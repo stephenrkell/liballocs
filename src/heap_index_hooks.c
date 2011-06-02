@@ -44,59 +44,13 @@ struct trailer
 	struct entry next;
 	struct entry prev;
 
-	/* How to make this structure fit in reclaimed space:
-	 * 
-	 * TCmalloc has "a large object size (> 32K) is rounded up to a page size"
-	 * -- so if chunks are 8byte-aligned, we need 15-3 bits for the non-pagesize case,
-	 *    and 16 bits should also do for the pagesize case (maximum alloc 65535 * 4K == 256MB?)
-	 *    so 16 size bits are sufficient, plus one to distinguish the cases,
-	 *    or we could do "superpage alignment" for bigger allocs still?
-	 *    i.e. two state bits, 12 size bits 
-	 *    OR better, split the state bits: 0-prefixed means next 12 bits are byte-size>>3
-	 *                                    10-prefixed means next 11 bits are page-size
-	 *                                    11-prefixed means next 11 bits are superpage-size
-	 * -- this fits the size field in 13 bits total, plus one or two size-bits already stolen
-	 *
-	 * Since we can encode chunk size in 13 bits, and size is one word, we have
-	 * 18 bits spare on 32-bit platforms (assuming one bit already stolen) -- not enough
-	 * 50 bits spare on 64-bit platforms (assuming one bit already stolen) -- plenty
-	 *
-	 * next and prev are already 8 bits each (16 bits in all)
-	 * alloc_site can be encoded as {text-segment-id, offset}
-	 * where at most 127 text segments may be loaded, say (7 bits),
-	 * and each has a maximum size of 32MB, say (25 bits)
-	 * -- actually, since we have 50 bits to play with, bump these up to 255 and 64MB
-	 *
-	 * HMM. Can we fix the 32-bit case by only keeping a singly-linked chunk list?
-	 * Using slightly stingier limits on chunk size, text-segment-count and size,
-	 * we can:
-	 * 0-prefixed means next 9 bits are byte-size>>3        (4KB  > size >= 0)
-	 * 10-prefixed means next 8 bits are page-size    (255 * 4KB >= size >= 4KB)
-	 * 11-prefix means next 8 bits are superpage-size (255 * 4MB >= size >= 4MB)
-	 * PROBLEM: gap in size! need to tweak these bit values to cover sizes in range 1MB--4MB
-	 * But supposing we can fit size in 10 bits,
-	 * we have 22 bits for trailer fields,
-	 * so 14 bits for text-seg and offset;
-	 * Not enough!  Need an extra level of indirection...
-	 * We'd have to scan malloc-call-sites and give each a unique index.
-	 * 
-	 * Means on a 64-bit allocator we can fit all our metadata (48--50 bits) in stolen bits!
-	 * BUT we pay some overhead in wasted space from rounding up to page/superpage sizes
-	 * -- can collect empirical evidence that non-page-multiple large malloc()s are rare.
-	 *
-	 * HMM. Can we fix the 32-bit case by only keeping a singly-linked chunk list?
-	 * Using slightly stingier limits on chunk size, text-segment-count and size,
-	 * perhaps:
-	 * 0-prefixed means next 9 bits are byte-size>>3        (4KB  > size >= 0)
-	 * 10-prefixed means next 8 bits are page-size    (255 * 4KB >= size >= 4KB)
-	 * 11-prefix means next 8 bits are superpage-size (255 * 4MB >= size >= 4MB)
-	 * PROBLEM: gap in size! need to tweak these bit values to cover sizes in range 1MB--4MB
-	 * But supposing we can fit size in 10 bits,
-	 * we have 22 bits for trailer fields,
-	 * so 14 bits for text-seg and offset;
-	 * Not enough!  Need an extra level of indirection...
-	 * We'd have to scan malloc-call-sites and give each a unique index.
-	 */ 
+	/* For now, keeping this structure means increasing memory usage.  
+	 * Ideally, we want to make this structure fit in reclaimed space. 
+	 * Specifically, we can steal bits from a "chunk size" field.
+	 * On 64-bit machines this is fairly easy. On 32-bit it's harder
+	 * because the size field is smaller! But it can be done.
+	 * I'll produce a hacked version of dlmalloc which does this,
+	 * at some point.... */ 
 
 } __attribute__((packed));
 
