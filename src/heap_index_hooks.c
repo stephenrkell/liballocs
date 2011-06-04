@@ -29,14 +29,14 @@
 /* This defines core hooks, and static prototypes for our hooks. */
 #include "malloc_hooks.c" 
 
+#ifndef NO_HEADER
+#include "heap_index.h"
+#else
 struct entry
 {
 	unsigned present:1;
 	unsigned distance:7;
 } __attribute__((packed));
-
-struct entry *index_region;
-void *index_max_address;
 
 struct trailer
 {
@@ -44,15 +44,19 @@ struct trailer
 	struct entry next;
 	struct entry prev;
 
-	/* For now, keeping this structure means increasing memory usage.  
-	 * Ideally, we want to make this structure fit in reclaimed space. 
-	 * Specifically, we can steal bits from a "chunk size" field.
-	 * On 64-bit machines this is fairly easy. On 32-bit it's harder
-	 * because the size field is smaller! But it can be done.
-	 * I'll produce a hacked version of dlmalloc which does this,
-	 * at some point.... */ 
-
 } __attribute__((packed));
+#endif
+/* ^^^ For now, keeping this structure means increasing memory usage.  
+ * Ideally, we want to make this structure fit in reclaimed space. 
+ * Specifically, we can steal bits from a "chunk size" field.
+ * On 64-bit machines this is fairly easy. On 32-bit it's harder
+ * because the size field is smaller! But it can be done.
+ * I'll produce a hacked version of dlmalloc which does this,
+ * at some point.... */ 
+
+
+struct entry *index_region;
+void *index_max_address;
 
 #define entry_coverage_in_bytes 1024
 typedef struct entry entry_type;
@@ -385,4 +389,35 @@ void *lookup_metadata(void *mem)
 	 * which we could track as the biggest object malloc'd so far; 
 	 * terminate once object_minimum_size exceeds this. FIXME. */
 	
+}
+
+/* A more client-friendly lookup function. */
+struct trailer *lookup_object_info(void *mem, void **out_object_start)
+{
+	struct entry *cur_head = INDEX_LOC_FOR_ADDR(mem);
+	size_t object_minimum_size = 0;
+
+#define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
+	do
+	{
+		void *cur_chunk = entry_ptr_to_addr(cur_head);
+
+		while (cur_chunk)
+		{
+			struct trailer *cur_trailer = trailer_for_chunk(cur_chunk);
+			if (mem >= cur_chunk
+				&& mem < cur_chunk + malloc_usable_size(cur_chunk)) 
+			{
+				if (out_object_start) *out_object_start = cur_chunk;
+				return cur_trailer;
+			}
+			cur_chunk = entry_to_same_range_addr(cur_trailer->next, cur_chunk);
+		}
+		/* we reached the end of the list */
+	} while (object_minimum_size += entry_coverage_in_bytes,
+		cur_head-- > &index_region[0] && object_minimum_size <= BIGGEST_SENSIBLE_OBJECT);
+	return NULL;
+	/* FIXME: use the actual biggest allocated object, not a guess. */
+
+#undef BIGGEST_SENSIBLE_OBJECT
 }
