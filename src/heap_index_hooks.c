@@ -23,15 +23,16 @@
 #include <string.h>
 #include <errno.h>
 
-/* We use a memtable -- implemented by some C99 static inline functions */
-#include "memtable.h"
-
 /* This defines core hooks, and static prototypes for our hooks. */
 #include "malloc_hooks.c" 
 
 #ifndef NO_HEADER
 #include "heap_index.h"
 #else
+
+/* We use a memtable -- implemented by some C99 static inline functions */
+#include "memtable.h"
+
 struct entry
 {
 	unsigned present:1;
