@@ -42,6 +42,10 @@ struct entry
 struct trailer
 {
 	const void *alloc_site;
+	/* You can add extra fields here if you like, 
+	 * on a "manage them yourself" basis. This is
+	 * useful if you do some analysis over the heap
+	 * and need some extra per-object metadata. */
 	struct entry next;
 	struct entry prev;
 
@@ -144,7 +148,7 @@ init_hook(void)
 	index_begin_addr = (void*) 0U;
 	index_end_addr = (void*) 0U;
 	
-	size_t mapping_size = MEMTABLE_MAPPING_SIZE_WITH_TYPE(unsigned char,
+	size_t mapping_size = MEMTABLE_MAPPING_SIZE_WITH_TYPE(struct entry,
 		entry_coverage_in_bytes, 0, 0 /* both 0 => cover full address range */);
 
 	if (mapping_size > BIGGEST_MMAP_ALLOWED)
@@ -163,7 +167,7 @@ init_hook(void)
 		index_end_addr = one_past_max_indexed_address;
 	}
 	
-	index_region = MEMTABLE_NEW_WITH_TYPE(unsigned char, 
+	index_region = MEMTABLE_NEW_WITH_TYPE(struct entry, 
 		entry_coverage_in_bytes, index_begin_addr, index_end_addr);
 	assert(index_region != MAP_FAILED);
 }
@@ -211,7 +215,7 @@ index_insert(void *new_chunkaddr, size_t modified_size, const void *caller)
 	if (!index_region) init_hook();
 	
 	/* The address *must* be in our tracked range. Assert this. */
-	assert(new_chunkaddr <= index_end_addr);
+	assert(new_chunkaddr <= (index_end_addr ? index_end_addr : MAP_FAILED));
 
 	/* DEBUGGING: sanity check entire bin */
 	list_sanity_check(INDEX_LOC_FOR_ADDR(new_chunkaddr));
