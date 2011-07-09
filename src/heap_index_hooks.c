@@ -213,6 +213,7 @@ index_insert(void *new_chunkaddr, size_t modified_size, const void *caller)
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
 	if (!index_region) init_hook();
+	assert(index_region);
 	
 	/* The address *must* be in our tracked range. Assert this. */
 	assert(new_chunkaddr <= (index_end_addr ? index_end_addr : MAP_FAILED));
@@ -370,6 +371,8 @@ static void post_nonnull_nonzero_realloc(void *ptr,
  * it returns NULL. FIXME: support interior pointers. */
 void *lookup_metadata(void *mem)
 {
+	assert(index_region);
+	
 	struct entry *cur_head = INDEX_LOC_FOR_ADDR(mem);
 	size_t object_minimum_size = 0;
 	
