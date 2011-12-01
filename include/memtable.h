@@ -21,7 +21,7 @@ extern "C" {
 static inline size_t memtable_mapping_size(
 	unsigned entry_size_in_bytes,
 	unsigned entry_coverage_in_bytes,
-	void *addr_begin, void *addr_end)
+	const void *addr_begin, const void *addr_end)
 {
 	/* NOTE: if addr_begin and addr_end are both zero, we use the full range. */
 	/* HACK: we use "long double" because 80-bit precision avoids 
@@ -47,7 +47,7 @@ static inline size_t memtable_mapping_size(
 static inline void *memtable_new(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
-	void *addr_begin, void *addr_end)
+	const void *addr_begin, const void *addr_end)
 {
 	size_t mapping_size = memtable_mapping_size(entry_size_in_bytes,
 		entry_coverage_in_bytes, addr_begin, addr_end);
@@ -64,7 +64,7 @@ static inline void *memtable_index(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
-	void *addr_begin, void *addr_end,
+	const void *addr_begin, const void *addr_end,
 	unsigned long index
 	)
 {
@@ -78,8 +78,8 @@ static inline void *memtable_addr(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
-	void *addr_begin, void *addr_end,
-	void *addr
+	const void *addr_begin, const void *addr_end,
+	const void *addr
 	)
 {
 	assert(addr >= addr_begin && (addr_end == 0 || addr < addr_end));
@@ -95,8 +95,8 @@ static inline void *memtable_entry_range_base(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
-	void *addr_begin, void *addr_end, 
-	void *memtable_entry_ptr
+	const void *addr_begin, const void *addr_end, 
+	const void *memtable_entry_ptr
 )
 {
 	assert((char*)memtable_entry_ptr - (char*)memtable < memtable_mapping_size(
@@ -116,8 +116,8 @@ static inline void *memtable_addr_range_base(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
-	void *addr_begin, void *addr_end, 
-	void *addr
+	const void *addr_begin, const void *addr_end, 
+	const void *addr
 )
 {
 	/* For robustness / testing, express in terms of previous two functions. 
@@ -140,8 +140,8 @@ static inline ptrdiff_t memtable_addr_range_offset(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
-	void *addr_begin, void *addr_end, 
-	void *addr)
+	const void *addr_begin, const void *addr_end, 
+	const void *addr)
 {
 	return (char*)addr - (char*)memtable_addr_range_base(
 		memtable, entry_size_in_bytes, entry_coverage_in_bytes,
@@ -155,7 +155,7 @@ static inline ptrdiff_t memtable_addr_range_offset(
 static inline int memtable_free(void *memtable, 
  	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
-	void *addr_begin, void *addr_end)
+	const void *addr_begin, const void *addr_end)
 {
 	size_t mapping_size = memtable_mapping_size(entry_size_in_bytes, 
 		entry_coverage_in_bytes, addr_begin, addr_end);

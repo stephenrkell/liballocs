@@ -400,7 +400,7 @@ void *lookup_metadata(void *mem)
 }
 
 /* A more client-friendly lookup function. */
-struct trailer *lookup_object_info(void *mem, void **out_object_start)
+struct trailer *lookup_object_info(const void *mem, void **out_object_start)
 {
 	struct entry *cur_head = INDEX_LOC_FOR_ADDR(mem);
 	size_t object_minimum_size = 0;
