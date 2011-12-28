@@ -113,6 +113,12 @@ struct rec *typestr_to_uniqtype(const char *typestr);
 
 // every allocsmt entry (8 bytes) covers 256 bytes
 allocsmt_entry_type *allocsmt;
+ 
+// print out the 
+static void print_allocsmt(void)
+{
+
+}
 
 _Bool allocsmt_initialized;
 /* This is *not* a constructor. We don't want to be called too early,
@@ -143,6 +149,10 @@ void init_allocsites_memtable(void)
 	unsigned current_bucket_size = 1; // out of curiosity...
 	for (; cur_ent->allocsite; prev_ent = cur_ent++)
 	{
+		// debugging: print out entry
+		fprintf(stderr, "allocsite entry: %p, to uniqtype at %p\n", 
+			cur_ent->allocsite, cur_ent->uniqtype);
+	
 		// first iteration is trivial
 		if (!prev_ent) continue;
 		
