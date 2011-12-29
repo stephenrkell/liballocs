@@ -28,4 +28,4 @@ $(CIL)/bin/cilly: $(CIL_TOOLS_SRC)
 
 .PHONY: lib
 lib: src
-	mkdir -p lib && cd lib && ln -sf ../src/libcrunch.so .
+	mkdir -p lib && cd lib && ln -sf ../src/libcrunch.so ../src/stubs.o .

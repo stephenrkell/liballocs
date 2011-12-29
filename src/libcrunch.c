@@ -114,12 +114,6 @@ struct rec *typestr_to_uniqtype(const char *typestr);
 // every allocsmt entry (8 bytes) covers 256 bytes
 allocsmt_entry_type *allocsmt;
  
-// print out the 
-static void print_allocsmt(void)
-{
-
-}
-
 _Bool allocsmt_initialized;
 /* This is *not* a constructor. We don't want to be called too early,
  * because it might not be safe to open the -uniqtypes.so handle yet.
@@ -152,9 +146,16 @@ void init_allocsites_memtable(void)
 		// debugging: print out entry
 		fprintf(stderr, "allocsite entry: %p, to uniqtype at %p\n", 
 			cur_ent->allocsite, cur_ent->uniqtype);
-	
-		// first iteration is trivial
-		if (!prev_ent) continue;
+		
+		// first iteration needs no chaining, *BUT*
+		// we need to point the table entry at us
+		if (!prev_ent) 
+		{
+			struct allocsite_entry **bucket = ALLOCSMT_FUN(ADDR, cur_ent->allocsite);
+			assert(bucket);
+			*bucket = cur_ent;
+			continue;
+		}
 		
 		void *cur_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, cur_ent->allocsite);
 		void *prev_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, prev_ent->allocsite);
@@ -164,6 +165,7 @@ void init_allocsites_memtable(void)
 			// chain these guys together
 			prev_ent->next = cur_ent;
 			cur_ent->prev = prev_ent;
+			
 			++current_bucket_size;
 		} else current_bucket_size = 1; 
 		// we don't (currently) distinguish buckets of zero from buckets of one
@@ -173,4 +175,8 @@ void init_allocsites_memtable(void)
 	}
 	
 	allocsmt_initialized = 1;
+	
+	// debugging: check that we can look up the first entry, if we are non-empty
+	assert(!first_entry || 
+		allocsite_to_uniqtype(first_entry->allocsite) == first_entry->uniqtype);
 }

@@ -3,7 +3,7 @@ CFLAGS += -std=gnu99 -g -O0 -fPIC
 
 C_SRC := $(wildcard *.c)
 
-default: libcrunch.so
+default: libcrunch.so stubs.o
 
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 
@@ -15,4 +15,4 @@ $(C_DEPS): .%.d : %.c
 -include $(DEPS)
 
 libcrunch.so: libcrunch.o
-	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) -lheap_index_fast_hooks
+	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) #-lheap_index_fast_hooks
