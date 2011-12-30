@@ -61,10 +61,16 @@ int initialize_handle(void)
 	return 0;
 }
 
+const struct rec *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
+
 struct rec *typestr_to_uniqtype(const char *typestr)
 {
 	void *returned = dlsym(__uniqtypes_handle, typestr);
 	if (!returned) return NULL;
+	if (!__libcrunch_uniqtype_void && strcmp(typestr, "__uniqtype__void") == 0)
+	{
+		__libcrunch_uniqtype_void = (struct rec *) returned;
+	}
 	return (struct rec *) returned;
 }
 
@@ -147,15 +153,20 @@ void init_allocsites_memtable(void)
 		fprintf(stderr, "allocsite entry: %p, to uniqtype at %p\n", 
 			cur_ent->allocsite, cur_ent->uniqtype);
 		
-		// first iteration needs no chaining, *BUT*
-		// we need to point the table entry at us
-		if (!prev_ent) 
+		// if we've moved to a different bucket, point the table entry at us
+		struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, cur_ent->allocsite);
+		struct allocsite_entry **prev_ent_bucketpos
+		 = prev_ent ? ALLOCSMT_FUN(ADDR, prev_ent->allocsite) : NULL;
+		
+		// first iteration is too early to do chaining, 
+		// but we do need to set up the first bucket
+		if (!prev_ent || bucketpos != prev_ent_bucketpos)
 		{
-			struct allocsite_entry **bucket = ALLOCSMT_FUN(ADDR, cur_ent->allocsite);
-			assert(bucket);
-			*bucket = cur_ent;
-			continue;
+			// fresh bucket, so should be null
+			assert(!*bucketpos);
+			*bucketpos = cur_ent;
 		}
+		if (!prev_ent) continue;
 		
 		void *cur_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, cur_ent->allocsite);
 		void *prev_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, prev_ent->allocsite);
