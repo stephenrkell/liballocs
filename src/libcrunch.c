@@ -15,12 +15,19 @@ static char libfile_name[4096];
 void *__uniqtypes_handle;
 static _Bool tried_to_initialize;
 
+// forward decl
+static void print_exit_summary(void);
+
 int initialize_handle(void)
 {
 	if (__uniqtypes_handle) return 0; // we are okay
 	if (tried_to_initialize) return -1;
 	tried_to_initialize = 1;
-	// to locate our executable, we use /proc
+	
+	// print a summary when the program exits
+	atexit(print_exit_summary);
+
+		// to locate our executable, we use /proc
 	int count = readlink("/proc/self/exe", execfile_name,
 		sizeof execfile_name);
 	if (count == -1) return -1; // nothing we can do
@@ -49,7 +56,7 @@ int initialize_handle(void)
 	// now append the suffix
 	strncat(libfile_name, "-uniqtypes.so", bytes_left);
 	// no need to compute the last bytes_left
-	fprintf(stderr, "libcrunch: trying to open %s\n", libfile_name);
+	// fprintf(stderr, "libcrunch: trying to open %s\n", libfile_name);
 
 	__uniqtypes_handle = dlopen(libfile_name, RTLD_NOW);
 	if (!__uniqtypes_handle)
@@ -62,9 +69,38 @@ int initialize_handle(void)
 }
 
 const struct rec *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
+/* counters */
+unsigned long __libcrunch_begun;
+unsigned long __libcrunch_aborted_init;
+unsigned long __libcrunch_aborted_stack;
+unsigned long __libcrunch_aborted_static;
+unsigned long __libcrunch_aborted_unknown_storage;
+unsigned long __libcrunch_aborted_unindexed_heap;
+unsigned long __libcrunch_aborted_unrecognised_allocsite;
+unsigned long __libcrunch_failed;
+unsigned long __libcrunch_trivially_succeeded_null;
+unsigned long __libcrunch_trivially_succeeded_void;
+unsigned long __libcrunch_succeeded;
+
+static void print_exit_summary(void)
+{
+	fprintf(stderr, "libcrunch summary: \n");
+	fprintf(stderr, "checks begun:                          % 7ld\n", __libcrunch_begun);
+	fprintf(stderr, "checks aborted due to init failure:    % 7ld\n", __libcrunch_aborted_init);
+	fprintf(stderr, "checks aborted for stack objects:      % 7ld\n", __libcrunch_aborted_stack);
+	fprintf(stderr, "checks aborted for static objects:     % 7ld\n", __libcrunch_aborted_static);
+	fprintf(stderr, "checks aborted for unknown storage:    % 7ld\n", __libcrunch_aborted_unknown_storage);
+	fprintf(stderr, "checks aborted for unindexed heap:     % 7ld\n", __libcrunch_aborted_unindexed_heap);
+	fprintf(stderr, "checks aborted for unrecognised alloc: % 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
+	fprintf(stderr, "checks failed:                         % 7ld\n", __libcrunch_failed);
+	fprintf(stderr, "checks trivially passed on null ptr:   % 7ld\n", __libcrunch_trivially_succeeded_null);
+	fprintf(stderr, "checks trivially passed for void type: % 7ld\n", __libcrunch_trivially_succeeded_void);
+	fprintf(stderr, "checks passed:                         % 7ld\n", __libcrunch_succeeded);
+}
 
 struct rec *typestr_to_uniqtype(const char *typestr)
 {
+	if (!typestr) return NULL;
 	void *returned = dlsym(__uniqtypes_handle, typestr);
 	if (!returned) return NULL;
 	if (!__libcrunch_uniqtype_void && strcmp(typestr, "__uniqtype__void") == 0)
@@ -79,6 +115,7 @@ struct rec *typestr_to_uniqtype(const char *typestr)
  * generate a weak *dynamic* reference to __is_a. */
 int __is_a(const void *obj, const char *typestr);
 int __is_aU(const void *obj, const struct rec *uniqtype);
+int __is_a3(const void *obj, const char *typestr, const struct rec **maybe_uniqtype);
 
 // same for initialization and, in fact, everything....
 int __libcrunch_check_init(void);
@@ -150,8 +187,8 @@ void init_allocsites_memtable(void)
 	for (; cur_ent->allocsite; prev_ent = cur_ent++)
 	{
 		// debugging: print out entry
-		fprintf(stderr, "allocsite entry: %p, to uniqtype at %p\n", 
-			cur_ent->allocsite, cur_ent->uniqtype);
+		/* fprintf(stderr, "allocsite entry: %p, to uniqtype at %p\n", 
+			cur_ent->allocsite, cur_ent->uniqtype); */
 		
 		// if we've moved to a different bucket, point the table entry at us
 		struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, cur_ent->allocsite);
