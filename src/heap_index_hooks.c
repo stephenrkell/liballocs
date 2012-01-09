@@ -33,15 +33,20 @@
 /* We use a memtable -- implemented by some C99 static inline functions */
 #include "memtable.h"
 
+/* A thread-local variable to override the "caller" arguments. */
+extern __thread void *__current_allocsite;
+
 struct entry
 {
 	unsigned present:1;
 	unsigned distance:7;
 } __attribute__((packed));
 
+#define WORD_BITSIZE ((sizeof (void*))<<3)
 struct trailer
 {
-	const void *alloc_site;
+	unsigned alloc_site_flag:1;
+	unsigned long alloc_site:(WORD_BITSIZE-1);
 	/* You can add extra fields here if you like, 
 	 * on a "manage them yourself" basis. This is
 	 * useful if you do some analysis over the heap
@@ -59,6 +64,7 @@ struct trailer
  * I'll produce a hacked version of dlmalloc which does this,
  * at some point.... */ 
 
+__thread void *__current_allocsite;
 
 struct entry *index_region;
 void *index_max_address;
@@ -225,7 +231,8 @@ index_insert(void *new_chunkaddr, size_t modified_size, const void *caller)
 	
 	/* Populate our extra fields */
 	struct trailer *p_trailer = trailer_for_chunk(new_chunkaddr);
-	p_trailer->alloc_site = caller;
+	p_trailer->alloc_site_flag = 0U;
+	p_trailer->alloc_site = (unsigned long) caller;
 
 	/* Add it to the index. We always add to the start of the list, for now. */
 	/* 1. Initialize our trailer. */
@@ -252,7 +259,7 @@ index_insert(void *new_chunkaddr, size_t modified_size, const void *caller)
 static void 
 post_successful_alloc(void *begin, size_t modified_size, const void *caller)
 {
-	index_insert(begin, modified_size, caller);
+	index_insert(begin, modified_size, __current_allocsite ? __current_allocsite : caller);
 }	
 
 static void pre_alloc(size_t *p_size, const void *caller)
@@ -353,7 +360,7 @@ static void post_nonnull_nonzero_realloc(void *ptr,
 	if (__new != NULL)
 	{
 		/* create a new bin entry */
-		index_insert(__new, modified_size, caller);
+		index_insert(__new, modified_size, __current_allocsite ? __current_allocsite : caller);
 	}
 	else 
 	{
@@ -361,7 +368,7 @@ static void post_nonnull_nonzero_realloc(void *ptr,
 		 * is the *modified* size, i.e. we modified it before
 		 * allocating it, so we pass it as the modified_size to
 		 * index_insert. */
-		index_insert(ptr, old_usable_size, caller);
+		index_insert(ptr, old_usable_size, __current_allocsite ? __current_allocsite : caller);
 	} 
 }
 
@@ -402,13 +409,27 @@ void *lookup_metadata(void *mem)
 /* A more client-friendly lookup function. */
 struct trailer *lookup_object_info(const void *mem, void **out_object_start)
 {
+	/* Unlike our malloc hooks, we might get called before initialization,
+	   e.g. if someone tries to do a lookup before the first malloc of the
+	   program's execution. Rather than putting an initialization check
+	   in the fast-path functions, we bail here.  */
+	if (!index_region) return NULL;
+	
 	struct entry *cur_head = INDEX_LOC_FOR_ADDR(mem);
 	size_t object_minimum_size = 0;
 
 #define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
+	// Optimisation: if we see an object
+	// in the current bucket that starts before our object, 
+	// but doesn't span the address we're searching for,
+	// we don't need to look at previous buckets, 
+	// because we know that our pointer can't be an interior
+	// pointer into some object starting in a earlier bucket's region.
+	_Bool seen_object_starting_earlier = 0;
 	do
 	{
 		void *cur_chunk = entry_ptr_to_addr(cur_head);
+		seen_object_starting_earlier = 0;
 
 		while (cur_chunk)
 		{
@@ -419,11 +440,17 @@ struct trailer *lookup_object_info(const void *mem, void **out_object_start)
 				if (out_object_start) *out_object_start = cur_chunk;
 				return cur_trailer;
 			}
+			
+			// do that optimisation
+			if (cur_chunk < mem) seen_object_starting_earlier = 1;
+			
 			cur_chunk = entry_to_same_range_addr(cur_trailer->next, cur_chunk);
 		}
+		
 		/* we reached the end of the list */
-	} while (object_minimum_size += entry_coverage_in_bytes,
-		cur_head-- > &index_region[0] && object_minimum_size <= BIGGEST_SENSIBLE_OBJECT);
+	} while (!seen_object_starting_earlier
+		&& (object_minimum_size += entry_coverage_in_bytes,
+		cur_head-- > &index_region[0] && object_minimum_size <= BIGGEST_SENSIBLE_OBJECT));
 	return NULL;
 	/* FIXME: use the actual biggest allocated object, not a guess. */
 
