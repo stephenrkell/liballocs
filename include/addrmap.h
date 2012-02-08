@@ -18,6 +18,8 @@ enum object_memory_kind
 	STACK,
 	HEAP
 };
+	
+typedef enum object_memory_kind memory_kind;
 
 #define STACK_BEGIN 0x800000000000UL
 
