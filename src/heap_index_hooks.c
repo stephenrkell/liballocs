@@ -24,7 +24,11 @@
 #include <errno.h>
 
 /* This defines core hooks, and static prototypes for our hooks. */
-#include "malloc_hooks.c" 
+#ifndef MALLOC_HOOKS_INCLUDE
+#define MALLOC_HOOKS_INCLUDE "malloc_hooks.c" 
+#endif
+/* This defines core hooks, and static prototypes for our hooks. */
+#include MALLOC_HOOKS_INCLUDE
 
 #ifndef NO_HEADER
 #include "heap_index.h"
@@ -270,7 +274,7 @@ static void pre_alloc(size_t *p_size, const void *caller)
 
 	*p_size += sizeof (struct trailer);
 }
-static void index_delete(void *ptr, size_t freed_usable_size)
+static void index_delete(void *ptr/*, size_t freed_usable_size*/)
 {
 	/* The freed_usable_size is not strictly necessary. It was added
 	 * for handling realloc after-the-fact. In this case, by the time we
@@ -280,7 +284,7 @@ static void index_delete(void *ptr, size_t freed_usable_size)
 	 * our trailer with its own (regular heap metadata) trailer, breaking the list.
 	 */
 
-	TRAILER_SANITY_CHECK(trailer_for_chunk_with_usable_size(ptr, freed_usable_size));
+	TRAILER_SANITY_CHECK(trailer_for_chunk/*_with_usable_size*/(ptr/*, freed_usable_size*/));
 
 	/* (old comment; still true?) FIXME: we need a big lock around realloc()
 	 * to avoid concurrent in-place realloc()s messing with the other trailers we access. */
@@ -337,7 +341,7 @@ static void index_delete(void *ptr, size_t freed_usable_size)
 
 static void pre_nonnull_free(void *ptr, size_t freed_usable_size)
 {
-	index_delete(ptr, freed_usable_size);
+	index_delete(ptr/*, freed_usable_size*/);
 }
 
 static void post_nonnull_free(void *ptr) {}
@@ -350,7 +354,7 @@ static void pre_nonnull_nonzero_realloc(void *ptr, size_t size, const void *call
 	 * the allocator might trash our trailer (by writing its own trailer over it). 
 	 * So we *must* delete the entry first,
 	 * then recreate it later, as it may not survive the realloc() uncorrupted. */
-	index_delete(ptr, malloc_usable_size(ptr));
+	index_delete(ptr/*, malloc_usable_size(ptr)*/);
 }
 static void post_nonnull_nonzero_realloc(void *ptr, 
 	size_t modified_size, 
