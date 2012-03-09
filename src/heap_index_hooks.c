@@ -215,9 +215,16 @@ static inline struct trailer *trailer_for_chunk_with_usable_size(void *addr, siz
 static void list_sanity_check(entry_type *head)
 {
 	void *head_chunk = entry_ptr_to_addr(head);
+#ifdef TRACE_HEAP_INDEX
+	fprintf(stderr,
+		"Begin sanity check of list indexed at %p, head chunk %p\n",
+		head, head_chunk);
+#endif
 	void *cur_chunk = head_chunk;
+	unsigned count = 0;
 	while (cur_chunk != NULL)
 	{
+		++count;
 		TRAILER_SANITY_CHECK(trailer_for_chunk(cur_chunk));
 		/* If the next chunk link is null, entry_to_same_range_addr
 		 * should detect this (.present == 0) and give us NULL. */
@@ -226,10 +233,25 @@ static void list_sanity_check(entry_type *head)
 			trailer_for_chunk(cur_chunk)->next, 
 			cur_chunk
 		);
+#ifdef TRACE_HEAP_INDEX
+		fprintf(stderr, "List has a chunk beginning at %p"
+			" (trailer {next: %p, prev %p})\n",
+			cur_chunk, next_chunk,
+			entry_to_same_range_addr(
+				trailer_for_chunk(cur_chunk)->prev, 
+				cur_chunk
+			)
+		);
+#endif
 		assert(next_chunk != head_chunk);
 		assert(next_chunk != cur_chunk);
 		cur_chunk = next_chunk;
 	}
+#ifdef TRACE_HEAP_INDEX
+	fprintf(stderr,
+		"Passed sanity check of list indexed at %p, head chunk %p, "
+		"length %d\n", head, head_chunk, count);
+#endif
 }
 #else /* NDEBUG */
 #define TRAILER_SANITY_CHECK(p_t)
@@ -252,6 +274,10 @@ index_insert(void *new_chunkaddr, size_t modified_size, const void *caller)
 	assert(new_chunkaddr <= (index_end_addr ? index_end_addr : MAP_FAILED));
 
 	/* DEBUGGING: sanity check entire bin */
+#ifdef TRACE_HEAP_INDEX
+	fprintf(stderr, "*** Inserting chunk at %p into list indexed at %p\n", 
+		new_chunkaddr, INDEX_LOC_FOR_ADDR(new_chunkaddr));
+#endif
 	list_sanity_check(INDEX_LOC_FOR_ADDR(new_chunkaddr));
 
 	void *head_chunkptr = entry_ptr_to_addr(INDEX_LOC_FOR_ADDR(new_chunkaddr));
@@ -312,6 +338,10 @@ static void index_delete(void *ptr/*, size_t freed_usable_size*/)
 	 * realloc'd size, where the realloc happens in-place, realloc() will overwrite
 	 * our trailer with its own (regular heap metadata) trailer, breaking the list.
 	 */
+#ifdef TRACE_HEAP_INDEX
+	fprintf(stderr, "*** Deleting entry for chunk %p, from list indexed at %p\n", 
+		ptr, INDEX_LOC_FOR_ADDR(ptr));
+#endif
 
 	list_sanity_check(INDEX_LOC_FOR_ADDR(ptr));
 	TRAILER_SANITY_CHECK(trailer_for_chunk/*_with_usable_size*/(ptr/*, freed_usable_size*/));
