@@ -18,27 +18,49 @@ extern "C" {
 #include <sys/mman.h>
 #include <stddef.h>
 
+static inline int is_power_of_two(size_t i)
+{
+	/* If we are a power of two, then one less than us 
+	 * has a run of low-order bits set and no others set,
+	 * whereas we have a single (higher) bit set. So when
+	 * we AND, we get zero. In all other (non-power-of-two)
+	 * cases except zero, not all lower-order bits will
+	 * roll over between i-1 and i, so there will be a nonzero
+	 * AND. */
+  	return (i != 0) && !(i & (i - 1));
+}
+
+static inline unsigned integer_log2(size_t i)
+{
+	unsigned count = 0;
+	assert(i != 0);
+	while ((i & 0x1) == 0) { ++count; i >>= 1; }
+	assert(i == 1);
+	return count;
+}
+
 static inline size_t memtable_mapping_size(
 	unsigned entry_size_in_bytes,
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
 {
-	/* NOTE: if addr_begin and addr_end are both zero, we use the full range. */
-	/* HACK: we use "long double" because 80-bit precision avoids 
-	 * overflow in the whole-address-space case. To do this with
-	 * integer arithmetic, we would be trying to construct the number
-	 * one bigger than the maximum representable unsigned 64-bit integer. */
-	
-	// void *test1 = (void*) -1;
-	// unsigned long long test2 = (unsigned long long) test1;
-	// long double test3 = test2 + 1;
-	// assert((long double)(unsigned long long)(void*)-1 != 0);
-	
-	long double nbytes_covered = (addr_begin == 0 && addr_end == 0) ?
-		(((long double)(unsigned long long)(void*)-1) + 1)
-		: (char*)addr_end - (char*)addr_begin;
-	long double nbytes_in_table = nbytes_covered / entry_coverage_in_bytes;
-	return (size_t) nbytes_in_table;
+	/* NOTE: if addr_begin and addr_end are both zero, it means 
+	 * we use the full range. */
+
+	/* Got rid of the "long double" hack. Instead, we insist that
+         * entry_coverage_in_bytes is a power of two. */
+	assert(is_power_of_two(entry_coverage_in_bytes));
+	unsigned log2_coverage = integer_log2(entry_coverage_in_bytes);
+
+	unsigned range_size = (char*)addr_end - (char*)addr_begin;
+	unsigned nentries = range_size == 0 ?
+		/* divide AS size by coverage (in log space) */
+		1<<( ((sizeof (void*))<<3) - log2_coverage ) :
+		/* divide actual range size by coverage */
+		(assert(range_size % entry_coverage_in_bytes == 0),
+			range_size / entry_coverage_in_bytes);
+
+	return (size_t) nentries * entry_size_in_bytes;
 }
 #define MEMTABLE_MAPPING_SIZE_WITH_TYPE(t, range, addr_begin, addr_end) \
 	memtable_mapping_size(sizeof(t), (range), (addr_begin), (addr_end))

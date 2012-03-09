@@ -20,6 +20,8 @@
 #define _GNU_SOURCE 
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <errno.h>
 
@@ -37,8 +39,14 @@
 /* We use a memtable -- implemented by some C99 static inline functions */
 #include "memtable.h"
 
-/* A thread-local variable to override the "caller" arguments. */
+/* A thread-local variable to override the "caller" arguments. 
+ * Platforms without TLS have to do without this feature. */
+#ifndef NO_TLS
 extern __thread void *__current_allocsite;
+#else
+#warning "Compiling without __current_allocsite TLS variable."
+#define __current_allocsite ((void*)0)
+#endif
 
 struct entry
 {
@@ -68,7 +76,9 @@ struct trailer
  * I'll produce a hacked version of dlmalloc which does this,
  * at some point.... */ 
 
+#ifndef NO_TLS
 __thread void *__current_allocsite;
+#endif
 
 struct entry *index_region;
 void *index_max_address;
@@ -149,6 +159,9 @@ static void check_shift_logic(void)
 static void
 init_hook(void)
 {
+	/* Optionally delay, for attaching a debugger. */
+	if (getenv("HEAP_INDEX_DELAY_INIT")) sleep(8);
+
 	/* Check we got the shift logic correct in entry_to_offset. */
 	check_shift_logic();
 
@@ -201,11 +214,21 @@ static inline struct trailer *trailer_for_chunk_with_usable_size(void *addr, siz
 
 static void list_sanity_check(entry_type *head)
 {
-	void *cur_chunk = entry_ptr_to_addr(head);
+	void *head_chunk = entry_ptr_to_addr(head);
+	void *cur_chunk = head_chunk;
 	while (cur_chunk != NULL)
 	{
 		TRAILER_SANITY_CHECK(trailer_for_chunk(cur_chunk));
-		cur_chunk = entry_to_same_range_addr(trailer_for_chunk(cur_chunk)->next, cur_chunk);
+		/* If the next chunk link is null, entry_to_same_range_addr
+		 * should detect this (.present == 0) and give us NULL. */
+		void *next_chunk
+		 = entry_to_same_range_addr(
+			trailer_for_chunk(cur_chunk)->next, 
+			cur_chunk
+		);
+		assert(next_chunk != head_chunk);
+		assert(next_chunk != cur_chunk);
+		cur_chunk = next_chunk;
 	}
 }
 #else /* NDEBUG */
@@ -284,11 +307,11 @@ static void index_delete(void *ptr/*, size_t freed_usable_size*/)
 	 * our trailer with its own (regular heap metadata) trailer, breaking the list.
 	 */
 
+	list_sanity_check(INDEX_LOC_FOR_ADDR(ptr));
 	TRAILER_SANITY_CHECK(trailer_for_chunk/*_with_usable_size*/(ptr/*, freed_usable_size*/));
 
 	/* (old comment; still true?) FIXME: we need a big lock around realloc()
 	 * to avoid concurrent in-place realloc()s messing with the other trailers we access. */
-	/* bin_sanity_check(bin_for_addr(ptr)); */ 
 
 	/* remove it from the bins */
 	void *our_next_chunk = entry_to_same_range_addr(trailer_for_chunk(ptr)->next, ptr);
@@ -311,8 +334,7 @@ static void index_delete(void *ptr/*, size_t freed_usable_size*/)
 			 * - the index entry should be non-present
 			 * - exit */
 			assert(INDEX_LOC_FOR_ADDR(ptr)->present == 0);
-			/* bin_sanity_check(bin_for_addr(ptr)); */
-			return;
+			goto out;
 		}
 	}
 
@@ -336,7 +358,8 @@ static void index_delete(void *ptr/*, size_t freed_usable_size*/)
 	}
 	/* Now that we have deleted the record, our bin should be sane,
 	 * modulo concurrent reallocs. */
-	/* bin_sanity_check(bin_for_addr(ptr)); */
+out:
+	list_sanity_check(INDEX_LOC_FOR_ADDR(ptr));
 }
 
 static void pre_nonnull_free(void *ptr, size_t freed_usable_size)
