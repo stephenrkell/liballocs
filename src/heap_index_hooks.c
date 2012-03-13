@@ -265,6 +265,8 @@ index_insert(void *new_chunkaddr, size_t modified_size, const void *caller)
 	/* 1. Initialize our trailer. */
 	p_trailer->next = addr_to_entry(head_chunkptr);
 	p_trailer->prev = addr_to_entry(NULL);
+	assert(!p_trailer->prev.present);
+	
 	/* 2. Fix up the next trailer, if there is one */
 	if (p_trailer->next.present)
 	{
@@ -273,8 +275,12 @@ index_insert(void *new_chunkaddr, size_t modified_size, const void *caller)
 	}
 	/* 3. Fix up the index. */
 	*INDEX_LOC_FOR_ADDR(new_chunkaddr) = addr_to_entry(new_chunkaddr); // FIXME: thread-safety
-	
-	/* sanity check */
+
+	/* sanity checks */
+	struct entry *e = INDEX_LOC_FOR_ADDR(new_chunkaddr);
+	assert(e->present); // it's there
+	assert(trailer_for_chunk(entry_ptr_to_addr(e)));
+	assert(trailer_for_chunk(entry_ptr_to_addr(e)) == p_trailer);
 	TRAILER_SANITY_CHECK(p_trailer);
 	if (p_trailer->next.present) TRAILER_SANITY_CHECK(
 		trailer_for_chunk(entry_to_same_range_addr(p_trailer->next, new_chunkaddr)));
