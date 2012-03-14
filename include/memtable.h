@@ -52,13 +52,18 @@ static inline size_t memtable_mapping_size(
 	assert(is_power_of_two(entry_coverage_in_bytes));
 	unsigned log2_coverage = integer_log2(entry_coverage_in_bytes);
 
-	unsigned range_size = (char*)addr_end - (char*)addr_begin;
-	unsigned nentries = range_size == 0 ?
-		/* divide AS size by coverage (in log space) */
-		1<<( ((sizeof (void*))<<3) - log2_coverage ) :
-		/* divide actual range size by coverage */
-		(assert(range_size % entry_coverage_in_bytes == 0),
-			range_size / entry_coverage_in_bytes);
+	unsigned long long range_size = (char*)addr_end - (char*)addr_begin;
+	unsigned full_as_size_shift = ((sizeof (void*))<<3);
+	/* divide AS size by coverage (in log space) */
+	unsigned full_as_nentries_shift = full_as_size_shift - log2_coverage;
+	unsigned long long nentries = 0ULL;
+	if (range_size == 0ULL) nentries = 1ULL<<full_as_nentries_shift;
+	else
+	{
+		assert(range_size % entry_coverage_in_bytes == 0ULL);
+		nentries = range_size / entry_coverage_in_bytes;
+	}
+	assert(nentries != 0ULL);
 
 	return (size_t) nentries * entry_size_in_bytes;
 }
