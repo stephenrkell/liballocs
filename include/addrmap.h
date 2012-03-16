@@ -22,6 +22,9 @@ enum object_memory_kind
 	
 typedef enum object_memory_kind memory_kind;
 
+/* To stay self-contained, we define our own sbrk proto. */
+void *sbrk(intptr_t incr);
+
 #if defined (X86_64) || (defined (__x86_64__))
 #define STACK_BEGIN 0x800000000000UL
 #else
@@ -61,10 +64,16 @@ inline enum object_memory_kind get_object_memory_kind(const void *obj)
 #endif
 	if (__builtin_expect(addr >= current_sp && addr < STACK_BEGIN, 0)) return STACK;
 	
-	/* It's between HEAP and STATIC. HACK: use SHARED_LIBRARY_MIN_ADDRESS. */
+	/* It's between HEAP and STATIC. */
+#ifdef USE_SHARED_LIBRARY_MIN_ADDRESS_HACK
+	/* HACK: on systems where shared libs are loaded far away from heap regions, 
+	 * use a fixed boundary at SHARED_LIBRARY_MIN_ADDRESS. */
 	if (__builtin_expect(addr >= SHARED_LIBRARY_MIN_ADDRESS, 0)) return STATIC;
-	
 	return HEAP;
+#else
+	/* We don't know. The caller has to fall back to some more expensive method. */
+	return UNKNOWN;
+#endif
 }
 
 #ifdef __cplusplus
