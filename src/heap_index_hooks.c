@@ -26,7 +26,11 @@
 #include <errno.h>
 #ifdef MALLOC_USABLE_SIZE_HACK
 #include <dlfcn.h>
+extern "C" {
 static inline size_t malloc_usable_size(void *ptr);
+}
+#else
+size_t malloc_usable_size(void *ptr);
 #endif
 
 /* This defines core hooks, and static prototypes for our hooks. */
@@ -243,8 +247,10 @@ static void list_sanity_check(entry_type *head)
 		);
 #ifdef TRACE_HEAP_INDEX
 		fprintf(stderr, "List has a chunk beginning at %p"
-			" (trailer {next: %p, prev %p})\n",
-			cur_chunk, next_chunk,
+			" (usable_size %zu, trailer {next: %p, prev %p})\n",
+			cur_chunk, 
+			malloc_usable_size(cur_chunk),
+			next_chunk,
 			entry_to_same_range_addr(
 				trailer_for_chunk(cur_chunk)->prev, 
 				cur_chunk
