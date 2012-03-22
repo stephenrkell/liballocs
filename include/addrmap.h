@@ -10,7 +10,8 @@
 extern "C" {
 #endif
 
-extern unsigned long end; // NOTE: man page just uses "extern end", meaning "int"!
+extern int end; // NOTE: man page just uses "extern end", meaning "int"!
+extern int edata; // ditto
 enum object_memory_kind
 {
 	UNKNOWN,
@@ -52,7 +53,7 @@ inline enum object_memory_kind get_object_memory_kind(const void *obj)
 	unsigned long addr = (unsigned long) obj;
 	
 	/* If the address is below the end of the program BSS, it's static. */
-	if (__builtin_expect(addr < end, 0)) return STATIC;
+	if (__builtin_expect(addr < (intptr_t) end, 0)) return STATIC;
 	
 	/* If the address is greater than RSP and less than top-of-stack,
 	 * it's stack. */

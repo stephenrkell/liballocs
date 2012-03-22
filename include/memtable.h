@@ -126,8 +126,10 @@ static inline void *memtable_entry_range_base(
 	const void *memtable_entry_ptr
 )
 {
-	assert((char*)memtable_entry_ptr - (char*)memtable < memtable_mapping_size(
-		entry_size_in_bytes, entry_coverage_in_bytes, addr_begin, addr_end));
+	// Disabled this check because integer_log2 in memtable_mapping_size
+	// is surprisingly costly. 
+	//assert((char*)memtable_entry_ptr - (char*)memtable < memtable_mapping_size(
+	//	entry_size_in_bytes, entry_coverage_in_bytes, addr_begin, addr_end));
 
 	return ((char*)memtable_entry_ptr - (char*)memtable) / entry_size_in_bytes
 		* entry_coverage_in_bytes
