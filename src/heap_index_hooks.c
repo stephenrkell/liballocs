@@ -183,7 +183,6 @@ init_hook(void)
 
 	if (index_region) return; /* already done */
 	
-	/* Use a memtable with one byte per 1024B (1KB) of memory. */
 	index_begin_addr = (void*) 0U;
 #if defined(__x86_64__) || defined(x86_64)
 	index_end_addr = (void*)(1ULL<<48); /* it's effectively a 48-bit address space */
