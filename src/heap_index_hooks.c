@@ -40,7 +40,9 @@ size_t malloc_usable_size(void *ptr);
 /* This defines core hooks, and static prototypes for our hooks. */
 #include MALLOC_HOOKS_INCLUDE
 
-#ifndef NO_HEADER
+// always use the header for now, while we're changing stuff...
+//#ifndef NO_HEADER
+#if 1
 #include "heap_index.h"
 #else
 
@@ -59,6 +61,7 @@ extern __thread void *__current_allocsite;
 struct entry
 {
 	unsigned present:1;
+	unsigned removed:1;
 	unsigned distance:7;
 } __attribute__((packed));
 
@@ -75,7 +78,7 @@ struct trailer
 	struct entry prev;
 
 } __attribute__((packed));
-#endif
+ #endif /* end #ifdef NO_HEADER */
 /* ^^^ For now, keeping this structure means increasing memory usage.  
  * Ideally, we want to make this structure fit in reclaimed space. 
  * Specifically, we can steal bits from a "chunk size" field.
@@ -95,7 +98,7 @@ __thread void *__current_allocsite;
 struct entry *index_region;
 void *index_max_address;
 
-#define entry_coverage_in_bytes 1024
+#define entry_coverage_in_bytes /*1024*/ 512
 typedef struct entry entry_type;
 void *index_begin_addr;
 void *index_end_addr;
@@ -104,11 +107,11 @@ void *index_end_addr;
 static inline ptrdiff_t entry_to_offset(struct entry e) 
 { 
 	assert(e.present); 
-	return e.distance << 3; 
+	return e.distance << DISTANCE_UNIT_SHIFT; 
 }
 static inline struct entry offset_to_entry(ptrdiff_t o) 
 { 
-	return (struct entry) { .present = 1, .distance = o >> 3 }; 
+	return (struct entry) { .present = 1, .removed = 0, .distance = o >> DISTANCE_UNIT_SHIFT }; 
 }
 static inline void *entry_ptr_to_addr(struct entry *p_e)
 {
@@ -135,7 +138,7 @@ static inline void *entry_to_same_range_addr(struct entry e, void *same_range_pt
 }
 static inline struct entry addr_to_entry(void *a)
 {
-	if (a == NULL) return (struct entry) { .present = 0, .distance = 0 };
+	if (a == NULL) return (struct entry) { .present = 0, .removed = 0, .distance = 0 };
 	else return offset_to_entry(
 		MEMTABLE_ADDR_RANGE_OFFSET_WITH_TYPE(
 			index_region, entry_type, entry_coverage_in_bytes, 
@@ -155,11 +158,12 @@ static inline struct entry addr_to_entry(void *a)
 #pragma GCC diagnostic ignored "-Wpragmas"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverflow"
-static void check_shift_logic(void)
+static void check_impl_sanity(void)
 {
+	assert(sizeof (struct entry) == 1);
 	assert(
-			entry_to_offset((struct entry){ .present = 1, .distance = (unsigned) -1})
-			+ entry_to_offset((struct entry){ .present = 1, .distance = 1 }) 
+			entry_to_offset((struct entry){ .present = 1, .removed = 0, .distance = (unsigned) -1})
+			+ entry_to_offset((struct entry){ .present = 1, .removed = 0, .distance = 1 }) 
 		== entry_coverage_in_bytes);
 }
 /* First, re-enable the overflow pragma, to be conservative. */
@@ -174,17 +178,24 @@ init_hook(void)
 	/* Optionally delay, for attaching a debugger. */
 	if (getenv("HEAP_INDEX_DELAY_INIT")) sleep(8);
 
-	/* Check we got the shift logic correct in entry_to_offset. */
-	check_shift_logic();
+	/* Check we got the shift logic correct in entry_to_offset, and other compile-time logic. */
+	check_impl_sanity();
 
 	if (index_region) return; /* already done */
 	
 	/* Use a memtable with one byte per 1024B (1KB) of memory. */
 	index_begin_addr = (void*) 0U;
-	index_end_addr = (void*) 0U;
+#if defined(__x86_64__) || defined(x86_64)
+	index_end_addr = (void*)(1ULL<<48); /* it's effectively a 48-bit address space */
+#else
+	index_end_addr = (void*) 0U; /* both 0 => cover full address range */
+#endif
 	
 	size_t mapping_size = MEMTABLE_MAPPING_SIZE_WITH_TYPE(struct entry,
-		entry_coverage_in_bytes, 0, 0 /* both 0 => cover full address range */);
+		entry_coverage_in_bytes, 
+		index_begin_addr,
+		index_end_addr
+	);
 
 	if (mapping_size > BIGGEST_MMAP_ALLOWED)
 	{
