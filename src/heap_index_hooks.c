@@ -530,6 +530,16 @@ struct trailer *lookup_object_info(const void *mem, void **out_object_start)
 		while (cur_chunk)
 		{
 			struct trailer *cur_trailer = trailer_for_chunk(cur_chunk);
+#ifndef NDEBUG
+			/* Sanity check on the trailer. */
+			if ((char*) cur_trailer < (char*) cur_chunk
+				|| (char*) cur_trailer - (char*) cur_chunk > BIGGEST_SENSIBLE_OBJECT)
+			{
+				fprintf(stderr, "Saw insane trailer address %p for chunk beginning %p "
+					"(usable size %zu); memory corruption?\n", 
+					cur_trailer, cur_chunk, malloc_usable_size(cur_chunk));
+			}	
+#endif
 			if (mem >= cur_chunk
 				&& mem < cur_chunk + malloc_usable_size(cur_chunk)) 
 			{
