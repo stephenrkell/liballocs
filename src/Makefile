@@ -1,6 +1,10 @@
 #CFLAGS += -std=gnu99 -g -O3 -fPIC
 CFLAGS += -std=gnu99 -g -O0 -fPIC
 
+# For maximum speed
+CFLAGS   += -DUSE_SHARED_LIBRARY_MIN_ADDRESS_HACK
+CXXFLAGS += -DUSE_SHARED_LIBRARY_MIN_ADDRESS_HACK
+
 C_SRC := $(wildcard *.c)
 
 default: libcrunch.so stubs.o

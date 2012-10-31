@@ -95,7 +95,7 @@ static void print_exit_summary(void)
 	fprintf(stderr, "checks failed:                         % 7ld\n", __libcrunch_failed);
 	fprintf(stderr, "checks trivially passed on null ptr:   % 7ld\n", __libcrunch_trivially_succeeded_null);
 	fprintf(stderr, "checks trivially passed for void type: % 7ld\n", __libcrunch_trivially_succeeded_void);
-	fprintf(stderr, "checks passed:                         % 7ld\n", __libcrunch_succeeded);
+	fprintf(stderr, "checks nontrivially passed:            % 7ld\n", __libcrunch_succeeded);
 }
 
 struct rec *typestr_to_uniqtype(const char *typestr)
