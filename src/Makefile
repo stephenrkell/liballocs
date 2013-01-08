@@ -1,5 +1,6 @@
-#CFLAGS += -std=gnu99 -g -O3 -fPIC
+#CFLAGS += -std=gnu99 -g -O2 -fPIC
 CFLAGS += -std=gnu99 -g -O0 -fPIC
+CFLAGS += -DUSE_STARTUP_BRK
 
 # For maximum speed
 CFLAGS   += -DUSE_SHARED_LIBRARY_MIN_ADDRESS_HACK
@@ -19,4 +20,9 @@ $(C_DEPS): .%.d : %.c
 -include $(DEPS)
 
 libcrunch.so: libcrunch.o
-	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) #-lheap_index_fast_hooks
+	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl #-lheap_index_hooks
+
+# have to preload the hooks yourself if you want them to hook!
+
+clean: 
+	rm -f *.o *.so .*.d

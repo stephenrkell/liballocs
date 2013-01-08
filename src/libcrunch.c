@@ -27,7 +27,7 @@ int initialize_handle(void)
 	// print a summary when the program exits
 	atexit(print_exit_summary);
 
-		// to locate our executable, we use /proc
+	// to locate our executable, we use /proc
 	int count = readlink("/proc/self/exe", execfile_name,
 		sizeof execfile_name);
 	if (count == -1) return -1; // nothing we can do
