@@ -4,7 +4,18 @@ CFLAGS += -DUSE_STARTUP_BRK
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 export CFLAGS
-export CC := $(realpath $(dir $(THIS_MAKEFILE))/../bin/crunchcc)
+
+UNIQTYPES_BASE ?= /usr/lib/allocsites
+ALLOCSITES_BASE ?= /usr/lib/allocsites
+
+export UNIQTYPES_BASE
+export ALLOCSITES_BASE
+
+export CC := $(realpath $(dir $(THIS_MAKEFILE))/../frontend/c/bin/crunchcc)
+
+ifeq ($(CC),)
+$(error Could not find crunchcc)
+endif
 
 cases := $(wildcard [a-z]*)
 

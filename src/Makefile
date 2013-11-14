@@ -1,6 +1,6 @@
 #CFLAGS += -std=gnu99 -g -O2 -fPIC
 CFLAGS += -std=gnu99 -g -O0 -fPIC
-CFLAGS += -DUSE_STARTUP_BRK
+#CFLAGS += -DUSE_STARTUP_BRK
 
 # For maximum speed
 CFLAGS   += -DUSE_SHARED_LIBRARY_MIN_ADDRESS_HACK

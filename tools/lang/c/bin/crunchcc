@@ -1,0 +1,135 @@
+#!/usr/bin/env python
+
+# Compiler wrapper for libcrunch.
+# We identify the input source file in the commandline,
+# and export it as an environment variable.
+# We then delegate to cilly,
+# passing --save-temps=$( dirname "$inputfile" )
+# i.e. to ensure that temporaries get created in the source file's location
+# FIXME: This might break some builds using a separate objdir.
+# The Right Thing to do is to somehow replicate the source directory structure
+# rooted at the current directory. But it's not clear how to do this in general.
+
+import os, sys, re, subprocess
+
+def isLinkCommand():
+    seenLib = False
+    seenExecutableOutput = False
+    for argnum in range(0,len(sys.argv)):
+        arg = sys.argv[argnum]
+        if arg.startswith('-Wl,'):
+            return True
+        if arg.startswith('-l'):
+            seenLib = True
+        if arg == '-shared':
+            return True
+        if arg == "-o" and len(sys.argv) >= argnum + 2 and not '.' in sys.argv[argnum + 1]:
+            seenExecutableOutput = True
+    if seenLib and seenExecutableOutput:
+            return True
+    return False
+
+
+def main():
+    # change "-V" to some other undefined option
+    skipNext = False
+    outputFile = None
+    saveTempsArgs = ['-save-temps']
+    for num in range(0,len(sys.argv)):
+        if skipNext: 
+            skipNext = False
+            continue
+        if sys.argv[num] == "-V":
+            sys.argv[num] = "-0"
+        if sys.argv[num] == "-o":
+            outputFile = sys.argv[num + 1]
+            skipNext = True
+        if sys.argv[num].startswith('-'):
+            continue
+        if num == 0:
+            continue # this means we have "crunchcc" as the arg
+        if sys.argv[num].endswith('.a') or sys.argv[num].endswith('.o') or \
+           sys.argv[num].endswith('.so'):
+            # it's a linker input; not the source file
+            continue
+        else:
+            sys.stderr.write("guessed that source file is " + sys.argv[num] + "\n")
+            dirname = os.path.dirname(sys.argv[num])
+            if dirname != "":
+                saveTempsArgs = ["--save-temps=" + dirname]
+    
+    # If we're a linker command, then we have to handle allocation functions
+    # specially.
+    # Each allocation function, e.g. xmalloc, is linked with --wrap.
+    # If we're outputting a shared library, we leave it like this,
+    # with dangling references to __wrap_xmalloc,
+    # and an unused implementation of __real_xmalloc.
+    # If we're outputting an executable, 
+    # then we link a thread-local variable "__libcrunch_current_allocsite"
+    # into the executable,
+    # and for each allocation function, we link a generated copy of a file
+    # void *__wrap_<fnname>(argspec)
+    # {
+    #   __libcrunch_current_allocsite = __builtin_return_address(0);
+    #   auto retval = fnname(argspec);
+    #   __libcrunch_current_allocsite = NULL;
+    #   return retval;
+    # }
+    # -- using an ad-hoc notation to get the argspec
+    # from the LIBCRUNCH_ALLOC_FNS environment var. FIXME: autogenerate these stubs
+    linkArgs = []
+    if isLinkCommand:
+        # we need to wrap each allocation function
+        sys.stderr.write("crunchcc doing linking\n")
+        if "LIBCRUNCH_ALLOC_FNS" in os.environ:
+            for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
+                m = re.match("(.*)\((.*)\)", allocFn)
+                fnName = m.groups()[0]
+                fnSig = m.groups()[1]
+                linkArgs += ["-Wl,--wrap"]
+                linkArgs += ["-Wl," + fnName]
+        # we need to export-dynamic, s.t. __is_a is linked from libcrunch
+        linkArgs += ["-Wl,--export-dynamic"]
+        # if we're building an executable, append the magic objects
+        if not "-c" in sys.argv and not "-shared" in sys.argv:
+            linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../lib/stubs.o"]
+            # HACK: fix this once I sort out linking
+            linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
+            linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
+            linkArgs += ["-lcrunch","-ldl"]
+        # else we leave the shared library with 
+        # dangling dependencies on __wrap_
+        # and unused __real_
+    
+    argsToExec = ["--dotrumptr","--dodumpallocs"] \
+    + ["-Wno-attributes"] \
+    + saveTempsArgs \
+    + linkArgs \
+    + sys.argv[1:]
+    sys.stderr.write("about to run cilly with args: " + " ".join(argsToExec) + "\n")
+    sys.stderr.write("sys.argv[1:] is: " + " ".join(sys.argv[1:]) + "\n")
+    
+    ret1 = subprocess.call(["cilly"] + argsToExec)
+    
+    if ret1 != 0:
+        return ret1
+    
+    if isLinkCommand:
+        # We've just output an object, so invoke make to collect the allocsites, 
+        # with our target name as the file we've just built, using ALLOCSITES_BASE 
+        # to set the appropriate prefix
+        if outputFile == None:
+            outputFile = "a.out" # unlikely, but who knows?
+        baseDir = 
+        if "ALLOCSITES_BASE" in os.environ:
+            baseDir = os.environ["ALLOCSITES_BASE"]
+        else:
+            baseDir = "/usr/lib/allocsites"
+        targetNames = [baseDir + os.path.realpath(outputFile) + ext for ext in [".allallocs", "-uniqtypes.so"]]
+            
+        ret2 = subprocess.call(["make", "-C", os.path.dirname(sys.argv[0]) + "/../allocsites", \
+            "-f", "Makefile.allocsites"] +  targetNames)
+
+if __name__ == '__main__':
+    main()
+

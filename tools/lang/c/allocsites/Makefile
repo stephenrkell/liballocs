@@ -6,9 +6,6 @@ LDLIBS += -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -lboost_system -lbo
 
 CPP_SRC := uniqtypes.cpp
 
-OCAMLOPT ?= ocamlopt
-CIL ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/../cil
-
 default: uniqtypes
 
 .PHONY: clean
@@ -24,14 +21,6 @@ $(CPP_DEPS): .%.d : %.cpp
 
 -include $(DEPS)
 
-default: uniqtypes #dumpallocs
-
-#dumpallocs: dumpallocs.ml dumpallocsMain.ml
-#	$(OCAMLOPT) -o dumpallocsMain.cmx -c -I $(CIL)/obj/x86_LINUX $+
-#	$(OCAMLOPT) -ccopt -L$(CIL)/obj/x86_LINUX -o dumpallocs \
-#		unix.cmxa str.cmxa \
-#		int_misc.cmx nat.cmx big_int.cmx \
-#		$(CIL)/obj/x86_LINUX/cil.cmxa dumpallocsMain.cmx
-
+default: uniqtypes
 %: %.cpp
 	$(CXX) $(LDFLAGS) $(CXXFLAGS) -o "$@" "$<" $(LDLIBS)

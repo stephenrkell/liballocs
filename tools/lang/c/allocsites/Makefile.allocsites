@@ -6,10 +6,12 @@
 nullstring :=
 space := $(nullstring) # end
 
-ALLOCSITES_BASE := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/allocsites
+#ALLOCSITES_BASE ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/allocsites
+ALLOCSITES_BASE ?= /usr/lib/allocsites
 $(warning ALLOCSITES_BASE is $(ALLOCSITES_BASE))
-CALLER_RELATIVE_ALLOCSITES_BASE := $(shell find -follow -samefile "$(ALLOCSITES_BASE)" | head -n1 | sed 's|^./||')
-$(warning CALLER_RELATIVE_ALLOCSITES_BASE is $(CALLER_RELATIVE_ALLOCSITES_BASE))
+
+#CALLER_RELATIVE_ALLOCSITES_BASE := $(shell find -follow -samefile "$(ALLOCSITES_BASE)" | head -n1 | sed 's|^./||')
+#$(warning CALLER_RELATIVE_ALLOCSITES_BASE is $(CALLER_RELATIVE_ALLOCSITES_BASE))
 
 OBJDUMPALLOCS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/objdumpallocs
 OBJDEPS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/objdeps
@@ -27,7 +29,7 @@ default: $(shell find $(ALLOCSITES_BASE) -type f -name '*.allocsites*' ! -name '
 # in the system.
 prefix_exactly_one_slash = $(shell echo "$1" | sed 's|^/*\(.*\)|/\1|' )
 # GAH, this doesn't work
-$(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allocsites: $(call prefix_exactly_one_slash,%)
+$(ALLOCSITES_BASE)/%.allocsites: $(call prefix_exactly_one_slash,%)
 	mkdir -p $$(dirname "$@")
 	$(OBJDUMPALLOCS) "$<" | sed "s|.*|$<\t&|" > "$@"
 
@@ -36,7 +38,7 @@ $(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allocsites: $(call prefix_exactly_one_slash
 depend = $(shell $(OBJDEPS) "$1" 2>/dev/null | cut -f1 | while read line; do readlink -f "$$line"; done )
 
 # Note that $1 is always '/'-prefixed here, so we don't insert another L-- here
-allocsites_from_obj = $(patsubst %,$(CALLER_RELATIVE_ALLOCSITES_BASE)%.allocsites,$1)
+allocsites_from_obj = $(patsubst %,$(ALLOCSITES_BASE)%.allocsites,$1)
 all_allocsites_for_obj = $(foreach f,$1 $(call depend,$1),$(call allocsites_from_obj,$(f)))
 
 # Merge the allocsites from each object into a single file,
@@ -46,7 +48,7 @@ all_allocsites_for_obj = $(foreach f,$1 $(call depend,$1),$(call allocsites_from
 
 # One way to do it is to include a Makefile that itself includes a Makefile.
 # So, we want to get /path/to/foo.allobjallocs
-# so we include its makefile $(CALLER_RELATIVE_ALLOCSITES_BASE)/path/to/foo.allobjallocs
+# so we include its makefile $(ALLOCSITES_BASE)/path/to/foo.allobjallocs
 # We can easily write a rule that generates these makefiles.
 # AH, but we can't include just the ones we need?!
 # So, we can, but to do so we need to create a dynamic makefile based on $(TARGETS)
@@ -56,25 +58,25 @@ all_allocsites_for_obj = $(foreach f,$1 $(call depend,$1),$(call allocsites_from
 
 .SECONDEXPANSION:
 
-$(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allobjallocs: /% $$(call all_allocsites_for_obj,/%) 
+$(ALLOCSITES_BASE)/%.allobjallocs: /% $$(call all_allocsites_for_obj,/%) 
 	mkdir -p $$(dirname "$@")
 	( cat $(call all_allocsites_for_obj,/$*) | $(GATHER_OBJALLOCS) 2>&1 1>"$@" ) | tee "$@.rej"
 
-$(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allsrcallocs: $(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allobjallocs
+$(ALLOCSITES_BASE)/%.allsrcallocs: $(ALLOCSITES_BASE)/%.allobjallocs
 	mkdir -p $$(dirname "$@")
 	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" ) | tee "$@.rej"
 
-$(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allallocs: $(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allobjallocs $(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allsrcallocs
+$(ALLOCSITES_BASE)/%.allallocs: $(ALLOCSITES_BASE)/%.allobjallocs $(ALLOCSITES_BASE)/%.allsrcallocs
 	mkdir -p $$(dirname "$@")
 	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" ) | tee "$@.rej"
 
 # Now we can build the uniqtypes library
-$(CALLER_RELATIVE_ALLOCSITES_BASE)/%-uniqtypes.c: $(CALLER_RELATIVE_ALLOCSITES_BASE)/%.allallocs uniqtypes
+$(ALLOCSITES_BASE)/%-uniqtypes.c: $(ALLOCSITES_BASE)/%.allallocs uniqtypes
 	$(UNIQTYPES) "$<" > "$@"
 	
 comma := ,
 # We need to define macros for the load addrs of each library
-$(CALLER_RELATIVE_ALLOCSITES_BASE)/%-uniqtypes.so: $(CALLER_RELATIVE_ALLOCSITES_BASE)/%-uniqtypes.c
+$(ALLOCSITES_BASE)/%-uniqtypes.so: $(ALLOCSITES_BASE)/%-uniqtypes.c
 	# HACK: use ld --defsym to define alias symbols
 	$(CC) -shared \
 	$$( . $(LDD_FUNCS) && obj_load_addrs_as_cpp_macros /"$*" ) \

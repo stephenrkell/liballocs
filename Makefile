@@ -1,3 +1,5 @@
+default: src lib frontend test
+
 .PHONY: src
 src:
 	$(MAKE) -C src
@@ -13,6 +15,6 @@ lib: src
 .PHONY: clean
 clean:
 	$(MAKE) -C src clean
-	rm -f lib/* lib/.??*
+	rm -f lib/libcrunch.so lib/stubs.o lib/.??*
 	$(MAKE) -C frontend clean
 	$(MAKE) -C test clean

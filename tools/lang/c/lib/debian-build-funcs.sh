@@ -1,4 +1,4 @@
-export UNIQTYPES_BASE=${HOME}/work/devel/libcrunch.hg/dumpallocs/allocsites
+export UNIQTYPES_BASE=${HOME}/work/devel/libcrunch.hg/allocsites
 export LD_PRELOAD=${HOME}/work/devel/libpmirror.hg/lib/libheap_index_fast_hooks.so
 if [[ -z "$( echo "$PATH" | tr ':' '\n' | grep '/cil[^/]*/bin' )" ]]; then
    export PATH=/usr/local/src/cil/bin:${PATH}
