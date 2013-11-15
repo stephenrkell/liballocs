@@ -111,24 +111,23 @@ def main():
     
     ret1 = subprocess.call(["cilly"] + argsToExec)
     
-    if ret1 != 0:
+    if ret1 != 0 or not isLinkCommand:
         return ret1
-    
-    if isLinkCommand:
+    else: # isLinkCommand
         # We've just output an object, so invoke make to collect the allocsites, 
         # with our target name as the file we've just built, using ALLOCSITES_BASE 
         # to set the appropriate prefix
         if outputFile == None:
             outputFile = "a.out" # unlikely, but who knows?
-        baseDir = 
         if "ALLOCSITES_BASE" in os.environ:
             baseDir = os.environ["ALLOCSITES_BASE"]
         else:
             baseDir = "/usr/lib/allocsites"
         targetNames = [baseDir + os.path.realpath(outputFile) + ext for ext in [".allallocs", "-uniqtypes.so"]]
             
-        ret2 = subprocess.call(["make", "-C", os.path.dirname(sys.argv[0]) + "/../allocsites", \
+        ret2 = subprocess.call(["make", "-C", os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
             "-f", "Makefile.allocsites"] +  targetNames)
+        return ret2
 
 if __name__ == '__main__':
     main()

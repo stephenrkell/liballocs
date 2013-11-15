@@ -648,11 +648,14 @@ int main(int argc, char **argv)
 	 * need to run through the entire DIEset looking for data types. With core::, this
 	 * shouldn't take long. */
 	using core::iterator_base;
-	for (auto i_d = root_dies[objname]->begin(); i_d != iterator_base::END; ++i_d)
+	if (objname != "" && root_dies[objname])
 	{
-		if (i_d.spec_here().tag_is_type(i_d.tag_here()))
+		for (auto i_d = root_dies[objname]->begin(); i_d != iterator_base::END; ++i_d)
 		{
-			/* We've found a data type. */
+			if (i_d.spec_here().tag_is_type(i_d.tag_here()))
+			{
+				/* We've found a data type. */
+			}
 		}
 	}
 	
@@ -660,114 +663,121 @@ int main(int argc, char **argv)
 	//for (auto i_cu = diesets[objname]->toplevel()->compile_unit_children_begin();
 	//	 i_cu != diesets[objname]->toplevel()->compile_unit_children_end();
 	//	 ++i_cu)
-	auto cus = root_dies[objname]->begin().children().subseq_of<core::compile_unit_die>();
-	for (auto i_cu = std::move(cus.first); 
-	     i_cu != cus.second;
-	     ++i_cu)
+	if (objname != "" && root_dies[objname])
 	{
-		/* First base is the non-downcasting iterator. Second is the non-filtering 
-		 * iterator, i.e. the plain iterator_sibs. */
-		auto& ii_cu = i_cu.base().base();
-		cerr << "Found a CU at " << std::hex << ii_cu.offset_here() << std::dec << endl;
-		/* Add this CU's subprograms to the subprograms list */
-		/* FIXME: fix the memory leak!
-		 * enabling/disabling the get_dynamic_location() line (way) below still has a huge
-		 * impact on the memory consumption of the program. */
-		
-		/* This is no good because it doesn't construct a siblings_iterator. 
-		 * We want to take the iterator returned by children_here, and 
-		 * is_subprogram'ify it. */
-		//pair<iterator_base::is_subprogram> subps = i_cu.children_here();
-		
-		//iterator_base::only_tag_seq<DW_TAG_subprogram> 
-		
-		// function template seems like the best value
-		//auto subps = iterator_base::subseq< with_tag<DW_TAG_subprogram> >(i_cu.children_here())
-		// how does this do the downcast?
-		
-		//auto subps
-		// = iterator_base::subseq< iterator_base::is_a<core::subprogram_die> >(i_cu.children_here());
-		
-		auto children = ii_cu.children_here();
-		//cerr << "First child is at 0x" << std::hex << children.first.offset_here() << std::dec << endl;
-		auto subps = children.subseq_of<core::subprogram_die>();
-		for (auto i_subp = std::move(subps.first); i_subp != subps.second; ++i_subp)
+		auto cus = root_dies[objname]->begin().children().subseq_of<core::compile_unit_die>();
+		for (auto i_cu = std::move(cus.first); 
+			 i_cu != cus.second;
+			 ++i_cu)
 		{
-			auto ii_subp = i_subp.base().base();
-			
-// 			cerr << "Found a subprogram at 0x" << std::hex 
-// 				<< i_subp.base().base().base().offset_here() << std::dec
-// 				<< endl;
-			// FIXME: fix base.base.base problem
+			/* First base is the non-downcasting iterator. Second is the non-filtering 
+			 * iterator, i.e. the plain iterator_sibs. */
+			auto& ii_cu = i_cu.base().base();
+			cerr << "Found a CU at " << std::hex << ii_cu.offset_here() << std::dec << endl;
+			/* Add this CU's subprograms to the subprograms list */
+			/* FIXME: fix the memory leak!
+			 * enabling/disabling the get_dynamic_location() line (way) below still has a huge
+			 * impact on the memory consumption of the program. */
 
-			// FIXME: what if subprograms are not immediate children of their CU?
-			// Want libdwarf to define a may_immediately_contain
-			//                     and   may_recursively_contain (transitive closure)
-			// lookup, then generalise increment_skipping_subtree
-			// to a search specifying a tag, which can skip subtrees (whether doing dfs or bfs)
-			// if the DIEs we're looking for cannot possibly be underneath.
+			/* This is no good because it doesn't construct a siblings_iterator. 
+			 * We want to take the iterator returned by children_here, and 
+			 * is_subprogram'ify it. */
+			//pair<iterator_base::is_subprogram> subps = i_cu.children_here();
 
-			// problem dereferencing transform_iterators: 
-			// seems to be something to do with shared_ptr versus intrusive_ptr.
-			// What it's doing:
-			// dereference the base()
-			// apply the functor to the result
-			// return a *reference* implicitly constructed from the functor's output
-			// 
-			// Here the base() is our selective_iterator
-			// dereferencing it yields what? should be a basic_die&
-			// SOMEHOW it is getting called with an iterator_facade. 
-			// THAT does not make sense -- we apply the functor to the dereferenced base
-			// WHAT do we get when we dereference our filter_iterator?
-			// It's a srk31::selective_iterator<Iter>
-			// We get Iter::value_type.
-			// What's Iter? It's our subseq_t's Iter. What's that? It's iterator_sibs<>.
-			// So what's iterator_sibs<>'s value_type? It's basic_die.
-			
-			// NOT an intrusive_ptr to which we want to return a reference
-			// (which would be BAD! we'd need 
-			// to make reference_type on the selective_iterator just the intrusive_ptr
+			//iterator_base::only_tag_seq<DW_TAG_subprogram> 
 
-			// only add real, defined subprograms to the list
-			if ( 
-					( !i_subp->get_declaration() || !*i_subp->get_declaration() )
-			   )
+			// function template seems like the best value
+			//auto subps = iterator_base::subseq< with_tag<DW_TAG_subprogram> >(i_cu.children_here())
+			// how does this do the downcast?
+
+			//auto subps
+			// = iterator_base::subseq< iterator_base::is_a<core::subprogram_die> >(i_cu.children_here());
+
+			auto children = ii_cu.children_here();
+			//cerr << "First child is at 0x" << std::hex << children.first.offset_here() << std::dec << endl;
+			auto subps = children.subseq_of<core::subprogram_die>();
+			for (auto i_subp = std::move(subps.first); i_subp != subps.second; ++i_subp)
 			{
-				string sourcefile_name = i_subp->get_decl_file() ? 
-					i_cu->source_file_name(*i_subp->get_decl_file())
-					: "(unknown source file)";
-				string comp_dir = i_cu->get_comp_dir() ? *i_cu->get_comp_dir() : "";
+				auto ii_subp = i_subp.base().base();
 
-				string subp_name;
-				if (i_subp->get_name()) subp_name = *i_subp->get_name();
-				else 
+	// 			cerr << "Found a subprogram at 0x" << std::hex 
+	// 				<< i_subp.base().base().base().offset_here() << std::dec
+	// 				<< endl;
+				// FIXME: fix base.base.base problem
+
+				// FIXME: what if subprograms are not immediate children of their CU?
+				// Want libdwarf to define a may_immediately_contain
+				//                     and   may_recursively_contain (transitive closure)
+				// lookup, then generalise increment_skipping_subtree
+				// to a search specifying a tag, which can skip subtrees (whether doing dfs or bfs)
+				// if the DIEs we're looking for cannot possibly be underneath.
+
+				// problem dereferencing transform_iterators: 
+				// seems to be something to do with shared_ptr versus intrusive_ptr.
+				// What it's doing:
+				// dereference the base()
+				// apply the functor to the result
+				// return a *reference* implicitly constructed from the functor's output
+				// 
+				// Here the base() is our selective_iterator
+				// dereferencing it yields what? should be a basic_die&
+				// SOMEHOW it is getting called with an iterator_facade. 
+				// THAT does not make sense -- we apply the functor to the dereferenced base
+				// WHAT do we get when we dereference our filter_iterator?
+				// It's a srk31::selective_iterator<Iter>
+				// We get Iter::value_type.
+				// What's Iter? It's our subseq_t's Iter. What's that? It's iterator_sibs<>.
+				// So what's iterator_sibs<>'s value_type? It's basic_die.
+
+				// NOT an intrusive_ptr to which we want to return a reference
+				// (which would be BAD! we'd need 
+				// to make reference_type on the selective_iterator just the intrusive_ptr
+
+				// only add real, defined subprograms to the list
+				if ( 
+						( !i_subp->get_declaration() || !*i_subp->get_declaration() )
+				   )
 				{
-					std::ostringstream s;
-					s << "0x" << std::hex << ii_subp.offset_here();
-					subp_name = s.str();
-				}
+					string sourcefile_name = i_subp->get_decl_file() ? 
+						i_cu->source_file_name(*i_subp->get_decl_file())
+						: "(unknown source file)";
+					string comp_dir = i_cu->get_comp_dir() ? *i_cu->get_comp_dir() : "";
 
-				auto ret = subprograms_list.insert(
-					make_pair(
+					string subp_name;
+					if (i_subp->get_name()) subp_name = *i_subp->get_name();
+					else 
+					{
+						std::ostringstream s;
+						s << "0x" << std::hex << ii_subp.offset_here();
+						subp_name = s.str();
+					}
+
+					auto ret = subprograms_list.insert(
 						make_pair(
-							fq_pathname(comp_dir, sourcefile_name),
-							subp_name
-						), 
-						// now we want an iterator_sibs<subprogram_die> 
-						i_subp.base().base()
-					)
-				);
-				if (!ret.second)
-				{
-					/* This means that "the same value already existed". */
-					//cerr << "Warning: subprogram " << **i_subp
-					//	<< " already in subprograms_list as " 
-					//	<< ret.first->first.second << " in " << ret.first->first.first << ": "
-					//	<< **ret.first->second
-					//	<< endl;
+							make_pair(
+								fq_pathname(comp_dir, sourcefile_name),
+								subp_name
+							), 
+							// now we want an iterator_sibs<subprogram_die> 
+							i_subp.base().base()
+						)
+					);
+					if (!ret.second)
+					{
+						/* This means that "the same value already existed". */
+						//cerr << "Warning: subprogram " << **i_subp
+						//	<< " already in subprograms_list as " 
+						//	<< ret.first->first.second << " in " << ret.first->first.first << ": "
+						//	<< **ret.first->second
+						//	<< endl;
+					}
 				}
 			}
-		}
+		} // end for cu
+	}
+	else
+	{
+		if (objname != "") cerr << "Warning: no DIEs for " << objname << endl;
 	}
 	cerr << "Found " << subprograms_list.size() << " subprograms." << endl;
 	

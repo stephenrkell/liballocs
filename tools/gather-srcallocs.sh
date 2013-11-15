@@ -9,7 +9,6 @@ pad_numbers () {
     sed 's/\f\t/\n/g'
 }
 
-. ~/lib/bin/bash
 
 all_obj_allocs_file="$1"
 
@@ -19,6 +18,9 @@ cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
     echo "Saw line $obj $rest" 1>&2
     all_cus_info="$( readelf -wi "$obj" | grep -A7 'DW_TAG_compile_unit' | tr '\n' '\f' | sed 's/\f--\f/\n/g' )"
     echo "$all_cus_info" | while read cu_info; do
+        if [[ -z "$cu_info" ]]; then
+            continue
+        fi
         cu_fname="$( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_name | head -n1 | sed 's/.*DW_AT_name[[:blank:]]*:[[:blank:]]*(.*, offset: 0x[0-9a-f]*): \(.*\)/\1/' | sed 's/[[:blank:]]*$//')"
         echo "Note: found CU $cu_fname" 1>&2
         echo "CU info is: $cu_info" 1>&2

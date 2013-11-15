@@ -6,6 +6,8 @@
 nullstring :=
 space := $(nullstring) # end
 
+THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
+
 #ALLOCSITES_BASE ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/allocsites
 ALLOCSITES_BASE ?= /usr/lib/allocsites
 $(warning ALLOCSITES_BASE is $(ALLOCSITES_BASE))
@@ -13,13 +15,13 @@ $(warning ALLOCSITES_BASE is $(ALLOCSITES_BASE))
 #CALLER_RELATIVE_ALLOCSITES_BASE := $(shell find -follow -samefile "$(ALLOCSITES_BASE)" | head -n1 | sed 's|^./||')
 #$(warning CALLER_RELATIVE_ALLOCSITES_BASE is $(CALLER_RELATIVE_ALLOCSITES_BASE))
 
-OBJDUMPALLOCS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/objdumpallocs
-OBJDEPS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/objdeps
-UNIQTYPES ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/uniqtypes
-LDD_FUNCS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/ldd-funcs.sh
-MERGE_ALLOCS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/merge-allocs.sh
-GATHER_OBJALLOCS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/gather-objallocs.sh
-GATHER_SRCALLOCS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/gather-srcallocs.sh
+OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
+OBJDEPS ?= $(dir $(THIS_MAKEFILE))/objdeps
+UNIQTYPES ?= $(dir $(THIS_MAKEFILE))/uniqtypes
+LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
+MERGE_ALLOCS ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh
+GATHER_OBJALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-objallocs.sh
+GATHER_SRCALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-srcallocs.sh
 
 # By default, remake everything we have already made,
 # but don't make new .allocsites files.
@@ -28,7 +30,6 @@ default: $(shell find $(ALLOCSITES_BASE) -type f -name '*.allocsites*' ! -name '
 # Remaking a .allocsites file from the analogous file 
 # in the system.
 prefix_exactly_one_slash = $(shell echo "$1" | sed 's|^/*\(.*\)|/\1|' )
-# GAH, this doesn't work
 $(ALLOCSITES_BASE)/%.allocsites: $(call prefix_exactly_one_slash,%)
 	mkdir -p $$(dirname "$@")
 	$(OBJDUMPALLOCS) "$<" | sed "s|.*|$<\t&|" > "$@"
@@ -64,30 +65,26 @@ $(ALLOCSITES_BASE)/%.allobjallocs: /% $$(call all_allocsites_for_obj,/%)
 
 $(ALLOCSITES_BASE)/%.allsrcallocs: $(ALLOCSITES_BASE)/%.allobjallocs
 	mkdir -p $$(dirname "$@")
-	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" ) | tee "$@.rej"
+	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
 
 $(ALLOCSITES_BASE)/%.allallocs: $(ALLOCSITES_BASE)/%.allobjallocs $(ALLOCSITES_BASE)/%.allsrcallocs
 	mkdir -p $$(dirname "$@")
-	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" ) | tee "$@.rej"
+	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
 
 # Now we can build the uniqtypes library
-$(ALLOCSITES_BASE)/%-uniqtypes.c: $(ALLOCSITES_BASE)/%.allallocs uniqtypes
-	$(UNIQTYPES) "$<" > "$@"
+$(ALLOCSITES_BASE)/%-uniqtypes.c: $(ALLOCSITES_BASE)/%.allallocs #$(UNIQTYPES)
+	$(UNIQTYPES) "$<" > "$@" || rm -f "$@"
 	
 comma := ,
-# We need to define macros for the load addrs of each library
+# We use ldd_funcs to define macros for the load addrs of each library
 $(ALLOCSITES_BASE)/%-uniqtypes.so: $(ALLOCSITES_BASE)/%-uniqtypes.c
 	# HACK: use ld --defsym to define alias symbols
-	$(CC) -shared \
+	$(CC) -c \
 	$$( . $(LDD_FUNCS) && obj_load_addrs_as_cpp_macros /"$*" ) \
-	-o "$@" "$<" \
-	-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__sockaddr=__uniqtype__usr_include_x86_64_linux_gnu_bits_socket_h_sockaddr \
-	-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__stat=__uniqtype__usr_include_x86_64_linux_gnu_bits_stat_h_stat \
-	-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__bases=__uniqtype__var_local_stephen_work_devel_libcrunch_hg_test_random_random_c_bases \
-	$(patsubst %,-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__%=__uniqtype__signed_char,char) \
-	$(patsubst %,-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__%=__uniqtype__int,signed_int signed) \
-	$(patsubst %,-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__%=__uniqtype__unsigned_int,unsigned) \
-	$(patsubst %,-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__%=__uniqtype__long_int,long_signed_int signed_long long signed_long_int) \
-	$(patsubst %,-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__%=__uniqtype__unsigned_long_int,long_unsigned_int unsigned_long) \
-	$(patsubst %,-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__%=__uniqtype__long_long_int,long_long_signed_int signed_long_long signed_long_long_int long_long) \
-	$(patsubst %,-Wl$(comma)--defsym$(space)-Wl$(comma)__uniqtype__%=__uniqtype__long_long_unsigned_int,unsigned_long_long_int unsigned_long_long) \
+	-o "$@" "$<" 
+
+$(ALLOCSITES_BASE)/%-uniqtypes.so: $(ALLOCSITES_BASE)/%-uniqtypes.o
+	# use ld --defsym to define alias symbols for any C base types
+	# FIXME: need a prefix to indicate "built-ins for a given C impl", cf. Java or non-GNU C....
+	$(CC) -c \
+	`nm -fposix "$<" | $(dir $(THIS_MAKEFILE))/alias-linker-opts-for-base-types.sh)`

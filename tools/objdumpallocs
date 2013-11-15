@@ -24,8 +24,72 @@ case $(basename "$0") in
         ;;
 esac
 
-. ~/lib/bash/util
-. $(dirname "$0")/debug-funcs.sh
+# some stock definitions
+# FIXME: this doesn't escape some metacharacters, notably '[' and ']',
+# -- including the latter seemed to mess up the sed expression
+# but I could do it using alternation and bare characters, i.e. \|\[\|\]
+escape_shell () {
+     sed 's/[\$()"'"'"'{}\*?]/\\&/g'
+}
+
+escape_regexp () {
+    # filter which reads a string on input, and yields a plain grep-style regexp
+    # which matches the string literally, by escaping the metacharacters
+    cat | sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\\)/\\\1/g'
+}
+
+escape_eregexp () {
+    # filter which reads a string on input, and yields a plain grep-style regexp
+    # which matches the string literally, by escaping the metacharacters
+    cat | sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)/\\\1/g'
+}
+
+escape_regexp_awk_lit () {
+    echo -n '/'
+    cat | sed -r 's#(/|\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)#\\\1#g' | tr -d '\n'
+    echo -n '/'
+}
+
+escapefn_shell () {
+    echo "$1" | escape_shell
+}
+escapefn_regexp () {
+    echo "$1" | escape_regexp
+}
+escapefn_eregexp () {
+    echo "$1" | escape_eregexp
+}
+escapefn_regexp_awk_lit () {
+    echo "$1" | escape_regexp_awk_lit
+}
+
+make_match_any_line_regexp () {
+    # makes a giant regexp which matches any of a set of lines, read from stdin
+	# If we don't read any lines from stdin, we return a regexp that doesn't match
+	# anything! (At least I hope that's what $^ does.)lank lines.
+    cat | escape_regexp | sed 's/\(.*\)/^\\(\1\\)$/' | tr '\n' '\f' | \
+    	sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\$\^/'
+}
+
+make_match_any_line_floating_regexp () {
+    # makes a giant regexp which matches any of a set of lines, read from stdin
+	# If we don't read any lines from stdin, we return a regexp that matches only
+	# blank lines. Ideally we would return a regexp which doesn't match anything,
+	# but it turns out that there is no such grep regexp (I think!) and the
+	# alternative suffices for our purposes (below)
+    cat | escape_regexp | sed 's/\(.*\)/\\(\1\\)/' | tr '\n' '\f' | \
+    	sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\$\^/'
+}
+
+make_match_any_line_floating_eregexp () {
+	# as above, but makes an eregexp
+    cat | escape_eregexp | sed 's/\(.*\)/(\1)/' | tr '\n' '\f' | \
+    	sed 's/\f$/\n/' | sed 's/\f/|/g' |  sed 's/^$/\$\^/'
+}
+
+
+
+. $(dirname "$0")/../lib/debug-funcs.sh
 
 filetype="$( file -bi "$1" )"
 case "$filetype" in

@@ -29,6 +29,10 @@ endif
 run-%:
 	$(MAKE) -C "$*" "$*" && ( cd "$*" && LD_PRELOAD=$(LIBCRUNCH) ./$* ); \
 
+cleanrun-%: clean-% run-%
+	$(MAKE) -C $* -f ../Makefile clean
+	$(MAKE) run-$*
+
 clean-%:
 	$(MAKE) -C "$*" -f $(realpath $(THIS_MAKEFILE)) clean
 
