@@ -16,8 +16,9 @@ $(warning ALLOCSITES_BASE is $(ALLOCSITES_BASE))
 #$(warning CALLER_RELATIVE_ALLOCSITES_BASE is $(CALLER_RELATIVE_ALLOCSITES_BASE))
 
 OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
-OBJDEPS ?= $(dir $(THIS_MAKEFILE))/objdeps
 UNIQTYPES ?= $(dir $(THIS_MAKEFILE))/uniqtypes
+DUMPTYPES ?= $(dir $(THIS_MAKEFILE))/dumptypes
+DUMPTYPES ?= $(dir $(THIS_MAKEFILE))/dumpallocs
 LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
 MERGE_ALLOCS ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh
 GATHER_OBJALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-objallocs.sh
@@ -30,61 +31,50 @@ default: $(shell find $(ALLOCSITES_BASE) -type f -name '*.allocsites*' ! -name '
 # Remaking a .allocsites file from the analogous file 
 # in the system.
 prefix_exactly_one_slash = $(shell echo "$1" | sed 's|^/*\(.*\)|/\1|' )
-$(ALLOCSITES_BASE)/%.allocsites: $(call prefix_exactly_one_slash,%)
+$(ALLOCSITES_BASE)/%.objallocs: $(call prefix_exactly_one_slash,%)
 	mkdir -p $$(dirname "$@")
-	$(OBJDUMPALLOCS) "$<" | sed "s|.*|$<\t&|" > "$@"
+	$(OBJDUMPALLOCS) "$<" | sed "s|.*|$<\t&|" > "$@" || rm -f "$@"
 
 # We also know how to build a lib%-uniqtypes.so for each executable.
 # Which allocsites files does an executable's uniqtypes depend on?
-depend = $(shell $(OBJDEPS) "$1" 2>/dev/null | cut -f1 | while read line; do readlink -f "$$line"; done )
+# depend = $(shell $(OBJDEPS) "$1" 2>/dev/null | cut -f1 | while read line; do readlink -f "$$line"; done )
 
-# Note that $1 is always '/'-prefixed here, so we don't insert another L-- here
-allocsites_from_obj = $(patsubst %,$(ALLOCSITES_BASE)%.allocsites,$1)
-all_allocsites_for_obj = $(foreach f,$1 $(call depend,$1),$(call allocsites_from_obj,$(f)))
+# # Note that $1 is always '/'-prefixed here, so we don't insert another L-- here
+# # allocsites_from_obj = $(patsubst %,$(ALLOCSITES_BASE)%.allocsites,$1)
+# # all_allocsites_for_obj = $(foreach f,$1 $(call depend,$1),$(call allocsites_from_obj,$(f)))
 
-# Merge the allocsites from each object into a single file,
-# where we also look for dumpallocs-generated allocs files in the build dir.
-# The obvious attempt with an implicit rule having $(call dependency-function,/%) doesn't work
-# because the function gets expanded before '%' does. 
+# don't build /usr/lib/allocsites/usr/lib/allocsites/anything... 
+# and it's a bug if we try
+$(ALLOCSITES_BASE)$(ALLOCSITES_BASE)/%:
+	false
 
-# One way to do it is to include a Makefile that itself includes a Makefile.
-# So, we want to get /path/to/foo.allobjallocs
-# so we include its makefile $(ALLOCSITES_BASE)/path/to/foo.allobjallocs
-# We can easily write a rule that generates these makefiles.
-# AH, but we can't include just the ones we need?!
-# So, we can, but to do so we need to create a dynamic makefile based on $(TARGETS)
-# based on Paul D. Smith's hack.
-
-# OR we can use GNU Make 3.81's secondary expansion feature! This is much nicer.
-
-.SECONDEXPANSION:
-
-$(ALLOCSITES_BASE)/%.allobjallocs: /% $$(call all_allocsites_for_obj,/%) 
-	mkdir -p $$(dirname "$@")
-	( cat $(call all_allocsites_for_obj,/$*) | $(GATHER_OBJALLOCS) 2>&1 1>"$@" ) | tee "$@.rej"
-
-$(ALLOCSITES_BASE)/%.allsrcallocs: $(ALLOCSITES_BASE)/%.allobjallocs
+$(ALLOCSITES_BASE)/%.srcallocs: $(ALLOCSITES_BASE)/%.objallocs
 	mkdir -p $$(dirname "$@")
 	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
 
-$(ALLOCSITES_BASE)/%.allallocs: $(ALLOCSITES_BASE)/%.allobjallocs $(ALLOCSITES_BASE)/%.allsrcallocs
+$(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%.srcallocs
 	mkdir -p $$(dirname "$@")
 	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
 
-# Now we can build the uniqtypes library
-$(ALLOCSITES_BASE)/%-uniqtypes.c: $(ALLOCSITES_BASE)/%.allallocs #$(UNIQTYPES)
-	$(UNIQTYPES) "$<" > "$@" || rm -f "$@"
+# Experiment: don't bother with uniqtypes! 
+# Just dump types locally for each object, and use DT_NEEDED
+# to record dependencies on other objects type objects
+$(ALLOCSITES_BASE)/%-types.c: /%
+	$(DUMPTYPES) "$<" > "$@" || rm -f "$@"
 	
-comma := ,
-# We use ldd_funcs to define macros for the load addrs of each library
-$(ALLOCSITES_BASE)/%-uniqtypes.so: $(ALLOCSITES_BASE)/%-uniqtypes.c
-	# HACK: use ld --defsym to define alias symbols
-	$(CC) -c \
-	$$( . $(LDD_FUNCS) && obj_load_addrs_as_cpp_macros /"$*" ) \
-	-o "$@" "$<" 
+$(ALLOCSITES_BASE)/%-allocsites.c: /$(ALLOCSITES_BASE)/%.allocs
+	$(DUMPALLOCS) < "$<" > "$@" || rm -f "$@"
 
-$(ALLOCSITES_BASE)/%-uniqtypes.so: $(ALLOCSITES_BASE)/%-uniqtypes.o
+# no need for a .o rule -- we just use the builtin on
+
+# Generate the .so with the necessary base-type aliases
+$(ALLOCSITES_BASE)/%-types.so: $(ALLOCSITES_BASE)/%-types.o
 	# use ld --defsym to define alias symbols for any C base types
 	# FIXME: need a prefix to indicate "built-ins for a given C impl", cf. Java or non-GNU C....
-	$(CC) -c \
-	`nm -fposix "$<" | $(dir $(THIS_MAKEFILE))/alias-linker-opts-for-base-types.sh)`
+	$(CC) -shared \
+	-o "$@" \
+	`nm -fposix "$<" | $(dir $(THIS_MAKEFILE))/alias-linker-opts-for-base-types.sh)` "$<"
+
+# Generate the .so with the necessary base-type aliases
+$(ALLOCSITES_BASE)/%-allocsites.so: $(ALLOCSITES_BASE)/%-allocsites.c
+	$(CC) -shared -o "$@" "$<"

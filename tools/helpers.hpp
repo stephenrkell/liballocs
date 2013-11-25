@@ -4,50 +4,72 @@
 #include <sstream>
 #include <fstream>
 #include <memory>
-#include <dwarfpp/spec_adt.hpp>
-#include <dwarfpp/adt.hpp>
+#include <dwarfpp/lib.hpp>
+#include <srk31/rotate.hpp>
+#include <cstdint>
+#include <iomanip>
 
 using std::string;
 using std::endl;
 using std::map;
 using std::pair;
 using std::make_pair;
-using std::shared_ptr;
-using std::make_shared;
-using std::dynamic_pointer_cast;
 using std::istringstream;
 using namespace dwarf;
-using dwarf::spec::type_die;
-using dwarf::spec::with_data_members_die;
+using spec::opt;
+using lib::Dwarf_Unsigned;
 
 typedef pair<string, string> uniqued_name;
 
-inline string mangle_objname(const string& s)
+uniqued_name
+key_from_type(core::iterator_df<core::type_die> t);
+
+core::iterator_df<core::type_die>
+find_type_in_cu(core::iterator_df<core::compile_unit_die> cu, const string& name);
+
+inline string mangle_spaces(const string& s)
+{
+	string mangled = s ;
+	replace(mangled.begin(), mangled.end(), ' ', '_');
+
+	return mangled;
+}
+
+inline string mangle_nonalphanums(const string& s)
 {
 	string mangled = s;
+	
 	replace(mangled.begin(), mangled.end(), '/', '_');
-	replace(mangled.begin(), mangled.end(), ' ', '_');
 	replace(mangled.begin(), mangled.end(), '-', '_');
 	replace(mangled.begin(), mangled.end(), '.', '_');
-	
+	replace(mangled.begin(), mangled.end(), ':', '_');
+	replace(mangled.begin(), mangled.end(), '<', '_');
+	replace(mangled.begin(), mangled.end(), '>', '_');
+	replace(mangled.begin(), mangled.end(), ',', '_');
+	replace(mangled.begin(), mangled.end(), '*', '_');
+	replace(mangled.begin(), mangled.end(), '&', '_');
+	replace(mangled.begin(), mangled.end(), '[', '_');
+	replace(mangled.begin(), mangled.end(), ']', '_');
+	replace(mangled.begin(), mangled.end(), '(', '_');
+	replace(mangled.begin(), mangled.end(), ')', '_');
+	replace(mangled.begin(), mangled.end(), '+', '_');
 	return mangled;
+}
+
+inline string mangle_objname(const string& s)
+{
+	return mangle_spaces(mangle_nonalphanums(s));
 }
 
 inline string mangle_typename(const pair<string, string>& p)
 {
-	string first_mangled = p.first;
-	string second_mangled = p.second;
-	
-	replace(first_mangled.begin(), first_mangled.end(), '/', '_');
-	replace(first_mangled.begin(), first_mangled.end(), ' ', '_');
-	replace(first_mangled.begin(), first_mangled.end(), '-', '_');
-	replace(first_mangled.begin(), first_mangled.end(), '.', '_');
-
-	replace(second_mangled.begin(), second_mangled.end(), ' ', '_');
+	string first_mangled = mangle_spaces(mangle_nonalphanums(p.first));
+	string second_mangled = mangle_spaces(mangle_nonalphanums(p.second));
 	
 	return "__uniqtype_" + first_mangled + "_" + second_mangled;
 }
 
+uint32_t type_summary_code(core::iterator_df<core::type_die> t);
 
 inline std::string offset_to_string(lib::Dwarf_Off o)
 {

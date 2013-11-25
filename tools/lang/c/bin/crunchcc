@@ -123,8 +123,13 @@ def main():
             baseDir = os.environ["ALLOCSITES_BASE"]
         else:
             baseDir = "/usr/lib/allocsites"
-        targetNames = [baseDir + os.path.realpath(outputFile) + ext for ext in [".allallocs", "-uniqtypes.so"]]
-            
+        targetNames = [baseDir + os.path.realpath(outputFile) + ext for ext in [".allocs", "-types.so", "-allocsites.so"]]
+        
+        # un-export CC from the env if it's set to crunchcc, because 
+        # we don't want to recursively cruchcc the -uniqtypes.c files
+        # that this make invocation will be compiling for us.
+        if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
+            del os.environ["CC"]
         ret2 = subprocess.call(["make", "-C", os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
             "-f", "Makefile.allocsites"] +  targetNames)
         return ret2

@@ -87,7 +87,14 @@ make_match_any_line_floating_eregexp () {
     	sed 's/\f$/\n/' | sed 's/\f/|/g' |  sed 's/^$/\$\^/'
 }
 
-
+pad_numbers () {
+    tr '\n' '\f' | \
+    sed 's/\f/\f\n/g' | \
+    tr '\t' '\n' | \
+    sed -r "s/^[[:space:]]*[0-9]+[[:space:]]*\$/printf '%06d' '&'/e" | \
+    tr '\n' '\t' | \
+    sed 's/\f\t/\n/g'
+}
 
 . $(dirname "$0")/../lib/debug-funcs.sh
 
@@ -267,6 +274,7 @@ while read address sym offset; do
             echo "<${return_addr_sym}+${return_addr_offset}> @${filename}:${line_number}"$'\t'"${token:-\$FAILED\$}"
             ;;
     esac
-done <<<"$( echo "$allocation_sites" | sed -r 's/([-\+]0x[0-9a-f]*)$/ \1/' )" #"
+done <<<"$( echo "$allocation_sites" | sed -r 's/([-\+]0x[0-9a-f]*)$/ \1/' )" | \
+   pad_numbers | sort -t$'\t' -k3 -k4
 
 rm -f "$tmpfile"

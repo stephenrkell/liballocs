@@ -2,11 +2,12 @@ DEPS :=
 
 CXXFLAGS += -std=c++0x -g -O0
 CXXFLAGS += -Wno-deprecated-declarations # while we're using old libdwarfpp -- FIXME
-LDLIBS += -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization -lc++fileno -lsrk31c++ -lelf
+LDFLAGS += -L`pwd` -Wl,-R`pwd`
+LDLIBS += -lallocs -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization -lc++fileno -lsrk31c++ -lelf
 
 CPP_SRC := uniqtypes.cpp
 
-default: uniqtypes
+default: liballocs.a dumptypes allocsites
 
 .PHONY: clean
 clean:
@@ -24,3 +25,9 @@ $(CPP_DEPS): .%.d : %.cpp
 default: uniqtypes
 %: %.cpp
 	$(CXX) $(LDFLAGS) $(CXXFLAGS) -o "$@" "$<" $(LDLIBS)
+
+liballocs.a: helpers.o
+	ar r "$@" $^
+
+dumptypes: liballocs.a
+allocsites: liballocs.a

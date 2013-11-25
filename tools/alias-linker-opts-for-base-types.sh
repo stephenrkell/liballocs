@@ -1,8 +1,13 @@
 #!/bin/bash 
 
 if [[ -z "$EQUIVS" ]]; then
-    EQUIVS=$( readlink -f ../frontend/c/base-type-equivs.txt )
+    EQUIVS=$( readlink -f `dirname $0`/../frontend/c/base-type-equivs.txt )
+    if [[ -z "$EQUIVS" ]]; then
+        echo "Error: no equivs file" 1>&2
+    fi
 fi
+
+
 
 # we are reading the output of nm -fposix on a -uniqtypes.o file
 

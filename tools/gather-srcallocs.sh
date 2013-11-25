@@ -9,6 +9,7 @@ pad_numbers () {
     sed 's/\f\t/\n/g'
 }
 
+. $(dirname "$0")/../lib/debug-funcs.sh
 
 all_obj_allocs_file="$1"
 
@@ -16,7 +17,7 @@ echo Hello 1>&2
 
 cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
     echo "Saw line $obj $rest" 1>&2
-    all_cus_info="$( readelf -wi "$obj" | grep -A7 'DW_TAG_compile_unit' | tr '\n' '\f' | sed 's/\f--\f/\n/g' )"
+    all_cus_info="$( readelf_debug -wi "$obj" | grep -A7 'DW_TAG_compile_unit' | tr '\n' '\f' | sed 's/\f--\f/\n/g' )"
     echo "$all_cus_info" | while read cu_info; do
         if [[ -z "$cu_info" ]]; then
             continue

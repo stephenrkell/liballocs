@@ -67,6 +67,34 @@ read_debuglink () {
     return 1
 }
 
+readelf_debug () {
+    declare -a args
+    ctr=1
+    while true; do
+        args[$ctr]=$1
+        shift || break;
+        ctr=$(( $ctr + 1 ))
+    done
+    file=${args[$(( $ctr - 1 ))]}
+    echo "Slurped args: ${args[@]}" 1>&2
+    echo "Guessed file arg: $file" 1>&2
+    readelf_test_output="$( readelf ${args[@]} | head -n1 )"
+    # read from the $1 if it has debug sections, 
+    # else try to follow its debuglnk and read from that
+    if [[ -z "$readelf_test_output" ]]; then
+        debuglink_val="$( read_debuglink "$file" )"
+        if [[ -n "$debuglink_val" ]]; then
+            echo "Read debuglink val: $debuglink_val" 1>&2
+            resolved_debuglink="$( resolve_debuglink "$file" "$debuglink_val" )"
+            echo "Resolved debuglink to: $resolved_debuglink" 1>&2
+            args[$(( $ctr - 1 ))]="$resolved_debuglink"
+        else
+            echo "No debuglink found" 1>&2
+        fi
+    fi
+    readelf ${args[@]}
+}
+
 resolve_debuglink () {
     obj="$1"
     debuglink_value="$2"
