@@ -8,6 +8,12 @@ CXXFLAGS += -DUSE_SHARED_LIBRARY_MIN_ADDRESS_HACK
 
 C_SRC := $(wildcard *.c)
 
+# Don't use crunchcc to compile libcrunch!
+# if CC is crunchcc, unset it
+ifeq ($(notdir $(CC)),crunchcc)
+export CC := cc
+endif
+
 default: libcrunch.so stubs.o
 
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))

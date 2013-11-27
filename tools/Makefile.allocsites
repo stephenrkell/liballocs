@@ -18,7 +18,7 @@ $(warning ALLOCSITES_BASE is $(ALLOCSITES_BASE))
 OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
 UNIQTYPES ?= $(dir $(THIS_MAKEFILE))/uniqtypes
 DUMPTYPES ?= $(dir $(THIS_MAKEFILE))/dumptypes
-DUMPTYPES ?= $(dir $(THIS_MAKEFILE))/dumpallocs
+DUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/allocsites
 LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
 MERGE_ALLOCS ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh
 GATHER_OBJALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-objallocs.sh
@@ -61,7 +61,7 @@ $(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%
 # to record dependencies on other objects type objects
 $(ALLOCSITES_BASE)/%-types.c: /%
 	$(DUMPTYPES) "$<" > "$@" || rm -f "$@"
-	
+
 $(ALLOCSITES_BASE)/%-allocsites.c: /$(ALLOCSITES_BASE)/%.allocs
 	$(DUMPALLOCS) < "$<" > "$@" || rm -f "$@"
 

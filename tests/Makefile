@@ -26,12 +26,20 @@ ifeq ($(wildcard $(LIBCRUNCH)),)
 endif
 endif
 
-run-%:
-	$(MAKE) -C "$*" "$*" && ( cd "$*" && LD_PRELOAD=$(LIBCRUNCH) ./$* ); \
+LIBHEAP_INDEX_HOOKS ?= $(realpath $(dir $(THIS_MAKEFILE))/../../libpmirror.hg/lib/libheap_index_fast_hooks.so)
 
-cleanrun-%: clean-% run-%
+run-%:
+	$(MAKE) -C "$*" "$*" && ( cd "$*" && LD_PRELOAD="$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)" ./$* ); \
+
+cleanrun-%: 
 	$(MAKE) -C $* -f ../Makefile clean
 	$(MAKE) run-$*
+
+gdbrun-%: # run the test case with itself as input
+	$(MAKE) -C "$*" "$*" && ( cd "$*" && gdb --eval-command "set environment LD_PRELOAD=$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)" --args ./$* ./$* )
+
+gdbcleanrun-%:
+	$(MAKE) -C $* -f ../Makefile clean && $(MAKE) gdbrun-$*
 
 clean-%:
 	$(MAKE) -C "$*" -f $(realpath $(THIS_MAKEFILE)) clean

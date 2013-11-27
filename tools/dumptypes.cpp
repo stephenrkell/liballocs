@@ -14,6 +14,7 @@
 #include <boost/icl/interval_map.hpp>
 #include <srk31/algorithm.hpp>
 #include <srk31/ordinal.hpp>
+#include <cxxgen/tokens.hpp>
 #include <dwarfpp/lib.hpp>
 #include <fileno.hpp>
 
@@ -85,9 +86,10 @@ uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 		 && t.tag_here() != DW_TAG_pointer_type
 		 && t.tag_here() != DW_TAG_reference_type
 		 && t.tag_here() != DW_TAG_rvalue_reference_type
-		 && t.tag_here() != DW_TAG_array_type)
+		 && t.tag_here() != DW_TAG_array_type
+		 && t.tag_here() != DW_TAG_subroutine_type)
 		{
-			cerr << "Warning: skipping non-base non-pointer non-array type described by " << *t //
+			cerr << "Warning: skipping non-base non-pointer non-array non-subroutine type described by " << *t //
 			//if (t.name_here()) cerr << t.name_here();
 			//else cerr << "(unknown, offset: " << std::hex << t.offset_here() << std::dec << ")";
 			/*cerr */ << " because no file is recorded for its definition." << endl;
@@ -162,7 +164,14 @@ int main(int argc, char **argv)
 		cerr << "Could not open file " << argv[1] << endl;
 		exit(1);
 	}
-	core::root_die root(fileno(infstream));
+	using core::root_die;
+	struct sticky_root_die : public root_die
+	{
+		using root_die::root_die;
+		
+		// virtual bool is_sticky(const core::abstract_die& d) { return true; }
+		
+	} root(fileno(infstream));
 	opt<core::root_die&> opt_r = root; // for debugging
 	master_relation_t master_relation;
 
@@ -176,8 +185,10 @@ int main(int argc, char **argv)
 	};
 
 	map<subprogram_key, iterator_df<subprogram_die> > subprograms_list;
+	lib::Dwarf_Off previous_offset = 0UL;
 	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
 	{
+		assert(i.offset_here() >= previous_offset); // == for initial case, > afterwards
 		if (i.is_a<type_die>())
 		{
 			// add it to the relation
@@ -193,6 +204,7 @@ int main(int argc, char **argv)
 			}
 			add_type(i.as_a<type_die>(), master_relation);
 		}
+		previous_offset = i.offset_here();
 	}
 	cerr << "Master relation contains " << master_relation.size() << " data types." << endl;
 	/* For each type we output a record:
@@ -229,10 +241,12 @@ int main(int argc, char **argv)
 
 	// write a forward declaration for every uniqtype we need
 	set<string> names_emitted;
+	map<string, set< iterator_df<type_die> > > types_by_name;
 	for (auto i_pair = master_relation.begin(); i_pair != master_relation.end(); ++i_pair)
 	{
 		string s = mangle_typename(i_pair->first);
 		names_emitted.insert(s);
+		types_by_name[i_pair->first.second].insert(i_pair->second);
 		cout << "extern struct rec " << s << ";" << endl;
 	}
 
@@ -334,7 +348,29 @@ int main(int argc, char **argv)
 		cout << "\n__asm__(\".popsection\"); \n";
 	}
 	
+	/* Now create linker aliases for any that were unique. */
+	cout << "/* Begin aliases. */" << endl;
+	for (auto i_by_name_pair = types_by_name.begin(); i_by_name_pair != types_by_name.end();
+		++i_by_name_pair)
+	{
+		if (i_by_name_pair->second.size() == 1)
+		{
+			auto full_name_pair = key_from_type(*i_by_name_pair->second.begin());
+			string full_name = mangle_typename(full_name_pair);
+			pair<string, string> abbrev_name_pair = make_pair("", full_name_pair.second);
+			string abbrev_name = mangle_typename(abbrev_name_pair);
+			cout << "extern struct rec " << abbrev_name << " __attribute__((alias(\""
+				<< cxxgen::escape(full_name) << "\")));" << endl;
+		}
+		else
+		{
+			cout << "/* Not aliasing " << i_by_name_pair->first << "; set has size "
+				<< i_by_name_pair->second.size() << " */" << endl;
+		}
+	}
+	
 	// now output for the subprograms
+	cout << "/* Begin stack frame types. */" << endl;
 	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
 	{
 		if (i.is_a<subprogram_die>())
