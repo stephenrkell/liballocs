@@ -26,7 +26,7 @@ $(C_DEPS): .%.d : %.c
 -include $(DEPS)
 
 libcrunch.so: libcrunch.o
-	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl #-lheap_index_hooks
+	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
 
 # have to preload the hooks yourself if you want them to hook!
 

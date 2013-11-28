@@ -47,6 +47,8 @@ using dwarf::core::address_holding_type_die;
 using dwarf::core::array_type_die;
 using dwarf::core::type_chain_die;
 
+using dwarf::lib::Dwarf_Off;
+
 // regex usings
 using boost::regex;
 using boost::regex_match;
@@ -72,6 +74,9 @@ typedef std::map< pair<string, string>, iterator_sibs<core::variable_die> > stat
 
 void print_stacktypes_output(const subprograms_list_t& l);
 void print_statics_output(const statics_list_t& l);
+
+static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
+	const boost::icl::discrete_interval<Dwarf_Off> interval);
 
 uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 {
@@ -147,6 +152,18 @@ static string fq_pathname(const string& dir, const string& path)
 {
 	if (path.length() > 0 && path.at(0) == '/') return path;
 	else return dir + "/" + path;
+}
+
+static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
+	const boost::icl::discrete_interval<Dwarf_Off> interval)
+{
+	std::ostringstream s_typename;
+	if (i_subp.name_here()) s_typename << *i_subp.name_here();
+	else s_typename << "0x" << std::hex << i_subp.offset_here() << std::dec;
+	s_typename << "_vaddrs_0x" << std::hex << interval.lower() << "_0x" 
+		<< interval.upper() << std::dec;
+
+	return s_typename.str();
 }
 
 int main(int argc, char **argv)
@@ -427,18 +444,42 @@ int main(int argc, char **argv)
 	 * - collecting their vaddr ranges into a partition, splitting any overlapping ranges
 	     and building a mapping from each range to the variables/parameters valid in it;
 	 * - when we're finished, outputting a distinct uniqtype for each range;
-	 * - also, output a table of IPs-to-uniqtypes.  */
+	 * - also, output a table of IPs-to-uniqtypes. 
+	 *
+	 * We also output an allocsites record for each one, wit the allocsite as the
+	 *  */
 	using dwarf::lib::Dwarf_Off;
 	using dwarf::lib::Dwarf_Addr;
 	using dwarf::lib::Dwarf_Signed;
 	using dwarf::lib::Dwarf_Unsigned;
 	
+	typedef std::set< iterator_df<with_dynamic_location_die> > live_set_t;
+	typedef boost::icl::interval_map< Dwarf_Off, live_set_t > intervals_t;
+	typedef boost::icl::interval_map< 
+			Dwarf_Off, 
+			std::set< 
+				pair<
+					Dwarf_Signed, 
+					iterator_df<with_dynamic_location_die> 
+				> 
+			>
+		> retained_intervals_t;
+	typedef boost::icl::interval_map< 
+			Dwarf_Off, 
+			std::set< 
+				pair<
+					iterator_df<with_dynamic_location_die>,
+					string
+				>
+			>
+		> discarded_intervals_t;
+		
+	map< iterator_df<subprogram_die>, retained_intervals_t > intervals_by_subprogram;
+	
 	for (auto i_i_subp = subprograms_list.begin(); i_i_subp != subprograms_list.end(); ++i_i_subp)
 	{
 		auto i_subp = i_i_subp->second;
 		
-		typedef std::set< iterator_df<with_dynamic_location_die> >live_set_t;
-		typedef boost::icl::interval_map< Dwarf_Off, live_set_t > intervals_t;
 		intervals_t subp_vaddr_intervals; // CU- or file-relative?
 
 		/* Put this subp's vaddr ranges into the map */
@@ -597,24 +638,8 @@ int main(int argc, char **argv)
 		 * Keep an interval map of discarded items.
 		 * When finished, walk it and build another map keyed by 
 		  */
-		boost::icl::interval_map< 
-			Dwarf_Off, 
-			std::set< 
-				pair<
-					Dwarf_Signed, 
-					iterator_df<with_dynamic_location_die> 
-				> 
-			>
-		> frame_intervals;
-		boost::icl::interval_map< 
-			Dwarf_Off, 
-			std::set< 
-				pair<
-					iterator_df<with_dynamic_location_die>,
-					string
-				>
-			>
-		> discarded_intervals;
+		retained_intervals_t frame_intervals;
+		discarded_intervals_t discarded_intervals;
 		 
 		for (auto i_int = subp_vaddr_intervals.begin(); 
 			i_int != subp_vaddr_intervals.end(); ++i_int)
@@ -691,6 +716,8 @@ int main(int argc, char **argv)
 			}
 		} /* end for i_int */
 		
+		intervals_by_subprogram[i_subp] = frame_intervals;
+		
 		/* Now for each distinct interval in the frame_intervals map... */
 		for (auto i_frame_int = frame_intervals.begin(); i_frame_int != frame_intervals.end();
 			++i_frame_int)
@@ -729,26 +756,20 @@ int main(int argc, char **argv)
 					signed frame_min_offset = i_minoff_el->first;
 					frame_minoff = (frame_min_offset > 0) ? 0 : frame_min_offset;
 				}
-
 			}
 			
 			/* Output in offset order, CHECKing that there is no overlap (sanity). */
 			cout << "\n/* uniqtype for stack frame ";
-			std::ostringstream s_typename;
-			if (i_subp.name_here()) s_typename << *i_subp.name_here();
-			else s_typename << "0x" << std::hex << i_subp.offset_here() << std::dec;
-			
-			s_typename << "_vaddrs_0x" << std::hex << i_frame_int->first.lower() << "_0x" 
-				<< i_frame_int->first.upper() << std::dec;
+			string unmangled_typename = typename_for_vaddr_interval(i_subp, i_frame_int->first);
 			
 			string cu_name = *i_subp.enclosing_cu().name_here();
 			
-			cout << s_typename.str() 
+			cout << unmangled_typename
 				 << " defined in " << cu_name << ", "
 				 << "vaddr range " << i_frame_int->first << " */\n";
 				 
-			cout << "struct rec " << mangle_typename(make_pair(cu_name, s_typename.str()))
-				<< " = {\n\t\"" << s_typename.str() << "\",\n\t"
+			cout << "struct rec " << mangle_typename(make_pair(cu_name, unmangled_typename))
+				<< " = {\n\t\"" << unmangled_typename << "\",\n\t"
 				<< frame_maxoff << " /* pos_maxoff */,\n\t"
 				<< frame_minoff << " /* neg_maxoff */,\n\t"
 				<< i_frame_int->second.size() << " /* nmemb */,\n\t"
@@ -795,7 +816,53 @@ int main(int argc, char **argv)
 // 			cout << "; reason: " << i_discarded->second;
 // 			cout << " */ ";
 // 		}
+	} // end for subprogram
+	cout << "struct allocsite_entry\n\
+{ \n\
+	void *next; \n\
+	void *prev; \n\
+	void *allocsite; \n\
+	struct rec *uniqtype; \n\
+};\n";
+	cout << "struct allocsite_entry frame_vaddrs[] = {" << endl;
+
+	unsigned total_emitted = 0;
+	// reminder: retained_intervals_t is
+	// boost::icl::interval_map< 
+	//		Dwarf_Off, 
+	//		std::set< 
+	//			pair<
+	//				Dwarf_Signed, 
+	//				iterator_df<with_dynamic_location_die> 
+	//			> 
+	//		>
+	//	>
+	for (map< iterator_df<subprogram_die>, retained_intervals_t >::iterator i_subp_intervals 
+	  = intervals_by_subprogram.begin(); i_subp_intervals != intervals_by_subprogram.end();
+	  ++ i_subp_intervals)
+	{
+		// now output an allocsites-style table for these 
+		for (auto i_int = i_subp_intervals->second.begin(); i_int != i_subp_intervals->second.end(); 
+			++i_int)
+		{
+			cout << "\n\t/* frame alloc record for vaddr " << i_int->first.lower() << "+"
+				<< std::hex << "0x" << i_int->first.upper() << std::dec << " */";
+			cout << "\n\t{ (void*)0, (void*)0, "
+				<< "(char*) " << "0" // will fix up at load time
+				<< " + " << i_int->first.lower() << "UL, " 
+				<< "&" << mangle_typename(make_pair(*i_subp_intervals->first.enclosing_cu().name_here(),
+					typename_for_vaddr_interval(i_subp_intervals->first, i_int->first)))
+				<< " }";
+			cout << ",";
+			++total_emitted;
+		}
+
 	}
+	// output a null terminator entry
+	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct rec *)0 }";
+	
+	// close the list
+	cout << "\n};\n";
 
 	// success! 
 	return 0;

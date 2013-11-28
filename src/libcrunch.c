@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <link.h>
+#include <libunwind.h>
 #include "libcrunch.h"
 
 static const char *allocsites_base;
@@ -94,6 +95,9 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
+
+	// skip objects that are themselves types/allocsites objects
+	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
 	
 	// get the -types.so object's name
 	const char *libfile_name = helper_libfile_name(canon_objname, "-types.so");
@@ -117,10 +121,59 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 	return 0;
 }
 
+static void chain_allocsite_entries(struct allocsite_entry *cur_ent, 
+	struct allocsite_entry *prev_ent, unsigned *p_current_bucket_size, 
+	intptr_t load_addr, intptr_t extrabits)
+{
+#define FIXADDR(a) 	((void*)((intptr_t)(a) | extrabits))
+
+	// fix up the allocsite by the containing object's load address
+	*((unsigned char **) &cur_ent->allocsite) += load_addr;
+
+	// debugging: print out entry
+	/* fprintf(stderr, "allocsite entry: %p, to uniqtype at %p\n", 
+		cur_ent->allocsite, cur_ent->uniqtype); */
+
+	// if we've moved to a different bucket, point the table entry at us
+	struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, FIXADDR(cur_ent->allocsite));
+	struct allocsite_entry **prev_ent_bucketpos
+	 = prev_ent ? ALLOCSMT_FUN(ADDR, FIXADDR(prev_ent->allocsite)) : NULL;
+
+	// first iteration is too early to do chaining, 
+	// but we do need to set up the first bucket
+	if (!prev_ent || bucketpos != prev_ent_bucketpos)
+	{
+		// fresh bucket, so should be null
+		assert(!*bucketpos);
+		*bucketpos = cur_ent;
+	}
+	if (!prev_ent) return;
+
+	void *cur_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, FIXADDR(cur_ent->allocsite));
+	void *prev_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, FIXADDR(prev_ent->allocsite));
+
+	if (cur_range_base == prev_range_base)
+	{
+		// chain these guys together
+		prev_ent->next = cur_ent;
+		cur_ent->prev = prev_ent;
+
+		++(*p_current_bucket_size);
+	} else *p_current_bucket_size = 1; 
+	// we don't (currently) distinguish buckets of zero from buckets of one
+
+	// last iteration doesn't need special handling -- next will be null,
+	// prev will be set within the "if" above, if it needs to be set.
+#undef FIXADDR
+}
+
 static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
+
+	// skip objects that are themselves types/allocsites objects
+	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
 	
 	// get the -allocsites.so object's name
 	const char *libfile_name = helper_libfile_name(canon_objname, "-allocsites.so");
@@ -152,43 +205,8 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 	unsigned current_bucket_size = 1; // out of curiosity...
 	for (; cur_ent->allocsite; prev_ent = cur_ent++)
 	{
-		// debugging: print out entry
-		/* fprintf(stderr, "allocsite entry: %p, to uniqtype at %p\n", 
-			cur_ent->allocsite, cur_ent->uniqtype); */
-		
-		// if we've moved to a different bucket, point the table entry at us
-		struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, cur_ent->allocsite);
-		struct allocsite_entry **prev_ent_bucketpos
-		 = prev_ent ? ALLOCSMT_FUN(ADDR, prev_ent->allocsite) : NULL;
-		
-		// fix up the allocsite by the containing object's load address
-		*((unsigned char **) &cur_ent->allocsite) += info->dlpi_addr;
-		
-		// first iteration is too early to do chaining, 
-		// but we do need to set up the first bucket
-		if (!prev_ent || bucketpos != prev_ent_bucketpos)
-		{
-			// fresh bucket, so should be null
-			assert(!*bucketpos);
-			*bucketpos = cur_ent;
-		}
-		if (!prev_ent) continue;
-		
-		void *cur_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, cur_ent->allocsite);
-		void *prev_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, prev_ent->allocsite);
-		
-		if (cur_range_base == prev_range_base)
-		{
-			// chain these guys together
-			prev_ent->next = cur_ent;
-			cur_ent->prev = prev_ent;
-			
-			++current_bucket_size;
-		} else current_bucket_size = 1; 
-		// we don't (currently) distinguish buckets of zero from buckets of one
-		
-		// last iteration doesn't need special handling -- next will be null,
-		// prev will be set within the "if" above, if it needs to be set.
+		chain_allocsite_entries(cur_ent, prev_ent, &current_bucket_size, 
+			info->dlpi_addr, 0);
 	}
 
 	// debugging: check that we can look up the first entry, if we are non-empty
@@ -197,6 +215,58 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 	
 	// always continue with further objects
 	return 0;
+}
+
+static int link_stackaddr_allocs_cb(struct dl_phdr_info *info, size_t size, void *data)
+{
+	// get the canonical libfile name
+	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
+
+	// skip objects that are themselves types/allocsites objects
+	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
+	
+	// get the -allocsites.so object's name
+	const char *libfile_name = helper_libfile_name(canon_objname, "-types.so");
+	// don't load if we end with "-types.so"
+	if (0 == strcmp("-types.so", canon_objname + strlen(canon_objname) - strlen("-types.so")))
+	{
+		return 0;
+	}
+
+	dlerror();
+	void *types_handle = dlopen(libfile_name, RTLD_NOW | RTLD_NOLOAD);
+	if (!types_handle)
+	{
+		warnx("Could not re-load types object (%s)", dlerror());
+		return 0;
+	}
+	
+	dlerror();
+	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(types_handle, "frame_vaddrs");
+	if (!first_entry)
+	{
+		warnx("Could not load frame vaddrs (%s)", dlerror());
+		return 0;
+	}
+	
+	/* We chain these much like the allocsites, BUT we OR each vaddr with 
+	 * STACK_BEGIN first.  */
+	struct allocsite_entry *cur_ent = first_entry;
+	struct allocsite_entry *prev_ent = NULL;
+	unsigned current_bucket_size = 1; // out of curiosity...
+	for (; cur_ent->allocsite; prev_ent = cur_ent++)
+	{
+		chain_allocsite_entries(cur_ent, prev_ent, &current_bucket_size,
+			info->dlpi_addr, STACK_BEGIN);
+	}
+
+	// debugging: check that we can look up the first entry, if we are non-empty
+	assert(!first_entry || 
+		vaddr_to_uniqtype(first_entry->allocsite) == first_entry->uniqtype);
+	
+	// always continue with further objects
+	return 0;
+	
 }
 
 const struct rec *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
@@ -254,13 +324,18 @@ int __libcrunch_global_init(void)
 	assert(ret_types == 0);
 	
 	/* Allocate the memtable. 
-	 * Assume we don't need to cover addresses >= STACK_BEGIN. */
+	 * Assume we don't need to cover addresses >= STACK_BEGIN.
+	 * BUT we store vaddrs in the same table, with addresses ORed
+	 * with STACK_BEGIN. So double up the size of the table accordingly. */
 	__libcrunch_allocsmt = MEMTABLE_NEW_WITH_TYPE(allocsmt_entry_type, allocsmt_entry_coverage, 
-		(void*) 0, (void*) STACK_BEGIN);
+		(void*) 0, (void*) (STACK_BEGIN << 1));
 	assert(__libcrunch_allocsmt != MAP_FAILED);
 	
 	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_cb, NULL);
 	assert(ret_allocsites == 0);
+
+	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_allocs_cb, NULL);
+	assert(ret_stackaddr == 0);
 	
 	__libcrunch_is_initialized = 1;
 	fprintf(stderr, "libcrunch successfully initialized\n");
@@ -369,13 +444,151 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 	{
 		case STACK:
 		{
-			reason = "stack object";
+#ifdef UNW_TARGET_X86
+#define BEGINNING_OF_STACK 0xbfffffff
+#else // assume X86_64 for now
+#define BEGINNING_OF_STACK (STACK_BEGIN - 1)
+#endif
+			// we want to walk a sequence of vaddrs!
+			// how do we know which is the one we want?
+			// we can get a uniqtype for each one, including maximum posoff and negoff
+			// -- yes, use those
+			// begin pasted-then-edited from stack.cpp in pmirror
+			/* We declare all our variables up front, in the hope that we can rely on
+			 * the stack pointer not moving between getcontext and the sanity check.
+			 * FIXME: better would be to write this function in C90 and compile with
+			 * special flags. */
+			unw_cursor_t cursor, saved_cursor, prev_saved_cursor;
+			unw_word_t higherframe_sp = 0, sp, higherframe_ip = 0, callee_ip;
+			int unw_ret;
+			unw_word_t check_higherframe_sp;
+			unw_context_t unw_context;
+
+			// sanity check
+#ifdef UNW_TARGET_X86
+			__asm__ ("movl %%esp, %0\n" :"=r"(check_higherframe_sp));
+#else // assume X86_64 for now
+			__asm__("movq %%rsp, %0\n" : "=r"(check_higherframe_sp));
+#endif
+			unw_ret = unw_getcontext(&unw_context);
+			unw_init_local(&cursor, /*this->unw_as,*/ &unw_context);
+
+			unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp);
+			assert(check_higherframe_sp == higherframe_sp);
+			fprintf(stderr, "Initial sp=%p\n", (void *) higherframe_sp);
+			unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
+
+			unw_word_t ip = 0;
+			int step_ret;
+
+			do
+			{
+				callee_ip = ip;
+				prev_saved_cursor = saved_cursor;	// prev_saved_cursor is the cursor into the callee's frame 
+													// FIXME: will be garbage if callee_ip == 0
+				saved_cursor = cursor; // saved_cursor is the *current* frame's cursor
+					// and cursor, later, becomes the *next* (i.e. caller) frame's cursor
+
+				/* First get the ip, sp and symname of the current stack frame. */
+				unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(unw_ret == 0);
+				unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(unw_ret == 0); // sp = higherframe_sp
+
+				/* Now get the sp of the next higher stack frame, 
+				 * i.e. the bp of the current frame. N
+
+				 * NOTE: we're still
+				 * processing the stack frame ending at sp, but we
+				 * hoist the unw_step call to here so that we can get
+				 * the bp of the next higher frame (without demanding that
+				 * libunwind provides bp, e.g. for code compiled with
+				 * -fomit-frame-pointer -- FIXME: does this work?). 
+				 * This means "cursor" is no longer current -- use 
+				 * saved_cursor for the remainder of this iteration!
+				 * saved_cursor points to the deeper stack frame. */
+				int step_ret = unw_step(&cursor);
+				if (step_ret > 0)
+				{
+					unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp); assert(unw_ret == 0);
+					unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
+				}
+				else if (step_ret == 0)
+				{
+					higherframe_sp = BEGINNING_OF_STACK;
+					higherframe_ip = 0x0;
+				}
+				else
+				{
+					// return value <1 means error
+					// We return without calling the handler. This does mean that
+					// the very top frame will not get handler'd
+					break;
+				}
+
+// 				ret = handler(
+// 				/* process_image *image			 */ this,
+// 				/* unw_word_t frame_sp			  */ sp,
+// 				/* unw_word_t frame_ip			  */ ip,
+// 				/* const char *frame_proc_name	  */ name,
+// 				/* unw_word_t frame_caller_sp	   */ higherframe_sp,
+// 				/* unw_word_t frame_caller_ip	   */ higherframe_ip,
+// 				/* unw_word_t frame_callee_ip	   */ callee_ip,
+// 				/* unw_cursor_t frame_cursor		*/ saved_cursor,
+// 				/* unw_cursor_t frame_callee_cursor */ prev_saved_cursor,
+// 				/* void *arg						*/ handler_arg
+// 				);
+
+				// now do the stuff
+				// 1. get the frame uniqtype for frame_ip
+				/* NOTE: here we are doing one vaddr_to_uniqtype per frame.
+				 * Can we optimise this, by ruling out some frames just by
+				 * their bounding sps? YES, I'm sure we can. FIXME: do this!
+				 */
+				struct rec *frame_desc = vaddr_to_uniqtype((void *) ip);
+				if (!frame_desc)
+				{
+					// no frame descriptor for this frame; that's okay!
+					continue;
+				}
+				// 2. what's the frame base? it's the higherframe stack pointer
+				unsigned char *frame_base = (unsigned char *) higherframe_sp;
+				// 3. is our candidate addr between frame-base - negoff and frame_base + posoff?
+				if ((unsigned char *) obj >= frame_base + frame_desc->neg_maxoff  // is -ve, so 
+					&& (unsigned char *) obj < frame_base + frame_desc->pos_maxoff)
+				{
+					object_start = frame_base;
+					alloc_uniqtype = frame_desc;
+					break;
+				}
+				else
+				{
+					// have we gone too far? we are going upwards in memory...
+					// ... so if our lowest addr is still too high
+					if (frame_base + frame_desc->neg_maxoff > (unsigned char *) obj)
+					{
+						reason = "stack walk reached higher frame";
+						goto abort_stack;
+					}
+				}
+
+				assert(step_ret > 0 || higherframe_sp == BEGINNING_OF_STACK);
+			} while (higherframe_sp != BEGINNING_OF_STACK);
+			// if we hit the termination condition, we've failed
+			if (higherframe_sp == BEGINNING_OF_STACK)
+			{
+				reason = "stack walk reached top-of-stack";
+				goto abort_stack; //std::shared_ptr<dwarf::spec::basic_die>();
+			}
+		#undef BEGINNING_OF_STACK
+		// end pasted from pmirror stack.cpp
+		break; // end case STACK
+		abort_stack:
+			reason = reason ? reason : "stack object";
 			reason_ptr = obj;
 			suppress_warning = 1;
 			++__libcrunch_aborted_stack;
 			goto abort;
 			//void *uniqtype = stack_frame_to_uniqtype(frame_base, file_relative_ip);
-		}
+		} // end case STACK
 		case HEAP:
 		{
 			/* For heap allocations, we look up the allocation site.
@@ -441,8 +654,14 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 	/* Now search iteratively for a match at the offset within the toplevel
 	 * object. Nonzero offsets "recurse" immediately, using binary search. */
 	assert(alloc_uniqtype);
-	unsigned target_offset = ((char*) obj - (char*) object_start) % 
-		(alloc_uniqtype->pos_maxoff ? alloc_uniqtype->pos_maxoff : 1);
+	/* If we're searching in an array, we need to take the offset modulo the 
+	 * element size. */
+	int modulo; 
+	if (alloc_uniqtype->pos_maxoff != 0 && alloc_uniqtype->neg_maxoff == 0)
+	{	
+		modulo = alloc_uniqtype->pos_maxoff;
+	} else modulo = 1;
+	unsigned target_offset = ((char*) obj - (char*) object_start) % modulo; 
 	
 	struct rec *cur_obj_uniqtype = alloc_uniqtype;
 	signed descend_to_ind;
@@ -479,7 +698,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 		{
 			/* We found one offset */
 			__libcrunch_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset,
-				"offset underappoximates", __FILE__, __LINE__, __func__);
+				"offset underapproximates", __FILE__, __LINE__, __func__);
 			descend_to_ind = lower_ind;
 		}
 		else /* lower_ind >= upper_ind */
@@ -525,5 +744,6 @@ int __is_a3(const void *obj, const char *typestr, const struct rec **maybe_uniqt
 int __libcrunch_check_init(void);
 enum object_memory_kind get_object_memory_kind(const void *obj);
 struct rec *allocsite_to_uniqtype(const void *allocsite);
+struct rec *vaddr_to_uniqtype(const void *allocsite);
 struct rec *typestr_to_uniqtype(const char *typestr);
 

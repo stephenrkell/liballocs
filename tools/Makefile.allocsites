@@ -56,16 +56,13 @@ $(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%
 	mkdir -p $$(dirname "$@")
 	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
 
-# Experiment: don't bother with uniqtypes! 
-# Just dump types locally for each object, and use DT_NEEDED
-# to record dependencies on other objects type objects
 $(ALLOCSITES_BASE)/%-types.c: /%
 	$(DUMPTYPES) "$<" > "$@" || rm -f "$@"
 
 $(ALLOCSITES_BASE)/%-allocsites.c: /$(ALLOCSITES_BASE)/%.allocs
 	$(DUMPALLOCS) < "$<" > "$@" || rm -f "$@"
 
-# no need for a .o rule -- we just use the builtin on
+# no need for a .o rule -- we just use the builtin one
 
 # Generate the .so with the necessary base-type aliases
 $(ALLOCSITES_BASE)/%-types.so: $(ALLOCSITES_BASE)/%-types.o

@@ -326,7 +326,7 @@ int main(int argc, char **argv)
 	struct rec *uniqtype; \n\
 };\n";
 
-	// forward-declare the uniqtypes
+	// extern-declare the uniqtypes
 	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
 	{
 		cout << "extern struct rec " << mangle_typename(i_site->second) << ";" << endl;

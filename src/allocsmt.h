@@ -39,6 +39,6 @@ struct allocsite_entry
 #define allocsmt_entry_coverage      256
 extern allocsmt_entry_type *__libcrunch_allocsmt;
 #define ALLOCSMT_FUN(op, ...)    (MEMTABLE_ ## op ## _WITH_TYPE(__libcrunch_allocsmt, allocsmt_entry_type, \
-    allocsmt_entry_coverage, (void*)0, (void*)STACK_BEGIN, ## __VA_ARGS__ ))
+    allocsmt_entry_coverage, (void*)0, (void*)(STACK_BEGIN << 1), ## __VA_ARGS__ ))
 
 #endif
