@@ -33,12 +33,17 @@ struct allocsite_entry
  *   i.e. 2^6 i.e. 64 bytes, which is pretty damn good and well within our 4KB limit. 
  *   We bump it up to 256 instruction bytes. This is a "factor of 32" memtable,
  *   i.e. takes 1/32 of the VAS range it covers. 
+ *
+ * - then we quadruple the size of the whole thing, to allow up to four
+ *   different "allocation site spaces". Currently we use only three of them: 
+ *   heap allocation sites (|0), stack frame vaddr ranges (|STACK_BEGIN)
+ *   and static object base addresses (|STACK_BEGIN<<1).
  */
 
 #define allocsmt_entry_type          struct allocsite_entry *
 #define allocsmt_entry_coverage      256
 extern allocsmt_entry_type *__libcrunch_allocsmt;
 #define ALLOCSMT_FUN(op, ...)    (MEMTABLE_ ## op ## _WITH_TYPE(__libcrunch_allocsmt, allocsmt_entry_type, \
-    allocsmt_entry_coverage, (void*)0, (void*)(STACK_BEGIN << 1), ## __VA_ARGS__ ))
+    allocsmt_entry_coverage, (void*)0, (void*)(STACK_BEGIN << 2), ## __VA_ARGS__ ))
 
 #endif

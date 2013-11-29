@@ -319,47 +319,71 @@ int main(int argc, char **argv)
 			<< (i_vert->second.is_a<array_type_die>() ? "1" : "0") << " /* is_array */,\n\t"
 			<< array_len << " /* array_len */,\n\t"
 			<< /* contained[0] */ "/* contained */ {\n\t\t";
-		unsigned i_membernum = 0;
-		std::set<lib::Dwarf_Unsigned> used_offsets;
-		opt<iterator_base> first_with_byte_offset;
 
-		auto i_off = real_member_offsets.begin();
-		for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
+		if (i_vert->second.is_a<array_type_die>())
 		{
-			auto i_edge = i_i_edge->as_a<member_die>();
-			
-			/* if we're not the first, write a comma */
-			if (i_i_edge != real_members.begin()) cout << ",\n\t\t";
-			
+			// array: write a single entry, for the element type
 			/* begin the struct */
 			cout << "{ ";
-			
+
 			// compute offset
-			
-			cout << *i_off << ", ";
-			
+
+			cout << "0, ";
+
 			// compute and print destination name
-			auto k = key_from_type(i_edge->get_type());
+			auto k = key_from_type(i_vert->second.as_a<array_type_die>()->get_type());
+			/* FIXME: do multidimensional arrays get handled okay like this? 
+			 * I reckon so, but am not yet sure. */
 			string mangled_name = mangle_typename(k);
-			if (names_emitted.find(mangled_name) == names_emitted.end())
-			{
-				cout << "Type " << i_edge->get_type()
-					<< ", concretely " << i_edge->get_type()->get_concrete_type()
-					<< " was not emitted previously." << endl;
-				for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
-				{
-					if (i_name->substr(i_name->length() - k.second.length()) == k.second)
-					{
-						cout << "Possible near-miss: " << *i_name << endl;
-					}
-				}
-				assert(false);
-			}
 			cout << "&" << mangled_name;
-			
+
 			// end the struct
 			cout << " }";
 		}
+		else // non-array -- use real members
+		{
+			unsigned i_membernum = 0;
+			std::set<lib::Dwarf_Unsigned> used_offsets;
+			opt<iterator_base> first_with_byte_offset;
+			auto i_off = real_member_offsets.begin();
+			for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
+			{
+				auto i_edge = i_i_edge->as_a<member_die>();
+
+				/* if we're not the first, write a comma */
+				if (i_i_edge != real_members.begin()) cout << ",\n\t\t";
+
+				/* begin the struct */
+				cout << "{ ";
+
+				// compute offset
+
+				cout << *i_off << ", ";
+
+				// compute and print destination name
+				auto k = key_from_type(i_edge->get_type());
+				string mangled_name = mangle_typename(k);
+				if (names_emitted.find(mangled_name) == names_emitted.end())
+				{
+					cout << "Type " << i_edge->get_type()
+						<< ", concretely " << i_edge->get_type()->get_concrete_type()
+						<< " was not emitted previously." << endl;
+					for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
+					{
+						if (i_name->substr(i_name->length() - k.second.length()) == k.second)
+						{
+							cout << "Possible near-miss: " << *i_name << endl;
+						}
+					}
+					assert(false);
+				}
+				cout << "&" << mangled_name;
+
+				// end the struct
+				cout << " }";
+			}
+		}
+		
 		cout << "\n\t}"; /* end contained */
 		cout << "\n};\n"; /* end struct rec */
 		cout << "\n__asm__(\".popsection\"); \n";
@@ -381,8 +405,14 @@ int main(int argc, char **argv)
 		}
 		else
 		{
-			cout << "/* Not aliasing " << i_by_name_pair->first << "; set has size "
-				<< i_by_name_pair->second.size() << " */" << endl;
+			cout << "/* Not aliasing " << i_by_name_pair->first << "; set is {\n";
+			for (auto i_t = i_by_name_pair->second.begin(); i_t != i_by_name_pair->second.end(); ++i_t)
+			{
+				if (i_t != i_by_name_pair->second.begin()) cout << ",\n";
+				cout << "\t" << mangle_typename(key_from_type(*i_t)) << endl;
+			}
+			
+			cout << "} */" << endl;
 		}
 	}
 	
@@ -817,6 +847,8 @@ int main(int argc, char **argv)
 // 			cout << " */ ";
 // 		}
 	} // end for subprogram
+	
+	/* Now write frame_vaddr allocsites. */
 	cout << "struct allocsite_entry\n\
 { \n\
 	void *next; \n\
@@ -863,6 +895,60 @@ int main(int argc, char **argv)
 	
 	// close the list
 	cout << "\n};\n";
+
+	/* Now write static allocsites. */
+	cout << "struct allocsite_entry statics[] = {" << endl;
+
+	for (auto i = root.begin(); i != root.end(); ++i)
+	{
+		if (i.tag_here() == DW_TAG_variable
+			&& i.has_attribute_here(DW_AT_location)
+			&& i.as_a<variable_die>()->has_static_storage(root))
+		{
+			iterator_df<variable_die> i_var = i.as_a<variable_die>();
+			boost::icl::interval_map<Dwarf_Addr, Dwarf_Unsigned> intervals;
+			try
+			{
+				intervals = 
+					i_var->file_relative_intervals(
+						root, 
+						0 /* sym_binding_t (*sym_resolve)(const std::string& sym, void *arg) */, 
+						0 /* arg */);
+			}
+			catch (dwarf::lib::No_entry)
+			{
+				// this happens if we don't have a real location -- continue
+				continue;
+			}
+			if (intervals.size() == 0)
+			{
+				// this happens if we don't have a real location -- continue
+				continue;
+			}
+			
+			// calculate its file-relative addr
+			Dwarf_Off addr = intervals.begin()->first.lower();
+			
+			ostringstream anon_name; anon_name << "0x" << std::hex << i.offset_here();
+			
+			cout << "\n\t/* static alloc record for object "
+				 << (i.name_here() ? *i.name_here() : ("anonymous, DIE " + anon_name.str())) 
+				 << " at vaddr " << std::hex << "0x" << addr << std::dec << " */";
+			cout << "\n\t{ (void*)0, (void*)0, "
+				<< "(char*) " << "0" // will fix up at load time
+				<< " + " << addr << "UL, " 
+				<< "&" << mangle_typename(key_from_type(i_var->get_type()))
+				<< " }";
+			cout << ",";
+		}
+	}
+
+	// output a null terminator entry
+	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct rec *)0 }";
+	
+	// close the list
+	cout << "\n};\n";
+
 
 	// success! 
 	return 0;

@@ -55,7 +55,16 @@ static const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_
 			dlerror();
 			Dl_info addr_info;
 			int dladdr_ret = dladdr(dlpi_addr, &addr_info);
-			assert(dladdr_ret != 0);
+			if (dladdr_ret == 0)
+			{
+				warnx("dladdr could not resolve library loaded at %p\n", dlpi_addr);
+				return NULL;
+				// char cmdbuf[4096];
+				// int snret = snprintf(cmdbuf, 4096, "cat /proc/%d/maps", getpid());
+				// assert(snret > 0);
+				// system(cmdbuf);
+				// assert(0 && "no filename available for some loaded object");
+			}
 			assert(addr_info.dli_fname != NULL);
 			return realpath_quick_hack(addr_info.dli_fname);
 		}
@@ -95,6 +104,7 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
+	if (!canon_objname) return 0;
 
 	// skip objects that are themselves types/allocsites objects
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
@@ -171,7 +181,8 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
-
+	if (!canon_objname) return 0;
+	
 	// skip objects that are themselves types/allocsites objects
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
 	
@@ -217,10 +228,11 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 	return 0;
 }
 
-static int link_stackaddr_allocs_cb(struct dl_phdr_info *info, size_t size, void *data)
+static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
+	if (!canon_objname) return 0;
 
 	// skip objects that are themselves types/allocsites objects
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
@@ -241,28 +253,56 @@ static int link_stackaddr_allocs_cb(struct dl_phdr_info *info, size_t size, void
 		return 0;
 	}
 	
-	dlerror();
-	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(types_handle, "frame_vaddrs");
-	if (!first_entry)
 	{
-		warnx("Could not load frame vaddrs (%s)", dlerror());
-		return 0;
+		dlerror();
+		struct allocsite_entry *first_frame_entry = (struct allocsite_entry *) dlsym(types_handle, "frame_vaddrs");
+		if (!first_frame_entry)
+		{
+			warnx("Could not load frame vaddrs (%s)", dlerror());
+			return 0;
+		}
+
+		/* We chain these much like the allocsites, BUT we OR each vaddr with 
+		 * STACK_BEGIN first.  */
+		struct allocsite_entry *cur_frame_ent = first_frame_entry;
+		struct allocsite_entry *prev_frame_ent = NULL;
+		unsigned current_frame_bucket_size = 1; // out of curiosity...
+		for (; cur_frame_ent->allocsite; prev_frame_ent = cur_frame_ent++)
+		{
+			chain_allocsite_entries(cur_frame_ent, prev_frame_ent, &current_frame_bucket_size,
+				info->dlpi_addr, STACK_BEGIN);
+		}
+
+		// debugging: check that we can look up the first entry, if we are non-empty
+		assert(!first_frame_entry || 
+			vaddr_to_uniqtype(first_frame_entry->allocsite) == first_frame_entry->uniqtype);
 	}
 	
-	/* We chain these much like the allocsites, BUT we OR each vaddr with 
-	 * STACK_BEGIN first.  */
-	struct allocsite_entry *cur_ent = first_entry;
-	struct allocsite_entry *prev_ent = NULL;
-	unsigned current_bucket_size = 1; // out of curiosity...
-	for (; cur_ent->allocsite; prev_ent = cur_ent++)
+	/* Now a similar job for the statics. */
 	{
-		chain_allocsite_entries(cur_ent, prev_ent, &current_bucket_size,
-			info->dlpi_addr, STACK_BEGIN);
-	}
+		dlerror();
+		struct allocsite_entry *first_static_entry = (struct allocsite_entry *) dlsym(types_handle, "statics");
+		if (!first_static_entry)
+		{
+			warnx("Could not load statics (%s)", dlerror());
+			return 0;
+		}
 
-	// debugging: check that we can look up the first entry, if we are non-empty
-	assert(!first_entry || 
-		vaddr_to_uniqtype(first_entry->allocsite) == first_entry->uniqtype);
+		/* We chain these much like the allocsites, BUT we OR each vaddr with 
+		 * STACK_BEGIN<<1 first.  */
+		struct allocsite_entry *cur_static_ent = first_static_entry;
+		struct allocsite_entry *prev_static_ent = NULL;
+		unsigned current_static_bucket_size = 1; // out of curiosity...
+		for (; cur_static_ent->allocsite; prev_static_ent = cur_static_ent++)
+		{
+			chain_allocsite_entries(cur_static_ent, prev_static_ent, &current_static_bucket_size,
+				info->dlpi_addr, STACK_BEGIN<<1);
+		}
+
+		// debugging: check that we can look up the first entry, if we are non-empty
+		assert(!first_static_entry || 
+			static_addr_to_uniqtype(first_static_entry->allocsite, NULL) == first_static_entry->uniqtype);
+	}
 	
 	// always continue with further objects
 	return 0;
@@ -326,15 +366,18 @@ int __libcrunch_global_init(void)
 	/* Allocate the memtable. 
 	 * Assume we don't need to cover addresses >= STACK_BEGIN.
 	 * BUT we store vaddrs in the same table, with addresses ORed
-	 * with STACK_BEGIN. So double up the size of the table accordingly. */
+	 * with STACK_BEGIN. 
+	 * And we store static objects' addres in the same table, with addresses ORed
+	 * with STACK_BEGIN<<1. 
+	 * So quadruple up the size of the table accordingly. */
 	__libcrunch_allocsmt = MEMTABLE_NEW_WITH_TYPE(allocsmt_entry_type, allocsmt_entry_coverage, 
-		(void*) 0, (void*) (STACK_BEGIN << 1));
+		(void*) 0, (void*) (STACK_BEGIN << 2));
 	assert(__libcrunch_allocsmt != MAP_FAILED);
 	
 	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_cb, NULL);
 	assert(ret_allocsites == 0);
 
-	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_allocs_cb, NULL);
+	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_cb, NULL);
 	assert(ret_stackaddr == 0);
 	
 	__libcrunch_is_initialized = 1;
@@ -352,6 +395,7 @@ void *typeobj_handle_for_addr(void *caller)
 	
 	// dlopen the typeobj
 	const char *types_libname = helper_libfile_name(dynobj_name_from_dlpi_name(info.dli_fname, info.dli_fbase), "-types.so");
+	assert(types_libname != NULL);
 	return dlopen(types_libname, RTLD_NOW | RTLD_NOLOAD);
 }
 
@@ -444,11 +488,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 	{
 		case STACK:
 		{
-#ifdef UNW_TARGET_X86
-#define BEGINNING_OF_STACK 0xbfffffff
-#else // assume X86_64 for now
 #define BEGINNING_OF_STACK (STACK_BEGIN - 1)
-#endif
 			// we want to walk a sequence of vaddrs!
 			// how do we know which is the one we want?
 			// we can get a uniqtype for each one, including maximum posoff and negoff
@@ -541,8 +581,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 				// 1. get the frame uniqtype for frame_ip
 				/* NOTE: here we are doing one vaddr_to_uniqtype per frame.
 				 * Can we optimise this, by ruling out some frames just by
-				 * their bounding sps? YES, I'm sure we can. FIXME: do this!
-				 */
+				 * their bounding sps? YES, I'm sure we can. FIXME: do this! */
 				struct rec *frame_desc = vaddr_to_uniqtype((void *) ip);
 				if (!frame_desc)
 				{
@@ -552,7 +591,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 				// 2. what's the frame base? it's the higherframe stack pointer
 				unsigned char *frame_base = (unsigned char *) higherframe_sp;
 				// 3. is our candidate addr between frame-base - negoff and frame_base + posoff?
-				if ((unsigned char *) obj >= frame_base + frame_desc->neg_maxoff  // is -ve, so 
+				if ((unsigned char *) obj >= frame_base + frame_desc->neg_maxoff  // is -ve, so add it
 					&& (unsigned char *) obj < frame_base + frame_desc->pos_maxoff)
 				{
 					object_start = frame_base;
@@ -635,11 +674,16 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 		}
 		case STATIC:
 		{
-			//void *uniqtype = static_obj_to_uniqtype(object_start);
-			reason = "static object";
-			reason_ptr = obj;
-			++__libcrunch_aborted_static;
-			goto abort;
+			alloc_uniqtype = static_addr_to_uniqtype(obj, &object_start);
+			if (!alloc_uniqtype)
+			{
+				reason = "unrecognised static object";
+				reason_ptr = obj;
+				++__libcrunch_aborted_static;
+				goto abort;
+			}
+			// else we can go ahead
+			break;
 		}
 		case UNKNOWN:
 		default:
@@ -655,13 +699,16 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 	 * object. Nonzero offsets "recurse" immediately, using binary search. */
 	assert(alloc_uniqtype);
 	/* If we're searching in an array, we need to take the offset modulo the 
-	 * element size. */
+	 * element size. Otherwise just take the whole-block offset. */
 	int modulo; 
+	signed target_offset_wholeblock = (char*) obj - (char*) object_start;
+	signed target_offset;
 	if (alloc_uniqtype->pos_maxoff != 0 && alloc_uniqtype->neg_maxoff == 0)
-	{	
-		modulo = alloc_uniqtype->pos_maxoff;
-	} else modulo = 1;
-	unsigned target_offset = ((char*) obj - (char*) object_start) % modulo; 
+	{
+		signed target_offset = target_offset_wholeblock % alloc_uniqtype->pos_maxoff;
+	} else target_offset = target_offset_wholeblock;
+	// assert that the signs are the same
+	assert(target_offset_wholeblock < 0 ? target_offset < 0 : target_offset >= 0);
 	
 	struct rec *cur_obj_uniqtype = alloc_uniqtype;
 	signed descend_to_ind;
@@ -711,8 +758,8 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 		
 		/* Terminate or recurse. */
 	} while (descend_to_ind != -1 
-	    && (cur_obj_uniqtype = cur_obj_uniqtype->contained[descend_to_ind].ptr,
-	        target_offset = target_offset - cur_obj_uniqtype->contained[descend_to_ind].offset,
+	    && (target_offset = target_offset - cur_obj_uniqtype->contained[descend_to_ind].offset,
+	        cur_obj_uniqtype = cur_obj_uniqtype->contained[descend_to_ind].ptr,
 	        1));
 	// if we got here, the check failed
 	goto check_failed;
@@ -722,7 +769,7 @@ check_failed:
 	++__libcrunch_failed;
 	warnx("Failed check __is_aU(%p, %p a.k.a. \"%s\") at %p, allocation was a %p (a.k.a. \"%s\")\n", 
 		obj, test_uniqtype, test_uniqtype->name,
-		&&check_failed /* we are inlined, right? */,
+		&&check_failed /* we are inlined, right? GAH, no, unlikely*/,
 		alloc_uniqtype, alloc_uniqtype->name);
 	return 1;
 
@@ -745,5 +792,6 @@ int __libcrunch_check_init(void);
 enum object_memory_kind get_object_memory_kind(const void *obj);
 struct rec *allocsite_to_uniqtype(const void *allocsite);
 struct rec *vaddr_to_uniqtype(const void *allocsite);
+struct rec *static_addr_to_uniqtype(const void *allocsite, void **out_object_start);
 struct rec *typestr_to_uniqtype(const char *typestr);
 

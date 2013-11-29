@@ -32,7 +32,7 @@ run-%:
 	$(MAKE) -C "$*" "$*" && ( cd "$*" && LD_PRELOAD="$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)" ./$* ); \
 
 cleanrun-%: 
-	$(MAKE) -C $* -f ../Makefile clean
+	$(MAKE) -C $* -f ../Makefile clean && \
 	$(MAKE) run-$*
 
 gdbrun-%: # run the test case with itself as input
