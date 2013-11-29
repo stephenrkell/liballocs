@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <link.h>
 #include <libunwind.h>
-#include "libcrunch.h"
+#include "libcrunch_private.h"
 
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
@@ -385,7 +385,7 @@ int __libcrunch_global_init(void)
 	return 0;
 }
 
-void *typeobj_handle_for_addr(void *caller)
+static void *typeobj_handle_for_addr(void *caller)
 {
 	// find out what object the caller is in
 	Dl_info info;
@@ -399,11 +399,17 @@ void *typeobj_handle_for_addr(void *caller)
 	return dlopen(types_libname, RTLD_NOW | RTLD_NOLOAD);
 }
 
+void *__libcrunch_my_typeobj(void)
+{
+	__libcrunch_ensure_init();
+	return typeobj_handle_for_addr(__builtin_return_address(0));
+}
+
 /* FIXME: hook dlopen and dlclose so that we can load/unload allocsites and types
  * as execution proceeds. */
 
 /* This is left out-of-line because it's inherently a slow path. */
-struct rec *typestr_to_uniqtype(const char *typestr)
+struct rec *__libcrunch_typestr_to_uniqtype(const char *typestr)
 {
 	if (!typestr) return NULL;
 	
@@ -793,5 +799,5 @@ enum object_memory_kind get_object_memory_kind(const void *obj);
 struct rec *allocsite_to_uniqtype(const void *allocsite);
 struct rec *vaddr_to_uniqtype(const void *allocsite);
 struct rec *static_addr_to_uniqtype(const void *allocsite, void **out_object_start);
-struct rec *typestr_to_uniqtype(const char *typestr);
+struct rec *__libcrunch_typestr_to_uniqtype(const char *typestr);
 
