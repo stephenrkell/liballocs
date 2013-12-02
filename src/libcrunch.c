@@ -18,6 +18,7 @@ static unsigned allocsites_base_len;
 
 _Bool __libcrunch_is_initialized;
 allocsmt_entry_type *__libcrunch_allocsmt;
+void *__addrmap_executable_end_addr;
 
 // FIXME: do better!
 static char *realpath_quick_hack(const char *arg)
@@ -29,6 +30,7 @@ static char *realpath_quick_hack(const char *arg)
 static const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 {
 	static char execfile_name[4096];
+	
 	if (strlen(dlpi_name) == 0)
 	{
 		/* libdl can give us an empty name for 
@@ -329,12 +331,12 @@ static void print_exit_summary(void)
 	fprintf(stderr, "libcrunch summary: \n");
 	fprintf(stderr, "checks begun:                          % 7ld\n", __libcrunch_begun);
 	fprintf(stderr, "checks aborted due to init failure:    % 7ld\n", __libcrunch_aborted_init);
-	fprintf(stderr, "checks aborted for stack objects:      % 7ld\n", __libcrunch_aborted_stack);
-	fprintf(stderr, "checks aborted for static objects:     % 7ld\n", __libcrunch_aborted_static);
-	fprintf(stderr, "checks aborted for unrecognised type   % 7ld\n", __libcrunch_aborted_typestr);
+	fprintf(stderr, "checks aborted for bad typename:       % 7ld\n", __libcrunch_aborted_typestr);
 	fprintf(stderr, "checks aborted for unknown storage:    % 7ld\n", __libcrunch_aborted_unknown_storage);
 	fprintf(stderr, "checks aborted for unindexed heap:     % 7ld\n", __libcrunch_aborted_unindexed_heap);
-	fprintf(stderr, "checks aborted for unrecognised alloc: % 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
+	fprintf(stderr, "checks aborted for unknown allocsite:  % 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
+	fprintf(stderr, "checks aborted for unknown stackframes:% 7ld\n", __libcrunch_aborted_stack);
+	fprintf(stderr, "checks aborted for unknown static obj: % 7ld\n", __libcrunch_aborted_static);
 	fprintf(stderr, "checks failed:                         % 7ld\n", __libcrunch_failed);
 	fprintf(stderr, "checks trivially passed on null ptr:   % 7ld\n", __libcrunch_trivially_succeeded_null);
 	fprintf(stderr, "checks trivially passed for void type: % 7ld\n", __libcrunch_trivially_succeeded_void);
@@ -379,6 +381,13 @@ int __libcrunch_global_init(void)
 
 	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_cb, NULL);
 	assert(ret_stackaddr == 0);
+	
+	// grab the executable's end address
+	dlerror();
+	void *executable_handle = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
+	assert(executable_handle != NULL);
+	__addrmap_executable_end_addr = dlsym(executable_handle, "_end");
+	assert(__addrmap_executable_end_addr != 0);
 	
 	__libcrunch_is_initialized = 1;
 	fprintf(stderr, "libcrunch successfully initialized\n");
