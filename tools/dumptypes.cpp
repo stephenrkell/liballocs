@@ -189,6 +189,7 @@ int main(int argc, char **argv)
 		// virtual bool is_sticky(const core::abstract_die& d) { return true; }
 		
 	} root(fileno(infstream));
+	assert(&root.get_frame_section());
 	opt<core::root_die&> opt_r = root; // for debugging
 	master_relation_t master_relation;
 
@@ -483,7 +484,7 @@ int main(int argc, char **argv)
 	using dwarf::lib::Dwarf_Signed;
 	using dwarf::lib::Dwarf_Unsigned;
 	
-	typedef std::set< iterator_df<with_dynamic_location_die> > live_set_t;
+	typedef std::set< pair< iterator_df<with_dynamic_location_die>, encap::loc_expr > > live_set_t;
 	typedef boost::icl::interval_map< Dwarf_Off, live_set_t > intervals_t;
 	typedef boost::icl::interval_map< 
 			Dwarf_Off, 
@@ -560,33 +561,46 @@ int main(int argc, char **argv)
 				/* FIXME: does sranges already deal with these? */
 				continue;
 			}
+			auto i_dyn = i_bf.as_a<with_dynamic_location_die>();
+			
+			// skip member/inheritance DIEs
+			if (i_dyn->location_requires_object_base()) continue;
 			
 			/* enumerate the vaddr ranges of this DIE
-			 * -- note that some DIEs will be "for all vaddrs"
-			 */
-			
-			auto i_dyn = i_bf.as_a<with_dynamic_location_die>();
-			auto var_vaddr_intervals = i_dyn->get_dynamic_location();
+			 * -- note that some DIEs will be "for all vaddrs" */
+			auto var_loclist = i_dyn->get_dynamic_location();
+			// rewrite the loclist to use the CFA/frame_base maximally
+			cerr << "Saw loclist " << var_loclist << endl;
+			var_loclist = encap::rewrite_loclist_in_terms_of_cfa(
+				var_loclist, 
+				root.get_frame_section(), 
+				dwarf::spec::opt<const encap::loclist&>() /* opt_fbreg */
+			);
+			cerr << "Rewrote to loclist " << var_loclist << endl;
 			
 			// for each of this variable's intervals, add it to the map
-			for (auto i_int = var_vaddr_intervals.begin(); 
-				i_int != var_vaddr_intervals.end(); ++i_int)
+			int interval_index = 0;
+			for (auto i_locexpr = var_loclist.begin(); 
+				i_locexpr != var_loclist.end(); ++i_locexpr)
 			{
-				std::set< iterator_df<with_dynamic_location_die> > singleton_set;
-				singleton_set.insert(i_dyn);
+				std::set< pair<iterator_df<with_dynamic_location_die>, encap::loc_expr > > singleton_set;
+				/* PROBLEM: we need to remember not only that each i_dyn is valid 
+				 * in a given range, but with what loc_expr. So we pair the i_dyn with
+				 * the relevant loc_expr. */
+				singleton_set.insert(make_pair(i_dyn, *i_locexpr));
 				
-				if (i_int->lopc == 0xffffffffffffffffULL
-				|| i_int->lopc == 0xffffffffUL)
+				if (i_locexpr->lopc == 0xffffffffffffffffULL
+				|| i_locexpr->lopc == 0xffffffffUL)
 				{
 					// we got a base address selection entry -- not handled yet
 					assert(false);
 				}
 				
-				if (i_int->lopc == i_int->hipc && i_int->hipc != 0) continue; // skip empties
-				if (i_int->hipc <  i_int->lopc)
+				if (i_locexpr->lopc == i_locexpr->hipc && i_locexpr->hipc != 0) continue; // skip empties
+				if (i_locexpr->hipc <  i_locexpr->lopc)
 				{
-					cerr << "Warning: lopc (0x" << std::hex << i_int->lopc << std::dec
-						<< ") > hipc (0x" << std::hex << i_int->hipc << std::dec << ")"
+					cerr << "Warning: lopc (0x" << std::hex << i_locexpr->lopc << std::dec
+						<< ") > hipc (0x" << std::hex << i_locexpr->hipc << std::dec << ")"
 						<< " in " << *i_dyn << endl;
 					continue;
 				}
@@ -596,9 +610,13 @@ int main(int argc, char **argv)
 				
 				// handle "for all vaddrs" entries
 				boost::icl::discrete_interval<Dwarf_Off> our_interval;
-				if (i_int->lopc == 0 && 0 == i_int->hipc
-					|| i_int->lopc == 0 && i_int->hipc == std::numeric_limits<Dwarf_Off>::max())
+				if (i_locexpr->lopc == 0 && 0 == i_locexpr->hipc
+					|| i_locexpr->lopc == 0 && i_locexpr->hipc == std::numeric_limits<Dwarf_Off>::max())
 				{
+					// if we have a "for all vaddrs" entry, we should be the only index
+					assert(interval_index == 0);
+					assert(i_locexpr + 1 == var_loclist.end());
+					
 					/* we will just add the intervals of the containing subprogram */
 					auto subp_intervals = i_subp->file_relative_intervals(root, nullptr, nullptr);
 					for (auto i_subp_int = subp_intervals.begin();
@@ -623,16 +641,16 @@ int main(int argc, char **argv)
 						); 
 					}
 					/* There should be only one entry in the location list if so. */
-					assert(i_int == var_vaddr_intervals.begin());
-					assert(i_int + 1 == var_vaddr_intervals.end());
+					assert(i_locexpr == var_loclist.begin());
+					assert(i_locexpr + 1 == var_loclist.end());
 				}
 				else /* we have nonzero lopc and/or hipc */
 				{
 					our_interval = boost::icl::interval<Dwarf_Off>::right_open(
-						i_int->lopc + cu_base, i_int->hipc + cu_base
+						i_locexpr->lopc + cu_base, i_locexpr->hipc + cu_base
 					); 
 					
-					cerr << "Considering location of " << i_dyn << endl;
+					// cerr << "Considering location of " << i_dyn << endl;
 					
 					/* assert sane interval */
 					assert(our_interval.lower() < our_interval.upper());
@@ -674,41 +692,69 @@ int main(int argc, char **argv)
 		for (auto i_int = subp_vaddr_intervals.begin(); 
 			i_int != subp_vaddr_intervals.end(); ++i_int)
 		{
-			/* Get the set of p_dyns for this vaddr range. */
+			/* Get the set of <p_dyn, locexpr>s for this vaddr range. */
 			auto& frame_elements = i_int->second;
 			
 			/* Calculate their offset from the frame base, and sort. */
 			//std::map<Dwarf_Signed, shared_ptr<with_dynamic_location_die > > by_frame_off;
 			//std::vector<pair<shared_ptr<with_dynamic_location_die >, string> > discarded;
-			for (auto i_el = frame_elements.begin(); i_el != frame_elements.end(); ++i_el)
+			// check that we don't see the same DIE twice within the same interval
+			set<iterator_df<with_dynamic_location_die> > dies_seen;
+			for (auto i_el_pair = frame_elements.begin(); i_el_pair != frame_elements.end(); ++i_el_pair)
 			{
+				assert(dies_seen.find(i_el_pair->first) == dies_seen.end());
+				dies_seen.insert(i_el_pair->first);
 				/* NOTE: our offset can easily be negative! For parameters, it 
 				 * usually is. So we calculate the offset from the middle of the 
 				 * (imaginary) address space, a.k.a. 1U<<((sizeof(Dwarf_Addr)*8)-1). 
 				 * In a signed two's complement representation, 
 				 * this number is -MAX. 
-				 * NO -- just reinterpret_cast to a signed? */ 
+				 * NO -- just reinterpret_cast to a signed? */
+				
+				auto i_el = &i_el_pair->first;
+				
 				Dwarf_Addr addr_from_zero;
 				try
 				{
-					addr_from_zero = (*i_el)->calculate_addr( 
-						/* fb */ 0, root, //1U<<((sizeof(Dwarf_Addr)*8)-1), 
-						/* dr_ip */ i_int->first.lower(), 
-						/* dwarf::lib::regs *p_regs = */ 0);
-				} catch (/*dwarf::lib::No_entry*/...)
+					std::stack<Dwarf_Unsigned> initial_stack; 
+					initial_stack.push(0); 
+					// call the evaluator directly
+					// -- push zero (a.k.a. the frame base) onto the initial stack
+					lib::evaluator e(i_el_pair->second,
+						i_el_pair->first.spec_here(),
+						/* fb */ 0, 
+						initial_stack);
+					addr_from_zero = e.tos(false); // may *not* be value; must be loc
+				} 
+				catch (dwarf::lib::No_entry)
 				{
 					/* This probably means our variable/fp is in a register and not 
 					 * in a stack location. That's fine. Warn and continue. */
-					// cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp: " 
-					// 	<< *i_el;
+					cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp "
+						<< "in the vaddr range " 
+						<< std::hex << i_int->first << std::dec
+						<< ": "
+					 	<< *i_el;
 					//discarded.push_back(make_pair(*i_el, "register-located"));
 					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("register-located")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 					continue;
 				}
-				
+				catch (...)
+				{
+					cerr << "Warning: something strange happened when computing location for fp: " 
+					 	<< *i_el;
+					//discarded.push_back(make_pair(*i_el, "register-located"));
+					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+					singleton_set.insert(make_pair(*i_el, string("something-strange")));
+					discarded_intervals += make_pair(i_int->first, singleton_set);
+					continue;
+				}
 				Dwarf_Signed frame_offset = static_cast<Dwarf_Signed>(addr_from_zero);
+				cerr << "Found on-stack location (fb + " << frame_offset << ") for fp/var " << *i_el 
+						<< "in the vaddr range " 
+						<< std::hex << i_int->first << std::dec << endl;
 					
 				/* Redundant calculation to guard against arithmetic errors 
 				 * TODO: remove this once we have confidence. */
@@ -730,15 +776,15 @@ int main(int argc, char **argv)
 				assert(frame_offset + 0xbeef == addr_from_beef);
 				
 				/* We only add to by_frame_off if we have complete type => nonzero length. */
-				if ((*i_el)->get_type() && (*i_el)->get_type()->get_concrete_type())
+				if ((*i_el)->find_type() && (*i_el)->find_type()->get_concrete_type())
 				{
 					//by_frame_off[frame_offset] = *i_el;
 					set< pair<Dwarf_Signed, iterator_df<with_dynamic_location_die> > > singleton_set;
 					singleton_set.insert(make_pair(frame_offset, *i_el));
 					frame_intervals += make_pair(i_int->first, singleton_set);
-				} 
+				}
 				else
-				{ 
+				{
 					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("no_concrete_type")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
@@ -747,6 +793,10 @@ int main(int argc, char **argv)
 		} /* end for i_int */
 		
 		intervals_by_subprogram[i_subp] = frame_intervals;
+		if (frame_intervals.size() == 0)
+		{
+			cerr << "Warning: no frame element intervals for subprogram " << i_subp << endl;
+		}
 		
 		/* Now for each distinct interval in the frame_intervals map... */
 		for (auto i_frame_int = frame_intervals.begin(); i_frame_int != frame_intervals.end();
@@ -760,7 +810,7 @@ int main(int argc, char **argv)
 			{
 				{
 					auto i_maxoff_el = i_frame_int->second.end(); --i_maxoff_el;
-					auto p_maxoff_type = i_maxoff_el->second->get_type();
+					auto p_maxoff_type = i_maxoff_el->second->find_type();
 					unsigned calculated_maxel_size;
 					if (!p_maxoff_type || !p_maxoff_type->get_concrete_type()) 
 					{
@@ -796,7 +846,7 @@ int main(int argc, char **argv)
 			
 			cout << unmangled_typename
 				 << " defined in " << cu_name << ", "
-				 << "vaddr range " << i_frame_int->first << " */\n";
+				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 				 
 			cout << "struct rec " << mangle_typename(make_pair(cu_name, unmangled_typename))
 				<< " = {\n\t\"" << unmangled_typename << "\",\n\t"
@@ -811,7 +861,7 @@ int main(int argc, char **argv)
 				if (i_by_off != i_frame_int->second.begin()) cout << ",\n\t\t";
 				/* begin the struct */
 				cout << "{ ";
-				string mangled_name = mangle_typename(key_from_type(i_by_off->second->get_type()));
+				string mangled_name = mangle_typename(key_from_type(i_by_off->second->find_type()));
 				assert(names_emitted.find(mangled_name) != names_emitted.end());
 				cout << i_by_off->first << ", "
 					<< "&" << mangled_name
@@ -877,8 +927,8 @@ int main(int argc, char **argv)
 		for (auto i_int = i_subp_intervals->second.begin(); i_int != i_subp_intervals->second.end(); 
 			++i_int)
 		{
-			cout << "\n\t/* frame alloc record for vaddr " << i_int->first.lower() << "+"
-				<< std::hex << "0x" << i_int->first.upper() << std::dec << " */";
+			cout << "\n\t/* frame alloc record for vaddr 0x" << std::hex << i_int->first.lower() 
+				<< "+" << i_int->first.upper() << std::dec << " */";
 			cout << "\n\t{ (void*)0, (void*)0, "
 				<< "(char*) " << "0" // will fix up at load time
 				<< " + " << i_int->first.lower() << "UL, " 
@@ -937,7 +987,7 @@ int main(int argc, char **argv)
 			cout << "\n\t{ (void*)0, (void*)0, "
 				<< "(char*) " << "0" // will fix up at load time
 				<< " + " << addr << "UL, " 
-				<< "&" << mangle_typename(key_from_type(i_var->get_type()))
+				<< "&" << mangle_typename(key_from_type(i_var->find_type()))
 				<< " }";
 			cout << ",";
 		}

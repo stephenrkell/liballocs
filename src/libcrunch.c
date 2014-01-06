@@ -514,28 +514,31 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 			 * FIXME: better would be to write this function in C90 and compile with
 			 * special flags. */
 			unw_cursor_t cursor, saved_cursor, prev_saved_cursor;
-			unw_word_t higherframe_sp = 0, sp, higherframe_ip = 0, callee_ip;
+			unw_word_t higherframe_sp = 0, sp, bp = 0, ip = 0, higherframe_ip = 0, callee_ip;
 			int unw_ret;
-			unw_word_t check_higherframe_sp;
 			unw_context_t unw_context;
 
+#ifndef NDEBUG
+			unw_word_t check_higherframe_sp;
 			// sanity check
 #ifdef UNW_TARGET_X86
 			__asm__ ("movl %%esp, %0\n" :"=r"(check_higherframe_sp));
 #else // assume X86_64 for now
 			__asm__("movq %%rsp, %0\n" : "=r"(check_higherframe_sp));
 #endif
+#endif
 			unw_ret = unw_getcontext(&unw_context);
 			unw_init_local(&cursor, /*this->unw_as,*/ &unw_context);
 
 			unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp);
+// redundant #ifdef, but for clarity
+#ifndef NDEBUG 
 			assert(check_higherframe_sp == higherframe_sp);
-			fprintf(stderr, "Initial sp=%p\n", (void *) higherframe_sp);
+#endif
 			unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
 
-			unw_word_t ip = 0;
 			int step_ret;
-
+			_Bool at_or_above_main = 0;
 			do
 			{
 				callee_ip = ip;
@@ -547,16 +550,35 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 				/* First get the ip, sp and symname of the current stack frame. */
 				unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(unw_ret == 0);
 				unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(unw_ret == 0); // sp = higherframe_sp
+				// try to get the bp, but no problem if we don't
+				unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); 
+				_Bool got_bp = (unw_ret == 0);
+				/* Also do a test about whether we're in main, above which we want to
+				 * tolerate unwind failures more gracefully. HACK: for speed, assume 
+				 * that the main frame's bp is within 16KB of top-of-stack,
+				 * or if we didn't get bp, sp is within 32KB of top-of-stack. 
+				 * This avoids the expensive unw_get_proc_name() / strcmp() call
+				 * in the common case.
+				 */
+				char proc_name_buf[100];
+				unw_word_t byte_offset_from_proc_start;
+				at_or_above_main |= 
+					(
+						(got_bp && bp > BEGINNING_OF_STACK - 0x4000)
+					 || (sp > BEGINNING_OF_STACK - 0x8000)
+					) 
+					&& 
+					(unw_ret = unw_get_proc_name(&cursor, proc_name_buf, sizeof proc_name_buf, &byte_offset_from_proc_start), 
+					 assert(unw_ret == 0),
+					 strcmp("main", proc_name_buf) == 0);
 
 				/* Now get the sp of the next higher stack frame, 
-				 * i.e. the bp of the current frame. N
-
-				 * NOTE: we're still
+				 * i.e. the bp of the current frame. NOTE: we're still
 				 * processing the stack frame ending at sp, but we
 				 * hoist the unw_step call to here so that we can get
-				 * the bp of the next higher frame (without demanding that
-				 * libunwind provides bp, e.g. for code compiled with
-				 * -fomit-frame-pointer -- FIXME: does this work?). 
+				 * the *bp* of the current frame a.k.a. the caller's bp 
+				 * (without demanding that libunwind provides bp, e.g. 
+				 * for code compiled with -fomit-frame-pointer). 
 				 * This means "cursor" is no longer current -- use 
 				 * saved_cursor for the remainder of this iteration!
 				 * saved_cursor points to the deeper stack frame. */
@@ -564,9 +586,17 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 				if (step_ret > 0)
 				{
 					unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp); assert(unw_ret == 0);
+					// assert that for non-top-end frames, BP --> saved-SP relation holds
+					// FIXME: hard-codes calling convention info
+					if (got_bp) assert(at_or_above_main || higherframe_sp == bp + 2 * sizeof (void*));
 					unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
 				}
-				else if (step_ret == 0)
+				/* NOTE that -UNW_EBADREG happens near the top of the stack where 
+				 * unwind info gets patchy, so we should handle it mostly like the 
+				 * BEGINNING_OF_STACK case if so... but only if we're at or above main
+				 * (and anyway, we *should* have that unwind info, damnit!).
+				 */
+				else if (step_ret == 0 || (at_or_above_main && step_ret == -UNW_EBADREG))
 				{
 					higherframe_sp = BEGINNING_OF_STACK;
 					higherframe_ip = 0x0;
@@ -574,33 +604,29 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 				else
 				{
 					// return value <1 means error
-					// We return without calling the handler. This does mean that
-					// the very top frame will not get handler'd
+
+					reason = "stack walk step failure";
+					goto abort_stack;
 					break;
 				}
-
-// 				ret = handler(
-// 				/* process_image *image			 */ this,
-// 				/* unw_word_t frame_sp			  */ sp,
-// 				/* unw_word_t frame_ip			  */ ip,
-// 				/* const char *frame_proc_name	  */ name,
-// 				/* unw_word_t frame_caller_sp	   */ higherframe_sp,
-// 				/* unw_word_t frame_caller_ip	   */ higherframe_ip,
-// 				/* unw_word_t frame_callee_ip	   */ callee_ip,
-// 				/* unw_cursor_t frame_cursor		*/ saved_cursor,
-// 				/* unw_cursor_t frame_callee_cursor */ prev_saved_cursor,
-// 				/* void *arg						*/ handler_arg
-// 				);
+				
+				// useful variables at this point: sp, ip, got_bp && bp, 
+				// higherframe_sp, higherframe_ip, 
+				// callee_ip
 
 				// now do the stuff
 				// 1. get the frame uniqtype for frame_ip
 				/* NOTE: here we are doing one vaddr_to_uniqtype per frame.
 				 * Can we optimise this, by ruling out some frames just by
-				 * their bounding sps? YES, I'm sure we can. FIXME: do this! */
+				 * their bounding sps? YES, I'm sure we can. FIXME: do this!
+				 * The difficulty is in the fact that frame offsets can be
+				 * negative, i.e. arguments exist somewhere in the parent
+				 * frame. */
 				struct rec *frame_desc = vaddr_to_uniqtype((void *) ip);
 				if (!frame_desc)
 				{
 					// no frame descriptor for this frame; that's okay!
+					// e.g. our libcrunch frames should (normally) have no descriptor
 					continue;
 				}
 				// 2. what's the frame base? it's the higherframe stack pointer

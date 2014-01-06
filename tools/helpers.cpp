@@ -4,7 +4,7 @@
 #include <sstream>
 #include <fstream>
 #include <iomanip>
-#include <dwarfpp/cxx_compiler.hpp>
+#include <cxxgen/cxx_compiler.hpp>
 #include <srk31/algorithm.hpp>
 
 using std::cerr;

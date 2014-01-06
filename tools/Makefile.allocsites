@@ -57,7 +57,7 @@ $(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%
 	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
 
 $(ALLOCSITES_BASE)/%-types.c: /%
-	$(DUMPTYPES) "$<" > "$@" || rm -f "$@"
+	$(DUMPTYPES) "$<" >"$@" 2>$@.log || rm -f "$@"
 
 $(ALLOCSITES_BASE)/%-allocsites.c: /$(ALLOCSITES_BASE)/%.allocs
 	$(DUMPALLOCS) < "$<" > "$@" || rm -f "$@"
