@@ -19,7 +19,7 @@ $(CIL)/bin/cilly: $(CIL_TOOLS_SRC)
 	cd $(CIL) && \
 	(grep '$(firstword $(CIL_TOOLS))' config.log || \
 	    ./configure EXTRASRCDIRS="$(CIL_EXTRASRC)" EXTRAFEATURES="$(CIL_TOOLS)" ) && \
-	$(MAKE) && \
+	COMPILE_FLAGS=-g $(MAKE) && \
 	touch $(CIL)/bin/cilly
 
 .PHONY: sanity-tests
