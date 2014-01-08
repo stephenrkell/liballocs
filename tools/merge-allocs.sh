@@ -72,8 +72,8 @@ all_source_allocs_file="$2"
 ## multiple lines for the same malloc call? 
 ## e.g. for /usr/local/src/git-1.7.5.4/builtin/log.c line 1268
 
-echo "all_source_allocs_file: $all_source_allocs_file" 1>&2
-echo "all_obj_allocs_file: $all_obj_allocs_file" 1>&2
+# echo "all_source_allocs_file: $all_source_allocs_file" 1>&2
+# echo "all_obj_allocs_file: $all_obj_allocs_file" 1>&2
 
 # second pass -- we read input grouped by source file then line number
 keep_old_source_line=0
