@@ -17,7 +17,7 @@ ifeq ($(CC),)
 $(error Could not find crunchcc)
 endif
 
-cases := $(wildcard [a-z]*)
+cases := $(wildcard [-a-z]*)
 
 LIBCRUNCH := $(realpath $(dir $(THIS_MAKEFILE))/../lib/libcrunch.so)
 ifneq ($(MAKECMDGOALS),clean)
