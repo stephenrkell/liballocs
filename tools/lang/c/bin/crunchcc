@@ -17,16 +17,15 @@ def isLinkCommand():
     seenExecutableOutput = False
     for argnum in range(0,len(sys.argv)):
         arg = sys.argv[argnum]
-        if arg.startswith('-Wl,'):
-            return True
         if arg.startswith('-l'):
             seenLib = True
         if arg == '-shared':
             return True
-        if arg == "-o" and len(sys.argv) >= argnum + 2 and not '.' in sys.argv[argnum + 1]:
+        if arg == "-o" and len(sys.argv) >= argnum + 2 and not '.' in os.path.basename(sys.argv[argnum + 1]):
             seenExecutableOutput = True
-    if seenLib and seenExecutableOutput:
-            return True
+    if seenExecutableOutput:
+        return True
+    # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
     return False
 
 
@@ -78,7 +77,7 @@ def main():
     # -- using an ad-hoc notation to get the argspec
     # from the LIBCRUNCH_ALLOC_FNS environment var. FIXME: autogenerate these stubs
     linkArgs = []
-    if isLinkCommand:
+    if isLinkCommand():
         # we need to wrap each allocation function
         sys.stderr.write("crunchcc doing linking\n")
         if "LIBCRUNCH_ALLOC_FNS" in os.environ:
