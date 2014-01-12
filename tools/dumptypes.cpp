@@ -698,12 +698,16 @@ int main(int argc, char **argv)
 			/* Calculate their offset from the frame base, and sort. */
 			//std::map<Dwarf_Signed, shared_ptr<with_dynamic_location_die > > by_frame_off;
 			//std::vector<pair<shared_ptr<with_dynamic_location_die >, string> > discarded;
-			// check that we don't see the same DIE twice within the same interval
-			set<iterator_df<with_dynamic_location_die> > dies_seen;
+
+			/* We used to check that we don't see the same DIE twice within the same interval.
+			 * But WHY? We could have two pairs in frame_elements, with different loc_exprs.
+			 * In fact this does happen. So I've deleted the check. */
 			for (auto i_el_pair = frame_elements.begin(); i_el_pair != frame_elements.end(); ++i_el_pair)
 			{
-				assert(dies_seen.find(i_el_pair->first) == dies_seen.end());
-				dies_seen.insert(i_el_pair->first);
+				/* Note that thanks to the aggregation semantics of subp_vaddr_intervals, 
+				 * i_int is already the intersection of the loc_expr interval *and* all
+				 * other loc_expr intervals in use within this subprogram. W*/
+
 				/* NOTE: our offset can easily be negative! For parameters, it 
 				 * usually is. So we calculate the offset from the middle of the 
 				 * (imaginary) address space, a.k.a. 1U<<((sizeof(Dwarf_Addr)*8)-1). 
@@ -755,26 +759,7 @@ int main(int argc, char **argv)
 				cerr << "Found on-stack location (fb + " << frame_offset << ") for fp/var " << *i_el 
 						<< "in the vaddr range " 
 						<< std::hex << i_int->first << std::dec << endl;
-					
-				/* Redundant calculation to guard against arithmetic errors 
-				 * TODO: remove this once we have confidence. */
-				Dwarf_Addr addr_from_beef = (*i_el)->calculate_addr(
-					/* fb */ 0xbeef, root, 
-					/* dr_ip */ i_int->first.lower(), 
-					/* dwarf::lib::regs *p_regs = */ 0);
-				
-				/* Some fb-independent addrs might have slipped though. */
-				if (frame_offset == addr_from_beef)
-				{
-					cerr << "Warning: found fb-independent " << **i_el
-						<< " which we thought had non-static storage." << endl;
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
-					singleton_set.insert(make_pair(*i_el, string("fb-independent storage location")));
-					discarded_intervals += make_pair(i_int->first, singleton_set);
-					continue;
-				}
-				assert(frame_offset + 0xbeef == addr_from_beef);
-				
+
 				/* We only add to by_frame_off if we have complete type => nonzero length. */
 				if ((*i_el)->find_type() && (*i_el)->find_type()->get_concrete_type())
 				{
