@@ -56,8 +56,8 @@ $(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%
 	mkdir -p $$(dirname "$@")
 	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
 
-$(ALLOCSITES_BASE)/%-types.c: /%
-	$(DUMPTYPES) "$<" >"$@" 2>$@.log || rm -f "$@"
+$(ALLOCSITES_BASE)/%-types.c: /%  # pipe err through zip, so need to swap stdout and stderr
+	( ( $(DUMPTYPES) "$<"  3>&2 2>&1 1>&3 ) 2>"$@" | gzip >"$@".log.gz ) || rm -f "$@" "$@".log
 
 $(ALLOCSITES_BASE)/%-allocsites.c: /$(ALLOCSITES_BASE)/%.allocs
 	$(DUMPALLOCS) < "$<" > "$@" || rm -f "$@"
