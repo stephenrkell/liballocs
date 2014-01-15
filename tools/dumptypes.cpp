@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <cctype>
+#include <cstdlib>
 #include <memory>
 #include <boost/regex.hpp>
 #include <boost/algorithm/string.hpp>
@@ -166,6 +167,8 @@ static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp,
 	return s_typename.str();
 }
 
+static int debug_out = 1;
+
 int main(int argc, char **argv)
 {
 	/* We open the file named by argv[1] and dump its DWARF types. */ 
@@ -181,6 +184,12 @@ int main(int argc, char **argv)
 		cerr << "Could not open file " << argv[1] << endl;
 		exit(1);
 	}
+	
+	if (getenv("DUMPTYPES_DEBUG"))
+	{
+		debug_out = atoi(getenv("DUMPTYPES_DEBUG"));
+	}
+	
 	using core::root_die;
 	struct sticky_root_die : public root_die
 	{
@@ -718,6 +727,31 @@ int main(int argc, char **argv)
 				auto i_el = &i_el_pair->first;
 				
 				Dwarf_Addr addr_from_zero;
+				/* Check for vars that are part static, part on-stack. 
+				 * How does this happen? One example is 
+				 * the 'git_packed' that is local within rearrange_packed_git
+				 * which gets inlined into prepare_packed_git in sha1_file.c.
+				 * 
+				 * The answer is: they're static vars that are being manipulated
+				 * locally within the function. Because they're "variables" that are
+				 * "in scope" (I think this is an interaction with inlining), 
+				 * they get their own DW_TAG_variable DIEs within the inlined 
+				 * instance's DWARF. While they're being manipulated, these have 
+				 * register locations. It would be pointless to spill them to the 
+				 * stack, however, so I don't think we need to worry about them. */
+				if (i_el_pair->second.size() > 0 && i_el_pair->second.at(0).lr_atom == DW_OP_addr
+				 && i_el_pair->second.at(i_el_pair->second.size() - 1).lr_atom != DW_OP_stack_value)
+				{
+					cerr << "Skipping static var masquerading as local: "
+						<< *i_el 
+						<< "in the vaddr range " 
+						<< std::hex << i_int->first << std::dec;
+					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+					singleton_set.insert(make_pair(*i_el, string("static-masquerading-as-local")));
+					discarded_intervals += make_pair(i_int->first, singleton_set);
+					continue;
+				}
+				
 				try
 				{
 					std::stack<Dwarf_Unsigned> initial_stack; 
@@ -734,11 +768,14 @@ int main(int argc, char **argv)
 				{
 					/* This probably means our variable/fp is in a register and not 
 					 * in a stack location. That's fine. Warn and continue. */
-					cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp "
-						<< "in the vaddr range " 
-						<< std::hex << i_int->first << std::dec
-						<< ": "
-					 	<< *i_el;
+					if (debug_out > 1)
+					{
+						cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp "
+							<< "in the vaddr range " 
+							<< std::hex << i_int->first << std::dec
+							<< ": "
+					 		<< *i_el;
+					}
 					//discarded.push_back(make_pair(*i_el, "register-located"));
 					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("register-located")));
@@ -904,6 +941,11 @@ int main(int argc, char **argv)
 	//			> 
 	//		>
 	//	>
+	
+	/* NOTE: our allocsite chaining trick in libcrunch requires that our allocsites 
+	 * are sorted in vaddr order, so that adjacent allocsites in the memtable buckets
+	 * are adjacent in the table. So we sort them here. */
+	set< pair< boost::icl::discrete_interval<Dwarf_Addr>, iterator_df<subprogram_die> > > sorted_intervals;
 	for (map< iterator_df<subprogram_die>, retained_intervals_t >::iterator i_subp_intervals 
 	  = intervals_by_subprogram.begin(); i_subp_intervals != intervals_by_subprogram.end();
 	  ++ i_subp_intervals)
@@ -912,18 +954,22 @@ int main(int argc, char **argv)
 		for (auto i_int = i_subp_intervals->second.begin(); i_int != i_subp_intervals->second.end(); 
 			++i_int)
 		{
-			cout << "\n\t/* frame alloc record for vaddr 0x" << std::hex << i_int->first.lower() 
-				<< "+" << i_int->first.upper() << std::dec << " */";
-			cout << "\n\t{ (void*)0, (void*)0, "
-				<< "(char*) " << "0" // will fix up at load time
-				<< " + " << i_int->first.lower() << "UL, " 
-				<< "&" << mangle_typename(make_pair(*i_subp_intervals->first.enclosing_cu().name_here(),
-					typename_for_vaddr_interval(i_subp_intervals->first, i_int->first)))
-				<< " }";
-			cout << ",";
-			++total_emitted;
+			sorted_intervals.insert(make_pair(i_int->first, i_subp_intervals->first));
 		}
-
+	}
+	
+	for (auto i_pair = sorted_intervals.begin(); i_pair != sorted_intervals.end(); ++i_pair)
+	{
+		cout << "\n\t/* frame alloc record for vaddr 0x" << std::hex << i_pair->first.lower() 
+			<< "+" << i_pair->first.upper() << std::dec << " */";
+		cout << "\n\t{ (void*)0, (void*)0, "
+			<< "(char*) " << "0" // will fix up at load time
+			<< " + " << i_pair->first.lower() << "UL, " 
+			<< "&" << mangle_typename(make_pair(*i_pair->second.enclosing_cu().name_here(),
+				typename_for_vaddr_interval(i_pair->second, i_pair->first)))
+			<< " }";
+		cout << ",";
+		++total_emitted;
 	}
 	// output a null terminator entry
 	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct rec *)0 }";
@@ -931,8 +977,8 @@ int main(int argc, char **argv)
 	// close the list
 	cout << "\n};\n";
 
-	/* Now write static allocsites. */
-	cout << "struct allocsite_entry statics[] = {" << endl;
+	/* Now write static allocsites. As above, we also have to sort them. */
+	set<pair< Dwarf_Addr, iterator_df<variable_die> > > sorted_statics;
 
 	for (auto i = root.begin(); i != root.end(); ++i)
 	{
@@ -964,18 +1010,28 @@ int main(int argc, char **argv)
 			// calculate its file-relative addr
 			Dwarf_Off addr = intervals.begin()->first.lower();
 			
-			ostringstream anon_name; anon_name << "0x" << std::hex << i.offset_here();
-			
-			cout << "\n\t/* static alloc record for object "
-				 << (i.name_here() ? *i.name_here() : ("anonymous, DIE " + anon_name.str())) 
-				 << " at vaddr " << std::hex << "0x" << addr << std::dec << " */";
-			cout << "\n\t{ (void*)0, (void*)0, "
-				<< "(char*) " << "0" // will fix up at load time
-				<< " + " << addr << "UL, " 
-				<< "&" << mangle_typename(key_from_type(i_var->find_type()))
-				<< " }";
-			cout << ",";
+			sorted_statics.insert(make_pair(addr, i_var));
 		}
+	}
+	
+	cout << "struct allocsite_entry statics[] = {" << endl;
+	
+	for (auto i_var_pair = sorted_statics.begin(); i_var_pair != sorted_statics.end(); ++i_var_pair)
+	{
+		auto addr = i_var_pair->first;
+		auto& i_var = i_var_pair->second;
+
+		ostringstream anon_name; anon_name << "0x" << std::hex << i_var.offset_here();
+
+		cout << "\n\t/* static alloc record for object "
+			 << (i_var.name_here() ? *i_var.name_here() : ("anonymous, DIE " + anon_name.str())) 
+			 << " at vaddr " << std::hex << "0x" << addr << std::dec << " */";
+		cout << "\n\t{ (void*)0, (void*)0, "
+			<< "(char*) " << "0" // will fix up at load time
+			<< " + " << addr << "UL, " 
+			<< "&" << mangle_typename(key_from_type(i_var->find_type()))
+			<< " }";
+		cout << ",";
 	}
 
 	// output a null terminator entry
