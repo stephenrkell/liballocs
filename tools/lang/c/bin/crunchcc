@@ -104,7 +104,7 @@ def main():
 
     
     argsToExec = ["--dotrumptr","--dodumpallocs"] \
-    + ["-g", "-fno-omit-frame-pointer"] \
+    + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", "-fno-omit-frame-pointer"] \
     + saveTempsArgs \
     + linkArgs \
     + sys.argv[1:]
