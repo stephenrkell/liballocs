@@ -156,7 +156,7 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 	if (!prev_ent || bucketpos != prev_ent_bucketpos)
 	{
 		// fresh bucket, so should be null
-		assert(!*bucketpos);
+		assert(*bucketpos == NULL);
 		*bucketpos = cur_ent;
 	}
 	if (!prev_ent) return;
@@ -323,7 +323,6 @@ unsigned long __libcrunch_aborted_unindexed_heap;
 unsigned long __libcrunch_aborted_unrecognised_allocsite;
 unsigned long __libcrunch_failed;
 unsigned long __libcrunch_trivially_succeeded_null;
-unsigned long __libcrunch_trivially_succeeded_void;
 unsigned long __libcrunch_succeeded;
 
 static void print_exit_summary(void)
@@ -339,7 +338,6 @@ static void print_exit_summary(void)
 	fprintf(stderr, "checks aborted for unknown static obj: % 7ld\n", __libcrunch_aborted_static);
 	fprintf(stderr, "checks failed:                         % 7ld\n", __libcrunch_failed);
 	fprintf(stderr, "checks trivially passed on null ptr:   % 7ld\n", __libcrunch_trivially_succeeded_null);
-	fprintf(stderr, "checks trivially passed for void type: % 7ld\n", __libcrunch_trivially_succeeded_void);
 	fprintf(stderr, "checks nontrivially passed:            % 7ld\n", __libcrunch_succeeded);
 }
 
@@ -449,10 +447,7 @@ struct rec *__libcrunch_typestr_to_uniqtype(const char *typestr)
 	// void *returned = dlsym(typeobj_handle_for_addr(caller), typestr);
 	void *returned = dlsym(RTLD_DEFAULT, typestr);
 	if (!returned) return NULL;
-	if (!__libcrunch_uniqtype_void && strcmp(typestr, "__uniqtype__void") == 0)
-	{
-		__libcrunch_uniqtype_void = (struct rec *) returned;
-	}
+
 	return (struct rec *) returned;
 }
 /* Optimised version, for when you already know the uniqtype address. */
@@ -467,18 +462,10 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 	
 	/* A null pointer always satisfies is_a. */
 	if (!obj) { ++__libcrunch_trivially_succeeded_null; return 1; }
-	/* Any pointer satisfies void. We do this both here and in typestr_to_uniqtype,
-	 * in case we're not called through the __is_a typestr-based interface. */
-	if (!__libcrunch_uniqtype_void)
-	{
-		if (strcmp(test_uniqtype->name, "void") == 0)
-		{
-			__libcrunch_uniqtype_void = test_uniqtype;
-		}
-	}
-	if (__libcrunch_uniqtype_void && test_uniqtype == __libcrunch_uniqtype_void)
-	{ ++__libcrunch_trivially_succeeded_void; return 1; }
 	
+	/* NOTE: any pointer can be used as a void* or (in C) char* or unsigned char*. 
+	 * We now handle this in the front-end. */
+
 	/* It's okay to assume we're inited, otherwise how did the caller
 	 * get the uniqtype in the first place? */
 	
@@ -499,7 +486,9 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 #define USABLE_SIZE_FROM_OBJECT_SIZE(s) (PAD_TO_MBYTES_MOD_N( ((s) + sizeof (struct trailer)) , 8, 4))
 #define HEAPSZ_ONE(t) (USABLE_SIZE_FROM_OBJECT_SIZE(sizeof ((t))))
 
-	switch(get_object_memory_kind(obj))
+	memory_kind k = get_object_memory_kind(obj);
+	void *alloc_site = 0;
+	switch(k)
 	{
 		case STACK:
 		{
@@ -637,6 +626,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 				{
 					object_start = frame_base;
 					alloc_uniqtype = frame_desc;
+					alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
 					break;
 				}
 				else
@@ -656,7 +646,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 			if (higherframe_sp == BEGINNING_OF_STACK)
 			{
 				reason = "stack walk reached top-of-stack";
-				goto abort_stack; //std::shared_ptr<dwarf::spec::basic_die>();
+				goto abort_stack;
 			}
 		#undef BEGINNING_OF_STACK
 		// end pasted from pmirror stack.cpp
@@ -690,11 +680,12 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 			}
 
 			// now we have an allocsite
-			alloc_uniqtype = allocsite_to_uniqtype((void*)(intptr_t)heap_info->alloc_site);
+			alloc_site = (void*)(intptr_t)heap_info->alloc_site;
+			alloc_uniqtype = allocsite_to_uniqtype(alloc_site);
 			if (!alloc_uniqtype) 
 			{
 				reason = "unrecognised allocsite";
-				reason_ptr = (void*)(intptr_t)heap_info->alloc_site;
+				reason_ptr = alloc_site;
 				++__libcrunch_aborted_unrecognised_allocsite;
 				goto abort;
 			}
@@ -724,6 +715,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 				goto abort;
 			}
 			// else we can go ahead
+			alloc_site = object_start;
 			break;
 		}
 		case UNKNOWN:
@@ -808,10 +800,11 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 	__assert_fail("unreachable", __FILE__, __LINE__, __func__);
 check_failed:
 	++__libcrunch_failed;
-	warnx("Failed check __is_aU(%p, %p a.k.a. \"%s\") at %p, allocation was a %p (a.k.a. \"%s\")\n", 
+	warnx("Failed check __is_aU(%p, %p a.k.a. \"%s\") at %p, allocation was a %s %s originating at %p\n", 
 		obj, test_uniqtype, test_uniqtype->name,
-		&&check_failed /* we are inlined, right? GAH, no, unlikely*/,
-		alloc_uniqtype, alloc_uniqtype->name);
+		//&&check_failed /* we are inlined, right? GAH, no, unlikely*/,
+		__builtin_return_address(0), // make sure our *caller*, if any, is inlined
+		name_for_memory_kind(k), alloc_uniqtype->name, alloc_site);
 	return 1;
 
 abort:

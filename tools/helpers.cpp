@@ -353,6 +353,9 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 		/* pay attention *only* to the pointer representation (not what it points to)
 		 * -- calculate_byte_size knows how to get the CU address size
 		 * -- we should use DW_ATTR_address_class */
+		// FIXME: actually, why do we not want to pay attention to what it 
+		// points to, i.e. its contract? We wouldn't necessarily be baking
+		// in any nominality.
 		auto ptr_t = concrete_t.as_a<core::address_holding_type_die>();
 		unsigned ptr_size = *ptr_t->calculate_byte_size();
 		unsigned addr_class = ptr_t->get_address_class() ? *ptr_t->get_address_class() : 0;

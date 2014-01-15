@@ -115,6 +115,8 @@ inline int (__attribute__((always_inline)) __is_a3)(const void *obj, const char 
 inline int (__attribute__((always_inline)) __is_a)(const void *obj, const char *typestr);
 
 extern const struct rec *__libcrunch_uniqtype_void;
+extern const struct rec *__libcrunch_uniqtype_signed_char;
+extern const struct rec *__libcrunch_uniqtype_unsigned_char;
 /* counters */
 extern unsigned long __libcrunch_begun;
 extern unsigned long __libcrunch_aborted_init;
@@ -126,7 +128,6 @@ extern unsigned long __libcrunch_aborted_unindexed_heap;
 extern unsigned long __libcrunch_aborted_unrecognised_allocsite;
 extern unsigned long __libcrunch_failed;
 extern unsigned long __libcrunch_trivially_succeeded_null;
-extern unsigned long __libcrunch_trivially_succeeded_void;
 extern unsigned long __libcrunch_succeeded;
 
 // FIXME: inlining here and __builtin_return_address are a mess.
