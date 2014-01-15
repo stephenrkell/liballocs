@@ -97,10 +97,10 @@ let rec getSizeExpr (e: exp) (env : (int * typsig) list) = match e with
 (* FIXME: split this into a "toplevel" that does the HasNoSizeof check,
    and a recursive part which recurses *without* recursively doing the
    HasNoSizeof check. *)
-let getSizeExprElseChar (e: exp) (env : (int * typsig) list) = 
+let getSizeExprElseDefault (e: exp) (env : (int * typsig) list) = 
   let explicitSizeExpr = getSizeExpr e env in
   match explicitSizeExpr with
-    None -> Some(typeSig charType)
+    None -> Some(typeSig voidType)
   | Some(t) -> Some(t)
 
 (*   |  SizeOf(t) -> Some(Pretty.sprint 80 (d_typsig () (typeSig t)))
@@ -149,7 +149,7 @@ let rec extractUserAllocMatchingSignature i f arglist signature env =
        then Some((String.length (matched_string signatureArgSpec)) - 1 (* for the bracket*) - 1 (* because we want zero-based *))
        else (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain a capitalized arg spec element\n"); None)
  in match sizeArgPos with
-    Some(s) -> if (length arglist) > s then Some(f.vname, getSizeExprElseChar (nth arglist s) env)
+    Some(s) -> if (length arglist) > s then Some(f.vname, getSizeExprElseDefault (nth arglist s) env)
      else (output_string Pervasives.stderr ("Warning: signature " ^ signature 
      ^ " wrongly predicts allocation function " ^ f.vname ^ " will have at least " 
      ^ (string_of_int s) ^ " arguments, where here it has only " ^ (string_of_int (length arglist)) ^"\n"); None)
@@ -180,9 +180,9 @@ let rec getUserAllocExpr (i: instr) (f: varinfo) (arglist: exp list) env =
    and optionalTypeSig is the type signature we inferred was being allocated, if we managed it *)
 let rec getAllocExpr (i: instr) (f: varinfo) (arglist: exp list) env =
   match f.vname with
-    | "malloc" -> Some (f.vname, getSizeExprElseChar (nth arglist 0) env)
-    | "calloc" -> Some (f.vname, getSizeExprElseChar (nth arglist 1) env)
-    | "realloc" -> Some (f.vname, getSizeExprElseChar (nth arglist 1) env)
+    | "malloc" -> Some (f.vname, getSizeExprElseDefault (nth arglist 0) env)
+    | "calloc" -> Some (f.vname, getSizeExprElseDefault (nth arglist 1) env)
+    | "realloc" -> Some (f.vname, getSizeExprElseDefault (nth arglist 1) env)
     | _ -> getUserAllocExpr i f arglist env
 
 (* HACK: copied from trumptr *)
