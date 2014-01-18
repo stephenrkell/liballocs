@@ -314,30 +314,51 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 const struct rec *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
 /* counters */
 unsigned long __libcrunch_begun;
+#ifdef LIBCRUNCH_EXTENDED_COUNTS
 unsigned long __libcrunch_aborted_init;
+unsigned long __libcrunch_trivially_succeeded;
+#endif
 unsigned long __libcrunch_aborted_stack;
 unsigned long __libcrunch_aborted_static;
 unsigned long __libcrunch_aborted_typestr;
 unsigned long __libcrunch_aborted_unknown_storage;
+unsigned long __libcrunch_hit_heap_case;
+unsigned long __libcrunch_hit_stack_case;
+unsigned long __libcrunch_hit_static_case;
 unsigned long __libcrunch_aborted_unindexed_heap;
 unsigned long __libcrunch_aborted_unrecognised_allocsite;
 unsigned long __libcrunch_failed;
-unsigned long __libcrunch_trivially_succeeded_null;
 unsigned long __libcrunch_succeeded;
 
 static void print_exit_summary(void)
 {
 	fprintf(stderr, "libcrunch summary: \n");
 	fprintf(stderr, "checks begun:                          % 7ld\n", __libcrunch_begun);
+	fprintf(stderr, "----------------------------------------------\n", __libcrunch_begun);
+#ifdef LIBCRUNCH_EXTENDED_COUNTS
 	fprintf(stderr, "checks aborted due to init failure:    % 7ld\n", __libcrunch_aborted_init);
+#endif
 	fprintf(stderr, "checks aborted for bad typename:       % 7ld\n", __libcrunch_aborted_typestr);
 	fprintf(stderr, "checks aborted for unknown storage:    % 7ld\n", __libcrunch_aborted_unknown_storage);
+#ifdef LIBCRUNCH_EXTENDED_COUNTS
+	fprintf(stderr, "checks trivially passed:               % 7ld\n", __libcrunch_trivially_succeeded);
+#endif
+	fprintf(stderr, "==============================================\n", __libcrunch_begun);
+#ifdef LIBCRUNCH_EXTENDED_COUNTS
+	fprintf(stderr, "checks remaining                       % 7ld\n", __libcrunch_begun - (__libcrunch_trivially_succeeded + __libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr + __libcrunch_aborted_init));
+#else
+	fprintf(stderr, "checks remaining                       % 7ld\n", __libcrunch_begun - (__libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr));
+#endif	
+	fprintf(stderr, "----------------------------------------------\n", __libcrunch_begun);
+	fprintf(stderr, "checks handled by heap case            % 7ld\n", __libcrunch_hit_heap_case);
+	fprintf(stderr, "checks handled by stack case           % 7ld\n", __libcrunch_hit_stack_case);
+	fprintf(stderr, "checks handled by static case          % 7ld\n", __libcrunch_hit_static_case);
+	fprintf(stderr, "----------------------------------------------\n", __libcrunch_begun);
 	fprintf(stderr, "checks aborted for unindexed heap:     % 7ld\n", __libcrunch_aborted_unindexed_heap);
 	fprintf(stderr, "checks aborted for unknown allocsite:  % 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
 	fprintf(stderr, "checks aborted for unknown stackframes:% 7ld\n", __libcrunch_aborted_stack);
 	fprintf(stderr, "checks aborted for unknown static obj: % 7ld\n", __libcrunch_aborted_static);
 	fprintf(stderr, "checks failed:                         % 7ld\n", __libcrunch_failed);
-	fprintf(stderr, "checks trivially passed on null ptr:   % 7ld\n", __libcrunch_trivially_succeeded_null);
 	fprintf(stderr, "checks nontrivially passed:            % 7ld\n", __libcrunch_succeeded);
 }
 
@@ -451,20 +472,12 @@ struct rec *__libcrunch_typestr_to_uniqtype(const char *typestr)
 	return (struct rec *) returned;
 }
 /* Optimised version, for when you already know the uniqtype address. */
-int __is_aU(const void *obj, const struct rec *test_uniqtype)
+int __is_a_internal(const void *obj, const void *arg)
 {
+	const struct rec *test_uniqtype = (const struct rec *) arg;
 	const char *reason = NULL; // if we abort, set this to a string lit
 	const void *reason_ptr = NULL; // if we abort, set this to a useful address
 	_Bool suppress_warning = 0;
-	
-	// NOTE: we handle separately the path where __is_a fails because of init failure
-	++__libcrunch_begun;
-	
-	/* A null pointer always satisfies is_a. */
-	if (!obj) { ++__libcrunch_trivially_succeeded_null; return 1; }
-	
-	/* NOTE: any pointer can be used as a void* or (in C) char* or unsigned char*. 
-	 * We now handle this in the front-end. */
 
 	/* It's okay to assume we're inited, otherwise how did the caller
 	 * get the uniqtype in the first place? */
@@ -492,6 +505,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 	{
 		case STACK:
 		{
+			++__libcrunch_hit_stack_case;
 #define BEGINNING_OF_STACK (STACK_BEGIN - 1)
 			// we want to walk a sequence of vaddrs!
 			// how do we know which is the one we want?
@@ -661,6 +675,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 		} // end case STACK
 		case HEAP:
 		{
+			++__libcrunch_hit_heap_case;
 			/* For heap allocations, we look up the allocation site.
 			 * (This also yields an offset within a toplevel object.)
 			 * Then we translate the allocation site to a uniqtypes rec location.
@@ -706,6 +721,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 		}
 		case STATIC:
 		{
+			++__libcrunch_hit_static_case;
 			alloc_uniqtype = static_addr_to_uniqtype(obj, &object_start);
 			if (!alloc_uniqtype)
 			{
@@ -751,8 +767,8 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 		if (cur_obj_uniqtype == test_uniqtype) 
 		{
 		temp_label: // HACK: remove this printout once stable
-			warnx("Check __is_aU(%p, %p a.k.a. \"%s\") succeeded at %p.\n", 
-				obj, test_uniqtype, test_uniqtype->name, &&temp_label);
+			// warnx("Check __is_a_internal(%p, %p a.k.a. \"%s\") succeeded at %p.\n", 
+			// 	obj, test_uniqtype, test_uniqtype->name, &&temp_label);
 			++__libcrunch_succeeded;
 			return 1;
 		}
@@ -800,7 +816,7 @@ int __is_aU(const void *obj, const struct rec *test_uniqtype)
 	__assert_fail("unreachable", __FILE__, __LINE__, __func__);
 check_failed:
 	++__libcrunch_failed;
-	warnx("Failed check __is_aU(%p, %p a.k.a. \"%s\") at %p, allocation was a %s %s originating at %p\n", 
+	warnx("Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s %s originating at %p\n", 
 		obj, test_uniqtype, test_uniqtype->name,
 		//&&check_failed /* we are inlined, right? GAH, no, unlikely*/,
 		__builtin_return_address(0), // make sure our *caller*, if any, is inlined
@@ -808,7 +824,7 @@ check_failed:
 	return 1;
 
 abort:
-	// if (!suppress_warning) warnx("Aborted __is_aU(%p, %p) at %p, reason: %s (%p)\n", obj, uniqtype,
+	// if (!suppress_warning) warnx("Aborted __is_a_internal(%p, %p) at %p, reason: %s (%p)\n", obj, uniqtype,
 	//	&&abort /* we are inlined, right? */, reason, reason_ptr); 
 	return 1; // so that the program will continue
 }
@@ -818,8 +834,8 @@ abort:
  * generate a weak *dynamic* reference to __is_a3. */
 int __is_a(const void *obj, const char *typestr);
 int __is_a3(const void *obj, const char *typestr, const struct rec **maybe_uniqtype);
-// DON'T instantiate __is_aU -- this is an internal function and should be inlined
-// int __is_aU(const void *obj, const struct rec *uniqtype);
+// DON'T instantiate __is_a_internal -- this is an internal function and should be inlined
+// int __is_a_internal(const void *obj, const struct rec *uniqtype);
 
 // same for initialization and, in fact, everything....
 int __libcrunch_check_init(void);

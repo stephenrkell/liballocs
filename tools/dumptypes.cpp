@@ -20,6 +20,7 @@
 #include <fileno.hpp>
 
 #include "helpers.hpp"
+#include "uniqtypes.hpp"
 
 using std::cin;
 using std::cout;
@@ -58,14 +59,6 @@ using boost::regex_constants::egrep;
 using boost::match_default;
 using boost::format_all;
 
-// this encodes only the set of types, not the relations between them!
-struct master_relation_t : public std::map< uniqued_name, iterator_df<type_die> >
-{
-	//using map::map;
-	template<typename... Args>
-	master_relation_t(Args&&... args): map(std::forward<Args>(args)...) {}
-};
-
 // we store *iterators* to avoid the inefficient iterator_here(), find() stuff
 // BUT note that iterators are not totally ordered, so we can't store them 
 // as keys in a set (without breaking the equality test). So we use a map
@@ -78,76 +71,6 @@ void print_statics_output(const statics_list_t& l);
 
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval);
-
-uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
-{
-	if (t != t->get_concrete_type()) return make_pair("", ""); // only add concretes
-	
-	if (t == iterator_base::END) return make_pair("", "");
-	
-	/* If it's a base type, we might not have a decl_file, */
-	if (!t->get_decl_file() || *t->get_decl_file() == 0)
-	{
-		if (t.tag_here() != DW_TAG_base_type
-		 && t.tag_here() != DW_TAG_pointer_type
-		 && t.tag_here() != DW_TAG_reference_type
-		 && t.tag_here() != DW_TAG_rvalue_reference_type
-		 && t.tag_here() != DW_TAG_array_type
-		 && t.tag_here() != DW_TAG_subroutine_type)
-		{
-			cerr << "Warning: skipping non-base non-pointer non-array non-subroutine type described by " << *t //
-			//if (t.name_here()) cerr << t.name_here();
-			//else cerr << "(unknown, offset: " << std::hex << t.offset_here() << std::dec << ")";
-			/*cerr */ << " because no file is recorded for its definition." << endl;
-			return make_pair("", "");
-		}
-		// else it's a base type, so we go with the blank type
-		// FIXME: should canonicalise base types here
-		// (to the same as the ikind/fkinds come out from Cil.Pretty)
-	}
-	uniqued_name n = key_from_type(t);
-	
-	smatch m;
-	if (r.find(n) != r.end()
-		&& t.tag_here() != DW_TAG_base_type
-		&& !regex_match(n.second, m, regex(".*__(PTR|REF|RR|ARR[0-9]+)_.*")))
-	{
-		cerr << "warning: non-base non-pointer non-array type named " << n.second << " already exists!" << endl;
-	}
-	r[n] = t;
-	
-// 	/* Now recurse on members */
-// 	if (!t.is_a<with_data_members_die>()) return n;
-// 	auto member_children = t.as_a<with_data_members_die>().children().subseq_of<member_die>();
-// 	for (auto i_child = member_children.first;
-// 		i_child != member_children.second; ++i_child)
-// 	{
-// 		// skip "declared", "external" members, i.e. static member vars
-// 		if (i_child->get_declaration() && *i_child->get_declaration()
-// 		 && i_child->get_external() && *i_child->get_external())
-// 		{
-// 			continue;
-// 		}
-// 		
-// 		assert(i_child->get_type() != iterator_base::END);
-// 		if (i_child->get_type()->get_concrete_type() == t) 
-// 		{
-// 			cout << "Found directly recursive data type: "
-// 				<< t
-// 				<< " contains member "
-// 				<< i_child.base().base()
-// 				<< " of type "
-// 				<< i_child->get_type()->get_concrete_type()
-// 				<< " which equals " 
-// 				<< t
-// 				<< endl;
-// 			assert(false);
-// 		}
-// 		recursively_add_type(i_child->get_type(), r);
-// 	}
-	
-	return n;
-}
 
 static string fq_pathname(const string& dir, const string& path)
 {
@@ -200,7 +123,6 @@ int main(int argc, char **argv)
 	} root(fileno(infstream));
 	assert(&root.get_frame_section());
 	opt<core::root_die&> opt_r = root; // for debugging
-	master_relation_t master_relation;
 
 	struct subprogram_key : public pair< pair<string, string>, string > // ordering for free
 	{
@@ -212,27 +134,10 @@ int main(int argc, char **argv)
 	};
 
 	map<subprogram_key, iterator_df<subprogram_die> > subprograms_list;
-	lib::Dwarf_Off previous_offset = 0UL;
-	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
-	{
-		assert(i.offset_here() >= previous_offset); // == for initial case, > afterwards
-		if (i.is_a<type_die>())
-		{
-			// add it to the relation
-			opt<string> opt_name = i.name_here(); // for debugging
-			if (opt_name)
-			{
-				string name = *opt_name;
-				assert(name != "");
-				if (name == "abstract_def")
-				{
-					assert(true); // for debugging
-				}
-			}
-			add_type(i.as_a<type_die>(), master_relation);
-		}
-		previous_offset = i.offset_here();
-	}
+
+	master_relation_t master_relation;
+	make_exhaustive_master_relation(master_relation, root.begin(), root.end());
+
 	cerr << "Master relation contains " << master_relation.size() << " data types." << endl;
 	/* For each type we output a record:
 	 * - a pointer to its name;
@@ -240,164 +145,13 @@ int main(int argc, char **argv)
 	 * - a list of <offset, included-type-record ptr> pairs.
 	 */
 
-	cout << "struct rec \n\
-{ \n\
-	const char *name; \n\
-	short pos_maxoff; \n\
-	short neg_maxoff; \n\
-	unsigned nmemb:12;         // 12 bits -- number of `contained's\n\
-	unsigned is_array:1;       // 1 bit\n\
-	unsigned array_len:19;\n\
-	struct { \n\
-		signed offset; \n\
-		struct rec *ptr; \n\
-	} contained[]; \n\
-};\n";
-	/* DWARF doesn't reify void, but we do. So output a rec for void first of all. */
-	cout << "\n/* uniqtype for void */\n";
-	cout << "\n__asm__(\".pushsection .__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat\"); \n";
-	cout << "struct rec " << mangle_typename(make_pair(string(""), string("void")))
-		<< " = {\n\t\"" << "void" << "\",\n\t"
-		<< "0" << " /* pos_maxoff (void) */,\n\t"
-		<< "0" << " /* neg_maxoff (void) */,\n\t"
-		<< "0" << " /* nmemb (void) */,\n\t"
-		<< "0" << " /* is_array (void) */,\n\t"
-		<< "0" << " /* array_len (void) */,\n\t"
-		<< "/* contained */ { }\n};\n";
-	cout << "\n__asm__(\".popsection\"); \n";
 
 	// write a forward declaration for every uniqtype we need
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
-	for (auto i_pair = master_relation.begin(); i_pair != master_relation.end(); ++i_pair)
-	{
-		string s = mangle_typename(i_pair->first);
-		names_emitted.insert(s);
-		types_by_name[i_pair->first.second].insert(i_pair->second);
-		cout << "extern struct rec " << s << ";" << endl;
-	}
-
-	for (auto i_vert = master_relation.begin(); i_vert != master_relation.end(); ++i_vert)
-	{
-		auto opt_sz = i_vert->second->calculate_byte_size();
-		if (!opt_sz)
-		{
-			// we have an incomplete type
-			cerr << "Warning: type " 
-				<< i_vert->first.second
-				<< " is incomplete, treated as zero-size." << endl;
-		}
-		if (i_vert->first.second == string("void"))
-		{
-			cerr << "Warning: skipping explicitly declared void type from CU "
-				<< *i_vert->second.enclosing_cu().name_here()
-				<< endl;
-			continue;
-		}
-		
-		cout << "\n/* uniqtype for " << i_vert->first.second 
-			<< " defined in " << i_vert->first.first << " */\n";
-		auto members = i_vert->second.children().subseq_of<member_die>();
-		std::vector< iterator_base > real_members;
-		std::vector< Dwarf_Unsigned > real_member_offsets;
-		for (auto i_edge = members.first; i_edge != members.second; ++i_edge)
-		{
-			/* if we don't have a byte offset, skip it */
-			opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(root);
-			if (!opt_offset) continue;
-			else
-			{ 
-				real_members.push_back(i_edge.base().base()); 
-				real_member_offsets.push_back(*opt_offset);
-			}
-		}		
-		unsigned members_count = real_members.size();
-		unsigned array_len;
-		if  (i_vert->second.is_a<array_type_die>())
-		{
-			auto opt_array_len = i_vert->second.as_a<array_type_die>()->element_count(root);
-			if (opt_array_len) array_len = *opt_array_len;
-			else array_len = 0;
-		} else array_len = 0;
-		string mangled_name = mangle_typename(i_vert->first);
-		cout << "\n__asm__(\".pushsection ." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat\"); \n";
-		cout << "struct rec " << mangle_typename(i_vert->first)
-			<< " = {\n\t\"" << i_vert->first.second << "\",\n\t"
-			<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
-			<< "0 /* neg_maxoff */,\n\t"
-			<< (i_vert->second.is_a<array_type_die>() ? 1 : members_count) << " /* nmemb */,\n\t"
-			<< (i_vert->second.is_a<array_type_die>() ? "1" : "0") << " /* is_array */,\n\t"
-			<< array_len << " /* array_len */,\n\t"
-			<< /* contained[0] */ "/* contained */ {\n\t\t";
-
-		if (i_vert->second.is_a<array_type_die>())
-		{
-			// array: write a single entry, for the element type
-			/* begin the struct */
-			cout << "{ ";
-
-			// compute offset
-
-			cout << "0, ";
-
-			// compute and print destination name
-			auto k = key_from_type(i_vert->second.as_a<array_type_die>()->get_type());
-			/* FIXME: do multidimensional arrays get handled okay like this? 
-			 * I reckon so, but am not yet sure. */
-			string mangled_name = mangle_typename(k);
-			cout << "&" << mangled_name;
-
-			// end the struct
-			cout << " }";
-		}
-		else // non-array -- use real members
-		{
-			unsigned i_membernum = 0;
-			std::set<lib::Dwarf_Unsigned> used_offsets;
-			opt<iterator_base> first_with_byte_offset;
-			auto i_off = real_member_offsets.begin();
-			for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
-			{
-				auto i_edge = i_i_edge->as_a<member_die>();
-
-				/* if we're not the first, write a comma */
-				if (i_i_edge != real_members.begin()) cout << ",\n\t\t";
-
-				/* begin the struct */
-				cout << "{ ";
-
-				// compute offset
-
-				cout << *i_off << ", ";
-
-				// compute and print destination name
-				auto k = key_from_type(i_edge->get_type());
-				string mangled_name = mangle_typename(k);
-				if (names_emitted.find(mangled_name) == names_emitted.end())
-				{
-					cout << "Type " << i_edge->get_type()
-						<< ", concretely " << i_edge->get_type()->get_concrete_type()
-						<< " was not emitted previously." << endl;
-					for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
-					{
-						if (i_name->substr(i_name->length() - k.second.length()) == k.second)
-						{
-							cout << "Possible near-miss: " << *i_name << endl;
-						}
-					}
-					assert(false);
-				}
-				cout << "&" << mangled_name;
-
-				// end the struct
-				cout << " }";
-			}
-		}
-		
-		cout << "\n\t}"; /* end contained */
-		cout << "\n};\n"; /* end struct rec */
-		cout << "\n__asm__(\".popsection\"); \n";
-	}
+	
+	write_master_relation(master_relation, root, cout, cerr, true /* emit_void */, 
+		names_emitted, types_by_name);
 	
 	/* Now create linker aliases for any that were unique. */
 	cout << "/* Begin aliases. */" << endl;

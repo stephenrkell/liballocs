@@ -7,8 +7,6 @@ if [[ -z "$EQUIVS" ]]; then
     fi
 fi
 
-
-
 # we are reading the output of nm -fposix on a -uniqtypes.o file
 uniqtypes="$( tr -s '[:blank:]' '\t' | cut -f1 | grep '^__uniqtype_' )"
 

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <iomanip>
 
+// FIXME: shouldn't have toplevel "using" in header file
 using std::string;
 using std::endl;
 using std::map;

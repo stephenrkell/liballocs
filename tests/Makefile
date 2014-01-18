@@ -12,6 +12,7 @@ export UNIQTYPES_BASE
 export ALLOCSITES_BASE
 
 export CC := $(realpath $(dir $(THIS_MAKEFILE))/../frontend/c/bin/crunchcc)
+export CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
 
 ifeq ($(CC),)
 $(error Could not find crunchcc)

@@ -12,7 +12,7 @@ using std::endl;
 using std::ostringstream;
 using std::string;
 using namespace dwarf::core;
-using dwarf::tool::cxx_compiler;
+using dwarf::tool::abstract_c_compiler;
 
 uniqued_name
 key_from_type(iterator_df<type_die> t)
@@ -51,7 +51,7 @@ key_from_type(iterator_df<type_die> t)
 			assert(t.name_here() && t.tag_here() == DW_TAG_base_type);
 			string name_to_search_for = *t.name_here();
 			// search equiv classes for a type of this name
-			for (const char ***p_equiv = &cxx_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
+			for (const char ** const*p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
 			{
 				// assert this equiv class has at least one element
 				assert((*p_equiv)[0] != NULL);
@@ -198,7 +198,7 @@ find_type_in_cu(iterator_df<compile_unit_die> cu, const string& name)
 {
 	/* For the most part, we just do named_child.
 	 * BUT, for base types, we widen the search, using our equivalence classes. */
-	for (const char ***p_equiv = &cxx_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
+	for (const char **const *p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
 	{
 		for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
 		{

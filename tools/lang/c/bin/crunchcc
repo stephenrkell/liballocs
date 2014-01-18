@@ -28,12 +28,53 @@ def isLinkCommand():
     # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
     return False
 
+def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
+    argvWithoutOutputOptions = [argv[i] for i in range(0, len(argv)) \
+       if argv[i] != '-o' and (i != 0 and argv[i-1] != '-o') and argv[i] != '-shared' and argv[i] != '-c' \
+       and argv[i] != '-static']
+    argvToPassThrough = [x for x in argv[1:] if not x in cInputFiles]
+    
+    print "C input files: " + ', '.join(cInputFiles)
+    
+    for sourceFile in cInputFiles:
+         # compile to .o with the custom args
+         # -- erase -shared etc, and erase "-o blah"
+        nameStem, nameExtension = os.path.splitext(sourceFile)
+        if (nameExtension == ".c"):
+            outputFilename = nameStem + ".o"
+            print "Making a secret output file (from .c source) " + outputFilename
+        else:
+            outputFilename = sourceFile + ".o"
+            print "Making a secret output file (from unknown source) " + outputFilename
+        ret1 = subprocess.call(["cilly"] + argvWithoutOutputOptions + customArgs \
+        + ["-c", "-o", outputFilename, sourceFile])
+        
+        if ret1 != 0:
+            # we didn't succeed, so quit now
+            exit(ret1)
+        else:
+            # also link the file with the uniqtypes it references
+            cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", outputFilename]
+            print "Calling " + " ".join(cmd)
+            ret2 = subprocess.call(cmd)
+            
+            if ret2 != 0:
+                # we didn't succeed, so quit now
+                exit(ret2)
+            
+            # include the .o file in our passed-through args
+            argvToPassThrough += [outputFilename]
+
+    print "After making .o files, passing through arguments " + " ".join(argvToPassThrough)
+    return argvToPassThrough
 
 def main():
     # change "-V" to some other undefined option
     skipNext = False
     outputFile = None
     saveTempsArgs = ['-save-temps']
+    cInputFiles = []
+    oInputFiles = []
     for num in range(0,len(sys.argv)):
         if skipNext: 
             skipNext = False
@@ -47,12 +88,15 @@ def main():
             continue
         if num == 0:
             continue # this means we have "crunchcc" as the arg
+        if sys.argv[num].endswith('.o'):
+            oInputFiles += [sys.argv[num]]
         if sys.argv[num].endswith('.a') or sys.argv[num].endswith('.o') or \
            sys.argv[num].endswith('.so'):
             # it's a linker input; not the source file
             continue
         else:
             sys.stderr.write("guessed that source file is " + sys.argv[num] + "\n")
+            cInputFiles += [sys.argv[num]]
             dirname = os.path.dirname(sys.argv[num])
             if dirname != "":
                 saveTempsArgs = ["--save-temps=" + dirname]
@@ -76,8 +120,28 @@ def main():
     # }
     # -- using an ad-hoc notation to get the argspec
     # from the LIBCRUNCH_ALLOC_FNS environment var. FIXME: autogenerate these stubs
+    
+    crunchccCustomArgs = ["--dotrumptr","--dodumpallocs"] \
+    + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", "-fno-omit-frame-pointer"] \
+    + saveTempsArgs
+
+    # un-export CC from the env if it's set to crunchcc, because 
+    # we don't want to recursively cruchcc the -uniqtypes.c files
+    # that this make invocation will be compiling for us.
+    if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
+        del os.environ["CC"]
+
     linkArgs = []
     if isLinkCommand():
+        # we need to build the .o files first, 
+        # then link in the uniqtypes they reference, 
+        # then resume linking these .o files
+        if len(cInputFiles) > 0:
+            print "Making .o files first from " + " ".join(cInputFiles)
+            passedThroughArgs = makeDotOAndPassThrough(sys.argv, crunchccCustomArgs, cInputFiles)
+        else:
+            passedThroughArgs = sys.argv[1:]
+        
         # we need to wrap each allocation function
         sys.stderr.write("crunchcc doing linking\n")
         if "LIBCRUNCH_ALLOC_FNS" in os.environ:
@@ -89,8 +153,9 @@ def main():
                 linkArgs += ["-Wl," + fnName]
         # we need to export-dynamic, s.t. __is_a is linked from libcrunch
         linkArgs += ["-Wl,--export-dynamic"]
-        # if we're building an executable, append the magic objects
-        if not "-c" in sys.argv and not "-shared" in sys.argv:
+        # if we're building an executable, 
+        # append the magic objects
+        if not "-c" in passedThroughArgs and not "-shared" in passedThroughArgs:
             linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../lib/stubs.o"]
             # HACK: fix this once I sort out linking
             linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
@@ -99,17 +164,17 @@ def main():
         # else we leave the shared library with 
         # dangling dependencies on __wrap_
         # and unused __real_
+    else:
+        passedThroughArgs = sys.argv[1:]
 
 #    + ["-Wno-attributes"] \
 
     
-    argsToExec = ["--dotrumptr","--dodumpallocs"] \
-    + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", "-fno-omit-frame-pointer"] \
-    + saveTempsArgs \
+    argsToExec = crunchccCustomArgs \
     + linkArgs \
-    + sys.argv[1:]
+    + passedThroughArgs
     sys.stderr.write("about to run cilly with args: " + " ".join(argsToExec) + "\n")
-    sys.stderr.write("sys.argv[1:] is: " + " ".join(sys.argv[1:]) + "\n")
+    sys.stderr.write("passedThroughArgs is: " + " ".join(passedThroughArgs) + "\n")
     
     ret1 = subprocess.call(["cilly"] + argsToExec)
     
@@ -136,11 +201,7 @@ def main():
             baseDir = "/usr/lib/allocsites"
         targetNames = [baseDir + os.path.realpath(outputFile) + ext for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
         
-        # un-export CC from the env if it's set to crunchcc, because 
-        # we don't want to recursively cruchcc the -uniqtypes.c files
-        # that this make invocation will be compiling for us.
-        if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
-            del os.environ["CC"]
+
         ret2 = subprocess.call(["make", "-C", os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
             "-f", "Makefile.allocsites"] +  targetNames)
         return ret2

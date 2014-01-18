@@ -29,7 +29,7 @@ endif
 %: %.cpp
 	$(CXX) $(LDFLAGS) $(CXXFLAGS) -o "$@" "$<" $(LDLIBS)
 
-liballocs.a: helpers.o
+liballocs.a: helpers.o uniqtypes.o
 	ar r "$@" $^
 
 dumptypes: dumptypes.cpp liballocs.a
