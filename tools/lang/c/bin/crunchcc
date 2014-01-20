@@ -187,9 +187,9 @@ def main():
     # definitions which the compiler generated.
     # FIXME
     
-    if not isLinkCommand:
+    if not isLinkCommand():
         return ret1
-    else: # isLinkCommand
+    else: # isLinkCommand()
         # We've just output an object, so invoke make to collect the allocsites, 
         # with our target name as the file we've just built, using ALLOCSITES_BASE 
         # to set the appropriate prefix
