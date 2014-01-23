@@ -20,6 +20,9 @@ _Bool __libcrunch_is_initialized;
 allocsmt_entry_type *__libcrunch_allocsmt;
 void *__addrmap_executable_end_addr;
 
+static _Bool check_blacklist(const void *obj);
+static void consider_blacklisting(const void *obj);
+
 // FIXME: do better!
 static char *realpath_quick_hack(const char *arg)
 {
@@ -308,6 +311,14 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 	
 	// always continue with further objects
 	return 0;
+	
+}
+static _Bool check_blacklist(const void *obj)
+{
+	return 0;
+}
+static void consider_blacklisting(const void *obj)
+{
 	
 }
 
@@ -722,12 +733,25 @@ int __is_a_internal(const void *obj, const void *arg)
 		case STATIC:
 		{
 			++__libcrunch_hit_static_case;
+			/* We use a blacklist to rule out static addrs that map to things like 
+			 * mmap()'d regions (which we never have typeinfo for)
+			 * or uninstrumented libraries (which we happen not to have typeinfo for). */
+			_Bool blacklisted = check_blacklist(obj);
+			if (blacklisted)
+			{
+				// FIXME: record blacklist hits separately
+				reason = "unrecognised static object";
+				reason_ptr = obj;
+				++__libcrunch_aborted_static;
+				goto abort;
+			}
 			alloc_uniqtype = static_addr_to_uniqtype(obj, &object_start);
 			if (!alloc_uniqtype)
 			{
 				reason = "unrecognised static object";
 				reason_ptr = obj;
 				++__libcrunch_aborted_static;
+				consider_blacklisting(obj);
 				goto abort;
 			}
 			// else we can go ahead
@@ -754,7 +778,7 @@ int __is_a_internal(const void *obj, const void *arg)
 	signed target_offset;
 	if (alloc_uniqtype->pos_maxoff != 0 && alloc_uniqtype->neg_maxoff == 0)
 	{
-		signed target_offset = target_offset_wholeblock % alloc_uniqtype->pos_maxoff;
+		target_offset = target_offset_wholeblock % alloc_uniqtype->pos_maxoff;
 	} else target_offset = target_offset_wholeblock;
 	// assert that the signs are the same
 	assert(target_offset_wholeblock < 0 ? target_offset < 0 : target_offset >= 0);
@@ -816,11 +840,11 @@ int __is_a_internal(const void *obj, const void *arg)
 	__assert_fail("unreachable", __FILE__, __LINE__, __func__);
 check_failed:
 	++__libcrunch_failed;
-	warnx("Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s %s originating at %p\n", 
+	warnx("Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
 		obj, test_uniqtype, test_uniqtype->name,
 		//&&check_failed /* we are inlined, right? GAH, no, unlikely*/,
 		__builtin_return_address(0), // make sure our *caller*, if any, is inlined
-		name_for_memory_kind(k), alloc_uniqtype->name, alloc_site);
+		name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? "block of " : " ", alloc_uniqtype->name, alloc_site);
 	return 1;
 
 abort:

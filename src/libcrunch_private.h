@@ -48,16 +48,29 @@ inline struct rec *vaddr_to_uniqtype(const void *vaddr)
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)vaddr | STACK_BEGIN));
 	struct allocsite_entry **bucketpos = initial_bucketpos;
+	_Bool might_start_in_lower_bucket = 1;
 	do 
 	{
 		struct allocsite_entry *bucket = *bucketpos;
 		for (struct allocsite_entry *p = bucket; p; p = p->next)
 		{
-			if (p->allocsite <= vaddr) return p->uniqtype;
+			/* NOTE that in this memtable, buckets are sorted by address, so 
+			 * we would ideally walk backwards. We can't, so we peek ahead at
+			 * p->next. */
+			if (p->allocsite <= vaddr && 
+				(!p->next || ((struct allocsite_entry *) p->next)->allocsite > vaddr))
+			{
+				return p->uniqtype;
+			}
+			might_start_in_lower_bucket &= (p->allocsite > vaddr);
 		}
-		// no match? then try the next lower bucket
+		/* No match? then try the next lower bucket *unless* we've seen 
+		 * an object in *this* bucket which starts *before* our target address. 
+		 * In that case, no lower-bucket object can span far enough to reach our
+		 * static_addr, because to do so would overlap the earlier-starting object. */
 		--bucketpos;
-	} while ((initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_vaddr_range_size);
+	} while (might_start_in_lower_bucket && 
+	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_vaddr_range_size);
 	return NULL;
 }
 #undef maximum_vaddr_range_size
@@ -68,20 +81,30 @@ inline struct rec *static_addr_to_uniqtype(const void *static_addr, void **out_o
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)static_addr | (STACK_BEGIN<<1)));
 	struct allocsite_entry **bucketpos = initial_bucketpos;
+	_Bool might_start_in_lower_bucket = 1;
 	do 
 	{
 		struct allocsite_entry *bucket = *bucketpos;
 		for (struct allocsite_entry *p = bucket; p; p = p->next)
 		{
-			if (p->allocsite <= static_addr) 
+			/* NOTE that in this memtable, buckets are sorted by address, so 
+			 * we would ideally walk backwards. We can't, so we peek ahead at
+			 * p->next. */
+			if (p->allocsite <= static_addr && 
+				(!p->next || ((struct allocsite_entry *) p->next)->allocsite > static_addr)) 
 			{
 				if (out_object_start) *out_object_start = p->allocsite;
 				return p->uniqtype;
 			}
+			might_start_in_lower_bucket &= (p->allocsite > static_addr);
 		}
-		// no match? then try the next lower bucket
+		/* No match? then try the next lower bucket *unless* we've seen 
+		 * an object in *this* bucket which starts *before* our target address. 
+		 * In that case, no lower-bucket object can span far enough to reach our
+		 * static_addr, because to do so would overlap the earlier-starting object. */
 		--bucketpos;
-	} while ((initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_static_obj_size);
+	} while (might_start_in_lower_bucket && 
+	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_static_obj_size);
 	return NULL;
 }
 #undef maximum_vaddr_range_size
