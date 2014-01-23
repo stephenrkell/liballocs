@@ -21,12 +21,21 @@ def isLinkCommand():
             seenLib = True
         if arg == '-shared':
             return True
+        if arg == '-c':
+            return False
         if arg == "-o" and len(sys.argv) >= argnum + 2 and not '.' in os.path.basename(sys.argv[argnum + 1]):
             seenExecutableOutput = True
     if seenExecutableOutput:
         return True
     # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
     return False
+    
+    
+def fixupDotO(filename):
+    # also link the file with the uniqtypes it references
+    cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
+    print "Calling " + " ".join(cmd)
+    return subprocess.call(cmd)
 
 def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
     argvWithoutOutputOptions = [argv[i] for i in range(0, len(argv)) \
@@ -53,11 +62,7 @@ def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
             # we didn't succeed, so quit now
             exit(ret1)
         else:
-            # also link the file with the uniqtypes it references
-            cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", outputFilename]
-            print "Calling " + " ".join(cmd)
-            ret2 = subprocess.call(cmd)
-            
+            ret2 = fixupDotO(outputFilename)
             if ret2 != 0:
                 # we didn't succeed, so quit now
                 exit(ret2)
@@ -69,6 +74,7 @@ def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
     return argvToPassThrough
 
 def main():
+    sys.stderr.write("crunchcc called with args  " + " ".join(sys.argv) + "\n")
     # change "-V" to some other undefined option
     skipNext = False
     outputFile = None
@@ -170,11 +176,13 @@ def main():
 #    + ["-Wno-attributes"] \
 
     
-    argsToExec = crunchccCustomArgs \
+    argsToExec = ["--verbose"] + crunchccCustomArgs \
     + linkArgs \
     + passedThroughArgs
     sys.stderr.write("about to run cilly with args: " + " ".join(argsToExec) + "\n")
     sys.stderr.write("passedThroughArgs is: " + " ".join(passedThroughArgs) + "\n")
+    sys.stderr.write("crunchccCustomArgs is: " + " ".join(crunchccCustomArgs) + "\n")
+    sys.stderr.write("linkArgs is: " + " ".join(linkArgs) + "\n")
     
     ret1 = subprocess.call(["cilly"] + argsToExec)
     
@@ -188,13 +196,19 @@ def main():
     # FIXME
     
     if not isLinkCommand():
-        return ret1
+        if outputFile:
+            # we have a single named output file
+            ret2 = fixupDotO(outputFile)
+            return ret2
+        else:
+            # no explicit output file; the compiler output >=1 .o files, one for each input
+            for outputFilename in [nameStem + ".o" for (nameStem, nameExtension) in map(os.path.splitext, cInputFiles)]:
+                fixupDotO(outputFilename)
+    
     else: # isLinkCommand()
         # We've just output an object, so invoke make to collect the allocsites, 
         # with our target name as the file we've just built, using ALLOCSITES_BASE 
         # to set the appropriate prefix
-        if outputFile == None:
-            outputFile = "a.out" # unlikely, but who knows?
         if "ALLOCSITES_BASE" in os.environ:
             baseDir = os.environ["ALLOCSITES_BASE"]
         else:
@@ -207,5 +221,6 @@ def main():
         return ret2
 
 if __name__ == '__main__':
-    main()
+    ret = main()
+    exit(ret)
 
