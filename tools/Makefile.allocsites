@@ -33,7 +33,7 @@ default: $(shell find $(ALLOCSITES_BASE) -type f -name '*.allocsites*' ! -name '
 prefix_exactly_one_slash = $(shell echo "$1" | sed 's|^/*\(.*\)|/\1|' )
 $(ALLOCSITES_BASE)/%.objallocs: $(call prefix_exactly_one_slash,%)
 	mkdir -p $$(dirname "$@")
-	$(OBJDUMPALLOCS) "$<" | sed "s|.*|$<\t&|" > "$@" || rm -f "$@"
+	$(OBJDUMPALLOCS) "$<" | sed "s|.*|$<\t&|" > "$@" || (rm -f "$@"; false)
 
 # We also know how to build a lib%-uniqtypes.so for each executable.
 # Which allocsites files does an executable's uniqtypes depend on?
@@ -50,17 +50,20 @@ $(ALLOCSITES_BASE)$(ALLOCSITES_BASE)/%:
 
 $(ALLOCSITES_BASE)/%.srcallocs: $(ALLOCSITES_BASE)/%.objallocs
 	mkdir -p $$(dirname "$@")
-	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
+	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
+	test -e "$@"
 
 $(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%.srcallocs
 	mkdir -p $$(dirname "$@")
-	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || rm -f "$@" ) | tee "$@.rej"
+	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
+	test -e "$@"
 
 $(ALLOCSITES_BASE)/%-types.c: /%  # pipe err through zip, so need to swap stdout and stderr
-	( ( $(DUMPTYPES) "$<"  3>&2 2>&1 1>&3 ) 2>"$@" | gzip >"$@".log.gz ) || rm -f "$@" "$@".log
+	( ( $(DUMPTYPES) "$<"  3>&2 2>&1 1>&3 ) 2>"$@" || ( rm -f "$@"; false ) ) | gzip >"$@".log.gz 
+	test -e "$@"
 
 $(ALLOCSITES_BASE)/%-allocsites.c: /$(ALLOCSITES_BASE)/%.allocs
-	$(DUMPALLOCS) < "$<" > "$@" || rm -f "$@"
+	$(DUMPALLOCS) < "$<" > "$@" || (rm -f "$@"; false)
 
 # no need for a .o rule -- we just use the builtin one
 
