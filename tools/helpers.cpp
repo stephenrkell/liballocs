@@ -17,15 +17,18 @@ using dwarf::tool::abstract_c_compiler;
 uniqued_name
 key_from_type(iterator_df<type_die> t)
 {
-	uniqued_name n;
 	t = t->get_concrete_type();
 
 	/* we no longer use the defining_header -- use instead
 	 * the type summary code */
-	ostringstream summary_string;
-	summary_string << std::hex << type_summary_code(t) << std::dec;
+	ostringstream summary_string_str;
+	auto code = type_summary_code(t);
+	summary_string_str << std::hex << std::setfill('0') << std::setw(2 * sizeof code) << code 
+		<< std::dec;
+	string summary_string = summary_string_str.str();
+	assert(summary_string.size() == 2 * sizeof code);
 	
-	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>())
+	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>())
 	{
 		auto cu = t.enclosing_cu();
 		
@@ -74,7 +77,28 @@ key_from_type(iterator_df<type_die> t)
 		}
 
 		assert(name_to_use != "char"); // ... for example. It should be "signed char" of course! since cxx_compiler.cpp puts that one first
-		n = make_pair(summary_string.str(), name_to_use);
+		return make_pair(summary_string, name_to_use);
+	}
+	else if (t.is_a<subroutine_type_die>())
+	{
+		// "__FUN_FROM_" ^ (labelledArgTs argTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (stringFromSig returnTs) 		
+		ostringstream s;
+		auto sub_t = t.as_a<subroutine_type_die>();
+		s << "__FUN_FROM_";
+		auto fps = sub_t.children().subseq_of<formal_parameter_die>();
+		unsigned argnum = 0;
+		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp, ++argnum)
+		{
+			// args should not be void
+			s << "__ARG" << argnum << "_" << key_from_type(i_fp->get_type()).second;
+		}
+		if (sub_t->is_variadic())
+		{
+			s << "__VA_";
+		}
+		s << "__FUN_TO_";
+		s << ((!sub_t->get_type() || !sub_t->get_concrete_type()) ? string("void") : key_from_type(sub_t->get_type()).second);
+		return make_pair(summary_string, s.str());
 	}
 	else if (t.is_a<array_type_die>())
 	{
@@ -97,100 +121,64 @@ key_from_type(iterator_df<type_die> t)
 		ostringstream array_prefix;
 		opt<Dwarf_Unsigned> element_count = array_t->element_count();
 		array_prefix << "__ARR" << (element_count ? *element_count : 0) << "_";
-		n = make_pair(summary_string.str(), array_prefix.str() + key_from_type(array_t->get_type()).second);
+		return make_pair(summary_string, array_prefix.str() + key_from_type(array_t->get_type()).second);
 	}
 	else // DW_TAG_pointer_type and friends
 	{
-		auto t_as_type_chain = t.as_a<type_chain_die>();
-		iterator_df<type_die> opt_target_type;
-		if (t_as_type_chain != iterator_base::END)
-		{
-			opt_target_type = t_as_type_chain->get_type();
-			// concretify if we got something
-			if (opt_target_type != iterator_base::END) opt_target_type = opt_target_type->get_concrete_type();
-		}
-		// extract the name from what we got, if anything
-		string opt_target_type_name;
-		if (opt_target_type == iterator_base::END) opt_target_type_name = "void";
-		else
-		{
-			opt_target_type_name = opt_target_type.name_here() ? 
-				*opt_target_type.name_here() 
-			: offset_to_string(opt_target_type->get_offset());
-		}
-
 		/* The defining header file for a pointer type is 
 		 * the header file of the ultimate pointee. */
 		int levels_of_indirection = 0;
 		ostringstream indirection_prefix;
-		iterator_df<type_die> ultimate_pointee_type = t->get_concrete_type(); // initially
-		iterator_df<address_holding_type_die> address_holder;
-		do
+		iterator_df<type_die> working_t = t->get_concrete_type(); // initially
+		while (working_t && working_t.is_a<address_holding_type_die>())
 		{
-			if (ultimate_pointee_type.is_a<address_holding_type_die>()) 
+			++levels_of_indirection;
+			switch (working_t.tag_here())
 			{
-				address_holder = ultimate_pointee_type;
-				++levels_of_indirection;
-				switch (ultimate_pointee_type.tag_here())
-				{
-					case DW_TAG_pointer_type: 
-						indirection_prefix << "__PTR_"; break;
-					case DW_TAG_reference_type:
-						indirection_prefix << "__REF_"; break;
-					case DW_TAG_rvalue_reference_type:
-						indirection_prefix << "__RR_"; break;
-					default:
-						assert(false);
-				}
-				ultimate_pointee_type = address_holder->get_type();
+				case DW_TAG_pointer_type: 
+					indirection_prefix << "__PTR_"; break;
+				case DW_TAG_reference_type:
+					indirection_prefix << "__REF_"; break;
+				case DW_TAG_rvalue_reference_type:
+					indirection_prefix << "__RR_"; break;
+				default:
+					assert(false);
+			}
+			
+			// try moving on to the next in the chain
+			if (working_t.is_a<address_holding_type_die>()) 
+			{
+				working_t = working_t.as_a<address_holding_type_die>()->get_type();
 				// concretify if we got something
-				if (ultimate_pointee_type != iterator_base::END)
+				if (working_t)
 				{
-					ultimate_pointee_type = ultimate_pointee_type->get_concrete_type();
+					working_t = working_t->get_concrete_type();
 				}
-			} else address_holder = iterator_base::END;
-		} while (address_holder != iterator_base::END);
+			}
+		}
 		assert(levels_of_indirection >= 1);
 		
 		string defining_header;
-		if (ultimate_pointee_type == iterator_base::END)
+		if (!working_t)
 		{
-			// we have the "void" type, possibly indirected over multiple levels
+			// we have the "void" type, indirected over one or more levels
 			defining_header = "";
 		}
 		else 
 		{
 			defining_header = 
-			 (ultimate_pointee_type->get_decl_file() && *ultimate_pointee_type->get_decl_file() != 0) 
-			   ? ultimate_pointee_type.enclosing_cu()->source_file_name(
-			      *ultimate_pointee_type->get_decl_file()) 
+			 (working_t->get_decl_file() && *working_t->get_decl_file() != 0) 
+			   ? working_t.enclosing_cu()->source_file_name(
+			      *working_t->get_decl_file()) 
 			   : "";
 		}
-
-		string target_typename_to_use = opt_target_type ? key_from_type(opt_target_type).second : "void";
 		
-		ostringstream os(std::ios::out | std::ios::binary);
-		std::ostream_iterator<char, char> oi(os);
-		
-		// here we are translating a dumpallocs-style type descriptor name...
-		// ... into a uniqtypes-style name. BUT WHY? 
-		//regex_replace(oi, s.begin(), s.end(),
-		//	regex("(\\^)"), "(__PTR_)", 
-		//	match_default | format_all);
-		//assert(os.str() != "char"); // ... for example
-		
-		os << indirection_prefix.str() << target_typename_to_use;
-		
-		/* we no longer use the defining_header -- use instead
-		 * the type summary code */
-		ostringstream summary_string;
-		auto code = type_summary_code(t);
-		summary_string << std::hex << std::setfill('0') << std::setw(2 * sizeof code) << code << std::dec;
-		
-		n = make_pair(summary_string.str(), os.str());
+		ostringstream os;
+		os << indirection_prefix.str() << (!working_t ? "void" : key_from_type(working_t).second);
+		return make_pair(summary_string, os.str());
 	}
 	
-	return n;
+	assert(false); // should have returned by now
 }
 
 iterator_df<type_die>
@@ -255,11 +243,17 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 	using lib::Dwarf_Unsigned;
 	using lib::Dwarf_Half;
 	using namespace dwarf::core;
-	 
+	
+	if (!t)
+	{
+		// we got void
+		return 0;
+	}
+	
 	auto concrete_t = t->get_concrete_type();
 	if (!concrete_t)
 	{
-		// we got void
+		// we got a typedef of void
 		return 0;
 	}
 	
@@ -267,9 +261,19 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 	{
 		unsigned val;
 		
+		void zero_check()
+		{
+			if (val == 0)
+			{
+				cerr << "Warning: output_word value hit zero again." << endl;
+				val = (unsigned) -1;
+			}
+		}
+		
 		output_word_t& operator<<(unsigned arg) 
 		{
 			val = rotate_left(val, 8) ^ arg;
+			zero_check();
 			return *this;
 		}
 		output_word_t& operator<<(const string& s) 
@@ -278,6 +282,7 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 			{
 				*this << static_cast<unsigned>(*i);
 			}
+			zero_check();
 			return *this;
 		}
 		output_word_t() : val(0) {}
@@ -350,12 +355,9 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 	}
 	else if (concrete_t.is_a<address_holding_type_die>())
 	{
-		/* pay attention *only* to the pointer representation (not what it points to)
-		 * -- calculate_byte_size knows how to get the CU address size
-		 * -- we should use DW_ATTR_address_class */
-		// FIXME: actually, why do we not want to pay attention to what it 
-		// points to, i.e. its contract? We wouldn't necessarily be baking
-		// in any nominality.
+		/* NOTE: actually, we *do* want to pay attention to what the pointer points to, 
+		 * i.e. its contract. BUT there's a problem: recursive data types! For now, we
+		 * use a giant HACK: if we're a pointer-to-member, use only the name. */
 		auto ptr_t = concrete_t.as_a<core::address_holding_type_die>();
 		unsigned ptr_size = *ptr_t->calculate_byte_size();
 		unsigned addr_class = ptr_t->get_address_class() ? *ptr_t->get_address_class() : 0;
@@ -365,12 +367,26 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 			{
 				default:
 					assert(false); // nobody seems to use this feature so far
+				/* NOTE: There is also something called DWARF Pointer-Encoding (PEs).
+				   This is a DWARF representation issue, used in frame info, and is not 
+				   something we care about. */
 			}
 		}
-		output_word << tag << ptr_size << addr_class;
-		/* FIXME: There is also something called DWARF Pointer-Encoding (PEs).
-		   They only seem to exist in exception handling and unwind tables, though. 
-		   I don't think the quite do what we care about. */
+		auto target_t = ptr_t->get_type();
+		if (target_t.is_real_die_position()) target_t = target_t->get_concrete_type();
+		unsigned target_code;
+		if (target_t.is_real_die_position() && target_t.is_a<with_data_members_die>())
+		{
+			output_word_t tmp_output_word;
+			// add in the name only
+			if (target_t.name_here())
+			{
+				tmp_output_word << *target_t.name_here();
+			} else tmp_output_word << target_t.offset_here();
+
+			target_code = tmp_output_word.val;
+		} else target_code = type_summary_code(target_t);
+		output_word << tag << ptr_size << addr_class << target_code;
 	}
 	else if (concrete_t.is_a<with_data_members_die>())
 	{

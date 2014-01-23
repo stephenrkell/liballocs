@@ -28,6 +28,8 @@ using std::dynamic_pointer_cast;
 using boost::optional;
 using std::ostringstream;
 using std::set;
+using std::pair;
+using std::make_pair;
 using namespace dwarf;
 //using boost::filesystem::path;
 using dwarf::core::iterator_base;
@@ -43,6 +45,8 @@ using dwarf::core::with_dynamic_location_die;
 using dwarf::core::address_holding_type_die;
 using dwarf::core::array_type_die;
 using dwarf::core::type_chain_die;
+using dwarf::core::subroutine_type_die;
+using dwarf::core::formal_parameter_die;
 
 using dwarf::lib::Dwarf_Off;
 
@@ -56,9 +60,14 @@ using boost::format_all;
 
 uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 {
-	if (t != t->get_concrete_type()) return make_pair("", ""); // only add concretes
+	auto result = add_type_if_absent(t, r);
+	return result.second;
+}
+pair<bool, uniqued_name> add_type_if_absent(iterator_df<type_die> t, master_relation_t& r)
+{
+	if (t != t->get_concrete_type()) return make_pair(false, make_pair("", "")); // only add concretes
 	
-	if (t == iterator_base::END) return make_pair("", "");
+	if (t == iterator_base::END) return make_pair(false, make_pair("", ""));
 	
 	/* If it's a base type, we might not have a decl_file, */
 	if (!t->get_decl_file() || *t->get_decl_file() == 0)
@@ -74,7 +83,7 @@ uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 			//if (t.name_here()) cerr << t.name_here();
 			//else cerr << "(unknown, offset: " << std::hex << t.offset_here() << std::dec << ")";
 			/*cerr */ << " because no file is recorded for its definition." << endl;
-			return make_pair("", "");
+			return make_pair(false, make_pair("", ""));
 		}
 		// else it's a base type, so we go with the blank type
 		// FIXME: should canonicalise base types here
@@ -83,45 +92,75 @@ uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 	uniqued_name n = key_from_type(t);
 	
 	smatch m;
-	if (r.find(n) != r.end()
+	bool already_present = r.find(n) != r.end();
+	if (already_present
 		&& t.tag_here() != DW_TAG_base_type
 		&& !regex_match(n.second, m, regex(".*__(PTR|REF|RR|ARR[0-9]+)_.*")))
 	{
 		cerr << "warning: non-base non-pointer non-array type named " << n.second << " already exists!" << endl;
 	}
 	r[n] = t;
+	return make_pair(!already_present, n);
+}
+
+pair<bool, uniqued_name> transitively_add_type(iterator_df<type_die> t, master_relation_t& r)
+{
+	auto result = add_type_if_absent(t, r);
+	/* Now recurse on referenced type, IFF this was newly added */
+	if (!result.first) return result;
+	if (t.is_a<with_data_members_die>()) 
+	{
+		auto member_children = t.as_a<with_data_members_die>().children().subseq_of<member_die>();
+		for (auto i_child = member_children.first;
+			i_child != member_children.second; ++i_child)
+		{
+			// skip "declared", "external" members, i.e. static member vars
+			if (i_child->get_declaration() && *i_child->get_declaration()
+			 && i_child->get_external() && *i_child->get_external())
+			{
+				continue;
+			}
+
+			assert(i_child->get_type() != iterator_base::END);
+			if (i_child->get_type()->get_concrete_type() == t) 
+			{
+				cout << "Found directly recursive data type: "
+					<< t
+					<< " contains member "
+					<< i_child.base().base()
+					<< " of type "
+					<< i_child->get_type()->get_concrete_type()
+					<< " which equals " 
+					<< t
+					<< endl;
+				assert(false);
+			}
+			transitively_add_type(i_child->get_type()->get_concrete_type(), r);
+		}
+	}
+	else if (t.is_a<array_type_die>())
+	{
+		auto opt_el_t = t.as_a<array_type_die>()->ultimate_element_type();
+		if (opt_el_t) transitively_add_type(opt_el_t->get_concrete_type(), r);
+	}
+	else if (t.is_a<subroutine_type_die>())
+	{
+		auto opt_ret_t = t.as_a<subroutine_type_die>()->get_type();
+		if (opt_ret_t) transitively_add_type(opt_ret_t, r);
+		
+		auto member_fps = t.as_a<subroutine_type_die>().children().subseq_of<formal_parameter_die>();
+		for (auto i_fp = member_fps.first; i_fp != member_fps.second; ++i_fp)
+		{
+			transitively_add_type(i_fp->get_type(), r);
+		}
+	}
+	else if (t.is_a<address_holding_type_die>())
+	{
+		auto opt_target_t = t.as_a<address_holding_type_die>()->get_type();
+		if (opt_target_t) transitively_add_type(opt_target_t, r);
+	}
 	
-// 	/* Now recurse on members */
-// 	if (!t.is_a<with_data_members_die>()) return n;
-// 	auto member_children = t.as_a<with_data_members_die>().children().subseq_of<member_die>();
-// 	for (auto i_child = member_children.first;
-// 		i_child != member_children.second; ++i_child)
-// 	{
-// 		// skip "declared", "external" members, i.e. static member vars
-// 		if (i_child->get_declaration() && *i_child->get_declaration()
-// 		 && i_child->get_external() && *i_child->get_external())
-// 		{
-// 			continue;
-// 		}
-// 		
-// 		assert(i_child->get_type() != iterator_base::END);
-// 		if (i_child->get_type()->get_concrete_type() == t) 
-// 		{
-// 			cout << "Found directly recursive data type: "
-// 				<< t
-// 				<< " contains member "
-// 				<< i_child.base().base()
-// 				<< " of type "
-// 				<< i_child->get_type()->get_concrete_type()
-// 				<< " which equals " 
-// 				<< t
-// 				<< endl;
-// 			assert(false);
-// 		}
-// 		recursively_add_type(i_child->get_type(), r);
-// 	}
-	
-	return n;
+	return make_pair(true, result.second);
 }
 
 void make_exhaustive_master_relation(master_relation_t& rel, 
@@ -173,8 +212,8 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	{
 		/* DWARF doesn't reify void, but we do. So output a rec for void first of all. */
 		out << "\n/* uniqtype for void */\n";
-		out << "\n__asm__(\".pushsection .__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat\"); \n";
 		out << "struct rec " << mangle_typename(make_pair(string(""), string("void")))
+			<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
 			<< " = {\n\t\"" << "void" << "\",\n\t"
 			<< "0" << " /* pos_maxoff (void) */,\n\t"
 			<< "0" << " /* neg_maxoff (void) */,\n\t"
@@ -182,7 +221,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			<< "0" << " /* is_array (void) */,\n\t"
 			<< "0" << " /* array_len (void) */,\n\t"
 			<< "/* contained */ { }\n};\n";
-		out << "\n__asm__(\".popsection\"); \n";
 	}
 	
 	for (auto i_pair = r.begin(); i_pair != r.end(); ++i_pair)
@@ -236,8 +274,8 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			else array_len = 0;
 		} else array_len = 0;
 		string mangled_name = mangle_typename(i_vert->first);
-		out << "\n__asm__(\".pushsection ." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat\"); \n";
 		out << "struct rec " << mangle_typename(i_vert->first)
+			<< " __attribute__((section (\"" << ".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
 			<< " = {\n\t\"" << i_vert->first.second << "\",\n\t"
 			<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
 			<< "0 /* neg_maxoff */,\n\t"
@@ -312,7 +350,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		
 		out << "\n\t}"; /* end contained */
 		out << "\n};\n"; /* end struct rec */
-		out << "\n__asm__(\".popsection\"); \n";
 	}
 
 }

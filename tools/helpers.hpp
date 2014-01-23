@@ -4,6 +4,7 @@
 #include <sstream>
 #include <fstream>
 #include <memory>
+#include <cstdint>
 #include <dwarfpp/lib.hpp>
 #include <srk31/rotate.hpp>
 #include <cstdint>

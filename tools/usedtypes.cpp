@@ -86,7 +86,7 @@ int main(int argc, char **argv)
                    so just use two dots. Will need to change this if we start to include function
                    argument types in function typestrings. *)
                 let ptr_and_fun_replaced = Str.global_replace (Str.regexp "..=>") "__FUN_" ptr_replaced in
-                "__uniqtype_" ^ (if String.length header_insert > 0 then string_of_int(String.length header_insert) else "") ^ header_insert ^ "_" ^ ptr_and_fun_replaced
+                "__uniqtype_" ^ "" ^ "_" ^ ptr_and_fun_replaced
               end in
               let symname = symnameFromString typeStr concreteType in
 	 
@@ -158,34 +158,34 @@ int main(int argc, char **argv)
 
 			types_by_uniqtype_name.insert(make_pair(symname, concrete_t));
 			
-			/* Also add aliases. */
-			for (const char **const *p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
-			{
-				for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
-				{
-					if (uniqtype_name_pair.second == string(*p_el))
-					{
-						/* We've matched an element in the equivalence class, so
-						 * - add one multimap entry for every *other* item; 
-						 * - quit the loop. */
-						 
-						for (const char **p_other_el = p_equiv[0]; *p_other_el != NULL; ++p_other_el)
-						{
-							if (string(*p_other_el) == string(*p_el)) continue;
-							
-							types_by_uniqtype_name.insert(
-								make_pair(
-									mangle_typename(make_pair("", string(*p_other_el))),
-									concrete_t
-								)
-							);
-						}
-						
-						// quit this loop
-						break;
-					}
-				}
-			}
+// 			/* Also add aliases? NO. Our CIL shouldn't generate these. */
+// 			for (const char **const *p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
+// 			{
+// 				for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
+// 				{
+// 					if (uniqtype_name_pair.second == string(*p_el))
+// 					{
+// 						/* We've matched an element in the equivalence class, so
+// 						 * - add one multimap entry for every *other* item; 
+// 						 * - quit the loop. */
+// 						 
+// 						for (const char **p_other_el = p_equiv[0]; *p_other_el != NULL; ++p_other_el)
+// 						{
+// 							if (string(*p_other_el) == string(*p_el)) continue;
+// 							
+// 							types_by_uniqtype_name.insert(
+// 								make_pair(
+// 									mangle_typename(make_pair("", string(*p_other_el))),
+// 									concrete_t
+// 								)
+// 							);
+// 						}
+// 						
+// 						// quit this loop
+// 						break;
+// 					}
+// 				}
+// 			}
 		}
 	}
 	
@@ -199,6 +199,7 @@ int main(int argc, char **argv)
 	size_t line_len;
 	/* Now popen our input, read lines and match them against the map we just built. */
 	master_relation_t master_relation;
+	multimap<string, string> aliases_needed;
 	while (ret = getline(&line, &line_len, in), ret > 0)
 	{
 		string key(line);
@@ -211,19 +212,75 @@ int main(int argc, char **argv)
 		{
 			case 0:
 				cerr << "Found no match for " << key << endl;
+				/* HACK around CIL brokenness: if we contain the string 
+				 *     "__FUN_FROM___FUN_TO_" 
+				 * then match against
+				 *     "__FUN_FROM___VA___FUN_TO_" 
+				 * since CIL typesigs don't distinguish between 
+				 * "no specified parameters"        e.g. int f() 
+				 * and "specified as no parameters" e.g. int f(void)
+				  */
+				{
+					string search_expr = "__FUN_FROM___FUN_TO_";
+					string replace_expr = "__FUN_FROM___VA___FUN_TO_";
+					string::size_type pos = key.find(search_expr);
+					if (pos != string::npos)
+					{
+						string substitute_key = key;
+						substitute_key.replace(pos, search_expr.size(), replace_expr);
+						
+						auto found_retry_pair = types_by_uniqtype_name.equal_range(substitute_key);
+						if (found_retry_pair.first != found_retry_pair.second)
+						{
+							cerr << "Working around CIL bug by substituting " << substitute_key << endl;
+							auto name_pair = transitively_add_type(found_retry_pair.first->second, master_relation).second;
+							
+							substitute_key.replace(0, string("__uniqtype_").size(), "__uniqtype_" + name_pair.first);
+							string orig_key_symname = key;
+							orig_key_symname.replace(0, string("__uniqtype_").size(), "__uniqtype_" + name_pair.first);
+							
+							aliases_needed.insert(make_pair(orig_key_symname, substitute_key));
+							break;
+						}
+					}
+				}
+				cerr << "Defined are: ";
+				for (auto i_tname = types_by_uniqtype_name.begin(); i_tname != types_by_uniqtype_name.end(); ++i_tname)
+				{
+					if (i_tname != types_by_uniqtype_name.begin()) cerr << ", ";
+					cerr << i_tname->first;
+				}
+				cerr << endl;
+				exit(1);
 				break;
 			case 1: 
 				// cout << "Found match for " << key << ": " << found_pair.first->second << endl;
-				add_type(found_pair.first->second, master_relation);
+				transitively_add_type(found_pair.first->second, master_relation);
 				break;
 			
 			default: 
-				cerr << "Found multiple matches for " << key << ": " << endl;
+				cerr << "Found multiple matches (" << found_count << ") for " << key << ": " << endl;
+				auto first_found = found_pair.first;
+				multimap<unsigned, decltype(found_pair.first)> by_code;
 				while (found_pair.first != found_pair.second)
 				{
-					cout << "\t" << (found_pair.first++)->second << endl;
+					auto code = type_summary_code(found_pair.first->second);
+					by_code.insert(make_pair(code, found_pair.first));
+					cerr << "\t" << (found_pair.first++)->second << " (code: " << code << ")" << endl;
 				}
-				break;
+				/* Do they all seem to be identical? */
+				auto range_equal_to_first = by_code.equal_range(type_summary_code(first_found->second));
+				if (srk31::count(range_equal_to_first.first, range_equal_to_first.second))
+				{
+					cerr << "They all seem to be identical (code " << type_summary_code(first_found->second) 
+						<< ") so proceeding." << endl;
+					transitively_add_type(first_found->second, master_relation);
+				}
+				else 
+				{
+					cerr << "Not identical, so not proceeding." << endl;
+					exit(1);
+				}
 		}
 	
 	continue_loop:
@@ -238,6 +295,13 @@ int main(int argc, char **argv)
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	write_master_relation(master_relation, r, cout, cerr, false /* emit_void */, 
 		names_emitted, types_by_name);
+	
+	// also write the aliases, for CIL workaround;
+	for (auto i_pair = aliases_needed.begin(); i_pair != aliases_needed.end(); ++i_pair)
+	{
+		cout << "extern struct rec " << i_pair->first << " __attribute__((alias(\"" << i_pair->second << "\")));"
+			<< endl;
+	}
 
 	return 0;
 }

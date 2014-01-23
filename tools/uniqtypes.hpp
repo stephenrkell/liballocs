@@ -19,6 +19,8 @@ struct master_relation_t : public std::map< uniqued_name, dwarf::core::iterator_
 };
 
 uniqued_name add_type(dwarf::core::iterator_df<dwarf::core::type_die> t, master_relation_t& r);
+std::pair<bool, uniqued_name> add_type_if_absent(dwarf::core::iterator_df<dwarf::core::type_die> t, master_relation_t& r);
+std::pair<bool, uniqued_name> transitively_add_type(dwarf::core::iterator_df<dwarf::core::type_die> t, master_relation_t& r);
 
 void make_exhaustive_master_relation(master_relation_t& r, 
 	dwarf::core::iterator_df<> begin, 
