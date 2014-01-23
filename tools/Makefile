@@ -7,15 +7,14 @@ LDLIBS += -lallocs -lcxxgen -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -
 
 CPP_SRC := $(wildcard *.cpp)
 
-default: liballocs.a dumptypes allocsites
+default: liballocs.a dumptypes allocsites usedtypes
 
 .PHONY: clean
 clean:
 	rm -f *.o .*.d dumptypes allocsites liballocs.a
 
 CPP_DEPS := $(patsubst %.cpp,.%.d,$(CPP_SRC))
-
-DEPS :=$(CPP_DEPS)
+DEPS := $(CPP_DEPS)
 
 $(CPP_DEPS): .%.d : %.cpp
 	$(CXX) -MM $(CXXFLAGS) "$<"  > "$@"
@@ -34,3 +33,4 @@ liballocs.a: helpers.o uniqtypes.o
 
 dumptypes: dumptypes.cpp liballocs.a
 allocsites: allocsites.cpp liballocs.a
+usedtypes: usedtypes.cpp liballocs.a
