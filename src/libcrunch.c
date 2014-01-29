@@ -9,17 +9,28 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <link.h>
 #include <libunwind.h>
 #include "libcrunch_private.h"
 
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
+static uintptr_t page_size;
+static uintptr_t page_mask;
 
 _Bool __libcrunch_is_initialized;
 allocsmt_entry_type *__libcrunch_allocsmt;
 void *__addrmap_executable_end_addr;
 
+#define BLACKLIST_SIZE 8
+struct blacklist_ent 
+{
+	uintptr_t bits; 
+	uintptr_t mask; 
+	void *actual_start;
+	size_t actual_length;
+} blacklist[BLACKLIST_SIZE];
 static _Bool check_blacklist(const void *obj);
 static void consider_blacklisting(const void *obj);
 
@@ -315,12 +326,153 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 }
 static _Bool check_blacklist(const void *obj)
 {
+#ifndef NO_BLACKLIST
+	for (struct blacklist_ent *ent = &blacklist[0];
+		ent < &blacklist[BLACKLIST_SIZE]; ++ent)
+	{
+		if (!ent->mask) continue;
+		if ((((uintptr_t) obj) & ent->mask) == ent->bits) return 1;
+	}
+#endif
 	return 0;
 }
 static void consider_blacklisting(const void *obj)
 {
+#ifndef NO_BLACKLIST
+	assert(!check_blacklist(obj));
+	// is the addr in any mapped dynamic obj?
+	Dl_info info = { NULL /* don't care about other fields */ };
+	struct link_map *link_map;
+	int ret = dladdr1(obj, &info, (void**) &link_map, RTLD_DL_LINKMAP);
+	if (ret != 0 && info.dli_fname != NULL) /* zero means error, i.e. not a dynamic obj */ 
+	{
+		return; // couldn't be sure it's *not* in a mapped object
+	}
 	
+	// PROBLEM: how do we find out its size?
+	// HACK: just blacklist a page at a time?
+	
+	// if it's not in any shared obj, then we might want to blacklist it
+	// can we extend an existing blacklist slot?
+	struct blacklist_ent *slot = NULL;
+	for (struct blacklist_ent *slot_to_extend = &blacklist[0];
+		slot_to_extend < &blacklist[BLACKLIST_SIZE]; ++slot_to_extend)
+	{
+		if ((uintptr_t) slot_to_extend->actual_start + slot_to_extend->actual_length
+			 == (((uintptr_t) obj) & page_mask))
+		{
+			// post-extend this one
+			slot_to_extend->actual_length += page_size;
+			slot = slot_to_extend;
+			break;
+		}
+		else if ((uintptr_t) slot_to_extend->actual_start - page_size == (((uintptr_t) obj) & page_mask))
+		{
+			// pre-extend this one
+			slot_to_extend->actual_start -= page_size;
+			slot_to_extend->actual_length += page_size;
+			slot = slot_to_extend;
+			break;
+		}
+	}
+	if (slot == NULL)
+	{
+		// look for a free slot
+		struct blacklist_ent *free_slot = &blacklist[0];
+		while (free_slot < &blacklist[BLACKLIST_SIZE]
+		 && free_slot->mask != 0) ++free_slot;
+		if (free_slot == &blacklist[BLACKLIST_SIZE]) return;
+		else 
+		{
+			slot = free_slot;
+			slot->actual_start = (void *)(((uintptr_t) obj) & page_mask);
+			slot->actual_length = page_size;
+		}
+	}
+	
+	// we just added or created a slot; update its bits
+	uintptr_t bits_in_common = ~((uintptr_t) slot->actual_start ^ ((uintptr_t) slot->actual_start + slot->actual_length - 1));
+	// which bits are common *throughout* the range of values?
+	// we need to find the highest-bit-unset
+	uintptr_t highest_bit_not_in_common = sizeof (uintptr_t) * 8 - 1;
+	while ((bits_in_common & (1ul << highest_bit_not_in_common))) 
+	{
+		assert(highest_bit_not_in_common != 0);
+		--highest_bit_not_in_common;
+	}
+
+	const uintptr_t minimum_mask = ~((1ul << highest_bit_not_in_common) - 1);
+	const uintptr_t minimum_bits = ((uintptr_t) slot->actual_start) & minimum_mask;
+	
+	uintptr_t bits = minimum_bits;
+	uintptr_t mask = minimum_mask;
+	
+	// grow the mask until 
+	//   the bits/mask-defined blacklisted region starts no earlier than the actual region
+	// AND the region ends no later than the actual region
+	while ((bits & mask) < (uintptr_t) slot->actual_start
+	    // || (~mask + 1) > slot->actual_length
+		|| (bits & mask) + (~mask + 1) > (uintptr_t) slot->actual_start + slot->actual_length)
+	{
+		mask >>= 1;                            // shift the mask right
+		mask |= 1ul<<sizeof (uintptr_t) * 8 - 1; // set the top bit of the mask
+		bits = ((uintptr_t) slot->actual_start) & mask;
+		
+		assert(~mask + 1 >= page_size); // the smallest mask we want is one page
+	}
+	
+	assert((bits | mask) >= (uintptr_t) slot->actual_start);
+	assert(bits | ~mask <= (uintptr_t) slot->actual_start + slot->actual_length);
+	
+	slot->mask = mask;
+	slot->bits = bits;
+
+	
+	/* FIXME: sometimes by extending an entry, we reduce its effective range, 
+	 * i.e. the number of addresses covered by its mask. 
+	 * In that case, we shouldn't bother extending it; we should create
+	 * a new one. */
+	
+	
+	
+	// HMM. beginning to think that building a prefix trie of the address space 
+	// is a good idea. 
+	
+	// PROBLEM: does this mean rewriting
+	// get_object_memory_kind() into something slower?
+	
+	// It does mean rewriting it -- it will still work, but it is limited:
+	// 
+	// - can't tell us about other pthreads' stacks
+	// - can't distinguish tracked from untracked libraries
+	// - can't distinguish heap from 
+	// - BUT we can use it to "fast-path" certain cases:
+	//     current thread, data seg static, sbrk heap 
+	
+	/*
+	    struct prefix_trie_node {
+	        prefix_trie_node *next, prev;
+	        unsigned long bits;
+	        unsigned nbits:6;
+	        unsigned kind:2; // UNKNOWN, STACK, HEAP, STATIC
+	        unsigned first_child:48;  // or stack block ptr
+	    };
+	    
+	
+	 */
+
+	// WHAT do we need to hook?
+	// mmap, munmap, mremap
+	// dlopen, dlclose      -- these will just call mmap; but do they do so interposably?
+	// sbrk
+	// pthread_create() etc.? or will just use mmap()?
+	// clone, fork, vfork   because these unmap non-MAP_SHARED mappings
+	
+	// just blacklist a page at a time for now
+#endif
 }
+
+static void *main_bp; // beginning of main's stack frame
 
 const struct rec *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
 /* counters */
@@ -418,6 +570,75 @@ int __libcrunch_global_init(void)
 	assert(executable_handle != NULL);
 	__addrmap_executable_end_addr = dlsym(executable_handle, "_end");
 	assert(__addrmap_executable_end_addr != 0);
+	
+	// grab the start of main's stack frame -- we'll use this 
+	// when walking the stack
+	unw_cursor_t cursor;
+	unw_context_t unw_context;
+	int ret = unw_getcontext(&unw_context); assert(ret == 0);
+	ret = unw_init_local(&cursor, &unw_context); assert(ret == 0);
+	char buf[8];
+	unw_word_t ip;
+	unw_word_t sp;
+	unw_word_t bp;
+	_Bool have_bp;
+	_Bool have_name;
+	assert(ret == 0);
+	do
+	{
+		// get bp, sp, ip and proc_name
+		ret = unw_get_proc_name(&cursor, buf, sizeof buf, NULL); have_name = (ret == 0 || ret == -UNW_ENOMEM);
+		buf[sizeof buf - 1] = '\0';
+		// if (have_name) fprintf(stderr, "Saw frame %s\n", buf);
+
+		ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(ret == 0);
+		ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(ret == 0);
+		ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); have_bp = (ret == 0);
+	} while ((!have_name || 0 != strcmp(buf, "main")) && 
+		(ret = unw_step(&cursor)) > 0);
+
+	// have we found main?
+	if (have_name && 0 == strcmp(buf, "main"))
+	{
+		// did we get its bp?
+		if (!have_bp)
+		{
+			// try stepping once more
+			ret = unw_step(&cursor);
+			if (ret == 0)
+			{
+				ret = unw_get_reg(&cursor, UNW_REG_SP, &bp);
+			}
+
+			if (ret == 0) have_bp = 1;
+		}
+
+		if (have_bp)
+		{
+			main_bp = (void*) (intptr_t) bp;
+		}
+		else
+		{
+			// underapproximate bp as the sp
+			main_bp = (void*) (intptr_t) sp;
+		}
+	}
+	else 
+	{
+		// underapproximate bp as our current sp!
+		fprintf(stderr, "Warning: using egregious approximation for bp of main().\n");
+		unw_word_t our_sp;
+	#ifdef UNW_TARGET_X86
+		__asm__ ("movl %%esp, %0\n" :"=r"(our_sp));
+	#else // assume X86_64 for now
+		__asm__("movq %%rsp, %0\n" : "=r"(our_sp));
+	#endif
+		main_bp = (void*) (intptr_t) our_sp;
+	}
+	assert(main_bp != 0);
+	
+	page_size = (uintptr_t) sysconf(_SC_PAGE_SIZE);
+	page_mask = ~((uintptr_t) sysconf(_SC_PAGE_SIZE) - 1);
 	
 	__libcrunch_is_initialized = 1;
 	fprintf(stderr, "libcrunch successfully initialized\n");
@@ -568,23 +789,15 @@ int __is_a_internal(const void *obj, const void *arg)
 				unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); 
 				_Bool got_bp = (unw_ret == 0);
 				/* Also do a test about whether we're in main, above which we want to
-				 * tolerate unwind failures more gracefully. HACK: for speed, assume 
-				 * that the main frame's bp is within 16KB of top-of-stack,
-				 * or if we didn't get bp, sp is within 32KB of top-of-stack. 
-				 * This avoids the expensive unw_get_proc_name() / strcmp() call
-				 * in the common case.
+				 * tolerate unwind failures more gracefully.
 				 */
 				char proc_name_buf[100];
 				unw_word_t byte_offset_from_proc_start;
 				at_or_above_main |= 
 					(
-						(got_bp && bp > BEGINNING_OF_STACK - 0x4000)
-					 || (sp > BEGINNING_OF_STACK - 0x8000)
-					) 
-					&& 
-					(unw_ret = unw_get_proc_name(&cursor, proc_name_buf, sizeof proc_name_buf, &byte_offset_from_proc_start), 
-					 assert(unw_ret == 0),
-					 strcmp("main", proc_name_buf) == 0);
+						(got_bp && bp >= (intptr_t) main_bp)
+					 || (sp >= (intptr_t) main_bp) // NOTE: this misses the in-main case
+					);
 
 				/* Now get the sp of the next higher stack frame, 
 				 * i.e. the bp of the current frame. NOTE: we're still
