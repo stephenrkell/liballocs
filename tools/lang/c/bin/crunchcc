@@ -19,7 +19,7 @@ def isLinkCommand():
         arg = sys.argv[argnum]
         if arg.startswith('-l'):
             seenLib = True
-        if arg == '-shared':
+        if arg == '-shared' or arg == '-G':
             return True
         if arg == '-c':
             return False
@@ -159,17 +159,35 @@ def main():
                 linkArgs += ["-Wl," + fnName]
         # we need to export-dynamic, s.t. __is_a is linked from libcrunch
         linkArgs += ["-Wl,--export-dynamic"]
-        # if we're building an executable, 
-        # append the magic objects
-        if not "-c" in passedThroughArgs and not "-shared" in passedThroughArgs:
+        # if we're building an executable, append the magic objects
+        # -- and link with the noop *shared* library, to be interposable
+        if not "-shared" in passedThroughArgs \
+            and not "-G" in passedThroughArgs:
+            
             linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../lib/stubs.o"]
             # HACK: fix this once I sort out linking
             linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
             linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
-            linkArgs += ["-lcrunch","-ldl"]
-        # else we leave the shared library with 
-        # dangling dependencies on __wrap_
-        # and unused __real_
+            if "LIBCRUNCH_USE_PRELOAD" in os.environ and os.environ["LIBCRUNCH_USE_PRELOAD"] == "no":
+                linkArgs += ["-lcrunch"]
+            else: # FIXME: weak linkage one day
+                linkArgs += ["-lcrunch_noop"]
+        else:
+            # We're building a shared library, so simply add libcrunch.o
+            # only link directly if we're disabling the preload approach
+            if "LIBCRUNCH_USE_PRELOAD" in os.environ and os.environ["LIBCRUNCH_USE_PRELOAD"] == "no":
+                linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
+                linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
+                if "LIBCRUNCH_USE_PRELOAD" in os.environ and os.environ["LIBCRUNCH_USE_PRELOAD"] == "no":
+                    linkArgs += ["-lcrunch"]
+            else: # FIXME: weak linkage one day....
+                linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../lib/libcrunch_noop.o"]
+            # note: we leave the shared library with 
+            # dangling dependencies on __wrap_
+            # and unused __real_
+            
+        linkArgs += ["-ldl"]
+        
     else:
         passedThroughArgs = sys.argv[1:]
 
@@ -193,7 +211,6 @@ def main():
     # We did succeed, so we need to fix up the output binary's 
     # __uniqtype references to the actual binary-compatible type
     # definitions which the compiler generated.
-    # FIXME
     
     if not isLinkCommand():
         if outputFile:

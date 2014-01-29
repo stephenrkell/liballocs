@@ -2,10 +2,6 @@
 CFLAGS += -std=gnu99 -g -O0 -fPIC -I../include
 #CFLAGS += -DUSE_STARTUP_BRK
 
-# For maximum speed
-CFLAGS   += -DUSE_SHARED_LIBRARY_MIN_ADDRESS_HACK
-CXXFLAGS += -DUSE_SHARED_LIBRARY_MIN_ADDRESS_HACK
-
 C_SRC := $(wildcard *.c)
 
 # Don't use crunchcc to compile libcrunch!
@@ -14,7 +10,7 @@ ifeq ($(notdir $(CC)),crunchcc)
 export CC := cc
 endif
 
-default: libcrunch.so stubs.o
+default: libcrunch_preload.so libcrunch_noop.a stubs.o
 
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 
@@ -25,8 +21,18 @@ $(C_DEPS): .%.d : %.c
 
 -include $(DEPS)
 
+# FIXME: in preload case, can be clever with stubs?
+
+libcrunch_preload.so: libcrunch.o preload.o prefix_tree.o
+	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` -lheap_index_hooks
+
 libcrunch.so: libcrunch.o
 	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
+
+noop.o: CFLAGS += -fPIC 
+
+libcrunch_noop.so: noop.o
+	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS)
 
 # have to preload the hooks yourself if you want them to hook!
 

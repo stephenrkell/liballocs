@@ -16,6 +16,14 @@ static inline void __attribute__((gnu_inline)) __libcrunch_ensure_init(void);
 
 #include "libcrunch.h"
 
+/* We use this prefix trie to map the address space. */
+struct prefix_tree_node;
+void prefix_tree_add(void *base, size_t s, const char *filename);
+void prefix_tree_del(void *base, size_t s);
+void init_prefix_tree_from_maps(void);
+
+extern struct prefix_tree_node *__libcrunch_prefix_tree_head;
+
 /* Copied from dumptypes.cpp */
 struct rec
 {
