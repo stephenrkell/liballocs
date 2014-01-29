@@ -20,24 +20,34 @@ endif
 
 cases := $(wildcard [-a-z]*)
 
+ifneq ($(LIBCRUNCH_USE_PRELOAD),no)
+LIBCRUNCH := $(realpath $(dir $(THIS_MAKEFILE))/../lib/libcrunch_preload.so)
+else
 LIBCRUNCH := $(realpath $(dir $(THIS_MAKEFILE))/../lib/libcrunch.so)
+endif
 ifneq ($(MAKECMDGOALS),clean)
 ifeq ($(wildcard $(LIBCRUNCH)),)
-        $(error You must first build libcrunch and link it from ../lib)
+        $(error You must first build libcrunch{.so,_preload.so} and link them from ../lib)
 endif
 endif
 
+ifneq ($(LIBCRUNCH_USE_PRELOAD),no)
+PRELOAD := "$(LIBCRUNCH)"
+else
 LIBHEAP_INDEX_HOOKS ?= $(realpath $(dir $(THIS_MAKEFILE))/../../libpmirror.hg/lib/libheap_index_fast_hooks.so)
+# FIXME: do we really need to preload libcrunch in this case?
+PRELOAD := "$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)"
+endif
 
 run-%:
-	$(MAKE) -C "$*" "$*" && ( cd "$*" && LD_PRELOAD="$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)" ./$* ); \
+	$(MAKE) -C "$*" "$*" && ( cd "$*" && LD_PRELOAD="$(PRELOAD)" ./$* ); \
 
 cleanrun-%: 
 	$(MAKE) -C $* -f ../Makefile clean && \
 	$(MAKE) run-$*
 
 gdbrun-%: # run the test case with itself as input
-	$(MAKE) -C "$*" "$*" && ( cd "$*" && gdb --eval-command "set environment LD_PRELOAD=$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)" --args ./$* ./$* )
+	$(MAKE) -C "$*" "$*" && ( cd "$*" && gdb --eval-command "set environment LD_PRELOAD=$(PRELOAD)" --args ./$* ./$* )
 
 gdbcleanrun-%:
 	$(MAKE) -C $* -f ../Makefile clean && $(MAKE) gdbrun-$*
