@@ -10,7 +10,7 @@ ifeq ($(notdir $(CC)),crunchcc)
 export CC := cc
 endif
 
-default: libcrunch_preload.so libcrunch_noop.a stubs.o
+default: libcrunch_preload.so libcrunch_noop.so stubs.o
 
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 
@@ -24,7 +24,7 @@ $(C_DEPS): .%.d : %.c
 # FIXME: in preload case, can be clever with stubs?
 
 libcrunch_preload.so: libcrunch.o preload.o prefix_tree.o
-	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` -lheap_index_hooks
+	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -lheap_index_fast_hooks -Wl,--no-whole-archive -Wl,-Bdynamic 
 
 libcrunch.so: libcrunch.o
 	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
@@ -33,6 +33,9 @@ noop.o: CFLAGS += -fPIC
 
 libcrunch_noop.so: noop.o
 	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS)
+
+libcrunch_noop.o: noop.o
+	ln -s "$<" "$@"
 
 # have to preload the hooks yourself if you want them to hook!
 
