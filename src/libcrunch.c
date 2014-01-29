@@ -237,7 +237,7 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 	}
 
 	// debugging: check that we can look up the first entry, if we are non-empty
-	assert(!first_entry || 
+	assert(!first_entry || !first_entry->allocsite || 
 		allocsite_to_uniqtype(first_entry->allocsite) == first_entry->uniqtype);
 	
 	// always continue with further objects
@@ -290,7 +290,7 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 		}
 
 		// debugging: check that we can look up the first entry, if we are non-empty
-		assert(!first_frame_entry || 
+		assert(!first_frame_entry || !first_frame_entry->allocsite || 
 			vaddr_to_uniqtype(first_frame_entry->allocsite) == first_frame_entry->uniqtype);
 	}
 	
@@ -316,7 +316,7 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 		}
 
 		// debugging: check that we can look up the first entry, if we are non-empty
-		assert(!first_static_entry || 
+		assert(!first_static_entry || !first_static_entry->allocsite || 
 			static_addr_to_uniqtype(first_static_entry->allocsite, NULL) == first_static_entry->uniqtype);
 	}
 	
@@ -815,7 +815,11 @@ int __is_a_internal(const void *obj, const void *arg)
 					unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp); assert(unw_ret == 0);
 					// assert that for non-top-end frames, BP --> saved-SP relation holds
 					// FIXME: hard-codes calling convention info
-					if (got_bp) assert(at_or_above_main || higherframe_sp == bp + 2 * sizeof (void*));
+					if (got_bp && !at_or_above_main && higherframe_sp != bp + 2 * sizeof (void*))
+					{
+						warnx("Saw frame boundary with unusual sp/bp relation (higherframe_sp=%p, bp=%p != higherframe_sp + 2*sizeof(void*))", 
+							higherframe_sp, bp);
+					}
 					unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
 				}
 				/* NOTE that -UNW_EBADREG happens near the top of the stack where 
