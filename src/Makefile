@@ -1,5 +1,5 @@
 #CFLAGS += -std=gnu99 -g -O2 -fPIC
-CFLAGS += -std=gnu99 -g -O0 -fPIC -I../include
+CFLAGS += -std=gnu99 -g -O2 -fPIC -I../include
 #CFLAGS += -DUSE_STARTUP_BRK
 
 C_SRC := $(wildcard *.c)

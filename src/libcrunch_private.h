@@ -122,7 +122,6 @@ void __assert_fail(const char *assertion,
 	const char *file, unsigned int line, const char *function);
 void warnx(const char *fmt, ...);
 unsigned long malloc_usable_size (void *ptr);
-int strcmp(const char *, const char *);
 
 /* our own private assert */
 static inline void __libcrunch_private_assert(_Bool cond, const char *reason, 
