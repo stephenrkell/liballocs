@@ -368,6 +368,9 @@ int main(int argc, char **argv)
 					continue;
 				}
 				
+				/* vaddrs in this CU are relative to what addr? 
+				 * If we're an executable, they're absolute. 
+				 * If we're a shared library, */
 				auto opt_cu_base = i_subp.enclosing_cu()->get_low_pc();
 				Dwarf_Unsigned cu_base = opt_cu_base->addr;
 				
@@ -386,9 +389,11 @@ int main(int argc, char **argv)
 						i_subp_int != subp_intervals.end(); 
 						++i_subp_int)
 					{
+						/* NOTE: we do *not* adjust these by cu_base. This has already 
+						 * been done, by file_relative_intervals! */
 						our_interval = boost::icl::interval<Dwarf_Off>::right_open(
-							i_subp_int->first.lower() + cu_base,
-							i_subp_int->first.upper() + cu_base
+							i_subp_int->first.lower()/* + cu_base*/,
+							i_subp_int->first.upper()/* + cu_base*/
 						);
 						
 						cerr << "Borrowing vaddr ranges of " << *i_subp
@@ -409,6 +414,8 @@ int main(int argc, char **argv)
 				}
 				else /* we have nonzero lopc and/or hipc */
 				{
+					/* We *do* have to adjust these by cu_base, because 
+					 * we're getting them straight from the location expression. */
 					our_interval = boost::icl::interval<Dwarf_Off>::right_open(
 						i_locexpr->lopc + cu_base, i_locexpr->hipc + cu_base
 					); 
