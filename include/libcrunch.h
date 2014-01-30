@@ -1,3 +1,6 @@
+#ifndef LIBCRUNCH_H_
+#define LIBCRUNCH_H_
+
 /* public interface to libcrunch */
 extern void warnx(const char *fmt, ...); // avoid repeating proto
 
@@ -28,7 +31,7 @@ extern int __uniqtype__unsigned_char __attribute__((weak));
  * the instrumentation can add them to code which doesn't include this header. */
 
 /* Initialize if not already done. Return 0 if all okay, -1 otherwise. */
-extern inline int __attribute__((always_inline)) __libcrunch_check_init(void)
+extern inline int __attribute__((always_inline,gnu_inline)) __libcrunch_check_init(void)
 {
 	if (__builtin_expect(!&__libcrunch_is_initialized, 0))
 	{
@@ -44,6 +47,19 @@ extern inline int __attribute__((always_inline)) __libcrunch_check_init(void)
 	}
 	
 	return 0;
+}
+
+/* our own private assert */
+static inline void __libcrunch_private_assert(_Bool cond, const char *reason, 
+	const char *f, unsigned l, const char *fn)
+{
+	if (!cond) __assert_fail(reason, f, l, fn);
+}
+
+static inline void  __attribute__((gnu_inline)) __libcrunch_ensure_init(void)
+{
+	__libcrunch_private_assert(__libcrunch_check_init() == 0, "libcrunch init", 
+		__FILE__, __LINE__, __func__);
 }
 
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
@@ -78,7 +94,7 @@ extern inline int __attribute__((always_inline)) __libcrunch_check_init(void)
 	} while (0)
 #endif
 
-extern inline int __attribute__((always_inline)) __is_aU(const void *obj, struct rec *r)
+extern inline int __attribute__((always_inline,gnu_inline)) __is_aU(const void *obj, struct rec *r)
 {
 	LIBCRUNCH_BASIC_CHECKS;
 	
@@ -107,7 +123,7 @@ extern inline int __attribute__((always_inline)) __is_aU(const void *obj, struct
 	return __is_a_internal(obj, r);
 }
 
-extern inline int __attribute__((always_inline)) __is_aS(const void *obj, const char *typestr)
+extern inline int __attribute__((always_inline,gnu_inline)) __is_aS(const void *obj, const char *typestr)
 {
 	LIBCRUNCH_BASIC_CHECKS;
 	
@@ -115,3 +131,5 @@ extern inline int __attribute__((always_inline)) __is_aS(const void *obj, const 
 
 	return __is_aU(obj, r);
 }
+
+#endif

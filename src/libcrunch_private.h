@@ -1,5 +1,5 @@
-#ifndef LIBCRUNCH_H_
-#define LIBCRUNCH_H_
+#ifndef LIBCRUNCH_PRIVATE_H_
+#define LIBCRUNCH_PRIVATE_H_
 
 /* x86_64 only, for now */
 #if !defined(__x86_64__) && !defined(X86_64)
@@ -11,8 +11,6 @@
 #include "allocsmt.h"
 #include <stdint.h>
 #include "addrmap.h"
-
-static inline void __attribute__((gnu_inline)) __libcrunch_ensure_init(void);
 
 #include "libcrunch.h"
 
@@ -39,7 +37,7 @@ struct rec
 	} contained[];
 };
 
-inline struct rec *allocsite_to_uniqtype(const void *allocsite)
+static inline struct rec *allocsite_to_uniqtype(const void *allocsite)
 {
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, allocsite);
@@ -51,7 +49,7 @@ inline struct rec *allocsite_to_uniqtype(const void *allocsite)
 }
 
 #define maximum_vaddr_range_size (4*1024) // HACK
-inline struct rec *vaddr_to_uniqtype(const void *vaddr)
+static inline struct rec *vaddr_to_uniqtype(const void *vaddr)
 {
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)vaddr | STACK_BEGIN));
@@ -84,7 +82,7 @@ inline struct rec *vaddr_to_uniqtype(const void *vaddr)
 #undef maximum_vaddr_range_size
 
 #define maximum_static_obj_size (64*1024) // HACK
-inline struct rec *static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
+static inline struct rec *static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 {
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)static_addr | (STACK_BEGIN<<1)));
@@ -122,19 +120,6 @@ void __assert_fail(const char *assertion,
 	const char *file, unsigned int line, const char *function);
 void warnx(const char *fmt, ...);
 unsigned long malloc_usable_size (void *ptr);
-
-/* our own private assert */
-static inline void __libcrunch_private_assert(_Bool cond, const char *reason, 
-	const char *f, unsigned l, const char *fn)
-{
-	if (!cond) __assert_fail(reason, f, l, fn);
-}
-
-static inline void  __attribute__((gnu_inline)) __libcrunch_ensure_init(void)
-{
-	__libcrunch_private_assert(__libcrunch_check_init() == 0, "libcrunch init", 
-		__FILE__, __LINE__, __func__);
-}
 
 /* counters */
 extern unsigned long __libcrunch_begun;

@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <link.h>
 #include <libunwind.h>
+#include "libcrunch.h"
 #include "libcrunch_private.h"
 
 static const char *allocsites_base;
@@ -22,6 +23,8 @@ static uintptr_t page_mask;
 _Bool __libcrunch_is_initialized;
 allocsmt_entry_type *__libcrunch_allocsmt;
 void *__addrmap_executable_end_addr;
+// HACK
+void __libcrunch_preload_init(void);
 
 #define BLACKLIST_SIZE 8
 struct blacklist_ent 
@@ -33,6 +36,16 @@ struct blacklist_ent
 } blacklist[BLACKLIST_SIZE];
 static _Bool check_blacklist(const void *obj);
 static void consider_blacklisting(const void *obj);
+
+static _Bool done_init;
+void __libcrunch_main_init(void) __attribute__((constructor(101)));
+// NOTE: runs *before* the constructor in preload.c
+void __libcrunch_main_init(void)
+{
+	assert(!done_init);
+	
+	done_init = 1;
+}
 
 // FIXME: do better!
 static char *realpath_quick_hack(const char *arg)
@@ -639,6 +652,9 @@ int __libcrunch_global_init(void)
 	
 	page_size = (uintptr_t) sysconf(_SC_PAGE_SIZE);
 	page_mask = ~((uintptr_t) sysconf(_SC_PAGE_SIZE) - 1);
+	
+	// debugging HACK
+	__libcrunch_preload_init();
 	
 	__libcrunch_is_initialized = 1;
 	fprintf(stderr, "libcrunch successfully initialized\n");

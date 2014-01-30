@@ -1,5 +1,5 @@
 #CFLAGS += -std=gnu99 -g -O2 -fPIC
-CFLAGS += -std=gnu99 -g -O2 -fPIC -I../include
+CFLAGS += -std=gnu99 -g -O0 -fPIC -I../include
 #CFLAGS += -DUSE_STARTUP_BRK
 
 C_SRC := $(wildcard *.c)
@@ -24,15 +24,15 @@ $(C_DEPS): .%.d : %.c
 # FIXME: in preload case, can be clever with stubs?
 
 libcrunch_preload.so: libcrunch.o preload.o prefix_tree.o
-	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -lheap_index_fast_hooks -Wl,--no-whole-archive -Wl,-Bdynamic 
+	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -lheap_index_fast_hooks -Wl,--no-whole-archive -Wl,-Bdynamic 
 
 libcrunch.so: libcrunch.o
-	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
+	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS) ${HOME}/work/devel/libpmirror.hg/src/addrmap.c -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
 
 noop.o: CFLAGS += -fPIC 
 
 libcrunch_noop.so: noop.o
-	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS)
+	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
 
 libcrunch_noop.o: noop.o
 	ln -s "$<" "$@"
