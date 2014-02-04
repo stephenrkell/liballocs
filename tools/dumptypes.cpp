@@ -150,7 +150,7 @@ int main(int argc, char **argv)
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	
-	write_master_relation(master_relation, root, cout, cerr, true /* emit_void */, 
+	write_master_relation(master_relation, root, cout, cerr, true /* emit_void */, true, 
 		names_emitted, types_by_name);
 	
 	/* Now create linker aliases for any that were unique. */

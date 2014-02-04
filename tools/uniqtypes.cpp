@@ -191,11 +191,11 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 }	
 
 void write_master_relation(master_relation_t& r, dwarf::core::root_die& root, 
-	std::ostream& out, std::ostream& err, bool emit_void, 
+	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def, 
 	std::set<std::string>& names_emitted,
 	std::map<std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name)
 {
-	cout << "struct rec \n\
+	if (emit_struct_def) cout << "struct rec \n\
 { \n\
 	const char *name; \n\
 	short pos_maxoff; \n\

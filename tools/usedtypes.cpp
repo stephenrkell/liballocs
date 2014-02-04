@@ -199,7 +199,7 @@ int main(int argc, char **argv)
 	size_t line_len;
 	/* Now popen our input, read lines and match them against the map we just built. */
 	master_relation_t master_relation;
-	multimap<string, string> aliases_needed;
+	multimap<string, pair<string, string> > aliases_needed;
 	while (ret = getline(&line, &line_len, in), ret > 0)
 	{
 		string key(line);
@@ -218,8 +218,18 @@ int main(int argc, char **argv)
 				 *     "__FUN_FROM___VA___FUN_TO_" 
 				 * since CIL typesigs don't distinguish between 
 				 * "no specified parameters"        e.g. int f() 
-				 * and "specified as no parameters" e.g. int f(void)
-				  */
+				 * and "specified as no parameters" e.g. int f(void).
+				 * 
+				 * This will ensure that some type gets emitted, such that we
+				 * can bind up the UNDefined uniqtype to it. 
+				 * BUT
+				 * We will emit it under its rightful name, so the reference
+				 * won't get bound just like that. Previously we dealt with
+				 * this by creating an alias, but in fact we need to emit
+				 * the uniqtype *again* under the correct section name. 
+				 * Otherwise the name we want might get eliminated by COMDAT
+				 * if a non-worked-around section appears in the same link.
+				 */
 				{
 					string search_expr = "__FUN_FROM___FUN_TO_";
 					string replace_expr = "__FUN_FROM___VA___FUN_TO_";
@@ -235,11 +245,14 @@ int main(int argc, char **argv)
 							cerr << "Working around CIL bug by substituting " << substitute_key << endl;
 							auto name_pair = transitively_add_type(found_retry_pair.first->second, master_relation).second;
 							
+							string orig_substitute_key = substitute_key;
+							
 							substitute_key.replace(0, string("__uniqtype_").size(), "__uniqtype_" + name_pair.first);
+							
 							string orig_key_symname = key;
 							orig_key_symname.replace(0, string("__uniqtype_").size(), "__uniqtype_" + name_pair.first);
 							
-							aliases_needed.insert(make_pair(orig_key_symname, substitute_key));
+							aliases_needed.insert(make_pair(orig_key_symname, make_pair(orig_substitute_key, substitute_key)));
 							break;
 						}
 					}
@@ -281,6 +294,7 @@ int main(int argc, char **argv)
 					cerr << "Not identical, so not proceeding." << endl;
 					exit(1);
 				}
+			// end case default
 		}
 	
 	continue_loop:
@@ -293,14 +307,32 @@ int main(int argc, char **argv)
 	// write the types to stdout
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
-	write_master_relation(master_relation, r, cout, cerr, false /* emit_void */, 
+	write_master_relation(master_relation, r, cout, cerr, false /* emit_void */, true, 
 		names_emitted, types_by_name);
 	
-	// also write the aliases, for CIL workaround;
+	// for CIL workaround: for each alias, write a one-element master relation
+	// defining it under the alias name (do *not* use the other name at all!)
 	for (auto i_pair = aliases_needed.begin(); i_pair != aliases_needed.end(); ++i_pair)
 	{
-		cout << "extern struct rec " << i_pair->first << " __attribute__((alias(\"" << i_pair->second << "\")));"
-			<< endl;
+		//cout << "extern struct rec " << i_pair->first << " __attribute__((alias(\"" << i_pair->second << "\")));"
+		// 	<< endl;
+		
+		// i_pair is (orig_key_symname, (orig_substitute_key, substitute_key_with_typecode))
+		// and we need to look up in types_by_uniqtype_name by orig_substitute_key
+		
+		auto found = types_by_uniqtype_name.equal_range(i_pair->second.first);
+		assert(found.first != found.second || (cerr << i_pair->second.first << endl, false));
+		
+		master_relation_t tmp_master_relation;
+		string unmangled_name = i_pair->first;
+		unmangled_name.replace(0, string("__uniqtype_........_").size(), "");
+		string insert = i_pair->first.substr(string("__uniqtype_").size(), 8);
+		tmp_master_relation.insert(make_pair(make_pair(insert, unmangled_name), found.first->second));
+		
+		set<string> tmp_names_emitted;
+		map<string, set< iterator_df<type_die> > > tmp_types_by_name;
+		write_master_relation(tmp_master_relation, r, cout, cerr, false /* emit_void */, false, 
+			tmp_names_emitted, tmp_types_by_name);
 	}
 
 	return 0;
