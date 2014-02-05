@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 #include <stdint.h>
 #include <string.h>
 #include "libcrunch_private.h"
@@ -49,11 +50,29 @@ static const char *filename_for_fd(int fd)
  * intercept the early calls, we still need to be able to delegate. 
  * For that, we need our underyling function pointers. */
 
+/* NOTE / HACK / glibc-specifity: we know about two different mmap entry 
+ * points: mmap and mmap64. 
+ * 
+ * on x86-64, mmap64 has 8-byte size_t length and 8-byte off_t offset.
+ * on x86-64, mmap has 8-byte size_t length and 8-byte off_t offset.
+ * So I think the differences are only on 32-bit platforms. 
+ * For now, just alias mmap64 to mmap. */
+
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
 {
-	// HACK: let through the memtable mmaps and other things that 
-	// run before our constructor
+	/* HACK: let through the memtable mmaps and other things that 
+	 * run before our constructor. These will get called *very* early,
+	 * before malloc is initialized, hence before it's safe to call
+	 * libdl. Therefore, instead of orig_mmap, we use syscall() 
+	 * in these cases.
+	 */
+
+	if (!done_init)
+	{
+		// call via syscall
+		return (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
+	}
 
 	static void *(*orig_mmap)(void *, size_t, int, int, int, off_t);
 	if (!orig_mmap)
@@ -62,18 +81,23 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		assert(orig_mmap);
 	}
 	
-	if (!done_init) return orig_mmap(addr, length, prot, flags, fd, offset);
-	else
+	void *ret = orig_mmap(addr, length, prot, flags, fd, offset);
+	if (ret != MAP_FAILED)
 	{
-		void *ret = orig_mmap(addr, length, prot, flags, fd, offset);
-		if (ret != MAP_FAILED)
+		/* Add to the prefix tree */
+		if (fd != -1)
 		{
-			/* Add to the prefix tree */
-			prefix_tree_add(ret, length, filename_for_fd(fd));
+			prefix_tree_add(ret, length, MAPPED_FILE, filename_for_fd(fd));
 		}
-		return ret;
+		else
+		{
+			prefix_tree_add(ret, length, HEAP, NULL);
+		}
 	}
+	return ret;
 }
+void *mmap64(void *addr, size_t length, int prot, int flags,
+                  int fd, off_t offset) __attribute__((alias("mmap")));
 
 int munmap(void *addr, size_t length)
 {
@@ -96,26 +120,27 @@ int munmap(void *addr, size_t length)
 	}
 }
 
-static int add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
+int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
 	const char *filename = (const char *) data;
-	if (0 == strcmp(filename, info->dlpi_name))
+	if (filename == NULL || 0 == strcmp(filename, info->dlpi_name))
 	{
 		// this is the file we care about, so iterate over its phdrs
 		for (int i = 0; i < info->dlpi_phnum; ++i)
 		{
-			// if this phdr's a LOAD and matches our filename, 
+			// if this phdr's a LOAD
 			if (info->dlpi_phdr[i].p_type == PT_LOAD)
 			{
+				// add it to the tree
 				prefix_tree_add((unsigned char *) info->dlpi_addr + info->dlpi_phdr[i].p_vaddr, 
-					info->dlpi_phdr[i].p_memsz, filename);
+					info->dlpi_phdr[i].p_memsz, STATIC, info->dlpi_name);
 			}
 		}
 	
-		// can stop now
-		return 1;
+		// if we're looking for a single file, can stop now
+		if (filename != NULL) return 1;
 	}
-	else 
+	
 	// keep going
 	return 0;
 	
@@ -138,7 +163,7 @@ void *dlopen(const char *filename, int flag)
 		{
 			/* Note that in general we will get one mapping for every 
 			 * LOAD phdr. So we use dl_iterate_phdr. */
-			int dlpi_ret = dl_iterate_phdr(add_all_mappings_cb, 
+			int dlpi_ret = dl_iterate_phdr(__libcrunch_add_all_mappings_cb, 
 				((struct link_map *) ret)->l_name);
 			assert(dlpi_ret != 0);
 		}

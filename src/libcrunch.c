@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <link.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include <libunwind.h>
 #include "libcrunch.h"
 #include "libcrunch_private.h"
@@ -20,9 +22,14 @@ static unsigned allocsites_base_len;
 static uintptr_t page_size;
 static uintptr_t page_mask;
 
+int __libcrunch_debug_level;
 _Bool __libcrunch_is_initialized;
 allocsmt_entry_type *__libcrunch_allocsmt;
+
+// these two are defined in addrmap.h as weak
 void *__addrmap_executable_end_addr;
+unsigned long __addrmap_max_stack_size;
+
 // HACK
 void __libcrunch_preload_init(void);
 
@@ -86,7 +93,7 @@ static const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_
 			int dladdr_ret = dladdr(dlpi_addr, &addr_info);
 			if (dladdr_ret == 0)
 			{
-				warnx("dladdr could not resolve library loaded at %p\n", dlpi_addr);
+				debug_printf(1, "dladdr could not resolve library loaded at %p\n", dlpi_addr);
 				return NULL;
 				// char cmdbuf[4096];
 				// int snret = snprintf(cmdbuf, 4096, "cat /proc/%d/maps", getpid());
@@ -152,7 +159,7 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 	void *handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	if (!handle)
 	{
-		warnx("Could not load types object (%s)", dlerror());
+		debug_printf(1, "loading types object: %s", dlerror());
 		return 0;
 	}
 	
@@ -228,7 +235,7 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 	void *allocsites_handle = dlopen(libfile_name, RTLD_NOW);
 	if (!allocsites_handle)
 	{
-		warnx("Could not load allocsites object (%s)", dlerror());
+		debug_printf(1, "loading allocsites object: %s", dlerror());
 		return 0;
 	}
 	
@@ -278,7 +285,7 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 	void *types_handle = dlopen(libfile_name, RTLD_NOW | RTLD_NOLOAD);
 	if (!types_handle)
 	{
-		warnx("Could not re-load types object (%s)", dlerror());
+		debug_printf(1, "re-loading types object: %s", dlerror());
 		return 0;
 	}
 	
@@ -287,7 +294,7 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 		struct allocsite_entry *first_frame_entry = (struct allocsite_entry *) dlsym(types_handle, "frame_vaddrs");
 		if (!first_frame_entry)
 		{
-			warnx("Could not load frame vaddrs (%s)", dlerror());
+			debug_printf(1, "Could not load frame vaddrs (%s)", dlerror());
 			return 0;
 		}
 
@@ -313,7 +320,7 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 		struct allocsite_entry *first_static_entry = (struct allocsite_entry *) dlsym(types_handle, "statics");
 		if (!first_static_entry)
 		{
-			warnx("Could not load statics (%s)", dlerror());
+			debug_printf(1, "Could not load statics (%s)", dlerror());
 			return 0;
 		}
 
@@ -394,7 +401,10 @@ static void consider_blacklisting(const void *obj)
 		struct blacklist_ent *free_slot = &blacklist[0];
 		while (free_slot < &blacklist[BLACKLIST_SIZE]
 		 && free_slot->mask != 0) ++free_slot;
-		if (free_slot == &blacklist[BLACKLIST_SIZE]) return;
+		if (free_slot == &blacklist[BLACKLIST_SIZE]) 
+		{
+			return; // full
+		}
 		else 
 		{
 			slot = free_slot;
@@ -439,49 +449,6 @@ static void consider_blacklisting(const void *obj)
 	
 	slot->mask = mask;
 	slot->bits = bits;
-
-	
-	/* FIXME: sometimes by extending an entry, we reduce its effective range, 
-	 * i.e. the number of addresses covered by its mask. 
-	 * In that case, we shouldn't bother extending it; we should create
-	 * a new one. */
-	
-	
-	
-	// HMM. beginning to think that building a prefix trie of the address space 
-	// is a good idea. 
-	
-	// PROBLEM: does this mean rewriting
-	// get_object_memory_kind() into something slower?
-	
-	// It does mean rewriting it -- it will still work, but it is limited:
-	// 
-	// - can't tell us about other pthreads' stacks
-	// - can't distinguish tracked from untracked libraries
-	// - can't distinguish heap from 
-	// - BUT we can use it to "fast-path" certain cases:
-	//     current thread, data seg static, sbrk heap 
-	
-	/*
-	    struct prefix_trie_node {
-	        prefix_trie_node *next, prev;
-	        unsigned long bits;
-	        unsigned nbits:6;
-	        unsigned kind:2; // UNKNOWN, STACK, HEAP, STATIC
-	        unsigned first_child:48;  // or stack block ptr
-	    };
-	    
-	
-	 */
-
-	// WHAT do we need to hook?
-	// mmap, munmap, mremap
-	// dlopen, dlclose      -- these will just call mmap; but do they do so interposably?
-	// sbrk
-	// pthread_create() etc.? or will just use mmap()?
-	// clone, fork, vfork   because these unmap non-MAP_SHARED mappings
-	
-	// just blacklist a page at a time for now
 #endif
 }
 
@@ -509,33 +476,33 @@ unsigned long __libcrunch_succeeded;
 static void print_exit_summary(void)
 {
 	fprintf(stderr, "libcrunch summary: \n");
-	fprintf(stderr, "checks begun:                          % 7ld\n", __libcrunch_begun);
-	fprintf(stderr, "----------------------------------------------\n", __libcrunch_begun);
+	fprintf(stderr, "checks begun:                             % 7ld\n", __libcrunch_begun);
+	fprintf(stderr, "-------------------------------------------------\n");
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks aborted due to init failure:    % 7ld\n", __libcrunch_aborted_init);
+	fprintf(stderr, "checks aborted due to init failure:       % 7ld\n", __libcrunch_aborted_init);
 #endif
-	fprintf(stderr, "checks aborted for bad typename:       % 7ld\n", __libcrunch_aborted_typestr);
-	fprintf(stderr, "checks aborted for unknown storage:    % 7ld\n", __libcrunch_aborted_unknown_storage);
+	fprintf(stderr, "checks aborted for bad typename:          % 7ld\n", __libcrunch_aborted_typestr);
+	fprintf(stderr, "checks aborted for unknown storage:       % 7ld\n", __libcrunch_aborted_unknown_storage);
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks trivially passed:               % 7ld\n", __libcrunch_trivially_succeeded);
+	fprintf(stderr, "checks trivially passed:                  % 7ld\n", __libcrunch_trivially_succeeded);
 #endif
-	fprintf(stderr, "==============================================\n", __libcrunch_begun);
+	fprintf(stderr, "=================================================\n");
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks remaining                       % 7ld\n", __libcrunch_begun - (__libcrunch_trivially_succeeded + __libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr + __libcrunch_aborted_init));
+	fprintf(stderr, "checks remaining                          % 7ld\n", __libcrunch_begun - (__libcrunch_trivially_succeeded + __libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr + __libcrunch_aborted_init));
 #else
-	fprintf(stderr, "checks remaining                       % 7ld\n", __libcrunch_begun - (__libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr));
+	fprintf(stderr, "checks remaining                          % 7ld\n", __libcrunch_begun - (__libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr));
 #endif	
-	fprintf(stderr, "----------------------------------------------\n", __libcrunch_begun);
-	fprintf(stderr, "checks handled by heap case            % 7ld\n", __libcrunch_hit_heap_case);
-	fprintf(stderr, "checks handled by stack case           % 7ld\n", __libcrunch_hit_stack_case);
-	fprintf(stderr, "checks handled by static case          % 7ld\n", __libcrunch_hit_static_case);
-	fprintf(stderr, "----------------------------------------------\n", __libcrunch_begun);
-	fprintf(stderr, "checks aborted for unindexed heap:     % 7ld\n", __libcrunch_aborted_unindexed_heap);
-	fprintf(stderr, "checks aborted for unknown allocsite:  % 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
-	fprintf(stderr, "checks aborted for unknown stackframes:% 7ld\n", __libcrunch_aborted_stack);
-	fprintf(stderr, "checks aborted for unknown static obj: % 7ld\n", __libcrunch_aborted_static);
-	fprintf(stderr, "checks failed:                         % 7ld\n", __libcrunch_failed);
-	fprintf(stderr, "checks nontrivially passed:            % 7ld\n", __libcrunch_succeeded);
+	fprintf(stderr, "-------------------------------------------------\n");
+	fprintf(stderr, "checks handled by heap case               % 7ld\n", __libcrunch_hit_heap_case);
+	fprintf(stderr, "checks handled by stack case              % 7ld\n", __libcrunch_hit_stack_case);
+	fprintf(stderr, "checks handled by static case             % 7ld\n", __libcrunch_hit_static_case);
+	fprintf(stderr, "-------------------------------------------------\n");
+	fprintf(stderr, "checks aborted for unindexed heap:        % 7ld\n", __libcrunch_aborted_unindexed_heap);
+	fprintf(stderr, "checks aborted for unknown heap allocsite:% 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
+	fprintf(stderr, "checks aborted for unknown stackframes:   % 7ld\n", __libcrunch_aborted_stack);
+	fprintf(stderr, "checks aborted for unknown static obj:    % 7ld\n", __libcrunch_aborted_static);
+	fprintf(stderr, "checks failed:                            % 7ld\n", __libcrunch_failed);
+	fprintf(stderr, "checks nontrivially passed:               % 7ld\n", __libcrunch_succeeded);
 }
 
 /* This is *not* a constructor. We don't want to be called too early,
@@ -556,6 +523,9 @@ int __libcrunch_global_init(void)
 	allocsites_base = getenv("ALLOCSITES_BASE");
 	if (!allocsites_base) allocsites_base = "/usr/lib/allocsites";
 	allocsites_base_len = strlen(allocsites_base);
+	
+	const char *debug_level_str = getenv("LIBCRUNCH_DEBUG_LEVEL");
+	if (debug_level_str) __libcrunch_debug_level = atoi(debug_level_str);
 	
 	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
 	assert(ret_types == 0);
@@ -583,6 +553,14 @@ int __libcrunch_global_init(void)
 	assert(executable_handle != NULL);
 	__addrmap_executable_end_addr = dlsym(executable_handle, "_end");
 	assert(__addrmap_executable_end_addr != 0);
+	
+	// grab the maximum stack size
+	struct rlimit rlim;
+	int rlret = getrlimit(RLIMIT_STACK, &rlim);
+	if (rlret == 0)
+	{
+		__addrmap_max_stack_size = rlim.rlim_cur;
+	}
 	
 	// grab the start of main's stack frame -- we'll use this 
 	// when walking the stack
@@ -639,7 +617,7 @@ int __libcrunch_global_init(void)
 	else 
 	{
 		// underapproximate bp as our current sp!
-		fprintf(stderr, "Warning: using egregious approximation for bp of main().\n");
+		debug_printf(1, "Warning: using egregious approximation for bp of main().\n");
 		unw_word_t our_sp;
 	#ifdef UNW_TARGET_X86
 		__asm__ ("movl %%esp, %0\n" :"=r"(our_sp));
@@ -657,7 +635,9 @@ int __libcrunch_global_init(void)
 	__libcrunch_preload_init();
 	
 	__libcrunch_is_initialized = 1;
-	fprintf(stderr, "libcrunch successfully initialized\n");
+
+	debug_printf(1, "libcrunch successfully initialized\n");
+	
 	return 0;
 }
 
@@ -748,6 +728,28 @@ int __is_a_internal(const void *obj, const void *arg)
 #define HEAPSZ_ONE(t) (USABLE_SIZE_FROM_OBJECT_SIZE(sizeof ((t))))
 
 	memory_kind k = get_object_memory_kind(obj);
+	if (__builtin_expect(k == UNKNOWN, 0))
+	{
+		k = prefix_tree_get_memory_kind(obj);
+		if (__builtin_expect(k == UNKNOWN, 0))
+		{
+			// still unknown? we have one last trick, if not blacklisted
+			_Bool blacklisted = check_blacklist(obj);
+			if (!blacklisted)
+			{
+				prefix_tree_add_missing_maps();
+				k = prefix_tree_get_memory_kind(obj);
+				if (k == UNKNOWN)
+				{
+					prefix_tree_print_all_to_stderr();
+					// completely wild pointer or kernel pointer
+					debug_printf(1, "libcrunch saw wild pointer %p from caller %p\n", obj,
+						__builtin_return_address(0));
+					consider_blacklisting(obj);
+				}
+			}
+		}
+	}
 	void *alloc_site = 0;
 	switch(k)
 	{
@@ -833,8 +835,8 @@ int __is_a_internal(const void *obj, const void *arg)
 					// FIXME: hard-codes calling convention info
 					if (got_bp && !at_or_above_main && higherframe_sp != bp + 2 * sizeof (void*))
 					{
-						warnx("Saw frame boundary with unusual sp/bp relation (higherframe_sp=%p, bp=%p != higherframe_sp + 2*sizeof(void*))", 
-							higherframe_sp, bp);
+						// debug_printf(2, "Saw frame boundary with unusual sp/bp relation (higherframe_sp=%p, bp=%p != higherframe_sp + 2*sizeof(void*))", 
+						// 	higherframe_sp, bp);
 					}
 					unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
 				}
@@ -928,7 +930,7 @@ int __is_a_internal(const void *obj, const void *arg)
 			 * initial contents mapping allocsites to uniqtype recs. This hash table
 			 * is initialized during load, but can be extended as new allocsites
 			 * are discovered, e.g. indirect ones.)
-			 */			
+			 */
 			struct trailer *heap_info = lookup_object_info(obj, &object_start);
 			if (!heap_info)
 			{
@@ -937,10 +939,13 @@ int __is_a_internal(const void *obj, const void *arg)
 				++__libcrunch_aborted_unindexed_heap;
 				goto abort;
 			}
+			assert(get_object_memory_kind(heap_info) == HEAP
+				|| prefix_tree_get_memory_kind(heap_info) == HEAP);
+			assert(prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC);
 
 			// now we have an allocsite
 			alloc_site = (void*)(intptr_t)heap_info->alloc_site;
-			alloc_uniqtype = allocsite_to_uniqtype(alloc_site);
+			alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
 			if (!alloc_uniqtype) 
 			{
 				reason = "unrecognised allocsite";
@@ -948,6 +953,11 @@ int __is_a_internal(const void *obj, const void *arg)
 				++__libcrunch_aborted_unrecognised_allocsite;
 				goto abort;
 			}
+			/* get_object_memory_kind is a bit liberal about what it considers 
+			 * heap allocation -- any anonymous memory mapping will be treated as
+			 * heap. By chance, sometimes this heap memory will look like it's 
+			 * been indexed. GAH. HOW? This shouldn't happen! */
+			assert(prefix_tree_get_memory_kind(alloc_uniqtype) == STATIC);
 			
 			/* FIXME: do we want to write the uniqtype directly into the heap trailer?
 			 * PROBABLY, but do this LATER once we can MEASURE the BENEFIT!
@@ -966,25 +976,25 @@ int __is_a_internal(const void *obj, const void *arg)
 		case STATIC:
 		{
 			++__libcrunch_hit_static_case;
-			/* We use a blacklist to rule out static addrs that map to things like 
-			 * mmap()'d regions (which we never have typeinfo for)
-			 * or uninstrumented libraries (which we happen not to have typeinfo for). */
-			_Bool blacklisted = check_blacklist(obj);
-			if (blacklisted)
-			{
-				// FIXME: record blacklist hits separately
-				reason = "unrecognised static object";
-				reason_ptr = obj;
-				++__libcrunch_aborted_static;
-				goto abort;
-			}
+//			/* We use a blacklist to rule out static addrs that map to things like 
+//			 * mmap()'d regions (which we never have typeinfo for)
+//			 * or uninstrumented libraries (which we happen not to have typeinfo for). */
+//			_Bool blacklisted = check_blacklist(obj);
+//			if (blacklisted)
+//			{
+//				// FIXME: record blacklist hits separately
+//				reason = "unrecognised static object";
+//				reason_ptr = obj;
+//				++__libcrunch_aborted_static;
+//				goto abort;
+//			}
 			alloc_uniqtype = static_addr_to_uniqtype(obj, &object_start);
 			if (!alloc_uniqtype)
 			{
 				reason = "unrecognised static object";
 				reason_ptr = obj;
 				++__libcrunch_aborted_static;
-				consider_blacklisting(obj);
+//				consider_blacklisting(obj);
 				goto abort;
 			}
 			// else we can go ahead
@@ -992,6 +1002,7 @@ int __is_a_internal(const void *obj, const void *arg)
 			break;
 		}
 		case UNKNOWN:
+		case MAPPED_FILE:
 		default:
 		{
 			reason = "object of unknown storage";
@@ -1024,7 +1035,7 @@ int __is_a_internal(const void *obj, const void *arg)
 		if (cur_obj_uniqtype == test_uniqtype) 
 		{
 		temp_label: // HACK: remove this printout once stable
-			// warnx("Check __is_a_internal(%p, %p a.k.a. \"%s\") succeeded at %p.\n", 
+			// debug_printf(5, "Check __is_a_internal(%p, %p a.k.a. \"%s\") succeeded at %p.\n", 
 			// 	obj, test_uniqtype, test_uniqtype->name, &&temp_label);
 			++__libcrunch_succeeded;
 			return 1;
@@ -1073,16 +1084,17 @@ int __is_a_internal(const void *obj, const void *arg)
 	__assert_fail("unreachable", __FILE__, __LINE__, __func__);
 check_failed:
 	++__libcrunch_failed;
-	warnx("Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
+	debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
 		obj, test_uniqtype, test_uniqtype->name,
-		//&&check_failed /* we are inlined, right? GAH, no, unlikely*/,
 		__builtin_return_address(0), // make sure our *caller*, if any, is inlined
-		name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? "block of " : " ", alloc_uniqtype->name, alloc_site);
-	return 1;
+		name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
+		alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
+		alloc_site);
+	return 1; // so that the program will continue
 
 abort:
-	// if (!suppress_warning) warnx("Aborted __is_a_internal(%p, %p) at %p, reason: %s (%p)\n", obj, uniqtype,
-	//	&&abort /* we are inlined, right? */, reason, reason_ptr); 
+	// HACK for debugging
+	// if (0 == strcmp(reason, "unrecognised allocsite")) warnx("Unrecognised allocsite: %p\n", reason_ptr);
 	return 1; // so that the program will continue
 }
 

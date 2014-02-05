@@ -14,13 +14,22 @@
 
 #include "libcrunch.h"
 
-/* We use this prefix trie to map the address space. */
+/* We use this prefix tree to map the address space. */
 struct prefix_tree_node;
-void prefix_tree_add(void *base, size_t s, const char *filename);
+void prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg);
 void prefix_tree_del(void *base, size_t s);
 void init_prefix_tree_from_maps(void);
-
-extern struct prefix_tree_node *__libcrunch_prefix_tree_head;
+void prefix_tree_add_missing_maps(void);
+enum object_memory_kind prefix_tree_get_memory_kind(const void *obj);
+void prefix_tree_print_all_to_stderr(void);
+struct prefix_tree_node *
+prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr);
+int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data);
+#define debug_printf(lvl, ...) do { \
+    if ((lvl) <= __libcrunch_debug_level) { \
+      warnx( __VA_ARGS__ );  \
+    } \
+  } while (0)
 
 /* Copied from dumptypes.cpp */
 struct rec
@@ -42,10 +51,14 @@ static inline struct rec *allocsite_to_uniqtype(const void *allocsite)
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, allocsite);
 	struct allocsite_entry *bucket = *bucketpos;
-	for (struct allocsite_entry *p = bucket; p; p = p->next)
+	for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
 	{
-		if (p->allocsite == allocsite) return p->uniqtype;
+		if (p->allocsite == allocsite)
+		{
+			return p->uniqtype;
+		}
 	}
+	return NULL;
 }
 
 #define maximum_vaddr_range_size (4*1024) // HACK
@@ -58,7 +71,7 @@ static inline struct rec *vaddr_to_uniqtype(const void *vaddr)
 	do 
 	{
 		struct allocsite_entry *bucket = *bucketpos;
-		for (struct allocsite_entry *p = bucket; p; p = p->next)
+		for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
 		{
 			/* NOTE that in this memtable, buckets are sorted by address, so 
 			 * we would ideally walk backwards. We can't, so we peek ahead at
@@ -91,7 +104,7 @@ static inline struct rec *static_addr_to_uniqtype(const void *static_addr, void 
 	do 
 	{
 		struct allocsite_entry *bucket = *bucketpos;
-		for (struct allocsite_entry *p = bucket; p; p = p->next)
+		for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
 		{
 			/* NOTE that in this memtable, buckets are sorted by address, so 
 			 * we would ideally walk backwards. We can't, so we peek ahead at

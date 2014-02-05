@@ -7,6 +7,7 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 /* Copied from dumptypes.cpp */
 struct rec; // opaque
 
+extern int __libcrunch_debug_level;
 extern _Bool __libcrunch_is_initialized __attribute__((weak));
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
 extern unsigned long __libcrunch_aborted_init __attribute__((weak));
@@ -53,7 +54,9 @@ extern inline int __attribute__((always_inline,gnu_inline)) __libcrunch_check_in
 static inline void __libcrunch_private_assert(_Bool cond, const char *reason, 
 	const char *f, unsigned l, const char *fn)
 {
+#ifndef NDEBUG
 	if (!cond) __assert_fail(reason, f, l, fn);
+#endif
 }
 
 static inline void  __attribute__((gnu_inline)) __libcrunch_ensure_init(void)
@@ -103,7 +106,7 @@ extern inline int __attribute__((always_inline,gnu_inline)) __is_aU(const void *
 	if (__builtin_expect(r == NULL, 0))
 	{
 		++__libcrunch_begun;
-		warnx("Aborted __is_a(%p, %p), reason: %\n", obj, r, 
+		if (__libcrunch_debug_level > 0) warnx("Aborted __is_a(%p, %p), reason: %\n", obj, r, 
 			"unrecognised typename (see stack trace)");
 		++__libcrunch_aborted_typestr;
 		return 1;
