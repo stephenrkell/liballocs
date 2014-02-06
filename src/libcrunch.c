@@ -433,17 +433,18 @@ static void consider_blacklisting(const void *obj)
 	// grow the mask until 
 	//   the bits/mask-defined blacklisted region starts no earlier than the actual region
 	// AND the region ends no later than the actual region
-	while ((bits & mask) < (uintptr_t) slot->actual_start
-	    // || (~mask + 1) > slot->actual_length
-		|| (bits & mask) + (~mask + 1) > (uintptr_t) slot->actual_start + slot->actual_length)
+	// WHERE the smallest mask we want is one page
+	while (((bits & mask) < (uintptr_t) slot->actual_start
+			|| (bits & mask) + (~mask + 1) > (uintptr_t) slot->actual_start + slot->actual_length)
+		&& ~mask + 1 > page_size)
 	{
 		mask >>= 1;                            // shift the mask right
 		mask |= 1ul<<sizeof (uintptr_t) * 8 - 1; // set the top bit of the mask
 		bits = ((uintptr_t) slot->actual_start) & mask;
 		
-		assert(~mask + 1 >= page_size); // the smallest mask we want is one page
 	}
 	
+	// if we got a zero-length entry, give up and zero the whole lot
 	assert((bits | mask) >= (uintptr_t) slot->actual_start);
 	assert(bits | ~mask <= (uintptr_t) slot->actual_start + slot->actual_length);
 	
@@ -518,6 +519,12 @@ int __libcrunch_global_init(void)
 	
 	// print a summary when the program exits
 	atexit(print_exit_summary);
+	
+	// delay start-up here if the user asked for it
+	if (getenv("LIBCRUNCH_DELAY_STARTUP"))
+	{
+		sleep(10);
+	}
 
 	// the user can specify where we get our -types.so and -allocsites.so
 	allocsites_base = getenv("ALLOCSITES_BASE");
@@ -631,9 +638,9 @@ int __libcrunch_global_init(void)
 	page_size = (uintptr_t) sysconf(_SC_PAGE_SIZE);
 	page_mask = ~((uintptr_t) sysconf(_SC_PAGE_SIZE) - 1);
 	
-	// debugging HACK
-	__libcrunch_preload_init();
-	
+	// also init the prefix tree
+	init_prefix_tree_from_maps();
+
 	__libcrunch_is_initialized = 1;
 
 	debug_printf(1, "libcrunch successfully initialized\n");
@@ -707,8 +714,9 @@ int __is_a_internal(const void *obj, const void *arg)
 	const void *reason_ptr = NULL; // if we abort, set this to a useful address
 	_Bool suppress_warning = 0;
 
-	/* It's okay to assume we're inited, otherwise how did the caller
-	 * get the uniqtype in the first place? */
+	/* We might not be initialized yet (recall that __libcrunch_global_init is 
+	 * not a constructor, because it's not safe to call super-early). */
+	__libcrunch_check_init();
 	
 	/* To get the uniqtype for obj, we need to determine its memory
 	 * location. x86-64 only! */

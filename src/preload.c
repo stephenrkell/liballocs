@@ -19,17 +19,7 @@
 #include <string.h>
 #include "libcrunch_private.h"
 
-static _Bool done_init;
-void __libcrunch_preload_init(void) /*__attribute__((constructor(102)))*/;
-// NOTE: runs *after* the constructor in libcrunch.c
-void __libcrunch_preload_init(void)
-{
-	//assert(!done_init);
-	
-	if (!done_init) init_prefix_tree_from_maps();
-	
-	done_init = 1;
-}
+static const _Bool safe_to_use_prefix_tree = 1; // experiment with this
 
 static const char *filename_for_fd(int fd)
 {
@@ -68,7 +58,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	 * in these cases.
 	 */
 
-	if (!done_init)
+	if (!safe_to_use_prefix_tree)
 	{
 		// call via syscall
 		return (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
@@ -108,7 +98,7 @@ int munmap(void *addr, size_t length)
 		assert(orig_munmap);
 	}
 	
-	if (!done_init) return orig_munmap(addr, length);
+	if (!safe_to_use_prefix_tree) return orig_munmap(addr, length);
 	else
 	{
 		int ret = orig_munmap(addr, length);
@@ -155,7 +145,7 @@ void *dlopen(const char *filename, int flag)
 		assert(orig_dlopen);
 	}
 	
-	if (!done_init) return orig_dlopen(filename, flag);
+	if (!safe_to_use_prefix_tree) return orig_dlopen(filename, flag);
 	else
 	{
 		void *ret = orig_dlopen(filename, flag);
@@ -222,7 +212,7 @@ int dlclose(void *handle)
 		assert(orig_dlclose);
 	}
 	
-	if (!done_init) return orig_dlclose(handle);
+	if (!safe_to_use_prefix_tree) return orig_dlclose(handle);
 	else
 	{
 		char *copied_filename = strdup(((struct link_map *) handle)->l_name);

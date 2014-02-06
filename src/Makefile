@@ -1,4 +1,5 @@
-CFLAGS += -std=gnu99 -g -O3 -DNDEBUG -fPIC -I../include
+CFLAGS += -std=gnu99 -g -O3 -DNDEBUG -pg -fPIC -I../include
+LDFLAGS += -pg
 
 CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
 
@@ -28,7 +29,10 @@ $(CC_DEPS): .%.d : %.cc
 # for addrmap.c
 vpath %.c $(PMIRROR)/src
 
-# FIXME: in preload case, can be clever with stubs?
+# FIXME: in preload case, can be clever with stubs? 
+# HMM. We still have to --wrap the allocation funcs, but we could put the wrappers in the preload lib...
+# BUT since they're generated per-build from the LIBCRUNCH_ALLOC_FNS content, this doesn't work --
+# stick with stubs!
 libcrunch_preload.so: libcrunch.o preload.o interval_tree.o maps.o addrmap.o
 	$(CXX) $(CXXFLAGS) -shared -o "$@" $^ $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -lheap_index_fast_hooks -Wl,--no-whole-archive -Wl,-Bdynamic 
 
