@@ -15,7 +15,10 @@
 #include "libcrunch.h"
 
 /* We use this prefix tree to map the address space. */
-struct prefix_tree_node;
+struct prefix_tree_node {
+	unsigned kind/*:2*/; // UNKNOWN, STACK, HEAP, STATIC
+	const void *data_ptr;
+};
 void prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg);
 void prefix_tree_del(void *base, size_t s);
 void init_prefix_tree_from_maps(void);

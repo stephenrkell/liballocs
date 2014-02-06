@@ -17,9 +17,10 @@
 #include <sys/syscall.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdarg.h>
 #include "libcrunch_private.h"
 
-static const _Bool safe_to_use_prefix_tree = 1; // experiment with this
+#define safe_to_use_prefix_tree (__libcrunch_is_initialized)
 
 static const char *filename_for_fd(int fd)
 {
@@ -108,6 +109,49 @@ int munmap(void *addr, size_t length)
 		}
 		return ret;
 	}
+}
+
+void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /* void *new_address */)
+{
+	static void *(*orig_mremap)(void *, size_t, size_t, int, ...);
+	va_list ap;
+	if (!orig_mremap)
+	{
+		orig_mremap = dlsym(RTLD_NEXT, "mremap");
+		assert(orig_mremap);
+	}
+	
+	void *new_address;
+	if (flags & MREMAP_FIXED)
+	{
+		va_start(ap, flags);
+		new_address = va_arg(ap, void *);
+		va_end(ap);
+	}
+	
+#define orig_call ((flags & MREMAP_FIXED)  \
+			? orig_mremap(old_addr, old_size, new_size, flags, new_address) \
+			: orig_mremap(old_addr, old_size, new_size, flags))
+	
+	if (!safe_to_use_prefix_tree) 
+	{
+		return orig_call;
+	}
+	else
+	{
+		void *ret = orig_call;
+		if (ret != MAP_FAILED)
+		{
+			struct prefix_tree_node *cur = prefix_tree_deepest_match_from_root(old_addr, NULL);
+			assert(cur != NULL);
+			unsigned kind = cur->kind;
+			const void *data_ptr = cur->data_ptr;
+			prefix_tree_del(old_addr, old_size);
+			prefix_tree_add(ret, new_size, kind, data_ptr);
+		}
+		return ret;
+	}
+#undef orig_call
 }
 
 int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
