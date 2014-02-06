@@ -126,7 +126,7 @@ int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 					info->dlpi_phdr[i].p_memsz, STATIC, info->dlpi_name);
 			}
 		}
-	
+		
 		// if we're looking for a single file, can stop now
 		if (filename != NULL) return 1;
 	}
@@ -235,7 +235,7 @@ int dlclose(void *handle)
 		if (ret == 0)
 		{
 			// was it really unloaded?
-			void *h = orig_dlopen(copied_filename, RTLD_NOLOAD);
+			void *h = orig_dlopen(copied_filename, RTLD_LAZY | RTLD_NOLOAD);
 			if (h == NULL)
 			{
 				// yes, it was unloaded
