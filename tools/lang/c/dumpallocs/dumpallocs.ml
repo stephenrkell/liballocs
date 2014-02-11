@@ -84,12 +84,12 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
    |  SizeOfE(e) -> Some(typeSig (typeOf e))
    |  SizeOfStr(s) -> Some(typeSig charType)
    |  Lval(lhost, offset) -> begin
-        output_string Pervasives.stderr ("Hello from Lval case in getSizeExpr\n");  flush Pervasives.stderr; 
+        (* output_string Pervasives.stderr ("Hello from Lval case in getSizeExpr\n");  flush Pervasives.stderr; *) 
         match lhost with 
            Var(v) -> begin
              if v.vglob then None else try 
                let found = Some(assoc v.vid env) in 
-               output_string Pervasives.stderr ("environment tells us that vid " ^ (string_of_int v.vid) ^ " has a sizeofness\n"); 
+               (* output_string Pervasives.stderr ("environment tells us that vid " ^ (string_of_int v.vid) ^ " has a sizeofness\n"); *)
                found 
              with Not_found -> None
            end
@@ -101,7 +101,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
    and a recursive part which recurses *without* recursively doing the
    HasNoSizeof check. *)
 let getSizeExprElseDefault (e: exp) (env : (int * typsig) list) = 
-  output_string Pervasives.stderr ("Hello from getSizeExprElseDefault\n");  flush Pervasives.stderr; 
+  (* output_string Pervasives.stderr ("Hello from getSizeExprElseDefault\n");  flush Pervasives.stderr;  *)
   let explicitSizeExpr = getSizeExpr e env in
   match explicitSizeExpr with
     None -> Some(typeSig voidType)
@@ -134,20 +134,20 @@ let rec warnIfLikelyAllocFn (i: instr) (f: varinfo) (arglist: exp list) =
                   Some(f.vname, None) (* We eliminate these lines in merge-allocs, rather than
                      here, so we can safely pass over the false positive from objdumpallocs. *)
          *)  end else (* None *)
-      (output_string Pervasives.stderr ("call to function " ^ f.vname ^ " is not an allocation because of empty arglist\n"); (* None *) () )
+      (* (output_string Pervasives.stderr ("call to function " ^ f.vname ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
 
 let rec extractUserAllocMatchingSignature i f arglist signature env = 
  (* destruct the signature string *)
- (output_string Pervasives.stderr ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr; 
+ (* (output_string Pervasives.stderr ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr;  *)
  let signatureFunction = 
        if string_match (regexp "[^\\(]+") signature 0 
-       then (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; matched_string signature ) 
-       else (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; "" )
+       then (* (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; *) matched_string signature (* ) *)
+       else (* (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; *) "" (* ) *)
  in if f.vname <> signatureFunction then (* (output_string Pervasives.stderr ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) None (* ) *)
  else begin let signatureArgSpec = 
        if string_match (regexp "\\(.*\\)") signature (String.length signatureFunction) 
-       then (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function arg spec\n"); flush Pervasives.stderr; ( matched_string signature ) )
-       else (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain an arg spec\n"); flush Pervasives.stderr; "")
+       then (* (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function arg spec\n"); flush Pervasives.stderr; ( *) matched_string signature (* ) ) *)
+       else (* (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain an arg spec\n"); flush Pervasives.stderr; *) "" (* ) *)
  in let sizeArgPos = 
        if string_match (regexp "[^A-Z]*[A-Z]") signatureArgSpec 0 
        then Some((String.length (matched_string signatureArgSpec)) - 1 (* for the bracket*) - 1 (* because we want zero-based *))
@@ -156,21 +156,21 @@ let rec extractUserAllocMatchingSignature i f arglist signature env =
     Some(s) -> if (length arglist) > s then 
        let szEx = getSizeExprElseDefault (nth arglist s) env in 
        match szEx with
-         Some(szType) -> (output_string Pervasives.stderr ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr ); 
+         Some(szType) -> (* (output_string Pervasives.stderr ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr ); *)
                Some(f.vname, szEx)
       | None -> output_string Pervasives.stderr ("Could not infer what we are allocating\n"); flush Pervasives.stderr; None
      else (output_string Pervasives.stderr ("Warning: signature " ^ signature 
      ^ " wrongly predicts allocation function " ^ f.vname ^ " will have at least " 
      ^ (string_of_int s) ^ " arguments, where here it has only " ^ (string_of_int (length arglist)) ^"\n"); flush Pervasives.stderr; None)
    | None -> None
- end)
+ end (* ) *)
 
 let rec getUserAllocExpr (i: instr) (f: varinfo) (arglist: exp list) env = 
-  output_string Pervasives.stderr "Looking for user alloc expr\n"; flush Pervasives.stderr; 
+  (* output_string Pervasives.stderr "Looking for user alloc expr\n"; flush Pervasives.stderr; *)
   let userVerdict = try begin
     let candidates = Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOC_FNS") in
     (* match f.vname with each candidate *) 
-    output_string Pervasives.stderr ("Got " ^ (string_of_int (List.length candidates)) ^ "candidate signatures\n"); flush Pervasives.stderr; 
+    (* output_string Pervasives.stderr ("Got " ^ (string_of_int (List.length candidates)) ^ "candidate signatures\n"); flush Pervasives.stderr;  *)
     let rec firstMatchingSignature cands =
       match cands with
         [] -> output_string Pervasives.stderr ("Warning: exhausted candidate signatures in LIBCRUNCH_ALLOC_FNS matching function "  ^ f.vname ^ "\n"); None
@@ -276,7 +276,7 @@ let rec stringFromSig tsig = (* = Pretty.sprint 80 (d_typsig () (getEffectiveTyp
 
 (* I so do not understand Pretty.dprintf *)
 let printAllocFn fileAndLine chan funvar allocExpr = 
-   output_string Pervasives.stderr ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n");
+   (* output_string Pervasives.stderr ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
    output_string chan fileAndLine;
    let msg = Pretty.sprint 80 
        (Pretty.dprintf  "\t%a\t"
@@ -345,7 +345,7 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
    and simply ignore the pred/succ structure in stmts, 
    instead just considering each instruction across all stmts. 
    Let's try this. *)
-   let rec accumulateOverOneInstr acc i = output_string Pervasives.stderr "hello from accumulateOverOneInstr\n"; flush Pervasives.stderr; 
+   let rec accumulateOverOneInstr acc i = (* output_string Pervasives.stderr "hello from accumulateOverOneInstr\n"; flush Pervasives.stderr; *)
        match i with
          Call(_, f, args, l) -> acc
        | Set((host, off), e, l) -> begin 
@@ -353,8 +353,8 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
             Var(v) -> if v.vglob then acc else begin
                match getSizeExpr e acc with
                  Some(t) -> (
-                 output_string Pervasives.stderr ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofTypsig " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig t)) ^  ")\n")
-                 ; flush Pervasives.stderr; (v.vid, t) :: (remove_assoc v.vid acc))
+                 (* output_string Pervasives.stderr ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofTypsig " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig t)) ^  ")\n")
+                 ; flush Pervasives.stderr; *) (v.vid, t) :: (remove_assoc v.vid acc))
               |  None -> acc
             end
           | Mem(e) -> acc
@@ -362,15 +362,15 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
        | Asm(_, _, _, _, _, l) -> acc
    in
    let rec accumulateOverInstrs acc instrs = 
-     output_string Pervasives.stderr "hello from accumulateOverInstrs\n"; flush Pervasives.stderr; 
+     (* output_string Pervasives.stderr "hello from accumulateOverInstrs\n"; flush Pervasives.stderr; *)
      match instrs with 
             [] -> acc
     |  i :: is -> accumulateOverInstrs (accumulateOverOneInstr acc i) is
    in
    let rec accumulateOneStatement acc s = 
-      output_string Pervasives.stderr (Pretty.sprint 80 
+      (* output_string Pervasives.stderr (Pretty.sprint 80 
        (Pretty.dprintf  "Hello from accumulateOneStatement\n\t%a\t\n" d_stmt s)); 
-      flush Pervasives.stderr; 
+      flush Pervasives.stderr; *)
       match s.skind with
         Instr(is: instr list) -> accumulateOverInstrs acc is
    (*
@@ -424,12 +424,12 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
     DoChildren
 
   method vinst (i: instr) : instr list visitAction = 
-    ( output_string Pervasives.stderr ("considering instruction " ^ (
+    (* ( output_string Pervasives.stderr ("considering instruction " ^ (
        match i with 
           Call(_, _, _, l) -> "(call) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
         | Set(_, _, l) -> "(assignment) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
         | Asm(_, _, _, _, _, l) -> "(assembly) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
-      ) ^ "\n"); flush Pervasives.stderr; 
+      ) ^ "\n"); flush Pervasives.stderr; *)
       match i with 
       Call(_, f, args, l) -> begin
         (* Check if we need to output *)
@@ -478,17 +478,17 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                          let placeholder = if (length args) > 0 then "(unknown)" else "(none)"
                          in printAllocFn fileAndLine chan v placeholder; SkipChildren
                      |  _ -> 
-                         (output_string Pervasives.stderr (
+                         (* (output_string Pervasives.stderr (
                             "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
-                         ) ; flush Pervasives.stderr;  SkipChildren) (* this means it's not an allocation function *)
+                         ) ; flush Pervasives.stderr;  *) SkipChildren(* ) *) (* this means it's not an allocation function *)
                    end (* ) *)
                 | _ (* match v.vtype *) -> (output_string Pervasives.stderr ("skipping call to non-function var " ^ v.vname ^ "\n"); flush Pervasives.stderr; SkipChildren)
              end
         | _ (* match f *) -> (output_string Pervasives.stderr ("skipping call to non-lvalue at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n"); flush Pervasives.stderr; SkipChildren)
       end 
-    | Set(lv, e, l) -> (output_string Pervasives.stderr ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); flush Pervasives.stderr; SkipChildren )
+    | Set(lv, e, l) -> (* (output_string Pervasives.stderr ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); flush Pervasives.stderr; *) SkipChildren (* ) *)
     | Asm(_, _, _, _, _, l) -> (* (output_string Pervasives.stderr ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); *) SkipChildren (* ) *)
-    )
+   (* ) *)
 end (* class dumpAllocsVisitor *)
 
 let feature : featureDescr = 
