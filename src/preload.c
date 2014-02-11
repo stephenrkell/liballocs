@@ -41,7 +41,7 @@ static const char *filename_for_fd(int fd)
  * intercept the early calls, we still need to be able to delegate. 
  * For that, we need our underyling function pointers. */
 
-/* NOTE / HACK / glibc-specifity: we know about two different mmap entry 
+/* NOTE / HACK / glibc-specificity: we know about two different mmap entry 
  * points: mmap and mmap64. 
  * 
  * on x86-64, mmap64 has 8-byte size_t length and 8-byte off_t offset.

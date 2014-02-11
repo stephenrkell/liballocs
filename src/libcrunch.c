@@ -512,8 +512,9 @@ static void print_exit_summary(void)
 int __libcrunch_global_init(void)
 {
 	if (__libcrunch_is_initialized) return 0; // we are okay
+
+	// don't try more than once to initialize
 	static _Bool tried_to_initialize;
-	
 	if (tried_to_initialize) return -1;
 	tried_to_initialize = 1;
 	
@@ -672,7 +673,7 @@ void *__libcrunch_my_typeobj(void)
  * as execution proceeds. */
 
 /* This is left out-of-line because it's inherently a slow path. */
-struct rec *__libcrunch_typestr_to_uniqtype(const char *typestr)
+const void *__libcrunch_typestr_to_uniqtype(const char *typestr)
 {
 	if (!typestr) return NULL;
 	
