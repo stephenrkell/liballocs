@@ -155,8 +155,7 @@ def main():
                 m = re.match("(.*)\((.*)\)", allocFn)
                 fnName = m.groups()[0]
                 fnSig = m.groups()[1]
-                linkArgs += ["-Wl,--wrap"]
-                linkArgs += ["-Wl," + fnName]
+                linkArgs += ["-Wl,--wrap," + fnName]
         # we need to export-dynamic, s.t. __is_a is linked from libcrunch
         linkArgs += ["-Wl,--export-dynamic"]
         # if we're building an executable, append the magic objects
@@ -173,7 +172,7 @@ def main():
             else: # FIXME: weak linkage one day
                 linkArgs += ["-lcrunch_noop"]
         else:
-            # We're building a shared library, so simply add libcrunch.o
+            # We're building a shared library, so simply add libcrunch_noop.o; 
             # only link directly if we're disabling the preload approach
             if "LIBCRUNCH_USE_PRELOAD" in os.environ and os.environ["LIBCRUNCH_USE_PRELOAD"] == "no":
                 linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
