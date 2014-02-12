@@ -117,84 +117,114 @@ let rec try_match vname pattern =
         else false
     with Not_found -> false
 
-let rec warnIfLikelyAllocFn (i: instr) (f: varinfo) (arglist: exp list) =
- if try_match f.vname "[aA][lL][lL][oO][cC]" then begin (* we *might* want to output something *)
-               if (length arglist) > 0 then 
-                (* Some(f.vname, *)
-                   if try_match f.vname "calloc" && (length arglist) > 1
-                      then (* getSizeExpr (nth arglist 1) *)
-                      output_string Pervasives.stderr ("call to function " ^ f.vname ^ " looks like an allocation, but does not match any in LIBCRUNCH_ALLOC_FNS\n")
-                   else if try_match f.vname "realloc" && (length arglist) > 1
-                      then (* getSizeExpr (nth arglist 1) *)
-                      output_string Pervasives.stderr ("call to function " ^ f.vname ^ " looks like an allocation, but does not match any in LIBCRUNCH_ALLOC_FNS\n")
-                      else (* getSizeExpr (nth arglist 0) *)
-                         output_string Pervasives.stderr ("call to function " ^ f.vname ^ " looks like an allocation, but does not match any in LIBCRUNCH_ALLOC_FNS\n")
-               else () (*  ) 
-               else (* takes no arguments, so we output a "(none)" line. *)
-                  Some(f.vname, None) (* We eliminate these lines in merge-allocs, rather than
-                     here, so we can safely pass over the false positive from objdumpallocs. *)
-         *)  end else (* None *)
-      (* (output_string Pervasives.stderr ("call to function " ^ f.vname ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
+let rec warnIfLikelyAllocFn (i: instr) (maybeFunName: string option) (arglist: exp list) = 
+ match maybeFunName with 
+   Some(funName) -> 
+     if try_match funName "[aA][lL][lL][oO][cC]" then begin (* we *might* want to output something *)
+       if (length arglist) > 0 then 
+       (* Some(f.vname, *)
+          if try_match funName "calloc" && (length arglist) > 1
+             then (* getSizeExpr (nth arglist 1) *)
+             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_ALLOC_FNS\n")
+          else if try_match funName "realloc" && (length arglist) > 1
+             then (* getSizeExpr (nth arglist 1) *)
+             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_ALLOC_FNS\n")
+             else (* getSizeExpr (nth arglist 0) *)
+                output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_ALLOC_FNS\n")
+      else () (*  ) 
+      else (* takes no arguments, so we output a "(none)" line. *)
+         Some(f.vname, None) (* We eliminate these lines in merge-allocs, rather than
+            here, so we can safely pass over the false positive from objdumpallocs. *)
+*)  end else (* None *)
+      (* (output_string Pervasives.stderr ("call to function " ^ funName ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
+| None -> ()
 
-let rec extractUserAllocMatchingSignature i f arglist signature env = 
- (* destruct the signature string *)
- (* (output_string Pervasives.stderr ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr;  *)
- let signatureFunction = 
-       if string_match (regexp "[^\\(]+") signature 0 
-       then (* (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; *) matched_string signature (* ) *)
-       else (* (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; *) "" (* ) *)
- in if f.vname <> signatureFunction then (* (output_string Pervasives.stderr ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) None (* ) *)
- else begin let signatureArgSpec = 
-       if string_match (regexp "\\(.*\\)") signature (String.length signatureFunction) 
-       then (* (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function arg spec\n"); flush Pervasives.stderr; ( *) matched_string signature (* ) ) *)
-       else (* (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain an arg spec\n"); flush Pervasives.stderr; *) "" (* ) *)
+let matchUserAllocArgs i arglist signature env maybeFunNameToPrint : Cil.typsig option =
+ let signatureArgSpec = try (
+     let nskip = search_forward (regexp "(.*)") signature 0
+     in
+     let fragment = (* string_after *) (matched_string signature) (* nskip *)
+     in 
+     (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function arg spec (" ^ fragment ^ " a.k.a. signature + "^ (string_of_int nskip) ^")\n"); flush Pervasives.stderr);
+     fragment
+ )
+ with Not_found -> (
+       (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain an arg spec\n"); flush Pervasives.stderr); 
+       ""
+ )
  in let sizeArgPos = 
        if string_match (regexp "[^A-Z]*[A-Z]") signatureArgSpec 0 
        then Some((String.length (matched_string signatureArgSpec)) - 1 (* for the bracket*) - 1 (* because we want zero-based *))
        else (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain a capitalized arg spec element\n"); flush Pervasives.stderr; None)
  in match sizeArgPos with
-    Some(s) -> if (length arglist) > s then 
+  Some(s) -> 
+     if (length arglist) > s then 
        let szEx = getSizeExprElseDefault (nth arglist s) env in 
        match szEx with
          Some(szType) -> (* (output_string Pervasives.stderr ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr ); *)
-               Some(f.vname, szEx)
-      | None -> output_string Pervasives.stderr ("Could not infer what we are allocating\n"); flush Pervasives.stderr; None
-     else (output_string Pervasives.stderr ("Warning: signature " ^ signature 
-     ^ " wrongly predicts allocation function " ^ f.vname ^ " will have at least " 
-     ^ (string_of_int s) ^ " arguments, where here it has only " ^ (string_of_int (length arglist)) ^"\n"); flush Pervasives.stderr; None)
-   | None -> None
- end (* ) *)
+               szEx
+       | None -> output_string Pervasives.stderr ("Could not infer what we are allocating\n"); flush Pervasives.stderr; None
+     else (match maybeFunNameToPrint with 
+         Some(fnname) -> 
+               ((output_string Pervasives.stderr ("Warning: signature " ^ signature 
+               ^ " wrongly predicts allocation function " ^ fnname ^ " will have at least " 
+               ^ (string_of_int s) ^ " arguments, where call site it has only " ^ (string_of_int (length arglist)) ^"\n"); 
+               flush Pervasives.stderr); None)
+       | None -> (output_string Pervasives.stderr ("Warning: spec argument count (" ^ (string_of_int s) ^ ") does not match call-site argument count (" ^ (string_of_int (length arglist)) ^ ")")); None)
+ | None -> None
 
-let rec getUserAllocExpr (i: instr) (f: varinfo) (arglist: exp list) env = 
+let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env : Cil.typsig option = 
+ (* destruct the signature string *)
+ (* (output_string Pervasives.stderr ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr;  *)
+ let signatureFunction = 
+       if string_match (regexp "[^\\(]+") signature 0 
+       then (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; matched_string signature )
+       else (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; "" )
+ in 
+ match maybeFunName with 
+   Some(fname) -> (if fname <> signatureFunction then (* (output_string Pervasives.stderr ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) None (* ) *)
+                  else (matchUserAllocArgs i arglist signature env (Some(fname))))
+ | None -> (matchUserAllocArgs i arglist signature env None)
+ (* ) *)
+
+let userAllocFunctions () : string list = try begin 
+    Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOC_FNS")
+  end with Not_found -> []
+
+let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates : Cil.typsig option = 
   (* output_string Pervasives.stderr "Looking for user alloc expr\n"; flush Pervasives.stderr; *)
   let userVerdict = try begin
-    let candidates = Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOC_FNS") in
     (* match f.vname with each candidate *) 
     (* output_string Pervasives.stderr ("Got " ^ (string_of_int (List.length candidates)) ^ "candidate signatures\n"); flush Pervasives.stderr;  *)
-    let rec firstMatchingSignature cands =
+    let rec firstMatchingSignature cands = 
+      let funNameString = match maybeFunName with Some(s) -> s | None -> "(indirect call)"
+      in
       match cands with
-        [] -> output_string Pervasives.stderr ("Warning: exhausted candidate signatures in LIBCRUNCH_ALLOC_FNS matching function "  ^ f.vname ^ "\n"); None
-      | s::ss -> begin match extractUserAllocMatchingSignature i f arglist s env with
-           None -> (output_string Pervasives.stderr ("Warning: signature " ^ s ^ " did not match function " ^ f.vname ^ "\n"); firstMatchingSignature ss )
+        [] -> output_string Pervasives.stderr ("Warning: exhausted candidate signatures in matching function "  ^ funNameString ^ "\n"); None
+      | s::ss -> begin match extractUserAllocMatchingSignature i maybeFunName arglist s env with
+           None -> (output_string Pervasives.stderr ("Warning: signature " ^ s ^ " did not match function " ^ funNameString ^ "\n"); firstMatchingSignature ss )
          | Some(s) -> Some(s)
         end
     in firstMatchingSignature candidates
-  end with Not_found -> (output_string Pervasives.stderr ("Warning: function " ^ f.vname ^ " did not match any user allocation function descriptor\n"); None)
+  end with Not_found -> (match maybeFunName with 
+     Some(funName) -> (output_string Pervasives.stderr 
+          ("Warning: function " ^ funName ^ " did not match any allocation function descriptor\n"))
+  | None -> ()); None
   in
   match userVerdict with
-  |  None -> (warnIfLikelyAllocFn i f arglist; None)
+  |  None -> (warnIfLikelyAllocFn i maybeFunName arglist; None)
   |  Some(s) -> Some(s)
 
 (* Work out whether this call is an allocation call. If it is,
    return Some(fn, optionalTypeSig)
    where fn is the function varinfo
    and optionalTypeSig is the type signature we inferred was being allocated, if we managed it *)
-let rec getAllocExpr (i: instr) (f: varinfo) (arglist: exp list) env =
-  match f.vname with
-    | "malloc" -> Some (f.vname, getSizeExprElseDefault (nth arglist 0) env)
-    | "calloc" -> Some (f.vname, getSizeExprElseDefault (nth arglist 1) env)
-    | "realloc" -> Some (f.vname, getSizeExprElseDefault (nth arglist 1) env)
-    | _ -> getUserAllocExpr i f arglist env
+let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) env = 
+  let maybeFunName = match maybeFun with 
+    Some(f) -> Some(f.vname)
+  | None -> None
+  in 
+  getUserAllocExpr i maybeFunName arglist env (["malloc(Z)"; "calloc(zZ)"; "realloc(pZ)"; "posix_memalign(pzZ)"] @ (userAllocFunctions ()))
 
 (* HACK: copied from trumptr *)
 let rec canonicalizeBaseTypeStr s = 
@@ -275,12 +305,14 @@ let rec stringFromSig tsig = (* = Pretty.sprint 80 (d_typsig () (getEffectiveTyp
  | TSBase(tbase) -> baseTypeStr tbase
 
 (* I so do not understand Pretty.dprintf *)
-let printAllocFn fileAndLine chan funvar allocExpr = 
+let printAllocFn fileAndLine chan maybeFunvar allocExpr = 
    (* output_string Pervasives.stderr ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
    output_string chan fileAndLine;
-   let msg = Pretty.sprint 80 
+   let msg = match maybeFunvar with 
+     Some(funvar) -> Pretty.sprint 80 
        (Pretty.dprintf  "\t%a\t"
             d_lval (Var(funvar), NoOffset)) 
+   | None -> "\t(indirect)\t"
    in
    output_string chan (msg ^ allocExpr ^ "\n");
    flush chan
@@ -424,67 +456,117 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
     DoChildren
 
   method vinst (i: instr) : instr list visitAction = 
-    (* ( output_string Pervasives.stderr ("considering instruction " ^ (
+    ( output_string Pervasives.stderr ("considering instruction " ^ (
        match i with 
           Call(_, _, _, l) -> "(call) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
         | Set(_, _, l) -> "(assignment) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
         | Asm(_, _, _, _, _, l) -> "(assembly) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
-      ) ^ "\n"); flush Pervasives.stderr; *)
+      ) ^ "\n"); flush Pervasives.stderr);
       match i with 
-      Call(_, f, args, l) -> begin
-        (* Check if we need to output *)
-        match f with 
-          Lval(Var(v), NoOffset) when v.vglob -> begin
-              match v.vtype with
-               | TFun(returnType, optParamList, isVarArgs, attrs) -> 
-                   (* Where to write our output? We want the .allocs to be output 
-                      right alongside the .c file (say) that does the allocation.
-                      PROBLEM 1: this varies, because we're reading a .i file, i.e.
-                      preprocessed temporary, that is NOT NECESSARILY IN THE SAME DIRECTORY
-                      the C file.
-                      PROBLEM 2: allocs might be in a header file, in which case we
-                      won't have permission to write the output.
-                      Our solution:
-                      - tried: just write to where the .i file goes. This doesn't work because
-                      e.g. git has ./builtin/bundle.c and ./bundle.c; the allocs for the latter
-                      overwrite the former.
-                      - next attempt: we find out which file is the toplevel input, and use that.
-                      Problem: toplevel input was handled by cilly, our parent process.
-                      
-                      
-                      This makes sense because our allocs data is a per translation unit thing
-                      (e.g. could conceivably be different for two different compilations
-                      both including the same header file, so can't write a single ".allocs"
-                      for that header).
-                    *)
-                   (* (output_string Pervasives.stderr ("processing a function " ^ v.vname ^ "\n"); *)
-                   let chan = match !outChannel with
-                    | Some(s) -> s
-                    | None    -> Pervasives.stderr
-                   in
-                   let fileAndLine = (abspath l.file) ^ "\t" ^ (string_of_int l.line) 
-                   in
-                   begin
-                      (* Here we need to identify the size argument and
-                         then do either some hacky pattern matching
-                         or a recursive function on the expr structure:
-                         Sizeof T lets us terminate
-                         Sizeof V also lets us terminate
-                         Mul where an arg is a Sizeof lets us terminate *)
-                     match (getAllocExpr i v args !sizeEnv) with
-                        Some(fn1, Some(ts)) -> 
-                         printAllocFn fileAndLine chan v (stringFromSig ts); SkipChildren
-                     |  Some(fn2, None) -> 
-                         let placeholder = if (length args) > 0 then "(unknown)" else "(none)"
-                         in printAllocFn fileAndLine chan v placeholder; SkipChildren
-                     |  _ -> 
-                         (* (output_string Pervasives.stderr (
-                            "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
-                         ) ; flush Pervasives.stderr;  *) SkipChildren(* ) *) (* this means it's not an allocation function *)
-                   end (* ) *)
-                | _ (* match v.vtype *) -> (output_string Pervasives.stderr ("skipping call to non-function var " ^ v.vname ^ "\n"); flush Pervasives.stderr; SkipChildren)
+      Call(_, funExpr, args, l) -> begin
+         let handleCall maybeFunvar returnType optParamList isVarArgs attrs = 
+            (* Where to write our output? We want the .allocs to be output 
+               right alongside the .c file (say) that does the allocation.
+              PROBLEM 1: this varies, because we're reading a .i file, i.e.
+              preprocessed temporary, that is NOT NECESSARILY IN THE SAME DIRECTORY
+              the C file.
+              PROBLEM 2: allocs might be in a header file, in which case we
+              won't have permission to write the output.
+              Our solution:
+              - tried: just write to where the .i file goes. This doesn't work because
+              e.g. git has ./builtin/bundle.c and ./bundle.c; the allocs for the latter
+              overwrite the former.
+              - next attempt: we find out which file is the toplevel input, and use that.
+              Problem: toplevel input was handled by cilly, our parent process.
+              
+              
+              This makes sense because our allocs data is a per translation unit thing
+              (e.g. could conceivably be different for two different compilations
+              both including the same header file, so can't write a single ".allocs"
+              for that header).
+            *)
+            (* (output_string Pervasives.stderr ("processing a function " ^ v.vname ^ "\n"); *)
+            let chan = match !outChannel with
+             | Some(s) -> s
+             | None    -> Pervasives.stderr
+            in
+            let fileAndLine = (abspath l.file) ^ "\t" ^ (string_of_int l.line) 
+            in
+            begin
+              (* Here we need to identify the size argument and
+                 then do either some hacky pattern matching
+                 or a recursive function on the expr structure:
+                 Sizeof T lets us terminate
+                 Sizeof V also lets us terminate
+                 Mul where an arg is a Sizeof lets us terminate *)
+              match (getAllocExpr i maybeFunvar args !sizeEnv) with
+                 Some(ts) -> printAllocFn fileAndLine chan maybeFunvar (stringFromSig ts); SkipChildren
+              |  _ -> 
+                  (* (output_string Pervasives.stderr (
+                     "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
+                  ) ; flush Pervasives.stderr;  *) SkipChildren(* ) *) (* this means it's not an allocation function *)
+            end (* ) *)
+        in
+        (* We might be calling a multiply-indirected thing, say 
+        
+           Lval(Mem(Lval(Var(fn2, NoOffset)), NoOffset))
+        
+        and we want to get at the actual function type being called necessary
+        
+        
+         *)
+        let rec getCalledFunctionTypeSig currentIndirection fexp = 
+           let rec stripIndirectionFromTypeSig n ts = 
+             if n == 0 then ts
+             else match ts with 
+              | TSPtr(tts, attrs) -> stripIndirectionFromTypeSig (n-1) tts
+              | _ -> raise (Failure("not enough indirection"))
+           in
+           let extractFunctionTypeSig n t = (
+               let ts = (stripIndirectionFromTypeSig n (typeSig t)) 
+               in (
+                   match ts with 
+                     TSFun(_, _, _, _) -> ts 
+                   | _ -> raise (Failure("impossible call to cast expression"))
+                )
+           )
+           in
+           output_string Pervasives.stderr ("saw non-var-lvalue call expr " ^ (Pretty.sprint 80 (d_plainexp () fexp)) ^ "\n") ; flush Pervasives.stderr;
+           match fexp with 
+             Lval(Var(v), _) -> extractFunctionTypeSig currentIndirection v.vtype
+         |   Lval(Mem(expr), _) -> (getCalledFunctionTypeSig (currentIndirection + 1) expr)
+         |   BinOp(PlusPI, pointerEx, integerEx, resultTyp) -> getCalledFunctionTypeSig currentIndirection pointerEx
+         |   BinOp(IndexPI, pointerEx, integerEx, resultTyp) -> getCalledFunctionTypeSig (currentIndirection + 1) pointerEx
+         |   BinOp(MinusPI, pointerEx, integerEx, resultTyp) -> getCalledFunctionTypeSig currentIndirection pointerEx
+         |   CastE(targetTyp, ex) -> (extractFunctionTypeSig currentIndirection targetTyp)
+         |   AddrOf(Var(v), _) -> (extractFunctionTypeSig (currentIndirection - 1) v.vtype)
+         |   AddrOf(Mem(memExp), _) -> (getCalledFunctionTypeSig (currentIndirection - 1) memExp)
+         |   StartOf(Var(arrayVar), _) -> (extractFunctionTypeSig currentIndirection arrayVar.vtype)
+         |   StartOf(Mem(memExp), _) -> (getCalledFunctionTypeSig (currentIndirection + 1) memExp)
+         | _ -> raise (Failure("impossible called expression (getCalledFunctionTypeSig)"))
+        in
+        let getCalledFunctionOrFunctionPointerTypeSig fexp : Cil.typsig * Cil.varinfo option = 
+           match fexp with 
+             Lval(Var(v), _) -> ((typeSig v.vtype), Some(v))
+         |   Lval(Mem(expr), _) -> (getCalledFunctionTypeSig 1 expr, None)
+         |   BinOp(PlusPI, pointerEx, integerEx, resultTyp) -> (getCalledFunctionTypeSig 0 pointerEx, None)
+         |   BinOp(IndexPI, pointerEx, integerEx, resultTyp) -> (getCalledFunctionTypeSig 1 pointerEx, None)
+         |   BinOp(MinusPI, pointerEx, integerEx, resultTyp) -> (getCalledFunctionTypeSig 0 pointerEx, None)
+         |   CastE(targetTyp, ex) -> ((typeSig targetTyp), None)
+         | _ -> raise (Failure("impossible called expression (getCalledFunctionOrFunctionPointerTypeSig)"))
+        in 
+        let (functionTs, maybeVarinfo) = getCalledFunctionOrFunctionPointerTypeSig funExpr
+        in
+        match functionTs with
+          TSFun(returnTs, paramTss, isVarArgs, attrs) -> handleCall maybeVarinfo returnTs paramTss isVarArgs attrs
+        | TSPtr(TSFun(returnTs, paramTss, isVarArgs, funAttrs), ptrAttrs) -> handleCall (None) returnTs paramTss isVarArgs funAttrs
+        | _ -> raise (Failure("impossible called function typesig" ^ (Pretty.sprint 80 (d_typsig () functionTs))))
+        
+        (* TSPtr(TSFun(returnTs, paramTss, isVarArgs, funAttrs), ptrAttrs) -> handleCall None returnTs paramTss isVarArgs funAttrs
+               | _ (* match v.vtype *) -> (output_string Pervasives.stderr ("skipping call to non-function var " ^ v.vname ^ "\n"); flush Pervasives.stderr; SkipChildren)
              end
         | _ (* match f *) -> (output_string Pervasives.stderr ("skipping call to non-lvalue at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n"); flush Pervasives.stderr; SkipChildren)
+        *)
       end 
     | Set(lv, e, l) -> (* (output_string Pervasives.stderr ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); flush Pervasives.stderr; *) SkipChildren (* ) *)
     | Asm(_, _, _, _, _, l) -> (* (output_string Pervasives.stderr ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); *) SkipChildren (* ) *)

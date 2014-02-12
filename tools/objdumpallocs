@@ -128,11 +128,11 @@ case "$filetype" in
 esac
 
 line_regexp='^([0-9a-f]*) <([^>]*)>'
-alloc_site_regexp="${line_regexp}.*call.*<($( 
+alloc_site_regexp="${line_regexp}.*call.*(<($( 
     echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc' | \
     make_match_any_line_floating_eregexp )|$( 
     echo -n "${LIBCRUNCH_ALLOC_FNS:-malloc}" | sed 's/\([a-zA-Z0-9_]\+\)([^)]*) */\1\n__wrap_\1\n/g' | 
-    make_match_any_line_floating_eregexp ))"
+    make_match_any_line_floating_eregexp ))|.*\*)"
 # HACK: if libcrunch_alloc_fns is unset, use "malloc" a second time
 # (leaving this out will make the regexp end "|)" so match all calls)
 
