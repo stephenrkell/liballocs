@@ -507,53 +507,10 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                   ) ; flush Pervasives.stderr;  *) SkipChildren(* ) *) (* this means it's not an allocation function *)
             end (* ) *)
         in
-        (* We might be calling a multiply-indirected thing, say 
-        
-           Lval(Mem(Lval(Var(fn2, NoOffset)), NoOffset))
-        
-        and we want to get at the actual function type being called necessary
-        
-        
-         *)
-        let rec getCalledFunctionTypeSig currentIndirection fexp = 
-           let rec stripIndirectionFromTypeSig n ts = 
-             if n == 0 then ts
-             else match ts with 
-              | TSPtr(tts, attrs) -> stripIndirectionFromTypeSig (n-1) tts
-              | _ -> raise (Failure("not enough indirection"))
-           in
-           let extractFunctionTypeSig n t = (
-               let ts = (stripIndirectionFromTypeSig n (typeSig t)) 
-               in (
-                   match ts with 
-                     TSFun(_, _, _, _) -> ts 
-                   | _ -> raise (Failure("impossible call to cast expression"))
-                )
-           )
-           in
-           output_string Pervasives.stderr ("saw non-var-lvalue call expr " ^ (Pretty.sprint 80 (d_plainexp () fexp)) ^ "\n") ; flush Pervasives.stderr;
-           match fexp with 
-             Lval(Var(v), _) -> extractFunctionTypeSig currentIndirection v.vtype
-         |   Lval(Mem(expr), _) -> (getCalledFunctionTypeSig (currentIndirection + 1) expr)
-         |   BinOp(PlusPI, pointerEx, integerEx, resultTyp) -> getCalledFunctionTypeSig currentIndirection pointerEx
-         |   BinOp(IndexPI, pointerEx, integerEx, resultTyp) -> getCalledFunctionTypeSig (currentIndirection + 1) pointerEx
-         |   BinOp(MinusPI, pointerEx, integerEx, resultTyp) -> getCalledFunctionTypeSig currentIndirection pointerEx
-         |   CastE(targetTyp, ex) -> (extractFunctionTypeSig currentIndirection targetTyp)
-         |   AddrOf(Var(v), _) -> (extractFunctionTypeSig (currentIndirection - 1) v.vtype)
-         |   AddrOf(Mem(memExp), _) -> (getCalledFunctionTypeSig (currentIndirection - 1) memExp)
-         |   StartOf(Var(arrayVar), _) -> (extractFunctionTypeSig currentIndirection arrayVar.vtype)
-         |   StartOf(Mem(memExp), _) -> (getCalledFunctionTypeSig (currentIndirection + 1) memExp)
-         | _ -> raise (Failure("impossible called expression (getCalledFunctionTypeSig)"))
-        in
         let getCalledFunctionOrFunctionPointerTypeSig fexp : Cil.typsig * Cil.varinfo option = 
            match fexp with 
-             Lval(Var(v), _) -> ((typeSig v.vtype), Some(v))
-         |   Lval(Mem(expr), _) -> (getCalledFunctionTypeSig 1 expr, None)
-         |   BinOp(PlusPI, pointerEx, integerEx, resultTyp) -> (getCalledFunctionTypeSig 0 pointerEx, None)
-         |   BinOp(IndexPI, pointerEx, integerEx, resultTyp) -> (getCalledFunctionTypeSig 1 pointerEx, None)
-         |   BinOp(MinusPI, pointerEx, integerEx, resultTyp) -> (getCalledFunctionTypeSig 0 pointerEx, None)
-         |   CastE(targetTyp, ex) -> ((typeSig targetTyp), None)
-         | _ -> raise (Failure("impossible called expression (getCalledFunctionOrFunctionPointerTypeSig)"))
+             Lval(Var(v), NoOffset) -> ((typeSig v.vtype), Some(v))
+         |   _ -> (typeSig (typeOf fexp), None)
         in 
         let (functionTs, maybeVarinfo) = getCalledFunctionOrFunctionPointerTypeSig funExpr
         in
