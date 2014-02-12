@@ -1106,20 +1106,3 @@ abort:
 	// if (0 == strcmp(reason, "unrecognised allocsite")) warnx("Unrecognised allocsite: %p\n", reason_ptr);
 	return 1; // so that the program will continue
 }
-
-/* Force instantiation of __is_a3 in libcrunch, by repeating its prototype.
- * We do this so that linking an application -lcrunch is sufficient to
- * generate a weak *dynamic* reference to __is_a3. */
-int __is_a(const void *obj, const char *typestr);
-int __is_a3(const void *obj, const char *typestr, const struct rec **maybe_uniqtype);
-// DON'T instantiate __is_a_internal -- this is an internal function and should be inlined
-// int __is_a_internal(const void *obj, const struct rec *uniqtype);
-
-// same for initialization and, in fact, everything....
-int __libcrunch_check_init(void);
-enum object_memory_kind get_object_memory_kind(const void *obj);
-struct rec *allocsite_to_uniqtype(const void *allocsite);
-struct rec *vaddr_to_uniqtype(const void *allocsite);
-struct rec *static_addr_to_uniqtype(const void *allocsite, void **out_object_start);
-struct rec *__libcrunch_typestr_to_uniqtype(const char *typestr);
-

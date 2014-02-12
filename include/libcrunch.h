@@ -32,8 +32,14 @@ extern int __uniqtype__unsigned_char __attribute__((weak));
  * which are *always* inlined. NOTE: repeat these in trumptr.ml so that
  * the instrumentation can add them to code which doesn't include this header. */
 
+// if we're not compiling under CIL, include the things that trumptr would define
+#ifndef CIL
+#include "libcrunch_cil_inlines.h"
+#endif
+
 /* our own private assert */
-static inline void __libcrunch_private_assert(_Bool cond, const char *reason, 
+static inline void 
+(__attribute__((always_inline,gnu_inline)) __libcrunch_private_assert) (_Bool cond, const char *reason, 
 	const char *f, unsigned l, const char *fn)
 {
 #ifndef NDEBUG
@@ -41,7 +47,7 @@ static inline void __libcrunch_private_assert(_Bool cond, const char *reason,
 #endif
 }
 
-static inline void  __attribute__((gnu_inline)) __libcrunch_ensure_init(void)
+static inline void (__attribute__((always_inline,gnu_inline)) __libcrunch_ensure_init) (void)
 {
 	__libcrunch_private_assert(__libcrunch_check_init() == 0, "libcrunch init", 
 		__FILE__, __LINE__, __func__);
