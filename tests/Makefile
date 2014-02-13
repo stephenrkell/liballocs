@@ -32,28 +32,36 @@ endif
 endif
 
 ifneq ($(LIBCRUNCH_USE_PRELOAD),no)
-PRELOAD := "$(LIBCRUNCH)"
+export PRELOAD := "$(LIBCRUNCH)"
 else
 LIBHEAP_INDEX_HOOKS ?= $(realpath $(dir $(THIS_MAKEFILE))/../../libpmirror.hg/lib/libheap_index_fast_hooks.so)
 # FIXME: do we really need to preload libcrunch in this case?
-PRELOAD := "$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)"
+export PRELOAD := "$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)"
 endif
 
+INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then /bin/echo -f mk.inc; else true; fi`
+
+_onlyrun-%:
+	LD_PRELOAD=$(PRELOAD) ./$*
+
+_onlygdbrun-%:
+	gdb --eval-command "set environment LD_PRELOAD=$(PRELOAD)" --args ./$* ./$*
+
 run-%:
-	$(MAKE) -C "$*" "$*" && ( cd "$*" && LD_PRELOAD="$(PRELOAD)" ./$* ); \
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( $(MAKE) -C "$*" $(INCLUDE_MK_INC) -f ../Makefile _onlyrun-$* ); \
 
 cleanrun-%: 
-	$(MAKE) -C $* -f ../Makefile clean && \
+	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && \
 	$(MAKE) run-$*
 
 gdbrun-%: # run the test case with itself as input
-	$(MAKE) -C "$*" "$*" && ( cd "$*" && gdb --eval-command "set environment LD_PRELOAD=$(PRELOAD)" --args ./$* ./$* )
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( cd "$*" && $(MAKE) $(INCLUDE_MK_INC) -f ../Makefile _onlygdbrun-$* )
 
 gdbcleanrun-%:
-	$(MAKE) -C $* -f ../Makefile clean && $(MAKE) gdbrun-$*
+	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && $(MAKE) gdbrun-$*
 
 clean-%:
-	$(MAKE) -C "$*" -f $(realpath $(THIS_MAKEFILE)) clean
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) -f $(realpath $(THIS_MAKEFILE)) clean
 
 default:
 	for case in $(cases); do \

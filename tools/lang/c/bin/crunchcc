@@ -10,7 +10,7 @@
 # The Right Thing to do is to somehow replicate the source directory structure
 # rooted at the current directory. But it's not clear how to do this in general.
 
-import os, sys, re, subprocess
+import os, sys, re, subprocess, tempfile
 
 def isLinkCommand():
     seenLib = False
@@ -29,8 +29,7 @@ def isLinkCommand():
         return True
     # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
     return False
-    
-    
+
 def fixupDotO(filename):
     # also link the file with the uniqtypes it references
     cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
@@ -116,21 +115,21 @@ def main():
     # If we're outputting an executable, 
     # then we link a thread-local variable "__libcrunch_current_allocsite"
     # into the executable,
-    # and for each allocation function, we link a generated copy of a file
-    # void *__wrap_<fnname>(argspec)
-    # {
-    #   __libcrunch_current_allocsite = __builtin_return_address(0);
-    #   auto retval = fnname(argspec);
-    #   __libcrunch_current_allocsite = NULL;
-    #   return retval;
-    # }
-    # -- using an ad-hoc notation to get the argspec
-    # from the LIBCRUNCH_ALLOC_FNS environment var. FIXME: autogenerate these stubs
+    # and for each allocation function, we link a generated stub.
     
     crunchccCustomArgs = ["--dotrumptr","--dodumpallocs"] \
-    + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", "-fno-omit-frame-pointer"] \
+    + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", \
+    "-fno-omit-frame-pointer"] \
     + saveTempsArgs
-
+    
+    mallocWrapArgs = []
+    if "LIBCRUNCH_ALLOC_FNS" in os.environ:
+        for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
+            m = re.match("(.*)\((.*)\)(.?)", allocFn)
+            fnName = m.groups()[0]
+            fnSig = m.groups()[1]
+            mallocWrapArgs += ["-Wl,--wrap," + fnName]
+    
     # un-export CC from the env if it's set to crunchcc, because 
     # we don't want to recursively cruchcc the -uniqtypes.c files
     # that this make invocation will be compiling for us.
@@ -150,21 +149,45 @@ def main():
         
         # we need to wrap each allocation function
         sys.stderr.write("crunchcc doing linking\n")
-        if "LIBCRUNCH_ALLOC_FNS" in os.environ:
-            for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
-                m = re.match("(.*)\((.*)\)", allocFn)
-                fnName = m.groups()[0]
-                fnSig = m.groups()[1]
-                linkArgs += ["-Wl,--wrap," + fnName]
+        passedThroughArgs += mallocWrapArgs
         # we need to export-dynamic, s.t. __is_a is linked from libcrunch
         linkArgs += ["-Wl,--export-dynamic"]
         # if we're building an executable, append the magic objects
         # -- and link with the noop *shared* library, to be interposable
         if not "-shared" in passedThroughArgs \
             and not "-G" in passedThroughArgs:
+                
+            # make a temporary file for the stubs
+            stubsfile = tempfile.NamedTemporaryFile(delete=False, suffix=".c")
+            sys.stderr.write("stubsfile is %s\n" % stubsfile.name)
+            stubsfile.write("#include \"stubgen.h\"\n")
+            if "LIBCRUNCH_ALLOC_FNS" in os.environ:
+                for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
+                    m = re.match("(.*)\((.*)\)(.?)", allocFn)
+                    fnName = m.groups()[0]
+                    fnSig = m.groups()[1]
+                    retSig = m.groups()[2]
+                    stubsfile.write("#define arglist_%s(make_arg) " % fnName)
+                    ndx = 0
+                    for c in fnSig: 
+                        stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                        ndx += 1
+                    stubsfile.write("\n")
+                stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
+                stubsfile.flush()
+            # now we compile the C file ourselves, rather than cilly doing it, 
+            # because it's a special magic stub
+            stubs_bin = os.path.splitext(stubsfile.name)[0] + ".o"
+            ret_stubs = subprocess.call(["cc", "-c", "-o", stubs_bin, \
+                "-I" + os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
+                stubsfile.name])
+            if ret_stubs != 0:
+                sys.stderr.write("Could not compile stubs file %s: compiler returned %d\n" \
+                    % (stubsfile.name, ret_stubs))
+                exit(1)
             
-            linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../lib/stubs.o"]
             # HACK: fix this once I sort out linking
+            linkArgs += [stubs_bin]
             linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
             linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
             if "LIBCRUNCH_USE_PRELOAD" in os.environ and os.environ["LIBCRUNCH_USE_PRELOAD"] == "no":
