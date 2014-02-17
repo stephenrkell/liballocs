@@ -95,6 +95,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
            end
         |  Mem(_) -> None
       end
+   | CastE(t, e) -> (getSizeExpr e env)
    | _ -> None
    
 (* FIXME: split this into a "toplevel" that does the HasNoSizeof check,
@@ -159,9 +160,12 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint : Cil.typsig 
  in match sizeArgPos with
   Some(s) -> 
      if (length arglist) > s then 
-       let szEx = getSizeExprElseDefault (nth arglist s) env in 
+       let szEx = 
+          (output_string Pervasives.stderr ("Looking at arg expression number " ^ (string_of_int s) ^ "\n"); flush Pervasives.stderr); 
+          getSizeExpr (nth arglist s) env 
+       in 
        match szEx with
-         Some(szType) -> (* (output_string Pervasives.stderr ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr ); *)
+         Some(szType) -> (output_string Pervasives.stderr ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
                szEx
        | None -> output_string Pervasives.stderr ("Could not infer what we are allocating\n"); flush Pervasives.stderr; None
      else (match maybeFunNameToPrint with 
@@ -191,6 +195,8 @@ let userAllocFunctions () : string list = try begin
     Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOC_FNS")
   end with Not_found -> []
 
+(* FIXME: distinguish "it is an allocation function, but I couldn't identify what it's allocating"
+   from "it doesn't appear to be an allocation function". *)
 let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates : Cil.typsig option = 
   (* output_string Pervasives.stderr "Looking for user alloc expr\n"; flush Pervasives.stderr; *)
   let userVerdict = try begin
@@ -224,7 +230,7 @@ let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) e
     Some(f) -> Some(f.vname)
   | None -> None
   in 
-  getUserAllocExpr i maybeFunName arglist env (["malloc(Z)"; "calloc(zZ)"; "realloc(pZ)"; "posix_memalign(pzZ)"] @ (userAllocFunctions ()))
+  getUserAllocExpr i maybeFunName arglist env (["malloc(Z)p"; "calloc(zZ)p"; "realloc(pZ)p"; "posix_memalign(pzZ)p"] @ (userAllocFunctions ()))
 
 (* HACK: copied from trumptr *)
 let rec canonicalizeBaseTypeStr s = 
