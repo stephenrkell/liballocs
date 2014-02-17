@@ -34,7 +34,63 @@ def fixupDotO(filename):
     # also link the file with the uniqtypes it references
     cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
     print "Calling " + " ".join(cmd)
-    return subprocess.call(cmd)
+    ret = subprocess.call(cmd)
+    if ret != 0:
+        return ret  # give up now
+    # do we need to unbind? 
+    # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
+    # This is needed e.g. for SPEC benchmark bzip2
+    allocFns = []
+    if "LIBCRUNCH_ALLOC_FNS" in os.environ:
+        for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
+            m = re.match("(.*)\((.*)\)(.?)", allocFn)
+            fnName = m.groups()[0]
+            allocFns += [fnName]
+    sys.stderr.write("Looking for allocation functions that need unbinding\n")
+    cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"" \
+        % (filename, "|".join(allocFns))
+    sys.stderr.write("cmdstring is " + cmdstring + "\n")
+    grep_ret = subprocess.call(["sh", "-c", cmdstring])
+    if grep_ret == 0:
+        # we need to unbind. We unbind the allocsite syms
+        # *and* --prefer-non-section-relocs. 
+        # This will give us a file with __def_ and __ref_ symbols
+        # for the allocation function. We then rename these to 
+        # __real_ and __wrap_ respectively. 
+        sys.stderr.write("Found that we need to unbind\n")
+        unbind_pairs = [["--unbind-sym", sym] for sym in allocFns]
+        objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
+         + [opt for pair in unbind_pairs for opt in pair] \
+         + [filename])
+        if objcopy_ret != 0:
+            return objcopy_ret
+        else:
+            # one more objcopy to rename the __def_ and __ref_ symbols
+            sys.stderr.write("Renaming __def_ and __ref_ alloc symbols\n")
+            def_ref_args = [["--redefine-sym", "__def_" + sym + "=" + sym, \
+               "--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in allocFns]
+            objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
+             + [opt for seq in def_ref_args for opt in seq] \
+             + [filename])
+            if objcopy_ret != 0:
+                return objcopy_ret
+    
+    sys.stderr.write("Looking for allocation functions that need globalizing\n")
+    # grep for local symbols -- a lower-case letter after the symname is the giveaway
+    cmdstring = "nm -fposix --defined-only \"%s\" | egrep \"^(%s) [a-z] \"" \
+        % (filename, "|".join(allocFns))
+    sys.stderr.write("cmdstring is " + cmdstring)
+    grep_ret = subprocess.call(["sh", "-c", cmdstring])
+    if grep_ret == 0:
+        sys.stderr.write("Found that we need to globalize\n")
+        globalize_pairs = [["--globalize-symbol", sym] for sym in allocFns]
+        objcopy_ret = subprocess.call(["objcopy"] \
+         + [opt for pair in globalize_pairs for opt in pair] \
+         + [filename])
+        return objcopy_ret
+    # no need to objcopy; all good
+    sys.stderr.write("No need to globalize\n")
+    return 0
 
 def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
     argvWithoutOutputOptions = [argv[i] for i in range(0, len(argv)) \
@@ -119,8 +175,14 @@ def main():
     
     crunchccCustomArgs = ["--dotrumptr","--dodumpallocs"] \
     + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", \
-    "-fno-omit-frame-pointer"] \
+    "-fno-omit-frame-pointer", "-ffunction-sections"] \
     + saveTempsArgs
+    # we add -ffunction-sections to ensure that references to malloc functions 
+    # generate a relocation record -- since a *static, address-taken* malloc function
+    # might otherwise have its address taken without a relocation record. 
+    # Moreover, we want the relocation record to refer to the function symbol, not
+    # the section symbol. We handle this by using my hacked-in --prefer-non-section-relocs
+    # objcopy option *if* we do symbol unbinding.
     
     mallocWrapArgs = []
     if "LIBCRUNCH_ALLOC_FNS" in os.environ:
@@ -170,6 +232,8 @@ def main():
                     stubsfile.write("#define arglist_%s(make_arg) " % fnName)
                     ndx = 0
                     for c in fnSig: 
+                        if ndx != 0:
+                            stubsfile.write(", ")
                         stubsfile.write("make_arg(%d, %c)" % (ndx, c))
                         ndx += 1
                     stubsfile.write("\n")
@@ -178,7 +242,7 @@ def main():
             # now we compile the C file ourselves, rather than cilly doing it, 
             # because it's a special magic stub
             stubs_bin = os.path.splitext(stubsfile.name)[0] + ".o"
-            ret_stubs = subprocess.call(["cc", "-c", "-o", stubs_bin, \
+            ret_stubs = subprocess.call(["cc", "-g", "-c", "-o", stubs_bin, \
                 "-I" + os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
                 stubsfile.name])
             if ret_stubs != 0:
