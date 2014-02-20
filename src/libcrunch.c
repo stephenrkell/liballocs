@@ -97,50 +97,54 @@ static void scan_lazy_typenames(void *typelib_handle)
 	//	}
 	// }
 }
+
+static ElfW(Dyn) *get_dynamic_section(void *handle)
+{
+	return ((struct link_map *) handle)->l_ld;
+}
+
+static ElfW(Dyn) *get_dynamic_entry(void *handle, unsigned long tag)
+{
+	ElfW(Dyn) *dynamic_section = ((struct link_map *) handle)->l_ld;
+	while (dynamic_section->d_tag != DT_NULL
+		&& dynamic_section->d_tag != tag) ++dynamic_section;
+	if (dynamic_section->d_tag == DT_NULL) return NULL;
+	return dynamic_section;
+}
+
 static int iterate_types(void *typelib_handle, int (*cb)(struct rec *t, void *arg), void *arg)
 {
-	/* Start with edata, and work backwards. */
-	unsigned char *edata = dlsym(typelib_handle, "_edata");
-	// FIXME: until we separate the uniqtypes from the static allocsites....
-	Dl_info info;
-	int dladdr_ret;
-	// get the address and length of 'statics', so we can skip it
-	unsigned char *statics = dlsym(typelib_handle, "statics");
-	ElfW(Sym) *p_sym;
-	dladdr_ret = dladdr1(statics, &info, (void **) &p_sym, RTLD_DL_SYMENT);
-	assert(dladdr_ret != 0);
-	unsigned statics_length = p_sym->st_size;
-	
-	void *load_addr = 0; // will set this inside the loop
-	unsigned char *pos = edata;
-	if (pos) --pos;
+	/* Don't use dladdr() to iterate -- too slow! Instead, iterate 
+	 * directly over the dynsym section. */
+	unsigned char *load_addr = (unsigned char *) ((struct link_map *) typelib_handle)->l_addr;
+	/* We don't have to add load_addr, because ld.so has already done it. */
+	ElfW(Sym) *dynsym = (ElfW(Sym) *) get_dynamic_entry(typelib_handle, DT_SYMTAB)->d_un.d_ptr;
+	assert(dynsym);
+	// check that we start with a null symtab entry
+	static const ElfW(Sym) nullsym = { 0, 0, 0, 0, 0, 0 };
+	assert(0 == memcmp(&nullsym, dynsym, sizeof nullsym));
+	assert((unsigned char *) dynsym > load_addr);
+	unsigned char *dynstr = (unsigned char *) get_dynamic_entry(typelib_handle, DT_STRTAB)->d_un.d_ptr;
+	assert(dynstr > (unsigned char *) dynsym);
+	size_t dynsym_size = dynstr - (unsigned char *) dynsym;
+	// round down, because dynstr might be padded
+	dynsym_size = (dynsym_size / sizeof (ElfW(Sym))) * sizeof (ElfW(Sym));
 	int cb_ret = 0;
-	while (pos > (unsigned char *) load_addr)
+
+	for (ElfW(Sym) *p_sym = dynsym; (unsigned char *) p_sym < (unsigned char *) dynsym + dynsym_size; 
+		++p_sym)
 	{
-		// skip over statics
-		if (pos >= statics && pos <= statics + statics_length)
-		{ pos = statics - 1; continue; }
-	
-		void *preceding_addr;
-		dladdr_ret = dladdr(pos, &info);
-		assert(dladdr_ret != 0); // 0 means error
-		
-		// grab the load address of the library
-		if (!load_addr) load_addr = info.dli_fbase;
-		
-		if (info.dli_sname != NULL  /* Name of nearest symbol with address lower than addr */
-		 && info.dli_saddr != NULL) /* Exact address of symbol named in dli_sname */
+		if (ELF64_ST_TYPE(p_sym->st_info) == STT_OBJECT && 
+			p_sym->st_shndx != SHN_UNDEF &&
+			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8))
 		{
-			debug_printf(2, "Found symbol %s at %p\n", info.dli_sname, info.dli_saddr);
-			cb_ret = cb((struct rec *) info.dli_saddr, arg);
-			if (cb_ret) break;
-			pos = (unsigned char *) info.dli_saddr - 1;
-		}
-		else
-		{
-			// debug_printf(2, "dladdr claims no symbol precedes %p\n", pos);
-			// take the smallest step back
-			pos -= sizeof (struct rec); // HACK HACK HACK
+			struct rec *t = (struct rec *) (load_addr + p_sym->st_value);
+			// if our name comes out as null, we've probably done something wrong
+			if (t->name)
+			{
+				cb_ret = cb(t, arg);
+				if (cb_ret != 0) break;
+			}
 		}
 	}
 	
