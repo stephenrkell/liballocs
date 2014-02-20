@@ -43,9 +43,10 @@ def fixupDotO(filename):
     allocFns = []
     if "LIBCRUNCH_ALLOC_FNS" in os.environ:
         for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
-            m = re.match("(.*)\((.*)\)(.?)", allocFn)
-            fnName = m.groups()[0]
-            allocFns += [fnName]
+            if allocFn != '':
+                m = re.match("(.*)\((.*)\)(.?)", allocFn)
+                fnName = m.groups()[0]
+                allocFns += [fnName]
     sys.stderr.write("Looking for allocation functions that need unbinding\n")
     cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"" \
         % (filename, "|".join(allocFns))
@@ -187,10 +188,11 @@ def main():
     mallocWrapArgs = []
     if "LIBCRUNCH_ALLOC_FNS" in os.environ:
         for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
-            m = re.match("(.*)\((.*)\)(.?)", allocFn)
-            fnName = m.groups()[0]
-            fnSig = m.groups()[1]
-            mallocWrapArgs += ["-Wl,--wrap," + fnName]
+            if allocFn != '':
+                m = re.match("(.*)\((.*)\)(.?)", allocFn)
+                fnName = m.groups()[0]
+                fnSig = m.groups()[1]
+                mallocWrapArgs += ["-Wl,--wrap," + fnName]
     
     # un-export CC from the env if it's set to crunchcc, because 
     # we don't want to recursively cruchcc the -uniqtypes.c files
@@ -225,20 +227,21 @@ def main():
             stubsfile.write("#include \"stubgen.h\"\n")
             if "LIBCRUNCH_ALLOC_FNS" in os.environ:
                 for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
-                    m = re.match("(.*)\((.*)\)(.?)", allocFn)
-                    fnName = m.groups()[0]
-                    fnSig = m.groups()[1]
-                    retSig = m.groups()[2]
-                    stubsfile.write("#define arglist_%s(make_arg) " % fnName)
-                    ndx = 0
-                    for c in fnSig: 
-                        if ndx != 0:
-                            stubsfile.write(", ")
-                        stubsfile.write("make_arg(%d, %c)" % (ndx, c))
-                        ndx += 1
-                    stubsfile.write("\n")
-                stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
-                stubsfile.flush()
+                    if allocFn != '':
+                        m = re.match("(.*)\((.*)\)(.?)", allocFn)
+                        fnName = m.groups()[0]
+                        fnSig = m.groups()[1]
+                        retSig = m.groups()[2]
+                        stubsfile.write("#define arglist_%s(make_arg) " % fnName)
+                        ndx = 0
+                        for c in fnSig: 
+                            if ndx != 0:
+                                stubsfile.write(", ")
+                            stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                            ndx += 1
+                        stubsfile.write("\n")
+                        stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
+                        stubsfile.flush()
             # now we compile the C file ourselves, rather than cilly doing it, 
             # because it's a special magic stub
             stubs_bin = os.path.splitext(stubsfile.name)[0] + ".o"
@@ -317,7 +320,6 @@ def main():
         else:
             baseDir = "/usr/lib/allocsites"
         targetNames = [baseDir + os.path.realpath(outputFile) + ext for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
-        
 
         ret2 = subprocess.call(["make", "-C", os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
             "-f", "Makefile.allocsites"] +  targetNames)
