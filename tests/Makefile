@@ -41,6 +41,33 @@ endif
 
 INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then /bin/echo -f mk.inc; else true; fi`
 
+default: checkall
+
+checkall: $(patsubst %,checkrun-%,$(cases))
+
+# Most test cases should output a libcrunch summary in which 
+# -- zero or more checks passed (trivially or by lazy typing)
+# -- zero checks aborted
+# -- zero checks failed
+checkrun-%:
+	@echo "case is $*" && \
+	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
+	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
+	$(MAKE) cleanrun-$* 1>$$out 2>$$err && \
+		tail -n7 "$$err" | tr '\n' '\f' | \
+		grep ' [0-9]\+.* 0.* 0.* 0.* 0.* [0-9]\+$$' >/dev/null || \
+		(tail -n20 $$err; false)
+
+# Some cases are special and require only an exit status of zero
+checkrun-hello: 
+	$(MAKE) cleanrun-hello >/dev/null 2>&1
+checkrun-hello-errno: 
+	$(MAKE) cleanrun-hello-errno >/dev/null 2>&1
+checkrun-hello-qualified-char:
+	$(MAKE) cleanrun-hello-qualified-char >/dev/null 2>&1
+checkrun-random:
+	$(MAKE) cleanrun-random >/dev/null 2>&1
+
 _onlyrun-%:
 	LD_PRELOAD=$(PRELOAD) ./$*
 
@@ -48,7 +75,7 @@ _onlygdbrun-%:
 	gdb --eval-command "set environment LD_PRELOAD=$(PRELOAD)" --args ./$* ./$*
 
 run-%:
-	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( $(MAKE) -C "$*" $(INCLUDE_MK_INC) -f ../Makefile _onlyrun-$* ); \
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( $(MAKE) -C "$*" $(INCLUDE_MK_INC) -f ../Makefile _onlyrun-$* )
 
 cleanrun-%: 
 	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && \
