@@ -27,6 +27,7 @@ enum object_memory_kind prefix_tree_get_memory_kind(const void *obj);
 void prefix_tree_print_all_to_stderr(void);
 struct prefix_tree_node *
 prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr);
+void __libcrunch_scan_lazy_typenames(void *handle);
 int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data);
 #define debug_printf(lvl, ...) do { \
     if ((lvl) <= __libcrunch_debug_level) { \

@@ -195,6 +195,8 @@ void *dlopen(const char *filename, int flag)
 		void *ret = orig_dlopen(filename, flag);
 		if (ret != NULL)
 		{
+			__libcrunch_scan_lazy_typenames(ret);
+		
 			/* Note that in general we will get one mapping for every 
 			 * LOAD phdr. So we use dl_iterate_phdr. */
 			int dlpi_ret = dl_iterate_phdr(__libcrunch_add_all_mappings_cb, 

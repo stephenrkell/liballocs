@@ -70,7 +70,8 @@ static int match_typename_cb(struct rec *t, void *ignored)
 {
 	for (unsigned i = 0; i < lazy_heap_types_count; ++i)
 	{
-		if (0 == strcmp(t->name, lazy_heap_typenames[i]))
+		if (!lazy_heap_types[i] && 
+			0 == strcmp(t->name, lazy_heap_typenames[i]))
 		{
 			// install this type in the lazy_heap_type slot
 			lazy_heap_types[i] = t;
@@ -82,7 +83,7 @@ static int match_typename_cb(struct rec *t, void *ignored)
 	return 0; // keep going
 }
 
-static void scan_lazy_typenames(void *typelib_handle)
+void __libcrunch_scan_lazy_typenames(void *typelib_handle)
 {
 	iterate_types(typelib_handle, match_typename_cb, NULL);
 
@@ -103,13 +104,18 @@ static ElfW(Dyn) *get_dynamic_section(void *handle)
 	return ((struct link_map *) handle)->l_ld;
 }
 
-static ElfW(Dyn) *get_dynamic_entry(void *handle, unsigned long tag)
+static ElfW(Dyn) *get_dynamic_entry_from_section(void *dynsec, unsigned long tag)
 {
-	ElfW(Dyn) *dynamic_section = ((struct link_map *) handle)->l_ld;
+	ElfW(Dyn) *dynamic_section = dynsec;
 	while (dynamic_section->d_tag != DT_NULL
 		&& dynamic_section->d_tag != tag) ++dynamic_section;
 	if (dynamic_section->d_tag == DT_NULL) return NULL;
 	return dynamic_section;
+}
+
+static ElfW(Dyn) *get_dynamic_entry_from_handle(void *handle, unsigned long tag)
+{
+	return get_dynamic_entry_from_section(((struct link_map *) handle)->l_ld, tag);
 }
 
 static int iterate_types(void *typelib_handle, int (*cb)(struct rec *t, void *arg), void *arg)
@@ -118,13 +124,19 @@ static int iterate_types(void *typelib_handle, int (*cb)(struct rec *t, void *ar
 	 * directly over the dynsym section. */
 	unsigned char *load_addr = (unsigned char *) ((struct link_map *) typelib_handle)->l_addr;
 	/* We don't have to add load_addr, because ld.so has already done it. */
-	ElfW(Sym) *dynsym = (ElfW(Sym) *) get_dynamic_entry(typelib_handle, DT_SYMTAB)->d_un.d_ptr;
+	ElfW(Sym) *dynsym = (ElfW(Sym) *) get_dynamic_entry_from_handle(typelib_handle, DT_SYMTAB)->d_un.d_ptr;
 	assert(dynsym);
+	
+	/* If dynsym is greater than STACK_BEGIN, it means it's the vdso --
+	 * skip it, because it doesn't contain any uniqtypes and we may fault
+	 * trying to read its dynsym. */
+	if ((uintptr_t) dynsym > STACK_BEGIN) return 0;
+	
 	// check that we start with a null symtab entry
 	static const ElfW(Sym) nullsym = { 0, 0, 0, 0, 0, 0 };
 	assert(0 == memcmp(&nullsym, dynsym, sizeof nullsym));
 	assert((unsigned char *) dynsym > load_addr);
-	unsigned char *dynstr = (unsigned char *) get_dynamic_entry(typelib_handle, DT_STRTAB)->d_un.d_ptr;
+	unsigned char *dynstr = (unsigned char *) get_dynamic_entry_from_handle(typelib_handle, DT_STRTAB)->d_un.d_ptr;
 	assert(dynstr > (unsigned char *) dynsym);
 	size_t dynsym_size = dynstr - (unsigned char *) dynsym;
 	// round down, because dynstr might be padded
@@ -286,7 +298,7 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 	}
 	
 	// scan it for lazy-heap-alloc types
-	scan_lazy_typenames(handle);
+	__libcrunch_scan_lazy_typenames(handle);
 	
 	// always continue with further objects
 	return 0;
@@ -693,6 +705,29 @@ int __libcrunch_global_init(void)
 		lazy_heap_types_count = i;
 	}
 	
+	// grab the executable's end address
+	dlerror();
+	void *executable_handle = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
+	assert(executable_handle != NULL);
+	__addrmap_executable_end_addr = dlsym(executable_handle, "_end");
+	assert(__addrmap_executable_end_addr != 0);
+	
+	/* We have to scan for lazy heap types *in link order*, so that we see
+	 * the first linked definition of any type that is multiply-defined.
+	 * Do a scan now; we also scan when loading a types object, and when loading
+	 * a user-dlopen()'d object. 
+	 * 
+	 * We don't use dl_iterate_phdr because it doesn't give us the link_map * itself. 
+	 * Instead, walk the link map directly, like a debugger would. */
+	void *exec_dynamic = ((struct link_map *) executable_handle)->l_ld;
+	assert(exec_dynamic != NULL);
+	ElfW(Dyn) *dt_debug = get_dynamic_entry_from_section(exec_dynamic, DT_DEBUG);
+	struct r_debug *r_debug = (struct r_debug *) dt_debug->d_un.d_ptr;
+	for (struct link_map *l = r_debug->r_map; l; l = l->l_next)
+	{
+		__libcrunch_scan_lazy_typenames(l);
+	}
+	
 	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
 	assert(ret_types == 0);
 	
@@ -713,12 +748,6 @@ int __libcrunch_global_init(void)
 	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_cb, NULL);
 	assert(ret_stackaddr == 0);
 	
-	// grab the executable's end address
-	dlerror();
-	void *executable_handle = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
-	assert(executable_handle != NULL);
-	__addrmap_executable_end_addr = dlsym(executable_handle, "_end");
-	assert(__addrmap_executable_end_addr != 0);
 	
 	// grab the maximum stack size
 	struct rlimit rlim;
