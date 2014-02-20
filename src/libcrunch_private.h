@@ -151,6 +151,7 @@ extern unsigned long __libcrunch_hit_heap_case;
 extern unsigned long __libcrunch_hit_stack_case;
 extern unsigned long __libcrunch_hit_static_case;
 extern unsigned long __libcrunch_aborted_unindexed_heap;
+extern unsigned long __libcrunch_lazy_heap_type_assignment;
 extern unsigned long __libcrunch_aborted_unrecognised_allocsite;
 extern unsigned long __libcrunch_failed;
 extern unsigned long __libcrunch_succeeded;

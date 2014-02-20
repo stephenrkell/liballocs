@@ -30,6 +30,9 @@ allocsmt_entry_type *__libcrunch_allocsmt;
 void *__addrmap_executable_end_addr;
 unsigned long __addrmap_max_stack_size;
 
+// helper
+static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typestr);
+
 // HACK
 void __libcrunch_preload_init(void);
 
@@ -43,6 +46,115 @@ struct blacklist_ent
 } blacklist[BLACKLIST_SIZE];
 static _Bool check_blacklist(const void *obj);
 static void consider_blacklisting(const void *obj);
+
+/* Some data types like void* and sockaddr appear to be used to size a malloc(), 
+ * but are only used because they have the same size as the actual thing being
+ * allocated (say a different type of pointer, or a family-specific sockaddr). 
+ * We keep a list of these. The user can use the LIBCRUNCH_LAZY_HEAP_TYPES 
+ * environment variable to add these. */
+static unsigned lazy_heap_types_count;
+static const char **lazy_heap_typenames;
+static struct rec **lazy_heap_types;
+
+static int iterate_types(void *typelib_handle, int (*cb)(struct rec *t, void *arg), void *arg);
+
+static int print_type_cb(struct rec *t, void *ignored)
+{
+	fprintf(stderr, "uniqtype addr %p, name %s, size %d bytes\n", 
+		t, t->name, t->pos_maxoff);
+	fflush(stderr);
+	return 0;
+}
+
+static int match_typename_cb(struct rec *t, void *ignored)
+{
+	for (unsigned i = 0; i < lazy_heap_types_count; ++i)
+	{
+		if (0 == strcmp(t->name, lazy_heap_typenames[i]))
+		{
+			// install this type in the lazy_heap_type slot
+			lazy_heap_types[i] = t;
+			
+			// keep going -- we might have more to match
+			return 0;
+		}
+	}
+	return 0; // keep going
+}
+
+static void scan_lazy_typenames(void *typelib_handle)
+{
+	iterate_types(typelib_handle, match_typename_cb, NULL);
+
+	// for (unsigned i = 0; i < lazy_heap_types_count; ++i)
+	// {
+	// 	if (lazy_heap_typenames[i] && !lazy_heap_types[i])
+	// 	{
+	// 		// look up 
+	// 		const void *u = typestr_to_uniqtype_from_lib(typelib_handle, lazy_heap_typenames[i]);
+	// 		// if we found it, install it
+	// 		if (u) lazy_heap_types[i] = (struct rec *) u;
+	//	}
+	// }
+}
+static int iterate_types(void *typelib_handle, int (*cb)(struct rec *t, void *arg), void *arg)
+{
+	/* Start with edata, and work backwards. */
+	unsigned char *edata = dlsym(typelib_handle, "_edata");
+	// FIXME: until we separate the uniqtypes from the static allocsites....
+	Dl_info info;
+	int dladdr_ret;
+	// get the address and length of 'statics', so we can skip it
+	unsigned char *statics = dlsym(typelib_handle, "statics");
+	ElfW(Sym) *p_sym;
+	dladdr_ret = dladdr1(statics, &info, (void **) &p_sym, RTLD_DL_SYMENT);
+	assert(dladdr_ret != 0);
+	unsigned statics_length = p_sym->st_size;
+	
+	void *load_addr = 0; // will set this inside the loop
+	unsigned char *pos = edata;
+	if (pos) --pos;
+	int cb_ret = 0;
+	while (pos > (unsigned char *) load_addr)
+	{
+		// skip over statics
+		if (pos >= statics && pos <= statics + statics_length)
+		{ pos = statics - 1; continue; }
+	
+		void *preceding_addr;
+		dladdr_ret = dladdr(pos, &info);
+		assert(dladdr_ret != 0); // 0 means error
+		
+		// grab the load address of the library
+		if (!load_addr) load_addr = info.dli_fbase;
+		
+		if (info.dli_sname != NULL  /* Name of nearest symbol with address lower than addr */
+		 && info.dli_saddr != NULL) /* Exact address of symbol named in dli_sname */
+		{
+			debug_printf(2, "Found symbol %s at %p\n", info.dli_sname, info.dli_saddr);
+			cb_ret = cb((struct rec *) info.dli_saddr, arg);
+			if (cb_ret) break;
+			pos = (unsigned char *) info.dli_saddr - 1;
+		}
+		else
+		{
+			// debug_printf(2, "dladdr claims no symbol precedes %p\n", pos);
+			// take the smallest step back
+			pos -= sizeof (struct rec); // HACK HACK HACK
+		}
+	}
+	
+	return cb_ret;
+}
+
+static _Bool is_lazy_uniqtype(const void *u)
+{
+	for (unsigned i = 0; i < lazy_heap_types_count; ++i)
+	{
+		if (lazy_heap_types[i] == u) return 1;
+	}
+	return 0;
+}
 
 static _Bool done_init;
 void __libcrunch_main_init(void) __attribute__((constructor(101)));
@@ -162,6 +274,15 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 		debug_printf(1, "loading types object: %s", dlerror());
 		return 0;
 	}
+	
+	// if we want maximum output, print it
+	if (__libcrunch_debug_level >= 5)
+	{
+		iterate_types(handle, print_type_cb, NULL);
+	}
+	
+	// scan it for lazy-heap-alloc types
+	scan_lazy_typenames(handle);
 	
 	// always continue with further objects
 	return 0;
@@ -469,6 +590,7 @@ unsigned long __libcrunch_aborted_unknown_storage;
 unsigned long __libcrunch_hit_heap_case;
 unsigned long __libcrunch_hit_stack_case;
 unsigned long __libcrunch_hit_static_case;
+unsigned long __libcrunch_lazy_heap_type_assignment;
 unsigned long __libcrunch_aborted_unindexed_heap;
 unsigned long __libcrunch_aborted_unrecognised_allocsite;
 unsigned long __libcrunch_failed;
@@ -498,6 +620,7 @@ static void print_exit_summary(void)
 	fprintf(stderr, "checks handled by stack case              % 7ld\n", __libcrunch_hit_stack_case);
 	fprintf(stderr, "checks handled by static case             % 7ld\n", __libcrunch_hit_static_case);
 	fprintf(stderr, "-------------------------------------------------\n");
+	fprintf(stderr, "checks passed as lazy heap typing:        % 7ld\n", __libcrunch_lazy_heap_type_assignment);
 	fprintf(stderr, "checks aborted for unindexed heap:        % 7ld\n", __libcrunch_aborted_unindexed_heap);
 	fprintf(stderr, "checks aborted for unknown heap allocsite:% 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
 	fprintf(stderr, "checks aborted for unknown stackframes:   % 7ld\n", __libcrunch_aborted_stack);
@@ -534,6 +657,37 @@ int __libcrunch_global_init(void)
 	
 	const char *debug_level_str = getenv("LIBCRUNCH_DEBUG_LEVEL");
 	if (debug_level_str) __libcrunch_debug_level = atoi(debug_level_str);
+
+	const char *lazy_heap_types_str = getenv("LIBCRUNCH_LAZY_HEAP_TYPES");
+	if (lazy_heap_types_str)
+	{
+		/* Count the lazy heap types */
+		const char *pos = lazy_heap_types_str;
+		unsigned upper_bound = 1;
+		while ((pos = strrchr(pos, ' ')) != NULL) { ++upper_bound; ++pos; }
+		
+		/* Allocate and populate. */
+		lazy_heap_typenames = calloc(upper_bound, sizeof (const char *));
+		lazy_heap_types = calloc(upper_bound, sizeof (struct rec *));
+		pos = lazy_heap_types_str;
+		const char *spacepos;
+		int i = 0;
+		do 
+		{
+			spacepos = strchrnul(pos, ' ');
+			if (spacepos - pos > 0) 
+			{
+				assert(i < upper_bound);
+				lazy_heap_typenames[i] = strndup(pos, spacepos - pos);
+				++i;
+			}
+
+			pos = spacepos;
+			while (*pos == ' ') ++pos;
+		} while (*pos != '\0');
+		
+		lazy_heap_types_count = i;
+	}
 	
 	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
 	assert(ret_types == 0);
@@ -672,6 +826,7 @@ void *__libcrunch_my_typeobj(void)
 /* FIXME: hook dlopen and dlclose so that we can load/unload allocsites and types
  * as execution proceeds. */
 
+
 /* This is left out-of-line because it's inherently a slow path. */
 const void *__libcrunch_typestr_to_uniqtype(const char *typestr)
 {
@@ -681,7 +836,8 @@ const void *__libcrunch_typestr_to_uniqtype(const char *typestr)
 	 * We erase the header part and walk symbols in the -types.so to look for 
 	 * a unique match. FIXME: this requires us to define aliases in unique cases! 
 	 * in types.so, so dumptypes has to do this. */
-	int prefix_len = strlen("__uniqtype_");
+	static const char prefix[] = "__uniqtype_";
+	static const int prefix_len = (sizeof prefix) - 1;
 	assert(0 == strncmp(typestr, "__uniqtype_", prefix_len));
 	int header_name_len;
 	int nmatched = sscanf(typestr, "__uniqtype_%d", &header_name_len);
@@ -699,9 +855,13 @@ const void *__libcrunch_typestr_to_uniqtype(const char *typestr)
 	
 	dlerror();
 	// void *returned = dlsym(RTLD_DEFAULT, typestr);
-	void *caller = __builtin_return_address(1);
+	// void *caller = __builtin_return_address(1);
 	// RTLD_GLOBAL means that we don't need to get the handle
 	// void *returned = dlsym(typeobj_handle_for_addr(caller), typestr);
+	return typestr_to_uniqtype_from_lib(RTLD_NEXT, typestr);
+}	
+static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typestr)
+{
 	void *returned = dlsym(RTLD_DEFAULT, typestr);
 	if (!returned) return NULL;
 
@@ -952,16 +1112,42 @@ int __is_a_internal(const void *obj, const void *arg)
 				|| prefix_tree_get_memory_kind(heap_info) == HEAP);
 			assert(prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC);
 
-			// now we have an allocsite
-			alloc_site = (void*)(intptr_t)heap_info->alloc_site;
-			alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
-			if (!alloc_uniqtype) 
+			/* Now we have a uniqtype or an allocsite. For long-lived objects 
+			 * the uniqtype will have been installed in the heap trailer already.
+			 */
+			if (__builtin_expect(heap_info->alloc_site_flag, 1))
 			{
-				reason = "unrecognised allocsite";
-				reason_ptr = alloc_site;
-				++__libcrunch_aborted_unrecognised_allocsite;
-				goto abort;
+				alloc_site = NULL;
+				alloc_uniqtype = (void*)(uintptr_t)heap_info->alloc_site;
 			}
+			else
+			{
+				/* Look up the allocsite's uniqtype, and install it in the heap info. 
+				 * 
+				 * UNLESS it's a lazy uniqtype, in which case the target type of the 
+				 * cast we're checking is the one we assign to the . */
+				alloc_site = (void*)(uintptr_t)heap_info->alloc_site;
+				alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
+				if (!alloc_uniqtype) 
+				{
+					reason = "unrecognised allocsite";
+					reason_ptr = alloc_site;
+					++__libcrunch_aborted_unrecognised_allocsite;
+					goto abort;
+				}
+				if (__builtin_expect(is_lazy_uniqtype(alloc_uniqtype), 0))
+				{
+					++__libcrunch_lazy_heap_type_assignment;
+					heap_info->alloc_site_flag = 1;
+					heap_info->alloc_site = (uintptr_t) arg;
+					return 1;
+				}
+				
+				// FIXME: make this atomic using a union
+				heap_info->alloc_site_flag = 1;
+				heap_info->alloc_site = (uintptr_t) alloc_uniqtype;
+			}
+
 			/* get_object_memory_kind is a bit liberal about what it considers 
 			 * heap allocation -- any anonymous memory mapping will be treated as
 			 * heap. By chance, sometimes this heap memory will look like it's 
