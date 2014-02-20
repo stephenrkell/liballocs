@@ -1,4 +1,4 @@
-CFLAGS += -std=gnu99 -g -O3 -DNDEBUG -pg -fPIC -I../include
+CFLAGS += -std=gnu99 -g -O3 -pg -fPIC -I../include
 LDFLAGS += -pg
 
 CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
@@ -12,7 +12,7 @@ ifeq ($(notdir $(CC)),crunchcc)
 export CC := cc
 endif
 
-default: libcrunch_preload.so libcrunch_noop.so stubs.o
+default: libcrunch_preload.so libcrunch_noop.so
 
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
