@@ -33,7 +33,7 @@ def isLinkCommand():
 def fixupDotO(filename):
     # also link the file with the uniqtypes it references
     cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
-    print "Calling " + " ".join(cmd)
+    sys.stderr.write("Calling " + " ".join(cmd) + "\n")
     ret = subprocess.call(cmd)
     if ret != 0:
         return ret  # give up now
@@ -99,7 +99,7 @@ def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
        and argv[i] != '-static']
     argvToPassThrough = [x for x in argv[1:] if not x in cInputFiles]
     
-    print "C input files: " + ', '.join(cInputFiles)
+    sys.stderr.write("C input files: " + ', '.join(cInputFiles) + "\n")
     
     for sourceFile in cInputFiles:
          # compile to .o with the custom args
@@ -107,10 +107,10 @@ def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
         nameStem, nameExtension = os.path.splitext(sourceFile)
         if (nameExtension == ".c"):
             outputFilename = nameStem + ".o"
-            print "Making a secret output file (from .c source) " + outputFilename
+            sys.stderr.write("Making a secret output file (from .c source) " + outputFilename + "\n")
         else:
             outputFilename = sourceFile + ".o"
-            print "Making a secret output file (from unknown source) " + outputFilename
+            sys.stderr.write("Making a secret output file (from unknown source) " + outputFilename + "\n")
         ret1 = subprocess.call(["cilly"] + argvWithoutOutputOptions + customArgs \
         + ["-c", "-o", outputFilename, sourceFile])
         
@@ -126,7 +126,7 @@ def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
             # include the .o file in our passed-through args
             argvToPassThrough += [outputFilename]
 
-    print "After making .o files, passing through arguments " + " ".join(argvToPassThrough)
+    sys.stderr.write("After making .o files, passing through arguments " + " ".join(argvToPassThrough) + "\n")
     return argvToPassThrough
 
 def main():
@@ -206,7 +206,7 @@ def main():
         # then link in the uniqtypes they reference, 
         # then resume linking these .o files
         if len(cInputFiles) > 0:
-            print "Making .o files first from " + " ".join(cInputFiles)
+            sys.stderr.write("Making .o files first from " + " ".join(cInputFiles) + "\n")
             passedThroughArgs = makeDotOAndPassThrough(sys.argv, crunchccCustomArgs, cInputFiles)
         else:
             passedThroughArgs = sys.argv[1:]
