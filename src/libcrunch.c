@@ -632,11 +632,12 @@ static void print_exit_summary(void)
 	fprintf(stderr, "checks remaining                          % 7ld\n", __libcrunch_begun - (__libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr));
 #endif	
 	fprintf(stderr, "-------------------------------------------------\n");
-	fprintf(stderr, "checks handled by heap case               % 7ld\n", __libcrunch_hit_heap_case);
-	fprintf(stderr, "checks handled by stack case              % 7ld\n", __libcrunch_hit_stack_case);
-	fprintf(stderr, "checks handled by static case             % 7ld\n", __libcrunch_hit_static_case);
+	fprintf(stderr, "checks handled by static case:            % 7ld\n", __libcrunch_hit_static_case);
+	fprintf(stderr, "checks handled by stack case:             % 7ld\n", __libcrunch_hit_stack_case);
+	fprintf(stderr, "checks handled by heap case:              % 7ld\n", __libcrunch_hit_heap_case);
 	fprintf(stderr, "-------------------------------------------------\n");
-	fprintf(stderr, "checks passed as lazy heap typing:        % 7ld\n", __libcrunch_lazy_heap_type_assignment);
+	fprintf(stderr, "   of which did lazy heap type assignment:% 7ld\n", __libcrunch_lazy_heap_type_assignment);
+	fprintf(stderr, "-------------------------------------------------\n");
 	fprintf(stderr, "checks aborted for unindexed heap:        % 7ld\n", __libcrunch_aborted_unindexed_heap);
 	fprintf(stderr, "checks aborted for unknown heap allocsite:% 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
 	fprintf(stderr, "checks aborted for unknown stackframes:   % 7ld\n", __libcrunch_aborted_stack);
@@ -900,24 +901,19 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 
 	return (struct rec *) returned;
 }
-/* Optimised version, for when you already know the uniqtype address. */
-int __is_a_internal(const void *obj, const void *arg)
+
+static inline 
+_Bool 
+(__attribute__((always_inline,gnu_inline)) get_alloc_info) (const void *obj, 
+	const void *test_uniqtype, 
+	const char **out_reason,
+	const void **out_reason_ptr,
+	memory_kind *out_memory_kind,
+	const void **out_object_start,
+	unsigned *out_block_element_count,
+	struct rec **out_alloc_uniqtype, 
+	const void **out_alloc_site)
 {
-	const struct rec *test_uniqtype = (const struct rec *) arg;
-	const char *reason = NULL; // if we abort, set this to a string lit
-	const void *reason_ptr = NULL; // if we abort, set this to a useful address
-
-	/* We might not be initialized yet (recall that __libcrunch_global_init is 
-	 * not a constructor, because it's not safe to call super-early). */
-	__libcrunch_check_init();
-	
-	/* To get the uniqtype for obj, we need to determine its memory
-	 * location. x86-64 only! */
-	void *object_start;
-	unsigned offset;
-	unsigned block_element_count = 1;
-	struct rec *alloc_uniqtype = (struct rec *)0;
-
 /* HACK: pasted from heap.cpp in libpmirror */
 /* Do I want to pad to 4, 8 or (=== 4 (mod 8)) bytes? 
  * Try 4 mod 8. */
@@ -951,7 +947,8 @@ int __is_a_internal(const void *obj, const void *arg)
 			}
 		}
 	}
-	void *alloc_site = 0;
+	*out_alloc_site = 0; // will likely get updated later
+	*out_memory_kind = k;
 	switch(k)
 	{
 		case STACK:
@@ -1055,7 +1052,7 @@ int __is_a_internal(const void *obj, const void *arg)
 				{
 					// return value <1 means error
 
-					reason = "stack walk step failure";
+					*out_reason = "stack walk step failure";
 					goto abort_stack;
 					break;
 				}
@@ -1085,10 +1082,10 @@ int __is_a_internal(const void *obj, const void *arg)
 				if ((unsigned char *) obj >= frame_base + frame_desc->neg_maxoff  // is -ve, so add it
 					&& (unsigned char *) obj < frame_base + frame_desc->pos_maxoff)
 				{
-					object_start = frame_base;
-					alloc_uniqtype = frame_desc;
-					alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
-					break;
+					*out_object_start = frame_base;
+					*out_alloc_uniqtype = frame_desc;
+					*out_alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
+					return 0;
 				}
 				else
 				{
@@ -1096,7 +1093,7 @@ int __is_a_internal(const void *obj, const void *arg)
 					// ... so if our lowest addr is still too high
 					if (frame_base + frame_desc->neg_maxoff > (unsigned char *) obj)
 					{
-						reason = "stack walk reached higher frame";
+						*out_reason = "stack walk reached higher frame";
 						goto abort_stack;
 					}
 				}
@@ -1106,18 +1103,17 @@ int __is_a_internal(const void *obj, const void *arg)
 			// if we hit the termination condition, we've failed
 			if (higherframe_sp == BEGINNING_OF_STACK)
 			{
-				reason = "stack walk reached top-of-stack";
+				*out_reason = "stack walk reached top-of-stack";
 				goto abort_stack;
 			}
 		#undef BEGINNING_OF_STACK
 		// end pasted from pmirror stack.cpp
 		break; // end case STACK
 		abort_stack:
-			reason = reason ? reason : "stack object";
-			reason_ptr = obj;
+			if (!*out_reason) *out_reason = "stack object";
+			*out_reason_ptr = obj;
 			++__libcrunch_aborted_stack;
-			goto abort;
-			//void *uniqtype = stack_frame_to_uniqtype(frame_base, file_relative_ip);
+			return 1;
 		} // end case STACK
 		case HEAP:
 		{
@@ -1131,13 +1127,13 @@ int __is_a_internal(const void *obj, const void *arg)
 			 * is initialized during load, but can be extended as new allocsites
 			 * are discovered, e.g. indirect ones.)
 			 */
-			struct trailer *heap_info = lookup_object_info(obj, &object_start);
+			struct trailer *heap_info = lookup_object_info(obj, (void**) out_object_start);
 			if (!heap_info)
 			{
-				reason = "unindexed heap object";
-				reason_ptr = obj;
+				*out_reason = "unindexed heap object";
+				*out_reason_ptr = obj;
 				++__libcrunch_aborted_unindexed_heap;
-				goto abort;
+				return 1;
 			}
 			assert(get_object_memory_kind(heap_info) == HEAP
 				|| prefix_tree_get_memory_kind(heap_info) == HEAP);
@@ -1148,8 +1144,8 @@ int __is_a_internal(const void *obj, const void *arg)
 			 */
 			if (__builtin_expect(heap_info->alloc_site_flag, 1))
 			{
-				alloc_site = NULL;
-				alloc_uniqtype = (void*)(uintptr_t)heap_info->alloc_site;
+				*out_alloc_site = NULL;
+				*out_alloc_uniqtype = (void*)(uintptr_t)heap_info->alloc_site;
 			}
 			else
 			{
@@ -1158,46 +1154,42 @@ int __is_a_internal(const void *obj, const void *arg)
 				 * 
 				 * AND UNLESS it's a lazy uniqtype, in which case the target type of the 
 				 * cast we're checking is the one we assign to the . */
-				alloc_site = (void*)(uintptr_t)heap_info->alloc_site;
-				alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
+				void *alloc_site = (void*)(uintptr_t)heap_info->alloc_site;
+				*out_alloc_site = alloc_site;
+				struct rec *alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
+				*out_alloc_uniqtype = alloc_uniqtype;
 				if (!alloc_uniqtype) 
 				{
-					reason = "unrecognised allocsite";
-					reason_ptr = alloc_site;
+					*out_reason = "unrecognised allocsite";
+					*out_reason_ptr = alloc_site;
 					++__libcrunch_aborted_unrecognised_allocsite;
-					goto abort;
+					return 1;
 				}
 				if (__builtin_expect(is_lazy_uniqtype(alloc_uniqtype), 0))
 				{
 					++__libcrunch_lazy_heap_type_assignment;
 					heap_info->alloc_site_flag = 1;
-					heap_info->alloc_site = (uintptr_t) arg;
-					return 1;
+					heap_info->alloc_site = (uintptr_t) test_uniqtype;
+					*out_alloc_site = 0;
+					*out_alloc_uniqtype = (struct rec *) test_uniqtype;
+					return 0; // FIXME: we'd rather return from __is_a early right here
 				}
 				
 #ifdef NDEBUG
 				// FIXME: make this atomic using a union
 				heap_info->alloc_site_flag = 1;
-				heap_info->alloc_site = (uintptr_t) alloc_uniqtype;
+				heap_info->alloc_site = (uintptr_t) *out_alloc_uniqtype;
 #endif
 			}
 
-			/* get_object_memory_kind is a bit liberal about what it considers 
-			 * heap allocation -- any anonymous memory mapping will be treated as
-			 * heap. By chance, sometimes this heap memory will look like it's 
-			 * been indexed. GAH. HOW? This shouldn't happen! */
-			assert(prefix_tree_get_memory_kind(alloc_uniqtype) == STATIC);
-			
-			/* FIXME: do we want to write the uniqtype directly into the heap trailer?
-			 * PROBABLY, but do this LATER once we can MEASURE the BENEFIT!
-			 * -- we can scrounge the union tag bits as follows:
+			/* FIXME: scrounge in-heap trailer bits for next/prev and allocsite as follows:
 			 *    on 32-bit x86, exploit that code is not loaded in top half of AS;
 			 *    on 64-bit x86, exploit that certain bits of an addr are always 0. 
 			 */
 			 
-			unsigned chunk_size = malloc_usable_size(object_start);
+			unsigned chunk_size = malloc_usable_size((void*) *out_object_start);
 			unsigned padded_trailer_size = USABLE_SIZE_FROM_OBJECT_SIZE(0);
-			block_element_count = (chunk_size - padded_trailer_size) / alloc_uniqtype->pos_maxoff;
+			*out_block_element_count = (chunk_size - padded_trailer_size) / (*out_alloc_uniqtype)->pos_maxoff;
 			//__libcrunch_private_assert(chunk_size % alloc_uniqtype->pos_maxoff == 0,
 			//	"chunk size should be multiple of element size", __FILE__, __LINE__, __func__);
 			break;
@@ -1217,29 +1209,60 @@ int __is_a_internal(const void *obj, const void *arg)
 //				++__libcrunch_aborted_static;
 //				goto abort;
 //			}
-			alloc_uniqtype = static_addr_to_uniqtype(obj, &object_start);
-			if (!alloc_uniqtype)
+			*out_alloc_uniqtype = static_addr_to_uniqtype(obj, (void**) out_object_start);
+			if (!*out_alloc_uniqtype)
 			{
-				reason = "unrecognised static object";
-				reason_ptr = obj;
+				*out_reason = "unrecognised static object";
+				*out_reason_ptr = obj;
 				++__libcrunch_aborted_static;
 //				consider_blacklisting(obj);
-				goto abort;
+				return 1;
 			}
 			// else we can go ahead
-			alloc_site = object_start;
+			*out_alloc_site = *out_object_start;
 			break;
 		}
 		case UNKNOWN:
 		case MAPPED_FILE:
 		default:
 		{
-			reason = "object of unknown storage";
-			reason_ptr = obj;
+			*out_reason = "object of unknown storage";
+			*out_reason_ptr = obj;
 			++__libcrunch_aborted_unknown_storage;
-			goto abort;
+			return 1;
 		}
 	}
+	
+	return 0;
+}
+
+/* Optimised version, for when you already know the uniqtype address. */
+int __is_a_internal(const void *obj, const void *arg)
+{
+	/* We might not be initialized yet (recall that __libcrunch_global_init is 
+	 * not a constructor, because it's not safe to call super-early). */
+	__libcrunch_check_init();
+	
+	const struct rec *test_uniqtype = (const struct rec *) arg;
+	const char *reason = NULL; // if we abort, set this to a string lit
+	const void *reason_ptr = NULL; // if we abort, set this to a useful address
+	memory_kind k;
+	const void *object_start;
+	unsigned block_element_count = 1;
+	struct rec *alloc_uniqtype = (struct rec *)0;
+	const void *alloc_site;
+	
+	_Bool abort = get_alloc_info(obj, 
+		arg, 
+		&reason,
+		&reason_ptr,
+		&k,
+		&object_start,
+		&block_element_count,
+		&alloc_uniqtype, 
+		&alloc_site);
+	
+	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
 		
 	/* Now search iteratively for a match at the offset within the toplevel
 	 * object. Nonzero offsets "recurse" immediately, using binary search. */
@@ -1287,6 +1310,7 @@ int __is_a_internal(const void *obj, const void *arg)
 				upper_ind = bisect_ind;
 			} else lower_ind = bisect_ind;
 		}
+		
 		if (lower_ind + 1 == upper_ind)
 		{
 			/* We found one offset */
@@ -1311,6 +1335,7 @@ int __is_a_internal(const void *obj, const void *arg)
 	goto check_failed;
 	
 	__assert_fail("unreachable", __FILE__, __LINE__, __func__);
+	
 check_failed:
 	++__libcrunch_failed;
 	debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
@@ -1319,10 +1344,5 @@ check_failed:
 		name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
 		alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
 		alloc_site);
-	return 1; // so that the program will continue
-
-abort:
-	// HACK for debugging
-	// if (0 == strcmp(reason, "unrecognised allocsite")) warnx("Unrecognised allocsite: %p\n", reason_ptr);
 	return 1; // so that the program will continue
 }
