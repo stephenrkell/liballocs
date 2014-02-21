@@ -35,18 +35,18 @@ escape_shell () {
 escape_regexp () {
     # filter which reads a string on input, and yields a plain grep-style regexp
     # which matches the string literally, by escaping the metacharacters
-    cat | sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\\)/\\\1/g'
+    sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\\)/\\\1/g'
 }
 
 escape_eregexp () {
     # filter which reads a string on input, and yields a plain grep-style regexp
     # which matches the string literally, by escaping the metacharacters
-    cat | sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)/\\\1/g'
+    sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)/\\\1/g'
 }
 
 escape_regexp_awk_lit () {
     echo -n '/'
-    cat | sed -r 's#(/|\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)#\\\1#g' | tr -d '\n'
+    sed -r 's#(/|\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)#\\\1#g' | tr -d '\n'
     echo -n '/'
 }
 
@@ -67,7 +67,7 @@ make_match_any_line_regexp () {
     # makes a giant regexp which matches any of a set of lines, read from stdin
 	# If we don't read any lines from stdin, we return a regexp that doesn't match
 	# anything! (At least I hope that's what $^ does.)lank lines.
-    cat | escape_regexp | sed 's/\(.*\)/^\\(\1\\)$/' | tr '\n' '\f' | \
+    escape_regexp | sed 's/\(.*\)/^\\(\1\\)$/' | tr '\n' '\f' | \
     	sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\$\^/'
 }
 
@@ -77,13 +77,13 @@ make_match_any_line_floating_regexp () {
 	# blank lines. Ideally we would return a regexp which doesn't match anything,
 	# but it turns out that there is no such grep regexp (I think!) and the
 	# alternative suffices for our purposes (below)
-    cat | escape_regexp | sed 's/\(.*\)/\\(\1\\)/' | tr '\n' '\f' | \
+    escape_regexp | sed 's/\(.*\)/\\(\1\\)/' | tr '\n' '\f' | \
     	sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\$\^/'
 }
 
 make_match_any_line_floating_eregexp () {
 	# as above, but makes an eregexp
-    cat | escape_eregexp | sed 's/\(.*\)/(\1)/' | tr '\n' '\f' | \
+    escape_eregexp | sed 's/\(.*\)/(\1)/' | tr '\n' '\f' | \
     	sed 's/\f$/\n/' | sed 's/\f/|/g' |  sed 's/^$/\$\^/'
 }
 
@@ -131,7 +131,8 @@ line_regexp='^([0-9a-f]*) <([^>]*)>'
 alloc_site_regexp="${line_regexp}.*call.*(<($( 
     echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc' | \
     make_match_any_line_floating_eregexp )|$( 
-    echo -n "${LIBCRUNCH_ALLOC_FNS:-malloc}" | sed 's/\([a-zA-Z0-9_]\+\)([^)]*) */\1\n__wrap_\1\n/g' | 
+    echo -n "${LIBCRUNCH_ALLOC_FNS:-malloc}" | \
+        sed 's/\([a-zA-Z0-9_]\+\)([^)]*)[a-zA-Z]\?\( \+\|$\)/\1\n__wrap_\1\n/g' | \
     make_match_any_line_floating_eregexp ))|.*\*)"
 # HACK: if libcrunch_alloc_fns is unset, use "malloc" a second time
 # (leaving this out will make the regexp end "|)" so match all calls)
@@ -159,17 +160,23 @@ apply_relocs () {
     tr '\n' '\f' | sed 's/\f\([[:blank:]]*[0-9a-f]\+: R\)/\1/g' | tr '\f' '\n'
 }
 
-allocation_sites="$( objdump --prefix-addresses ${disassembly_opts} "$inputfile" | \
+# get allocation sites in "address sym offset" form
+allocsites_tmpfile="$(mktemp)"
+objdump --prefix-addresses ${disassembly_opts} "$inputfile" | \
 apply_relocs | \
 egrep "$alloc_site_regexp" | \
-sed -r "s/${alloc_site_regexp}.*/\1\t\2/" )" #"
+sed -r "s/${alloc_site_regexp}.*/\1\t\2/" | \
+sed -r 's/([-\+]0x[0-9a-f]*) *$/ \1/' > "$allocsites_tmpfile"
+echo "Written allocsites output to $allocsites_tmpfile" 1>&2
 
-# read the whole objdump in, to avoid re-disassembling
-objdump_output="$( objdump --line-numbers --prefix-addresses ${disassembly_opts} -S "$inputfile" | \
-apply_relocs )"
+# read the whole objdump to a temporary file, to avoid re-disassembling
+tmpfile="$(mktemp)"
+objdump --line-numbers --prefix-addresses ${disassembly_opts} -S "$inputfile" | \
+   apply_relocs > "$tmpfile"
+echo "Written objdump output to $tmpfile" 1>&2
 
 echo "Found allocation sites: " 1>&2
-echo "$allocation_sites" 1>&2
+cat "$allocsites_tmpfile" 1>&2
 
 # HACK: sometimes our gnu_debuglink section is wrong, i.e. does not reflect
 # the location of the debug info, e.g. according to Debian policy where
@@ -177,8 +184,6 @@ echo "$allocation_sites" 1>&2
 # with the same-directory path (i.e. plain filename) that was correct when
 # stripping occurred during the build process. 
 
-tmpfile="$(mktemp)"
-echo "$objdump_output" > "$tmpfile"
 bytes_consumed=0
 
 while read address sym offset; do
@@ -193,7 +198,7 @@ while read address sym offset; do
     #regexp="^[0-9a-f]+[[:blank:]]*<$( escapefn_eregexp "$sym" )\+$( escapefn_eregexp "$offset")>"
     regexp="^${address}[[:blank:]]*<"
     
-    #echo "regexp: $regexp" 1>&2
+    echo "regexp: $regexp" 1>&2
     # 2. Grab that and some lines of pre-context, 
     # which hopefully will include the allocating source line
     # FIXME: to optimise, chomp forward from previous match
@@ -274,7 +279,7 @@ while read address sym offset; do
             echo "<${return_addr_sym}+${return_addr_offset}> @${filename}:${line_number}"$'\t'"${token:-\$FAILED\$}"
             ;;
     esac
-done <<<"$( echo "$allocation_sites" | sed -r 's/([-\+]0x[0-9a-f]*)$/ \1/' )" | \
+done <"$allocsites_tmpfile" | \
    pad_numbers | sort -t$'\t' -k3 -k4
 
-rm -f "$tmpfile"
+# rm -f "$tmpfile"
