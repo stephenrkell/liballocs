@@ -298,7 +298,7 @@ let rec stringFromSig tsig = (* = Pretty.sprint 80 (d_typsig () (getEffectiveTyp
    | TFloat(kind,attrs) -> (Pretty.sprint 80 (d_fkind () kind))
    | _ -> raise(Failure "bad base type")
    in 
-   Str.global_replace (Str.regexp "[. /-]") "_" (canonicalizeBaseTypeStr (trim rawString))
+   (* Str.global_replace (Str.regexp "[. /-]") "_" ( *) canonicalizeBaseTypeStr (trim rawString)(* ) *)
  in
  match tsig with
    TSArray(tNestedSig, optSz, attrs) -> "impossible"
