@@ -46,7 +46,8 @@ void prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg)
 void prefix_tree_del(void *base, size_t s)
 {
 	map.erase(
-		discrete_interval<uintptr_t>::right_open(			(uintptr_t) base, 
+		discrete_interval<uintptr_t>::right_open(
+			(uintptr_t) base, 
 			(uintptr_t) base + s
 		)
 	);

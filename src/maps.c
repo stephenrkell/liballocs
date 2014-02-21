@@ -53,11 +53,14 @@ void prefix_tree_add_missing_maps(void)
 		{
 			// is there already a matching entry in the tree?
 			void *obj = (void *)(uintptr_t) first;
+			void *obj_lastbyte = (void *)((uintptr_t) second - 1);
 			struct prefix_tree_node **match_prevptr;
-			struct prefix_tree_node *match
+			struct prefix_tree_node *match_first
 			 = prefix_tree_deepest_match_from_root(obj, &match_prevptr);
+			struct prefix_tree_node *match_second
+			 = prefix_tree_deepest_match_from_root(obj_lastbyte, &match_prevptr);
 			
-			if (!match)
+			if (!match_first || !match_second)
 			{
 				// if 'rest' is '/' it's static, else it's heap or thread
 				switch (rest[0])
