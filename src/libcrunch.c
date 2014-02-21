@@ -1155,9 +1155,10 @@ int __is_a_internal(const void *obj, const void *arg)
 			}
 			else
 			{
-				/* Look up the allocsite's uniqtype, and install it in the heap info. 
+				/* Look up the allocsite's uniqtype, and install it in the heap info 
+				 * (on NDEBUG builds only, because it reduces debuggability a bit).
 				 * 
-				 * UNLESS it's a lazy uniqtype, in which case the target type of the 
+				 * AND UNLESS it's a lazy uniqtype, in which case the target type of the 
 				 * cast we're checking is the one we assign to the . */
 				alloc_site = (void*)(uintptr_t)heap_info->alloc_site;
 				alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
@@ -1176,9 +1177,11 @@ int __is_a_internal(const void *obj, const void *arg)
 					return 1;
 				}
 				
+#ifdef NDEBUG
 				// FIXME: make this atomic using a union
 				heap_info->alloc_site_flag = 1;
 				heap_info->alloc_site = (uintptr_t) alloc_uniqtype;
+#endif
 			}
 
 			/* get_object_memory_kind is a bit liberal about what it considers 
