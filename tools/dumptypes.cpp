@@ -333,13 +333,13 @@ int main(int argc, char **argv)
 			 * -- note that some DIEs will be "for all vaddrs" */
 			auto var_loclist = i_dyn->get_dynamic_location();
 			// rewrite the loclist to use the CFA/frame_base maximally
-			cerr << "Saw loclist " << var_loclist << endl;
+			// cerr << "Saw loclist " << var_loclist << endl;
 			var_loclist = encap::rewrite_loclist_in_terms_of_cfa(
 				var_loclist, 
 				root.get_frame_section(), 
 				dwarf::spec::opt<const encap::loclist&>() /* opt_fbreg */
 			);
-			cerr << "Rewrote to loclist " << var_loclist << endl;
+			// cerr << "Rewrote to loclist " << var_loclist << endl;
 			
 			// for each of this variable's intervals, add it to the map
 			int interval_index = 0;
@@ -554,9 +554,9 @@ int main(int argc, char **argv)
 					continue;
 				}
 				Dwarf_Signed frame_offset = static_cast<Dwarf_Signed>(addr_from_zero);
-				cerr << "Found on-stack location (fb + " << frame_offset << ") for fp/var " << *i_el 
-						<< "in the vaddr range " 
-						<< std::hex << i_int->first << std::dec << endl;
+				// cerr << "Found on-stack location (fb + " << frame_offset << ") for fp/var " << *i_el 
+				// 		<< "in the vaddr range " 
+				// 		<< std::hex << i_int->first << std::dec << endl;
 
 				/* We only add to by_frame_off if we have complete type => nonzero length. */
 				if ((*i_el)->find_type() && (*i_el)->find_type()->get_concrete_type())
