@@ -906,7 +906,6 @@ int __is_a_internal(const void *obj, const void *arg)
 	const struct rec *test_uniqtype = (const struct rec *) arg;
 	const char *reason = NULL; // if we abort, set this to a string lit
 	const void *reason_ptr = NULL; // if we abort, set this to a useful address
-	_Bool suppress_warning = 0;
 
 	/* We might not be initialized yet (recall that __libcrunch_global_init is 
 	 * not a constructor, because it's not safe to call super-early). */
@@ -1116,7 +1115,6 @@ int __is_a_internal(const void *obj, const void *arg)
 		abort_stack:
 			reason = reason ? reason : "stack object";
 			reason_ptr = obj;
-			suppress_warning = 1;
 			++__libcrunch_aborted_stack;
 			goto abort;
 			//void *uniqtype = stack_frame_to_uniqtype(frame_base, file_relative_ip);
