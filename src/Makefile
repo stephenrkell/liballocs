@@ -1,4 +1,4 @@
-CFLAGS += -std=gnu99 -g -O3 -DNDEBUG -pg -fPIC -I../include
+CFLAGS += -std=gnu99 -g -O0 -pg -fPIC -I../include
 LDFLAGS += -pg
 
 CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11

@@ -21,6 +21,7 @@ int __libcrunch_global_init(void) __attribute__((weak));
 const void *__libcrunch_typestr_to_uniqtype(const char *typestr) __attribute__((weak));
 void *__libcrunch_my_typeobj(void) __attribute__((weak));
 int __is_a_internal(const void *obj, const void *uniqtype) __attribute__((weak));
+int __like_a_internal(const void *obj, const void *uniqtype) __attribute__((weak));
 
 /* Uniqtypes for signed_char and unsigned_char -- we declare them as int 
  * to avoid the need to define struct rec in this header file. */

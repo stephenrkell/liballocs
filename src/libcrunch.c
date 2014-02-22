@@ -593,6 +593,19 @@ static void consider_blacklisting(const void *obj)
 static void *main_bp; // beginning of main's stack frame
 
 const struct rec *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
+const struct rec *__libcrunch_uniqtype_signed_char;
+const struct rec *__libcrunch_uniqtype_unsigned_char;
+#define LOOKUP_CALLER_TYPE(frag, caller) /* FIXME: use caller not RTLD_DEFAULT */ \
+    ( \
+		(__libcrunch_uniqtype_ ## frag) ? __libcrunch_uniqtype_ ## frag : \
+		(__libcrunch_uniqtype_ ## frag = dlsym(RTLD_DEFAULT, "__uniqtype__" #frag), \
+			assert(__libcrunch_uniqtype_ ## frag), \
+			__libcrunch_uniqtype_ ## frag \
+		) \
+	)
+
+
+
 /* counters */
 unsigned long __libcrunch_begun;
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
@@ -912,7 +925,8 @@ _Bool
 	const void **out_object_start,
 	unsigned *out_block_element_count,
 	struct rec **out_alloc_uniqtype, 
-	const void **out_alloc_site)
+	const void **out_alloc_site,
+	signed *out_target_offset_within_uniqtype)
 {
 /* HACK: pasted from heap.cpp in libpmirror */
 /* Do I want to pad to 4, 8 or (=== 4 (mod 8)) bytes? 
@@ -923,6 +937,9 @@ _Bool
 : (((((s) / (n)) + 1) * (n)) + (m)))
 #define USABLE_SIZE_FROM_OBJECT_SIZE(s) (PAD_TO_MBYTES_MOD_N( ((s) + sizeof (struct trailer)) , 8, 4))
 #define HEAPSZ_ONE(t) (USABLE_SIZE_FROM_OBJECT_SIZE(sizeof ((t))))
+	int modulo; 
+	signed target_offset_wholeblock;
+	signed target_offset_within_uniqtype;
 
 	memory_kind k = get_object_memory_kind(obj);
 	if (__builtin_expect(k == UNKNOWN, 0))
@@ -1085,7 +1102,7 @@ _Bool
 					*out_object_start = frame_base;
 					*out_alloc_uniqtype = frame_desc;
 					*out_alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
-					return 0;
+					goto out_success;
 				}
 				else
 				{
@@ -1172,7 +1189,7 @@ _Bool
 					heap_info->alloc_site = (uintptr_t) test_uniqtype;
 					*out_alloc_site = 0;
 					*out_alloc_uniqtype = (struct rec *) test_uniqtype;
-					return 0; // FIXME: we'd rather return from __is_a early right here
+					goto out_success; // FIXME: we'd rather return from __is_a early right here
 				}
 				
 #ifdef NDEBUG
@@ -1233,7 +1250,74 @@ _Bool
 		}
 	}
 	
+out_success:
+	target_offset_wholeblock = (char*) obj - (char*) *out_object_start;
+	/* If we're searching in an array, we need to take the offset modulo the 
+	 * element size. Otherwise just take the whole-block offset. */
+	if ((*out_alloc_uniqtype)->pos_maxoff != 0 && (*out_alloc_uniqtype)->neg_maxoff == 0)
+	{
+		target_offset_within_uniqtype = target_offset_wholeblock % (*out_alloc_uniqtype)->pos_maxoff;
+	} else target_offset_within_uniqtype = target_offset_wholeblock;
+	// assert that the signs are the same
+	assert(target_offset_wholeblock < 0 
+		? target_offset_within_uniqtype < 0 
+		: target_offset_within_uniqtype >= 0);
+	*out_target_offset_within_uniqtype = target_offset_within_uniqtype;
+	
 	return 0;
+}
+
+static inline _Bool descend_to_subobject_spanning(signed *p_target_offset_within_uniqtype,
+	struct rec **p_cur_obj_uniqtype)
+{
+	struct rec *cur_obj_uniqtype = *p_cur_obj_uniqtype;
+	signed target_offset_within_uniqtype = *p_target_offset_within_uniqtype;
+	/* calculate the offset to descend to, if any */
+	unsigned num_contained = cur_obj_uniqtype->nmemb;
+	int lower_ind = 0;
+	int upper_ind = num_contained;
+	while (lower_ind + 1 < upper_ind) // difference of >= 2
+	{
+		/* Bisect the interval */
+		int bisect_ind = (upper_ind + lower_ind) / 2;
+		__libcrunch_private_assert(bisect_ind > lower_ind, "bisection progress", 
+			__FILE__, __LINE__, __func__);
+		if (cur_obj_uniqtype->contained[bisect_ind].offset > target_offset_within_uniqtype)
+		{
+			/* Our solution lies in the lower half of the interval */
+			upper_ind = bisect_ind;
+		} else lower_ind = bisect_ind;
+	}
+
+	if (lower_ind + 1 == upper_ind)
+	{
+		/* We found one offset */
+		__libcrunch_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset_within_uniqtype,
+			"offset underapproximates", __FILE__, __LINE__, __func__);
+		
+		*p_cur_obj_uniqtype
+		 = cur_obj_uniqtype->contained[lower_ind].ptr;
+		if (!cur_obj_uniqtype->is_array)
+		{
+			*p_target_offset_within_uniqtype
+			 = target_offset_within_uniqtype - cur_obj_uniqtype->contained[lower_ind].offset;
+		}
+		else
+		{
+			assert(cur_obj_uniqtype->contained[lower_ind].offset == 0);
+			*p_target_offset_within_uniqtype
+			 = target_offset_within_uniqtype % cur_obj_uniqtype->contained[0].ptr->pos_maxoff;
+			// - cur_obj_uniqtype->contained[lower_ind].offset;
+		}
+		return 1;
+	}
+	else /* lower_ind >= upper_ind */
+	{
+		// this should mean num_contained == 0
+		__libcrunch_private_assert(num_contained == 0,
+			"no contained objects", __FILE__, __LINE__, __func__);
+		return 0;
+	}
 }
 
 /* Optimised version, for when you already know the uniqtype address. */
@@ -1251,6 +1335,7 @@ int __is_a_internal(const void *obj, const void *arg)
 	unsigned block_element_count = 1;
 	struct rec *alloc_uniqtype = (struct rec *)0;
 	const void *alloc_site;
+	signed target_offset_within_uniqtype;
 	
 	_Bool abort = get_alloc_info(obj, 
 		arg, 
@@ -1260,83 +1345,25 @@ int __is_a_internal(const void *obj, const void *arg)
 		&object_start,
 		&block_element_count,
 		&alloc_uniqtype, 
-		&alloc_site);
+		&alloc_site,
+		&target_offset_within_uniqtype);
 	
 	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
-		
-	/* Now search iteratively for a match at the offset within the toplevel
-	 * object. Nonzero offsets "recurse" immediately, using binary search. */
-	assert(alloc_uniqtype);
-	/* If we're searching in an array, we need to take the offset modulo the 
-	 * element size. Otherwise just take the whole-block offset. */
-	int modulo; 
-	signed target_offset_wholeblock = (char*) obj - (char*) object_start;
-	signed target_offset;
-	if (alloc_uniqtype->pos_maxoff != 0 && alloc_uniqtype->neg_maxoff == 0)
-	{
-		target_offset = target_offset_wholeblock % alloc_uniqtype->pos_maxoff;
-	} else target_offset = target_offset_wholeblock;
-	// assert that the signs are the same
-	assert(target_offset_wholeblock < 0 ? target_offset < 0 : target_offset >= 0);
 	
 	struct rec *cur_obj_uniqtype = alloc_uniqtype;
-	signed descend_to_ind;
 	do
 	{
-		/* If we have offset == 0, we can check at this uniqtype. */
-		if (cur_obj_uniqtype == test_uniqtype) 
+		/* If we have offset == 0, we can check at this uniqtype.
+		 * FIXME: why do we not test target_offset_within_uniqtype here? */
+		if (target_offset_within_uniqtype == 0
+			&& cur_obj_uniqtype == test_uniqtype) 
 		{
-		temp_label: // HACK: remove this printout once stable
-			// debug_printf(5, "Check __is_a_internal(%p, %p a.k.a. \"%s\") succeeded at %p.\n", 
-			// 	obj, test_uniqtype, test_uniqtype->name, &&temp_label);
 			++__libcrunch_succeeded;
 			return 1;
 		}
+	} while (descend_to_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype));
 	
-		/* calculate the offset to descend to, if any 
-		 * FIXME: refactor into find_subobject_spanning(offset) */
-		unsigned num_contained = cur_obj_uniqtype->nmemb;
-		int lower_ind = 0;
-		int upper_ind = num_contained;
-		while (lower_ind + 1 < upper_ind) // difference of >= 2
-		{
-			/* Bisect the interval */
-			int bisect_ind = (upper_ind + lower_ind) / 2;
-			__libcrunch_private_assert(bisect_ind > lower_ind, "bisection progress", 
-				__FILE__, __LINE__, __func__);
-			if (cur_obj_uniqtype->contained[bisect_ind].offset > target_offset)
-			{
-				/* Our solution lies in the lower half of the interval */
-				upper_ind = bisect_ind;
-			} else lower_ind = bisect_ind;
-		}
-		
-		if (lower_ind + 1 == upper_ind)
-		{
-			/* We found one offset */
-			__libcrunch_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset,
-				"offset underapproximates", __FILE__, __LINE__, __func__);
-			descend_to_ind = lower_ind;
-		}
-		else /* lower_ind >= upper_ind */
-		{
-			// this should mean num_contained == 0
-			__libcrunch_private_assert(num_contained == 0,
-				"no contained objects", __FILE__, __LINE__, __func__);
-			descend_to_ind = -1;
-		}
-		
-		/* Terminate or recurse. */
-	} while (descend_to_ind != -1 
-	    && (target_offset = target_offset - cur_obj_uniqtype->contained[descend_to_ind].offset,
-	        cur_obj_uniqtype = cur_obj_uniqtype->contained[descend_to_ind].ptr,
-	        1));
 	// if we got here, the check failed
-	goto check_failed;
-	
-	__assert_fail("unreachable", __FILE__, __LINE__, __func__);
-	
-check_failed:
 	++__libcrunch_failed;
 	debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
 		obj, test_uniqtype, test_uniqtype->name,
@@ -1344,5 +1371,125 @@ check_failed:
 		name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
 		alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
 		alloc_site);
-	return 1; // so that the program will continue
+	return 1; // HACK: so that the program will continue
+}
+
+/* Optimised version, for when you already know the uniqtype address. */
+int __like_a_internal(const void *obj, const void *arg)
+{
+	/* We might not be initialized yet (recall that __libcrunch_global_init is 
+	 * not a constructor, because it's not safe to call super-early). */
+	__libcrunch_check_init();
+	
+	const struct rec *test_uniqtype = (const struct rec *) arg;
+	const char *reason = NULL; // if we abort, set this to a string lit
+	const void *reason_ptr = NULL; // if we abort, set this to a useful address
+	memory_kind k;
+	const void *object_start;
+	unsigned block_element_count = 1;
+	struct rec *alloc_uniqtype = (struct rec *)0;
+	const void *alloc_site;
+	signed target_offset_within_uniqtype;
+	void *caller_address = __builtin_return_address(0);
+	
+	_Bool abort = get_alloc_info(obj, 
+		arg, 
+		&reason,
+		&reason_ptr,
+		&k,
+		&object_start,
+		&block_element_count,
+		&alloc_uniqtype, 
+		&alloc_site,
+		&target_offset_within_uniqtype);
+	
+	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
+	struct rec *cur_obj_uniqtype = alloc_uniqtype;
+	
+	/* Descend the subobject hierarchy until our target offset is zero, i.e. we 
+	 * find the outermost thing in the subobject tree that starts at the address
+	 * we were passed (obj). */
+	while (target_offset_within_uniqtype != 0)
+	{
+		_Bool success = descend_to_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype);
+		if (!success) goto like_a_failed;
+	}
+	
+	// trivially, identical types are like one another
+	if (test_uniqtype == cur_obj_uniqtype) goto like_a_succeeded;
+	
+	// arrays are special
+	_Bool matches;
+	if (__builtin_expect((cur_obj_uniqtype->is_array || test_uniqtype->is_array), 0))
+	{
+		matches = 
+			test_uniqtype == cur_obj_uniqtype
+		||  (test_uniqtype->is_array && test_uniqtype->array_len == 1 
+				&& test_uniqtype->contained[0].ptr == cur_obj_uniqtype)
+		||  (cur_obj_uniqtype->is_array && cur_obj_uniqtype->array_len == 1
+				&& cur_obj_uniqtype->contained[0].ptr == test_uniqtype);
+		/* We don't need to allow an array of one blah to be like a different
+		 * array of one blah, because they should be the same type. 
+		 * FIXME: there's a difficult case: an array of statically unknown length, 
+		 * which happens to be length-1. */
+		if (matches) goto like_a_succeeded; else goto like_a_failed;
+	}
+	
+	/* Okay, we can start the like-a test: for each element in the test type, 
+	 * do we have a type-equivalent in the object type?
+	 * 
+	 * We make an exception for arrays of char (signed or unsigned): if an
+	 * element in the test type is such an array, we skip over any number of
+	 * fields in the object type, until we reach the offset of the end element.  */
+	unsigned i_obj_subobj = 0, i_test_subobj = 0;
+	for (; 
+		i_obj_subobj < cur_obj_uniqtype->nmemb && i_test_subobj < test_uniqtype->nmemb; 
+		++i_test_subobj, ++i_obj_subobj)
+	{
+		if (__builtin_expect(test_uniqtype->contained[i_test_subobj].ptr->is_array
+			&& (test_uniqtype->contained[i_test_subobj].ptr->contained[0].ptr
+					== LOOKUP_CALLER_TYPE(signed_char, caller_address)
+			|| test_uniqtype->contained[i_test_subobj].ptr->contained[0].ptr
+					== LOOKUP_CALLER_TYPE(unsigned_char, caller_address)), 0))
+		{
+			// we will skip this field in the test type
+			signed target_off =
+				test_uniqtype->nmemb > i_test_subobj + 1
+			 ?  test_uniqtype->contained[i_test_subobj + 1].offset
+			 :  test_uniqtype->contained[i_test_subobj].offset
+			      + test_uniqtype->contained[i_test_subobj].ptr->pos_maxoff;
+			
+			// ... if there's more in the test type, advance i_obj_subobj
+			while (i_obj_subobj + 1 < cur_obj_uniqtype->nmemb &&
+				cur_obj_uniqtype->contained[i_obj_subobj + 1].offset < target_off) ++i_obj_subobj;
+			/* We fail if we ran out of stuff in the target object type
+			 * AND there is more to go in the test type. */
+			if (i_obj_subobj + 1 >= cur_obj_uniqtype->nmemb
+			 && test_uniqtype->nmemb > i_test_subobj + 1) goto like_a_failed;
+				
+			continue;
+		}
+		matches = 
+				test_uniqtype->contained[i_test_subobj].offset == cur_obj_uniqtype->contained[i_obj_subobj].offset
+		 && 	test_uniqtype->contained[i_test_subobj].ptr == cur_obj_uniqtype->contained[i_obj_subobj].ptr;
+		if (!matches) goto like_a_failed;
+	}
+	// if we terminated because we ran out of fields in the target type, fail
+	if (i_test_subobj < test_uniqtype->nmemb) goto like_a_failed;
+	
+like_a_succeeded:
+	++__libcrunch_succeeded;
+	return 1;
+	
+	// if we got here, we've failed
+	// if we got here, the check failed
+like_a_failed:
+	++__libcrunch_failed;
+	debug_printf(0, "Failed check __like_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
+		obj, test_uniqtype, test_uniqtype->name,
+		__builtin_return_address(0), // make sure our *caller*, if any, is inlined
+		name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
+		alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
+		alloc_site);
+	return 1; // HACK: so that the program will continue
 }
