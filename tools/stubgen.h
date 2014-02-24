@@ -20,7 +20,7 @@ extern __thread void *__current_allocsite __attribute__((weak)); // defined by h
 	arg ## num
 
 #define make_wrapper(name, retchar) \
-	type_for_argchar_ ## retchar __real_ ## name( arglist_ ## name (make_argdecl) ); \
+	type_for_argchar_ ## retchar ( __attribute__((weak)) __real_ ## name ) ( arglist_ ## name (make_argdecl) ); \
 	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
 		if (&__current_allocsite && !__current_allocsite) \
