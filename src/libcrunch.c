@@ -623,6 +623,7 @@ unsigned long __libcrunch_lazy_heap_type_assignment;
 unsigned long __libcrunch_aborted_unindexed_heap;
 unsigned long __libcrunch_aborted_unrecognised_allocsite;
 unsigned long __libcrunch_failed;
+unsigned long __libcrunch_failed_in_alloc;
 unsigned long __libcrunch_succeeded;
 
 static void print_exit_summary(void)
@@ -655,7 +656,8 @@ static void print_exit_summary(void)
 	fprintf(stderr, "checks aborted for unknown heap allocsite:% 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
 	fprintf(stderr, "checks aborted for unknown stackframes:   % 7ld\n", __libcrunch_aborted_stack);
 	fprintf(stderr, "checks aborted for unknown static obj:    % 7ld\n", __libcrunch_aborted_static);
-	fprintf(stderr, "checks failed:                            % 7ld\n", __libcrunch_failed);
+	fprintf(stderr, "checks failed inside allocation functions:% 7ld\n", __libcrunch_failed_in_alloc);
+	fprintf(stderr, "checks failed otherwise:                  % 7ld\n", __libcrunch_failed);
 	fprintf(stderr, "checks nontrivially passed:               % 7ld\n", __libcrunch_succeeded);
 }
 
@@ -1364,13 +1366,21 @@ int __is_a_internal(const void *obj, const void *arg)
 	} while (descend_to_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype));
 	
 	// if we got here, the check failed
-	++__libcrunch_failed;
-	debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
-		obj, test_uniqtype, test_uniqtype->name,
-		__builtin_return_address(0), // make sure our *caller*, if any, is inlined
-		name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
-		alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
-		alloc_site);
+	if (__current_allocsite)
+	{
+		++__libcrunch_failed_in_alloc;
+		// suppress warning
+	}
+	else
+	{
+		++__libcrunch_failed;
+		debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
+			obj, test_uniqtype, test_uniqtype->name,
+			__builtin_return_address(0), // make sure our *caller*, if any, is inlined
+			name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
+			alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
+			alloc_site);
+	}
 	return 1; // HACK: so that the program will continue
 }
 
@@ -1484,12 +1494,20 @@ like_a_succeeded:
 	// if we got here, we've failed
 	// if we got here, the check failed
 like_a_failed:
-	++__libcrunch_failed;
-	debug_printf(0, "Failed check __like_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
-		obj, test_uniqtype, test_uniqtype->name,
-		__builtin_return_address(0), // make sure our *caller*, if any, is inlined
-		name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
-		alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
-		alloc_site);
+	if (__current_allocsite) 
+	{
+		++__libcrunch_failed_in_alloc;
+		// suppress warning
+	}
+	else
+	{
+		++__libcrunch_failed;
+		debug_printf(0, "Failed check __like_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
+			obj, test_uniqtype, test_uniqtype->name,
+			__builtin_return_address(0), // make sure our *caller*, if any, is inlined
+			name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
+			alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
+			alloc_site);
+	}
 	return 1; // HACK: so that the program will continue
 }

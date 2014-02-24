@@ -34,6 +34,7 @@ int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
       warnx( __VA_ARGS__ );  \
     } \
   } while (0)
+extern __thread void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 
 /* Copied from dumptypes.cpp */
 struct rec
@@ -155,6 +156,7 @@ extern unsigned long __libcrunch_aborted_unindexed_heap;
 extern unsigned long __libcrunch_lazy_heap_type_assignment;
 extern unsigned long __libcrunch_aborted_unrecognised_allocsite;
 extern unsigned long __libcrunch_failed;
+extern unsigned long __libcrunch_failed_in_alloc;
 extern unsigned long __libcrunch_succeeded;
 
 #endif

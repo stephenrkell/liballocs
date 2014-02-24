@@ -140,7 +140,7 @@ let rec warnIfLikelyAllocFn (i: instr) (maybeFunName: string option) (arglist: e
       (* (output_string Pervasives.stderr ("call to function " ^ funName ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
 | None -> ()
 
-let matchUserAllocArgs i arglist signature env maybeFunNameToPrint : Cil.typsig option =
+let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctionType : Cil.typsig option =
  let signatureArgSpec = try (
      let nskip = search_forward (regexp "(.*)") signature 0
      in
@@ -175,9 +175,19 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint : Cil.typsig 
                ^ (string_of_int s) ^ " arguments, where call site it has only " ^ (string_of_int (length arglist)) ^"\n"); 
                flush Pervasives.stderr); None)
        | None -> (output_string Pervasives.stderr ("Warning: spec argument count (" ^ (string_of_int s) ^ ") does not match call-site argument count (" ^ (string_of_int (length arglist)) ^ ")")); None)
- | None -> None
+ | None -> 
+      (* If we have no sizearg pos, use the return type of the function: 
+         if it is a pointer to non-void, we assume the pointer target type is the allocated type. *)
+      match calledFunctionType with 
+        TSFun(returnTs, paramTss, isVarArgs, attrs) -> begin
+            match returnTs with
+            TSBase(TVoid(_)) -> None
+         |  TSPtr(targetTs, _) -> Some(targetTs)
+         |  _ -> None (* it returns something else *)
+         end
+      | _ -> raise (Failure "impossible function type")
 
-let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env : Cil.typsig option = 
+let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env calledFunctionType : Cil.typsig option = 
  (* destruct the signature string *)
  (* (output_string Pervasives.stderr ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr;  *)
  let signatureFunction = 
@@ -187,8 +197,8 @@ let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env :
  in 
  match maybeFunName with 
    Some(fname) -> (if fname <> signatureFunction then (* (output_string Pervasives.stderr ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) None (* ) *)
-                  else (matchUserAllocArgs i arglist signature env (Some(fname))))
- | None -> (matchUserAllocArgs i arglist signature env None)
+                  else (matchUserAllocArgs i arglist signature env (Some(fname)) calledFunctionType))
+ | None -> (matchUserAllocArgs i arglist signature env None calledFunctionType)
  (* ) *)
 
 let userAllocFunctions () : string list = try begin 
@@ -197,7 +207,7 @@ let userAllocFunctions () : string list = try begin
 
 (* FIXME: distinguish "it is an allocation function, but I couldn't identify what it's allocating"
    from "it doesn't appear to be an allocation function". *)
-let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates : Cil.typsig option = 
+let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates calledFunctionType : Cil.typsig option = 
   (* output_string Pervasives.stderr "Looking for user alloc expr\n"; flush Pervasives.stderr; *)
   let userVerdict = try begin
     (* match f.vname with each candidate *) 
@@ -207,7 +217,7 @@ let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp 
       in
       match cands with
         [] -> output_string Pervasives.stderr ("Warning: exhausted candidate signatures in matching function "  ^ funNameString ^ "\n"); None
-      | s::ss -> begin match extractUserAllocMatchingSignature i maybeFunName arglist s env with
+      | s::ss -> begin match extractUserAllocMatchingSignature i maybeFunName arglist s env calledFunctionType with
            None -> (output_string Pervasives.stderr ("Warning: signature " ^ s ^ " did not match function " ^ funNameString ^ "\n"); firstMatchingSignature ss )
          | Some(s) -> Some(s)
         end
@@ -225,12 +235,12 @@ let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp 
    return Some(fn, optionalTypeSig)
    where fn is the function varinfo
    and optionalTypeSig is the type signature we inferred was being allocated, if we managed it *)
-let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) env = 
+let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) env calledFunctionType = 
   let maybeFunName = match maybeFun with 
     Some(f) -> Some(f.vname)
   | None -> None
   in 
-  getUserAllocExpr i maybeFunName arglist env (["malloc(Z)p"; "calloc(zZ)p"; "realloc(pZ)p"; "posix_memalign(pzZ)p"] @ (userAllocFunctions ()))
+  getUserAllocExpr i maybeFunName arglist env (["malloc(Z)p"; "calloc(zZ)p"; "realloc(pZ)p"; "posix_memalign(pzZ)p"] @ (userAllocFunctions ())) calledFunctionType
 
 (* HACK: copied from trumptr *)
 let rec canonicalizeBaseTypeStr s = 
@@ -470,7 +480,9 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
       ) ^ "\n"); flush Pervasives.stderr);
       match i with 
       Call(_, funExpr, args, l) -> begin
-         let handleCall maybeFunvar returnType optParamList isVarArgs attrs = 
+         let handleCall maybeFunvar functionTs = begin
+          match functionTs with 
+          | TSFun(returnType, optParamList, isVarArgs, attrs) -> begin
             (* Where to write our output? We want the .allocs to be output 
                right alongside the .c file (say) that does the allocation.
               PROBLEM 1: this varies, because we're reading a .i file, i.e.
@@ -505,13 +517,16 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Sizeof T lets us terminate
                  Sizeof V also lets us terminate
                  Mul where an arg is a Sizeof lets us terminate *)
-              match (getAllocExpr i maybeFunvar args !sizeEnv) with
+              match (getAllocExpr i maybeFunvar args !sizeEnv functionTs) with
                  Some(ts) -> printAllocFn fileAndLine chan maybeFunvar (stringFromSig ts); SkipChildren
               |  _ -> 
                   (* (output_string Pervasives.stderr (
                      "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
                   ) ; flush Pervasives.stderr;  *) SkipChildren(* ) *) (* this means it's not an allocation function *)
             end (* ) *)
+          end
+        | _ -> raise(Failure "impossible function type")
+        end
         in
         let getCalledFunctionOrFunctionPointerTypeSig fexp : Cil.typsig * Cil.varinfo option = 
            match fexp with 
@@ -521,8 +536,8 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
         let (functionTs, maybeVarinfo) = getCalledFunctionOrFunctionPointerTypeSig funExpr
         in
         match functionTs with
-          TSFun(returnTs, paramTss, isVarArgs, attrs) -> handleCall maybeVarinfo returnTs paramTss isVarArgs attrs
-        | TSPtr(TSFun(returnTs, paramTss, isVarArgs, funAttrs), ptrAttrs) -> handleCall (None) returnTs paramTss isVarArgs funAttrs
+          TSFun(returnTs, paramTss, isVarArgs, attrs) -> handleCall maybeVarinfo functionTs
+        | TSPtr(fts, ptrAttrs) -> handleCall (None) fts
         | _ -> raise (Failure("impossible called function typesig" ^ (Pretty.sprint 80 (d_typsig () functionTs))))
         
         (* TSPtr(TSFun(returnTs, paramTss, isVarArgs, funAttrs), ptrAttrs) -> handleCall None returnTs paramTss isVarArgs funAttrs
