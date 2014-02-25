@@ -595,7 +595,7 @@ static void *main_bp; // beginning of main's stack frame
 const struct rec *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
 const struct rec *__libcrunch_uniqtype_signed_char;
 const struct rec *__libcrunch_uniqtype_unsigned_char;
-#define LOOKUP_CALLER_TYPE(frag, caller) /* FIXME: use caller not RTLD_DEFAULT */ \
+#define LOOKUP_CALLER_TYPE(frag, caller) /* FIXME: use caller not RTLD_DEFAULT -- use interval tree? */ \
     ( \
 		(__libcrunch_uniqtype_ ## frag) ? __libcrunch_uniqtype_ ## frag : \
 		(__libcrunch_uniqtype_ ## frag = dlsym(RTLD_DEFAULT, "__uniqtype__" #frag), \
@@ -690,35 +690,40 @@ int __libcrunch_global_init(void)
 	const char *debug_level_str = getenv("LIBCRUNCH_DEBUG_LEVEL");
 	if (debug_level_str) __libcrunch_debug_level = atoi(debug_level_str);
 
+	/* We always include "signed char" in the lazy heap types (FIXME: this is a 
+	 * C-specificity we'd rather not have here, but live with it for now.) 
+	 * We count the other ones. */
 	const char *lazy_heap_types_str = getenv("LIBCRUNCH_LAZY_HEAP_TYPES");
+	unsigned upper_bound = 2; // signed char plus one string with zero spaces
 	if (lazy_heap_types_str)
 	{
 		/* Count the lazy heap types */
 		const char *pos = lazy_heap_types_str;
-		unsigned upper_bound = 1;
 		while ((pos = strrchr(pos, ' ')) != NULL) { ++upper_bound; ++pos; }
-		
-		/* Allocate and populate. */
-		lazy_heap_typenames = calloc(upper_bound, sizeof (const char *));
-		lazy_heap_types = calloc(upper_bound, sizeof (struct rec *));
-		pos = lazy_heap_types_str;
+	}
+	/* Allocate and populate. */
+	lazy_heap_typenames = calloc(upper_bound, sizeof (const char *));
+	lazy_heap_types = calloc(upper_bound, sizeof (struct rec *));
+
+	// the first entry is always signed char
+	lazy_heap_typenames[0] = "signed char";
+	lazy_heap_types_count = 1;
+	if (lazy_heap_types_str)
+	{
+		const char *pos = lazy_heap_types_str;
 		const char *spacepos;
-		int i = 0;
 		do 
 		{
 			spacepos = strchrnul(pos, ' ');
 			if (spacepos - pos > 0) 
 			{
-				assert(i < upper_bound);
-				lazy_heap_typenames[i] = strndup(pos, spacepos - pos);
-				++i;
+				assert(lazy_heap_types_count < upper_bound);
+				lazy_heap_typenames[lazy_heap_types_count++] = strndup(pos, spacepos - pos);
 			}
 
 			pos = spacepos;
 			while (*pos == ' ') ++pos;
 		} while (*pos != '\0');
-		
-		lazy_heap_types_count = i;
 	}
 	
 	// grab the executable's end address
@@ -734,7 +739,8 @@ int __libcrunch_global_init(void)
 	 * a user-dlopen()'d object. 
 	 * 
 	 * We don't use dl_iterate_phdr because it doesn't give us the link_map * itself. 
-	 * Instead, walk the link map directly, like a debugger would. */
+	 * Instead, walk the link map directly, like a debugger would
+	 *                                           (like I always knew somebody should). */
 	void *exec_dynamic = ((struct link_map *) executable_handle)->l_ld;
 	assert(exec_dynamic != NULL);
 	ElfW(Dyn) *dt_debug = get_dynamic_entry_from_section(exec_dynamic, DT_DEBUG);
@@ -763,7 +769,6 @@ int __libcrunch_global_init(void)
 
 	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_cb, NULL);
 	assert(ret_stackaddr == 0);
-	
 	
 	// grab the maximum stack size
 	struct rlimit rlim;
@@ -1441,7 +1446,7 @@ int __like_a_internal(const void *obj, const void *arg)
 		/* We don't need to allow an array of one blah to be like a different
 		 * array of one blah, because they should be the same type. 
 		 * FIXME: there's a difficult case: an array of statically unknown length, 
-		 * which happens to be length-1. */
+		 * which happens to have length 1. */
 		if (matches) goto like_a_succeeded; else goto like_a_failed;
 	}
 	
