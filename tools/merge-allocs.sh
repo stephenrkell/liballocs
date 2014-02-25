@@ -13,10 +13,10 @@ all_obj_allocs_file="$1"
 lexicographic_compare_le () {
     sorted="$( echo "$1"$'\n'"$2" | LANG=C sort )"
     if [[ "$sorted" == "$1"$'\n'"$2" ]]; then
-        echo "strings $1 and $2 compare le" 1>&2
+        # echo "strings $1 and $2 compare le" 1>&2
         return 0 # true
     elif [[ "$sorted" == "$2"$'\n'"$1" ]]; then
-        echo "strings $1 and $2 compare gt" 1>&2
+        # echo "strings $1 and $2 compare gt" 1>&2
         return 1 # false
     else
         echo "lexicographic_compare_le: internal error" 1>&2
