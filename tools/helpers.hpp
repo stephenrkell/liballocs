@@ -24,7 +24,22 @@ using lib::Dwarf_Unsigned;
 typedef pair<string, string> uniqued_name;
 
 uniqued_name
-key_from_type(core::iterator_df<core::type_die> t);
+canonical_key_from_type(core::iterator_df<core::type_die> t);
+
+uniqued_name
+mayalias_key_from_type(core::iterator_df<core::type_die> t);
+
+uniqued_name
+language_specific_key_from_type(core::iterator_df<core::type_die> t);
+
+string 
+name_for_base_type(core::iterator_df<core::base_type_die> base_t);
+
+string 
+name_for_complement_base_type(core::iterator_df<core::base_type_die> base_t);
+
+string 
+summary_code_to_string(uint32_t code);
 
 core::iterator_df<core::type_die>
 find_type_in_cu(core::iterator_df<core::compile_unit_die> cu, const string& name);
@@ -72,6 +87,7 @@ inline string mangle_typename(const pair<string, string>& p)
 }
 
 uint32_t type_summary_code(core::iterator_df<core::type_die> t);
+uint32_t signedness_complement_type_summary_code(core::iterator_df<core::base_type_die> base_t);
 
 inline std::string offset_to_string(lib::Dwarf_Off o)
 {

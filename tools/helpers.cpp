@@ -15,68 +15,147 @@ using namespace dwarf::core;
 using dwarf::tool::abstract_c_compiler;
 
 uniqued_name
-key_from_type(iterator_df<type_die> t)
+mayalias_key_from_type(iterator_df<type_die> t)
 {
+	/* If we have a name, return our summary code and our name. */
+	if (t.name_here())
+	{
+		auto canonical_name = canonical_key_from_type(t);
+		return make_pair(canonical_name.first, *t.name_here());
+	} else return canonical_key_from_type(t);
+}
+
+string summary_code_to_string(uint32_t code)
+{
+	ostringstream summary_string_str;
+	summary_string_str << std::hex << std::setfill('0') << std::setw(2 * sizeof code) << code 
+		<< std::dec;
+	return summary_string_str.str();
+}
+string 
+name_for_complement_base_type(iterator_df<base_type_die> base_t)
+{
+	/* For base types, we use our own language-independent naming scheme. */
+	ostringstream name;
+	unsigned size = *base_t->get_byte_size();
+	auto encoding = base_t->get_encoding();
+	assert(encoding == DW_ATE_signed || encoding == DW_ATE_unsigned);
+	// assert we're not a weird bitty case
+	assert(base_t->get_bit_offset() == 0 && 
+		(!base_t->get_bit_size() || *base_t->get_bit_size() == 8 * size));
+	
+	name << ((base_t->get_encoding() == DW_ATE_signed) ? "uint" : "int")
+		<< "$" << (8 * *base_t->get_byte_size());
+
+	return name.str();
+}
+
+string 
+name_for_base_type(iterator_df<base_type_die> base_t)
+{
+	/* For base types, we use our own language-independent naming scheme. */
+	ostringstream name;
+	unsigned size = *base_t->get_byte_size();
+	switch (base_t->get_encoding())
+	{
+		case DW_ATE_signed:
+			name << "int";
+			break;
+		case DW_ATE_unsigned: 
+			name << "uint";
+			break;
+		default:
+			name << string(base_t.spec_here().encoding_lookup(base_t->get_encoding())).substr(sizeof "DW_ATE_" - 1);
+			break;
+	}
+
+	// weird cases of bit size/offset
+	if (base_t->get_bit_offset() != 0 || 
+		(base_t->get_bit_size() && *base_t->get_bit_size() != 8 * size))
+	{
+		// use the bit size and add a bit offset
+		name << "$" << *base_t->get_bit_size() 
+			<< "$" << (base_t->get_bit_offset() ? *base_t->get_bit_offset() : 0);
+	} 
+	else
+	{
+		name << "$" << (8 * size);
+	}
+
+	return name.str();
+}
+
+uniqued_name
+canonical_key_from_type(iterator_df<type_die> t)
+{
+	assert(t);
 	t = t->get_concrete_type();
 
 	/* we no longer use the defining_header -- use instead
 	 * the type summary code */
-	ostringstream summary_string_str;
 	auto code = type_summary_code(t);
-	summary_string_str << std::hex << std::setfill('0') << std::setw(2 * sizeof code) << code 
-		<< std::dec;
-	string summary_string = summary_string_str.str();
+	string summary_string = summary_code_to_string(code);
 	assert(summary_string.size() == 2 * sizeof code);
 	
 	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>())
 	{
-		auto cu = t.enclosing_cu();
-		
-		int file_index = -1;
-		if (t->get_decl_file() && *t->get_decl_file() != 0)
-		{ file_index = *t->get_decl_file(); }
-		
-		string file_to_use = (file_index != -1) ? cu->source_file_name(*t->get_decl_file()) : "";
-		
-		// for named base types, we use equivalence classes
-		string name_to_use; 
-		if (!t.name_here() || t.tag_here() != DW_TAG_base_type)
+		/* for base types, the canonical key is *always* the summary code *only*, 
+		 * i.e. the name component is empty. UNLESS we can place ourselves in a C
+		 * equivalence class, in which case.... */
+		string name_to_use;
+		if (t.is_a<base_type_die>())
 		{
-			name_to_use = t.name_here() ? *t.name_here() : offset_to_string(t.offset_here());
-		}
-		else // t->name_here() && t.tag_here() == DW_TAG_base_type
+// 			optional<string> c_normalized_name;
+// 			if (t.name_here())
+// 			{
+// 				const char **c_equiv_class = abstract_c_compiler::get_equivalence_class_ptr(
+// 					t.name_here()->c_str());
+// 				if (c_equiv_class)
+// 				{
+// 					c_normalized_name = c_equiv_class[0];
+// 				}
+// 			}
+			
+			/* For base types, we use our own language-independent naming scheme. */
+			name_to_use = name_for_base_type(t.as_a<base_type_die>());
+		} 
+		else
 		{
 			/* FIXME: deal with nested/qualified names also (nested data types, 
 			   local data types, C++ namespaces). */
 			/* FIXME: deal with struct/union tags also (but being sensitive to language: 
 			   don't do it with C++ CUs). */
-			
-			assert(t.name_here() && t.tag_here() == DW_TAG_base_type);
-			string name_to_search_for = *t.name_here();
-			// search equiv classes for a type of this name
-			for (const char ** const*p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
-			{
-				// assert this equiv class has at least one element
-				assert((*p_equiv)[0] != NULL);
-				
-				for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
-				{
-					// is this the relevant equiv class?
-					if (name_to_search_for == string(*p_el))
-					{
-						// yes, so grab its first element
-						name_to_use = (*p_equiv)[0];
-						break;
-					}
-				}
-				if (name_to_use != "") break; // we've got it
-			}
-			
-			// if we've still not got it....
-			if (name_to_use == "") name_to_use = name_to_search_for;
+			name_to_use = t.name_here() ? *t.name_here() : offset_to_string(t.offset_here());
 		}
+// 		else // t->name_here() && t.tag_here() == DW_TAG_base_type
+// 		{
+// 			assert(t.name_here() && t.tag_here() == DW_TAG_base_type);
+// 			string name_to_search_for = *t.name_here();
+// 			// search equiv classes for a type of this name
+// 			for (const char ** const*p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
+// 			{
+// 				// assert this equiv class has at least one element
+// 				assert((*p_equiv)[0] != NULL);
+// 				
+// 				for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
+// 				{
+// 					// is this the relevant equiv class?
+// 					if (name_to_search_for == string(*p_el))
+// 					{
+// 						// yes, so grab its first element
+// 						name_to_use = (*p_equiv)[0];
+// 						break;
+// 					}
+// 				}
+// 				if (name_to_use != "") break; // we've got it
+// 			}
+// 			
+// 			// if we've still not got it....
+// 			if (name_to_use == "") name_to_use = name_to_search_for;
+// 			
+// 			assert(name_to_use != "char"); // ... for example. It should be "signed char" of course! since cxx_compiler.cpp puts that one first
+// 		}
 
-		assert(name_to_use != "char"); // ... for example. It should be "signed char" of course! since cxx_compiler.cpp puts that one first
 		return make_pair(summary_string, name_to_use);
 	}
 	else if (t.is_a<subroutine_type_die>())
@@ -89,15 +168,16 @@ key_from_type(iterator_df<type_die> t)
 		unsigned argnum = 0;
 		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp, ++argnum)
 		{
-			// args should not be void
-			s << "__ARG" << argnum << "_" << key_from_type(i_fp->get_type()).second;
+			/* args should not be void */
+			/* We're making a canonical typename, so use canonical argnames. */
+			s << "__ARG" << argnum << "_" << canonical_key_from_type(i_fp->get_type()).second;
 		}
 		if (sub_t->is_variadic())
 		{
 			s << "__VA_";
 		}
 		s << "__FUN_TO_";
-		s << ((!sub_t->get_type() || !sub_t->get_concrete_type()) ? string("void") : key_from_type(sub_t->get_type()).second);
+		s << ((!sub_t->get_type() || !sub_t->get_concrete_type()) ? string("void") : canonical_key_from_type(sub_t->get_type()).second);
 		return make_pair(summary_string, s.str());
 	}
 	else if (t.is_a<array_type_die>())
@@ -121,7 +201,7 @@ key_from_type(iterator_df<type_die> t)
 		ostringstream array_prefix;
 		opt<Dwarf_Unsigned> element_count = array_t->element_count();
 		array_prefix << "__ARR" << (element_count ? *element_count : 0) << "_";
-		return make_pair(summary_string, array_prefix.str() + key_from_type(array_t->get_type()).second);
+		return make_pair(summary_string, array_prefix.str() + canonical_key_from_type(array_t->get_type()).second);
 	}
 	else // DW_TAG_pointer_type and friends
 	{
@@ -174,7 +254,7 @@ key_from_type(iterator_df<type_die> t)
 		}
 		
 		ostringstream os;
-		os << indirection_prefix.str() << (!working_t ? "void" : key_from_type(working_t).second);
+		os << indirection_prefix.str() << (!working_t ? "void" : canonical_key_from_type(working_t).second);
 		return make_pair(summary_string, os.str());
 	}
 	
@@ -205,6 +285,37 @@ find_type_in_cu(iterator_df<compile_unit_die> cu, const string& name)
 	// if we got here, just try named_child
 	return iterator_df<type_die>(cu.named_child(name)); //shared_ptr<type_die>();
 }
+
+struct output_word_t
+{
+	unsigned val;
+
+	void zero_check()
+	{
+		if (val == 0)
+		{
+			cerr << "Warning: output_word value hit zero again." << endl;
+			val = (unsigned) -1;
+		}
+	}
+
+	output_word_t& operator<<(unsigned arg) 
+	{
+		val = rotate_left(val, 8) ^ arg;
+		zero_check();
+		return *this;
+	}
+	output_word_t& operator<<(const string& s) 
+	{
+		for (auto i = s.begin(); i != s.end(); ++i)
+		{
+			*this << static_cast<unsigned>(*i);
+		}
+		zero_check();
+		return *this;
+	}
+	output_word_t() : val(0) {}
+};
 
 uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 {
@@ -257,37 +368,7 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 		return 0;
 	}
 	
-	struct output_word_t
-	{
-		unsigned val;
-		
-		void zero_check()
-		{
-			if (val == 0)
-			{
-				cerr << "Warning: output_word value hit zero again." << endl;
-				val = (unsigned) -1;
-			}
-		}
-		
-		output_word_t& operator<<(unsigned arg) 
-		{
-			val = rotate_left(val, 8) ^ arg;
-			zero_check();
-			return *this;
-		}
-		output_word_t& operator<<(const string& s) 
-		{
-			for (auto i = s.begin(); i != s.end(); ++i)
-			{
-				*this << static_cast<unsigned>(*i);
-			}
-			zero_check();
-			return *this;
-		}
-		output_word_t() : val(0) {}
-	} output_word;
-	
+	output_word_t output_word;
 	Dwarf_Half tag = concrete_t.tag_here();
 	if (concrete_t.is_a<base_type_die>())
 	{
@@ -298,7 +379,6 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 		unsigned bit_size = base_t->get_bit_size() ? *base_t->get_bit_size() : byte_size * 8;
 		unsigned bit_offset = base_t->get_bit_offset() ? *base_t->get_bit_offset() : 0;
 		output_word << DW_TAG_base_type << encoding << byte_size << bit_size << bit_offset;
-
 	} 
 	else if (concrete_t.is_a<enumeration_type_die>())
 	{
@@ -436,3 +516,17 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 	return output_word.val;
 	// return std::numeric_limits<uint32_t>::max();
 }
+uint32_t signedness_complement_type_summary_code(core::iterator_df<core::base_type_die> base_t)
+{
+	unsigned encoding = base_t->get_encoding();
+	assert(encoding == DW_ATE_signed || encoding == DW_ATE_unsigned);
+	output_word_t output_word;
+	assert(base_t->get_byte_size());
+	unsigned byte_size = *base_t->get_byte_size();
+	unsigned bit_size = base_t->get_bit_size() ? *base_t->get_bit_size() : byte_size * 8;
+	unsigned bit_offset = base_t->get_bit_offset() ? *base_t->get_bit_offset() : 0;
+	output_word << DW_TAG_base_type 
+		<< (encoding == DW_ATE_unsigned ? DW_ATE_signed : DW_ATE_unsigned) 
+		<< byte_size << bit_size << bit_offset;
+	return output_word.val;
+}	

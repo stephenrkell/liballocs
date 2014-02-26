@@ -153,33 +153,6 @@ int main(int argc, char **argv)
 	write_master_relation(master_relation, root, cout, cerr, true /* emit_void */, true, 
 		names_emitted, types_by_name);
 	
-	/* Now create linker aliases for any that were unique. */
-	cout << "/* Begin aliases. */" << endl;
-	for (auto i_by_name_pair = types_by_name.begin(); i_by_name_pair != types_by_name.end();
-		++i_by_name_pair)
-	{
-		if (i_by_name_pair->second.size() == 1)
-		{
-			auto full_name_pair = key_from_type(*i_by_name_pair->second.begin());
-			string full_name = mangle_typename(full_name_pair);
-			pair<string, string> abbrev_name_pair = make_pair("", full_name_pair.second);
-			string abbrev_name = mangle_typename(abbrev_name_pair);
-			cout << "extern struct rec " << abbrev_name << " __attribute__((alias(\""
-				<< cxxgen::escape(full_name) << "\")));" << endl;
-		}
-		else
-		{
-			cout << "/* Not aliasing " << i_by_name_pair->first << "; set is {\n";
-			for (auto i_t = i_by_name_pair->second.begin(); i_t != i_by_name_pair->second.end(); ++i_t)
-			{
-				if (i_t != i_by_name_pair->second.begin()) cout << ",\n";
-				cout << "\t" << mangle_typename(key_from_type(*i_t)) << endl;
-			}
-			
-			cout << "} */" << endl;
-		}
-	}
-	
 	// now output for the subprograms
 	cout << "/* Begin stack frame types. */" << endl;
 	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
@@ -644,7 +617,7 @@ int main(int argc, char **argv)
 				if (i_by_off != i_frame_int->second.begin()) cout << ",\n\t\t";
 				/* begin the struct */
 				cout << "{ ";
-				string mangled_name = mangle_typename(key_from_type(i_by_off->second->find_type()));
+				string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->second->find_type()));
 				assert(names_emitted.find(mangled_name) != names_emitted.end());
 				cout << i_by_off->first << ", "
 					<< "&" << mangled_name
@@ -790,7 +763,7 @@ int main(int argc, char **argv)
 		cout << "\n\t{ (void*)0, (void*)0, "
 			<< "(char*) " << "0" // will fix up at load time
 			<< " + " << addr << "UL, " 
-			<< "&" << mangle_typename(key_from_type(i_var->find_type()))
+			<< "&" << mangle_typename(canonical_key_from_type(i_var->find_type()))
 			<< " }";
 		cout << ",";
 	}

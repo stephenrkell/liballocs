@@ -37,6 +37,7 @@ using dwarf::core::iterator_base;
 using dwarf::core::iterator_df;
 using dwarf::core::iterator_sibs;
 using dwarf::core::type_die;
+using dwarf::core::base_type_die;
 using dwarf::core::subprogram_die;
 using dwarf::core::compile_unit_die;
 using dwarf::core::member_die;
@@ -127,7 +128,8 @@ int main(int argc, char **argv)
 	root_die r(fileno(infstream));
 	
 	multimap<string, iterator_df<type_die> > types_by_uniqtype_name;
-	/* First we look through the whole file and index its types by their uniqtype name. */
+	/* First we look through the whole file and index its types by their *codeless*
+	 * *canonical* uniqtype name, i.e. we blank out the first element of the name pair. */
 	for (iterator_df<> i = r.begin(); i != r.end(); ++i)
 	{
 		if (i.is_a<type_die>())
@@ -151,41 +153,56 @@ int main(int argc, char **argv)
 			}
 			else
 			{
-				uniqtype_name_pair = key_from_type(t);
+				uniqtype_name_pair = canonical_key_from_type(t);
 			}
-			
-			auto symname = mangle_typename(make_pair("", uniqtype_name_pair.second));
 
-			types_by_uniqtype_name.insert(make_pair(symname, concrete_t));
+			/* CIL/trumptr will only generate references to aliases in the case of 
+			 * base types. We need to handle these here. What should happen? 
+			 * 
+			 * - we will see references looking like __uniqtype__signed_char
+			 * - we want to link in two things:
+			 *    1. the nameless __uniqtype_<code>_ definition of this base type
+			 *    2. the alias    __uniqtype_<code>_signed_char from the usual alias handling
+			 * - we do this by indexing all our types by a *codeless* version of their
+			 *   name, then matching our inputs lines against that.
+			 * - the input lines will have signed_char instead of ""
+			 * - ... so that's what we need to put in our index.
+			 * */
 			
-// 			/* Also add aliases? NO. Our CIL shouldn't generate these. */
-// 			for (const char **const *p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
-// 			{
-// 				for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
-// 				{
-// 					if (uniqtype_name_pair.second == string(*p_el))
-// 					{
-// 						/* We've matched an element in the equivalence class, so
-// 						 * - add one multimap entry for every *other* item; 
-// 						 * - quit the loop. */
-// 						 
-// 						for (const char **p_other_el = p_equiv[0]; *p_other_el != NULL; ++p_other_el)
-// 						{
-// 							if (string(*p_other_el) == string(*p_el)) continue;
-// 							
-// 							types_by_uniqtype_name.insert(
-// 								make_pair(
-// 									mangle_typename(make_pair("", string(*p_other_el))),
-// 									concrete_t
-// 								)
-// 							);
-// 						}
-// 						
-// 						// quit this loop
-// 						break;
-// 					}
-// 				}
-// 			}
+			string canonical_or_base_typename = uniqtype_name_pair.second;
+			if (canonical_or_base_typename == "")
+			{
+				assert(concrete_t.is_a<base_type_die>());
+				// if the base type has no name, this DWARF type is useless to us
+				if (!concrete_t.name_here()) continue;
+				canonical_or_base_typename = *concrete_t.name_here();
+			}
+			string codeless_symname = mangle_typename(make_pair("", canonical_or_base_typename));
+
+			types_by_uniqtype_name.insert(make_pair(codeless_symname, concrete_t));
+
+			/* Special handling for base types: also add them by the name in which they 
+			 * appear in the DWARF, *and* by their C-canonical name. Our CIL frontend
+			 * doesn't know the exact bit-widths so must use the latter. */
+			if (concrete_t.is_a<base_type_die>() && concrete_t.name_here())
+			{
+				types_by_uniqtype_name.insert(
+					make_pair(
+						mangle_typename(make_pair("", *concrete_t.name_here())), 
+						concrete_t
+					)
+				);
+				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(concrete_t.name_here()->c_str());
+				if (equiv)
+				{
+					types_by_uniqtype_name.insert(
+						make_pair(
+							mangle_typename(make_pair("", equiv[0])), 
+							concrete_t
+						)
+					);
+				}
+			}
 		}
 	}
 	
@@ -279,7 +296,9 @@ int main(int argc, char **argv)
 				{
 					auto code = type_summary_code(found_pair.first->second);
 					by_code.insert(make_pair(code, found_pair.first));
-					cerr << "\t" << (found_pair.first++)->second << " (code: " << code << ")" << endl;
+					cerr << "\t" << (found_pair.first++)->second << " (code: " 
+						<< summary_code_to_string(code) 
+						<< ")" << endl;
 				}
 				/* Do they all seem to be identical? */
 				auto range_equal_to_first = by_code.equal_range(type_summary_code(first_found->second));
@@ -307,6 +326,7 @@ int main(int argc, char **argv)
 	// write the types to stdout
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
+	map< iterator_df<type_die>, set<string> > names_by_type;
 	write_master_relation(master_relation, r, cout, cerr, false /* emit_void */, true, 
 		names_emitted, types_by_name);
 	

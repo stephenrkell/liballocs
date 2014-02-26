@@ -11,7 +11,7 @@ default: liballocs.a dumptypes allocsites usedtypes
 
 .PHONY: clean
 clean:
-	rm -f *.o .*.d dumptypes allocsites liballocs.a
+	rm -f *.o .*.d dumptypes usedtypes allocsites liballocs.a
 
 CPP_DEPS := $(patsubst %.cpp,.%.d,$(CPP_SRC))
 DEPS := $(CPP_DEPS)
