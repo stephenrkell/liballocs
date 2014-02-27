@@ -12,7 +12,7 @@ ifeq ($(notdir $(CC)),crunchcc)
 export CC := cc
 endif
 
-default: libcrunch_preload.so libcrunch_noop.so
+default: libcrunch_preload.so libcrunch_noop.so libcrunch_noop.o
 
 C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
 CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
@@ -36,7 +36,7 @@ vpath %.c $(PMIRROR)/src
 libcrunch_preload.so: libcrunch.o preload.o interval_tree.o maps.o addrmap.o
 	$(CXX) $(CXXFLAGS) -shared -o "$@" $^ $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -lheap_index_fast_hooks -Wl,--no-whole-archive -Wl,-Bdynamic 
 
-# build libcrunch with C++ compiler
+# build libcrunch with C++ compiler -- this version lacks preload stuff
 libcrunch.so: libcrunch.o interval_tree.o maps.o addrmap.o
 	$(CXX) $(CXXFLAGS) -shared -o "$@" $^ $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
 

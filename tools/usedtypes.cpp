@@ -167,6 +167,11 @@ int main(int argc, char **argv)
 			 *   name, then matching our inputs lines against that.
 			 * - the input lines will have signed_char instead of ""
 			 * - ... so that's what we need to put in our index.
+			 * 
+			 * IT GETS WORSE: the same is true for any typename *mentioning* a base
+			 * type! We will see references in terms of C-canonicalised base type names, 
+			 * but we will be trying to match them against language-independent names. 
+			 * It seems that we need to do a separate "C fix up" pass first.
 			 * */
 			
 			string canonical_or_base_typename = uniqtype_name_pair.second;

@@ -557,8 +557,25 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			out << "\n\t}"; /* end contained */
 			out << "\n};\n"; /* end struct rec */
 			
-			/* If our actual type has a C-style name, output an alias for its 
-			 * complement. */
+			/* If our actual type has a C-style name, output a C-style alias for the 
+			 * complement we just output. FIXME: how *should* this work? Who consumes 
+			 * these aliases? Is it only our sloppy-dumptypes test case, i.e. typename-
+			 * -based client code that expects C-style names? 
+			 * 
+			 * In general we want to factor this into a pair of extra phases in crunchcc:
+			 * one which "lowers" trumptr-generated typenames into canonical
+			 * language-independent ones, 
+			 * and one which "re-aliases them" in language-dependent form. We could use
+			 * this to support e.g. Fortran at the same time as C, etc..
+			 * BUT NOTE that the "language-dependent" form is, in general, both language-
+			 * and *compiler*-dependent, i.e. more than one base type might be "unsigned long"
+			 * depending on compiler flags etc.. So it's not as simple as re-aliasing them.
+			 * The typestr APIs need to be sensitive to the *caller* (e.g. an alias for 
+			 * "unsigned_long" might meaningfully exist in a caller's typeobj, but not globally
+			 * since multiple distinct "unsigned long"s are defined across the whole program). 
+			 * A simple re-aliasing pass on a per-typeobj basis is "good enough" for now though. 
+			 * (The case of multiple distinct definitions in the same dynamic object is rare.)
+			 * */
 			if (i_vert->second.name_here())
 			{
 				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(

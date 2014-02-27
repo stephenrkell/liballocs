@@ -9,11 +9,13 @@
 #include <srk31/rotate.hpp>
 #include <cstdint>
 #include <iomanip>
+#include <deque>
 
 // FIXME: shouldn't have toplevel "using" in header file
 using std::string;
 using std::endl;
 using std::map;
+using std::deque;
 using std::pair;
 using std::make_pair;
 using std::istringstream;
@@ -31,6 +33,30 @@ mayalias_key_from_type(core::iterator_df<core::type_die> t);
 
 uniqued_name
 language_specific_key_from_type(core::iterator_df<core::type_die> t);
+
+/* We expand all the possible names for a type, using synonyms along the 
+ * chain starting from t. Don't use C-equivalences though; this is generic code. */
+struct all_names_for_type_t : std::unary_function< core::iterator_df<core::type_die>, deque<string> >
+{
+	/* This function is structured as a pattern-matching sequence, each delegating to 
+	 * an overridable method. The sequence is not overridable, but the delegated-to
+	 * method is. This is, unfortunately, reinveinting inheritance somewhat. */
+	
+	std::function< deque<string>(core::iterator_df<core::type_die>) > void_case;
+	std::function< deque<string>(core::iterator_df<core::qualified_type_die>) > qualified_case;
+	std::function< deque<string>(core::iterator_df<core::type_chain_die>) > typedef_case;
+	std::function< deque<string>(core::iterator_df<core::base_type_die>) > base_type_case;
+	std::function< deque<string>(core::iterator_df<core::address_holding_type_die>) > pointer_case;
+	std::function< deque<string>(core::iterator_df<core::array_type_die>) > array_case;
+	std::function< deque<string>(core::iterator_df<core::subroutine_type_die>) > subroutine_case;
+	std::function< deque<string>(core::iterator_df<core::with_data_members_die>) > with_data_members_case;
+	std::function< deque<string>(core::iterator_df<core::type_die>) > default_case;
+	
+	// instantiate our default
+	all_names_for_type_t();
+	deque<string> operator()(core::iterator_df<core::type_die> t) const;
+};
+extern all_names_for_type_t default_all_names_for_type;
 
 string 
 name_for_base_type(core::iterator_df<core::base_type_die> base_t);
@@ -78,10 +104,15 @@ inline string mangle_objname(const string& s)
 	return mangle_spaces(mangle_nonalphanums(s));
 }
 
+inline string mangle_string(const string& s)
+{
+	return mangle_spaces(mangle_nonalphanums(s));
+}
+
 inline string mangle_typename(const pair<string, string>& p)
 {
-	string first_mangled = mangle_spaces(mangle_nonalphanums(p.first));
-	string second_mangled = mangle_spaces(mangle_nonalphanums(p.second));
+	string first_mangled = mangle_string(p.first);
+	string second_mangled = mangle_string(p.second);
 	
 	return "__uniqtype_" + first_mangled + "_" + second_mangled;
 }
