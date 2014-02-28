@@ -49,6 +49,7 @@ const char *name_for_memory_kind(enum object_memory_kind k)
 		case STACK:   return "stack";
 		case HEAP:    return "heap";
 		case ANON:    return "anon";
+		case MAPPED_FILE: return "mapped file";
 	}
 }
 	
@@ -73,7 +74,9 @@ void *sbrk(intptr_t incr);
 #else
 #define SHARED_LIBRARY_MIN_ADDRESS 0xb0000000
 #endif
-inline enum object_memory_kind get_object_memory_kind(const void *obj)
+static inline 
+enum object_memory_kind 
+(__attribute__((always_inline,gnu_inline)) get_object_memory_kind)(const void *obj)
 {
 	/* For x86-64, we do this in a rough-and-ready way. 
 	 * In particular, SHARED_LIBRARY_MIN_ADDRESS is not guaranteed, but 
