@@ -44,43 +44,9 @@ size_t malloc_usable_size(void *ptr);
 //#ifndef NO_HEADER
 #if 1
 #include "heap_index.h"
-#else
 
-/* We use a memtable -- implemented by some C99 static inline functions */
-#include "memtable.h"
-
-/* A thread-local variable to override the "caller" arguments. 
- * Platforms without TLS have to do without this feature. */
-#ifndef NO_TLS
-extern __thread void *__current_allocsite;
-#else
-#warning "Compiling without __current_allocsite TLS variable."
-#define __current_allocsite ((void*)0)
-#endif
-
-struct entry
-{
-	unsigned present:1;
-	unsigned removed:1;
-	unsigned distance:7;
-} __attribute__((packed));
-
-#define WORD_BITSIZE ((sizeof (void*))<<3)
-struct trailer
-{
-	unsigned alloc_site_flag:1;
-	unsigned long alloc_site:(WORD_BITSIZE-1);
-	/* You can add extra fields here if you like, 
-	 * on a "manage them yourself" basis. This is
-	 * useful if you do some analysis over the heap
-	 * and need some extra per-object metadata. */
-	struct entry next;
-	struct entry prev;
-
-} __attribute__((packed));
- #endif /* end #ifdef NO_HEADER */
-/* ^^^ For now, keeping this structure means increasing memory usage.  
- * Ideally, we want to make this structure fit in reclaimed space. 
+/* For now, trailers increase memory usage.  
+ * Ideally, we want to make headers/trailers fit in reclaimed space. 
  * Specifically, we can steal bits from a "chunk size" field.
  * On 64-bit machines this is fairly easy. On 32-bit it's harder
  * because the size field is smaller! But it can be done.
@@ -89,6 +55,12 @@ struct trailer
 
 #ifndef NO_TLS
 __thread void *__current_allocsite;
+__thread void *__current_allocfn;
+__thread size_t __current_allocsz;
+#else
+void *__current_allocsite;
+void *__current_allocfn;
+size_t __current_allocsz;
 #endif
 
 #ifdef MALLOC_USABLE_SIZE_HACK
@@ -98,7 +70,7 @@ __thread void *__current_allocsite;
 struct entry *index_region;
 void *index_max_address;
 
-#define entry_coverage_in_bytes /*1024*/ 512
+#define entry_coverage_in_bytes 512
 typedef struct entry entry_type;
 void *index_begin_addr;
 void *index_end_addr;
