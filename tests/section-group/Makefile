@@ -4,5 +4,5 @@ CFLAGS += -fPIC -I$(realpath ../../include)
 
 section-group: lib1.so lib2.so
 
-%.so: %.c
-	$(CC) $(CFLAGS) -shared -o "$@" "$<" $(LDFLAGS)
+%.so: %.c %a.c
+	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
