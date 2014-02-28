@@ -42,7 +42,6 @@ size_t malloc_usable_size(void *ptr);
 
 // always use the header for now, while we're changing stuff...
 //#ifndef NO_HEADER
-#if 1
 #include "heap_index.h"
 
 /* For now, trailers increase memory usage.  
@@ -536,4 +535,9 @@ struct trailer *lookup_object_info(const void *mem, void **out_object_start)
 	/* FIXME: use the actual biggest allocated object, not a guess. */
 
 #undef BIGGEST_SENSIBLE_OBJECT
+}
+
+void __check_alloc_indexed(void *ptr) 
+{
+	// noop for now
 }
