@@ -69,6 +69,8 @@ checkrun-random:
 	$(MAKE) cleanrun-random >/dev/null 2>&1
 checkrun-sloppy-dumptypes:
 	$(MAKE) cleanrun-sloppy-dumptypes >/dev/null 2>&1
+checkrun-section-group:
+	$(MAKE) cleanrun-section-group >/dev/null 2>&1
 
 _onlyrun-%:
 	LD_PRELOAD=$(PRELOAD) ./$*
