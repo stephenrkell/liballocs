@@ -3,6 +3,6 @@
 
 void *l2(int arg)
 {
-	void *resolved = dlsym(__libcrunch_my_typeobj(), "__uniqtype__signed_int");
+	void *resolved = dlsym(__libcrunch_my_typeobj(), "__uniqtype__int$32");
 	return resolved;
 }

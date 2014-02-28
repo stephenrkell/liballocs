@@ -305,7 +305,7 @@ int main(int argc, char **argv)
 		// now we found the type
 		//cerr << "SUCCESS: found type: " << *found_type << endl;
 
-		uniqued_name name_used = key_from_type(found_type);
+		uniqued_name name_used = canonical_key_from_type(found_type);
 
 		// add to the allocsites table too
 		// recall: this is the mapping from allocsites to uniqtype addrs

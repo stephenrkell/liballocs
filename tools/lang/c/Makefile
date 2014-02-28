@@ -7,7 +7,7 @@ CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) -name '*.ml')
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 CIL_EXTRASRC := $(addprefix $(realpath $(dir $(THIS_MAKEFILE)))/,$(CIL_TOOLS))
 
-default: lib $(CIL)/bin/cilly sanity-tests
+default: src lib $(CIL)/bin/cilly sanity-tests
 
 %.cil.o: %.c $(CIL)/bin/cilly
 	cd "$(dir $<)" && $(CIL)/bin/cilly --do$$( echo $(dir $<) | tr -d '/' ) --save-temps -c -o "$(notdir $@)" "$(notdir $<)"
@@ -25,3 +25,7 @@ $(CIL)/bin/cilly: $(CIL_TOOLS_SRC)
 .PHONY: sanity-tests
 sanity-tests: | default
 	$(MAKE) -C ../../test cleanrun-hello cleanrun-hello-errno cleanrun-hello-static cleanrun-hello-stack cleanrun-hello-heap
+
+.PHONY: src
+src:
+	$(MAKE) -C src

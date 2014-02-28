@@ -604,8 +604,6 @@ const struct rec *__libcrunch_uniqtype_unsigned_char;
 		) \
 	)
 
-
-
 /* counters */
 unsigned long __libcrunch_begun;
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
@@ -1360,8 +1358,7 @@ int __is_a_internal(const void *obj, const void *arg)
 	struct rec *cur_obj_uniqtype = alloc_uniqtype;
 	do
 	{
-		/* If we have offset == 0, we can check at this uniqtype.
-		 * FIXME: why do we not test target_offset_within_uniqtype here? */
+		/* If we have offset == 0, we can check at this uniqtype. */
 		if (target_offset_within_uniqtype == 0
 			&& cur_obj_uniqtype == test_uniqtype) 
 		{

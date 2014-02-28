@@ -68,12 +68,14 @@ $(ALLOCSITES_BASE)/%-allocsites.c: /$(ALLOCSITES_BASE)/%.allocs
 # no need for a .o rule -- we just use the builtin one
 
 # Generate the .so with the necessary base-type aliases
+# NOTE: aliases, including both typedefs and base types, 
+# are now handled by dumptypes... so we no longer add them here
 $(ALLOCSITES_BASE)/%-types.so: $(ALLOCSITES_BASE)/%-types.o
 	# use ld --defsym to define alias symbols for any C base types
 	# FIXME: need a prefix to indicate "built-ins for a given C impl", cf. Java or non-GNU C....
 	$(CC) -shared \
-	-o "$@" \
-	`nm -fposix "$<" | $(dir $(THIS_MAKEFILE))/alias-linker-opts-for-base-types.sh)` "$<"
+	-o "$@" "$<"
+	#`nm -fposix "$<" | $(dir $(THIS_MAKEFILE))/alias-linker-opts-for-base-types.sh)` "$<"
 
 # Generate the .so with the necessary base-type aliases
 $(ALLOCSITES_BASE)/%-allocsites.so: $(ALLOCSITES_BASE)/%-allocsites.c

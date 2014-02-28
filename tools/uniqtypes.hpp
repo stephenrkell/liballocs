@@ -16,11 +16,19 @@ struct master_relation_t : public std::map< uniqued_name, dwarf::core::iterator_
 	//using map::map;
 	template<typename... Args>
 	master_relation_t(Args&&... args): map(std::forward<Args>(args)...) {}
+
+	map<dwarf::core::iterator_df<dwarf::core::type_die>, set< string > > aliases;
 };
 
 uniqued_name add_type(dwarf::core::iterator_df<dwarf::core::type_die> t, master_relation_t& r);
 std::pair<bool, uniqued_name> add_type_if_absent(dwarf::core::iterator_df<dwarf::core::type_die> t, master_relation_t& r);
+std::pair<bool, uniqued_name> add_concrete_type_if_absent(dwarf::core::iterator_df<dwarf::core::type_die> t, master_relation_t& r);
 std::pair<bool, uniqued_name> transitively_add_type(dwarf::core::iterator_df<dwarf::core::type_die> t, master_relation_t& r);
+void add_alias_if_absent(
+	const std::string& s, 
+	dwarf::core::iterator_df<dwarf::core::type_die> concrete_t, 
+	master_relation_t& r
+);
 
 void make_exhaustive_master_relation(master_relation_t& r, 
 	dwarf::core::iterator_df<> begin, 

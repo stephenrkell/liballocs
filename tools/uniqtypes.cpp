@@ -12,6 +12,7 @@
 #include <srk31/algorithm.hpp>
 #include <srk31/ordinal.hpp>
 #include <cxxgen/tokens.hpp>
+#include <cxxgen/cxx_compiler.hpp>
 #include <dwarfpp/lib.hpp>
 #include <fileno.hpp>
 
@@ -43,12 +44,15 @@ using dwarf::core::with_data_members_die;
 using dwarf::core::variable_die;
 using dwarf::core::with_dynamic_location_die;
 using dwarf::core::address_holding_type_die;
+using dwarf::core::base_type_die;
 using dwarf::core::array_type_die;
 using dwarf::core::type_chain_die;
 using dwarf::core::subroutine_type_die;
 using dwarf::core::formal_parameter_die;
 
 using dwarf::lib::Dwarf_Off;
+
+using dwarf::tool::abstract_c_compiler;
 
 using boost::regex;
 using boost::regex_match;
@@ -57,7 +61,6 @@ using boost::regex_constants::egrep;
 using boost::match_default;
 using boost::format_all;
 
-
 uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 {
 	auto result = add_type_if_absent(t, r);
@@ -65,31 +68,87 @@ uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 }
 pair<bool, uniqued_name> add_type_if_absent(iterator_df<type_die> t, master_relation_t& r)
 {
-	if (t != t->get_concrete_type()) return make_pair(false, make_pair("", "")); // only add concretes
-	
-	if (t == iterator_base::END) return make_pair(false, make_pair("", ""));
-	
-	/* If it's a base type, we might not have a decl_file, */
-	if (!t->get_decl_file() || *t->get_decl_file() == 0)
+	if (t != t->get_concrete_type())
 	{
-		if (t.tag_here() != DW_TAG_base_type
-		 && t.tag_here() != DW_TAG_pointer_type
-		 && t.tag_here() != DW_TAG_reference_type
-		 && t.tag_here() != DW_TAG_rvalue_reference_type
-		 && t.tag_here() != DW_TAG_array_type
-		 && t.tag_here() != DW_TAG_subroutine_type)
+		// add the concrete
+		auto concrete_t = t->get_concrete_type();
+		auto ret = add_concrete_type_if_absent(concrete_t, r);
+		// add the alias, if we have a name
+		if (t.name_here())
 		{
-			cerr << "Warning: skipping non-base non-pointer non-array non-subroutine type described by " << *t //
-			//if (t.name_here()) cerr << t.name_here();
-			//else cerr << "(unknown, offset: " << std::hex << t.offset_here() << std::dec << ")";
-			/*cerr */ << " because no file is recorded for its definition." << endl;
-			return make_pair(false, make_pair("", ""));
+			add_alias_if_absent(*t.name_here(), concrete_t, r);
 		}
-		// else it's a base type, so we go with the blank type
-		// FIXME: should canonicalise base types here
-		// (to the same as the ikind/fkinds come out from Cil.Pretty)
+		return ret;
 	}
-	uniqued_name n = key_from_type(t);
+	else if (t.is_a<base_type_die>())
+	{
+		/* Base types are a bit like non-concretes. */
+		// add the concrete
+		auto concrete_t = t->get_concrete_type();
+		auto ret = add_concrete_type_if_absent(concrete_t, r);
+		// add the alias, if we have a name
+		if (t.name_here())
+		{
+			add_alias_if_absent(*t.name_here(), concrete_t, r);
+			/* HACK: for good measure, also ensure that we add the 
+			 * canonical C name, if the name we have is in some equivalence class. */
+			const char **c_equiv_class = abstract_c_compiler::get_equivalence_class_ptr(
+				t.name_here()->c_str());
+			if (c_equiv_class)
+			{
+				add_alias_if_absent(c_equiv_class[0], concrete_t, r);
+			}
+		}
+		return ret;
+	}
+	else return add_concrete_type_if_absent(t, r);
+}
+void add_alias_if_absent(const string& s, iterator_df<type_die> concrete_t, master_relation_t& r)
+{
+	// HACK: don't alias void (we can't use iterators-to-void-type as indexes)
+	if (!concrete_t) return;
+	
+	/* HACK: since in C, "struct X" and "X" are distinct, but we don't distinguish them, 
+	 * we also need to ignore this kind of alias here. Be careful about base types though: 
+	 * we *do* need their actual-name aliases. */
+	if (!concrete_t.is_a<base_type_die>() 
+		&& concrete_t.name_here() && s == *concrete_t.name_here()) return;
+	
+	r.aliases[concrete_t].insert(s);
+}
+pair<bool, uniqued_name> add_concrete_type_if_absent(iterator_df<type_die> t, master_relation_t& r)
+{
+	// we might get called on to add void
+	if (t == iterator_base::END)
+	{
+		return make_pair(false, make_pair("", ""));
+	}
+
+	assert(t == t->get_concrete_type());
+
+	
+// 	/* If it's a base type, we might not have a decl_file, */
+// 	if (!t->get_decl_file() || *t->get_decl_file() == 0)
+// 	{
+// 		if (t.tag_here() != DW_TAG_base_type
+// 		 && t.tag_here() != DW_TAG_pointer_type
+// 		 && t.tag_here() != DW_TAG_reference_type
+// 		 && t.tag_here() != DW_TAG_rvalue_reference_type
+// 		 && t.tag_here() != DW_TAG_array_type
+// 		 && t.tag_here() != DW_TAG_subroutine_type)
+// 		{
+// 			cerr << "Warning: skipping non-base non-pointer non-array non-subroutine type described by " << *t //
+// 			//if (t.name_here()) cerr << t.name_here();
+// 			//else cerr << "(unknown, offset: " << std::hex << t.offset_here() << std::dec << ")";
+// 			/*cerr */ << " because no file is recorded for its definition." << endl;
+// 			return make_pair(false, make_pair("", ""));
+// 		}
+// 		// else it's a base type, so we go with the blank type
+// 		// FIXME: should canonicalise base types here
+// 		// (to the same as the ikind/fkinds come out from Cil.Pretty)
+// 	}
+
+	uniqued_name n = canonical_key_from_type(t);
 	
 	smatch m;
 	bool already_present = r.find(n) != r.end();
@@ -106,8 +165,13 @@ pair<bool, uniqued_name> add_type_if_absent(iterator_df<type_die> t, master_rela
 pair<bool, uniqued_name> transitively_add_type(iterator_df<type_die> t, master_relation_t& r)
 {
 	auto result = add_type_if_absent(t, r);
-	/* Now recurse on referenced type, IFF this was newly added */
+	/* Now recurse on referenced type, IFF the concrete type was newly added. 
+	 * We don't care about adding any more aliases at this point: the purpose of
+	 * being transitive here is so that we can generate all the other uniqtypes
+	 * on which this one depends. (If you want all the aliases, you need to build
+	 * an exhaustive relation.) */
 	if (!result.first) return result;
+	t = t->get_concrete_type();
 	if (t.is_a<with_data_members_die>()) 
 	{
 		auto member_children = t.as_a<with_data_members_die>().children().subseq_of<member_die>();
@@ -192,8 +256,8 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 
 void write_master_relation(master_relation_t& r, dwarf::core::root_die& root, 
 	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def, 
-	std::set<std::string>& names_emitted,
-	std::map<std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name)
+	std::set< std::string >& names_emitted,
+	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name)
 {
 	if (emit_struct_def) cout << "struct rec \n\
 { \n\
@@ -208,6 +272,15 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		struct rec *ptr; \n\
 	} contained[]; \n\
 };\n";
+
+	std::map< std::string, std::set< pair<string, string> > > name_pairs_by_name;
+	
+	/* Note the very nasty hack with __attribute__((section (...))): 
+	 * we embed a '#' into the section string, after adding our own
+	 * assembler-level flags and attributes. This causes the compiler-
+	 * -generated flags and attributes to be ignored, because the '#' 
+	 * comments them out. Without this trick, there is no way of supplying
+	 * our own section flags and attributes to override the compiler. */
 	if (emit_void)
 	{
 		/* DWARF doesn't reify void, but we do. So output a rec for void first of all. */
@@ -223,14 +296,90 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			<< "/* contained */ { }\n};\n";
 	}
 	
+	/* The complement relation among signed and unsigned integer types. */
+	map<unsigned, map<bool, set< master_relation_t::value_type > > > integer_base_types_by_size_and_signedness;
+	auto needs_complement = [](iterator_df<base_type_die> base_t) {
+		return base_t->get_encoding() == DW_ATE_signed
+			 || base_t->get_encoding() == DW_ATE_unsigned;
+	};
+		
+	/* Emit forward declarations, building the complement relation as we go. */
 	for (auto i_pair = r.begin(); i_pair != r.end(); ++i_pair)
 	{
 		string s = mangle_typename(i_pair->first);
 		names_emitted.insert(s);
 		types_by_name[i_pair->first.second].insert(i_pair->second);
+		name_pairs_by_name[i_pair->first.second].insert(i_pair->first);
+		if (i_pair->second.is_a<base_type_die>())
+		{
+			/* Are we an integer? */
+			auto base_t = i_pair->second.as_a<base_type_die>();
+			if (needs_complement(base_t))
+			{
+				unsigned size = *base_t->get_byte_size();
+				bool signedness = (base_t->get_encoding() == DW_ATE_signed);
+
+				// HACK: for now, skip weird cases with bit size/offset
+				if (base_t->get_bit_offset() != 0 || 
+					(base_t->get_bit_size() && *base_t->get_bit_size() != 8 * size))
+				{
+					continue;
+				}
+
+				integer_base_types_by_size_and_signedness[size][signedness].insert(*i_pair);
+			}
+		}
+		
+		out << "extern struct rec " << s << ";" << endl;
+	}
+	/* Declare any signedness-complement base types that we didn't see. 
+	 * We will emit these specially. */
+
+	set< iterator_df<base_type_die> > synthesise_complements;
+	for (auto i_size = integer_base_types_by_size_and_signedness.begin(); 
+		i_size != integer_base_types_by_size_and_signedness.end(); ++i_size)
+	{
+		auto& by_signedness = i_size->second;
+		
+		/* We should never have nominally-distinct, definitionally-equivalent 
+		 * base types. Different names should be aliases, only. */
+		assert(by_signedness[false].size() <= 1);
+		assert(by_signedness[true].size() <= 1);
+		iterator_df<base_type_die> have_unsigned = iterator_base::END;
+		if (by_signedness[false].size() == 1) have_unsigned = by_signedness[false].begin()->second.as_a<base_type_die>();
+		iterator_df<base_type_die> have_signed = iterator_base::END;
+		if (by_signedness[true].size() == 1) have_signed = by_signedness[true].begin()->second.as_a<base_type_die>();
+		
+		// if we don't have either, how did we get here?
+		assert(have_unsigned || have_signed);
+		
+		if (!have_unsigned || !have_signed) // the "count == 1" case
+		{
+			// we have to synthesise the other-signedness version
+			synthesise_complements.insert(have_signed ? have_signed : have_unsigned);
+		}
+		// else the "count == 2" case: no need to synthesise
+	}
+	// declare any synthetic complements
+	for (auto i_need_comp = synthesise_complements.begin(); 
+		i_need_comp != synthesise_complements.end(); 
+		++i_need_comp)
+	{
+		// compute and print complement name
+		auto k = make_pair(
+			summary_code_to_string(
+				signedness_complement_type_summary_code(
+					*i_need_comp
+				)
+			),
+			name_for_complement_base_type(*i_need_comp)
+		);
+		string s = mangle_typename(k);
+
 		out << "extern struct rec " << s << ";" << endl;
 	}
 
+	/* Output the canonical definitions. */
 	for (auto i_vert = r.begin(); i_vert != r.end(); ++i_vert)
 	{
 		auto opt_sz = i_vert->second->calculate_byte_size();
@@ -249,8 +398,8 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			continue;
 		}
 		
-		out << "\n/* uniqtype for " << i_vert->first.second 
-			<< " defined in " << i_vert->first.first << " */\n";
+		out << "\n/* uniqtype for \"" << i_vert->first.second 
+			<< "\" with summary code " << i_vert->first.first << " */\n";
 		auto members = i_vert->second.children().subseq_of<member_die>();
 		std::vector< iterator_base > real_members;
 		std::vector< Dwarf_Unsigned > real_member_offsets;
@@ -274,7 +423,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			else array_len = 0;
 		} else array_len = 0;
 		string mangled_name = mangle_typename(i_vert->first);
-		out << "struct rec " << mangle_typename(i_vert->first)
+		out << "struct rec " << mangled_name
 			<< " __attribute__((section (\"" << ".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
 			<< " = {\n\t\"" << i_vert->first.second << "\",\n\t"
 			<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
@@ -287,15 +436,10 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		if (i_vert->second.is_a<array_type_die>())
 		{
 			// array: write a single entry, for the element type
-			/* begin the struct */
-			out << "{ ";
-
-			// compute offset
-
-			out << "0, ";
+			out << "{ " << "0, ";
 
 			// compute and print destination name
-			auto k = key_from_type(i_vert->second.as_a<array_type_die>()->get_type());
+			auto k = canonical_key_from_type(i_vert->second.as_a<array_type_die>()->get_type());
 			/* FIXME: do multidimensional arrays get handled okay like this? 
 			 * I reckon so, but am not yet sure. */
 			string mangled_name = mangle_typename(k);
@@ -310,38 +454,70 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			std::set<lib::Dwarf_Unsigned> used_offsets;
 			opt<iterator_base> first_with_byte_offset;
 			auto i_off = real_member_offsets.begin();
-			for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
+			
+			// we *always* output at least one array element
+			if (members_count > 0)
 			{
-				auto i_edge = i_i_edge->as_a<member_die>();
-
-				/* if we're not the first, write a comma */
-				if (i_i_edge != real_members.begin()) out << ",\n\t\t";
-
-				/* begin the struct */
-				out << "{ ";
-
-				// compute offset
-
-				out << *i_off << ", ";
-
-				// compute and print destination name
-				auto k = key_from_type(i_edge->get_type());
-				string mangled_name = mangle_typename(k);
-				if (names_emitted.find(mangled_name) == names_emitted.end())
+				for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
 				{
-					out << "Type " << i_edge->get_type()
-						<< ", concretely " << i_edge->get_type()->get_concrete_type()
-						<< " was not emitted previously." << endl;
-					for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
+					auto i_edge = i_i_edge->as_a<member_die>();
+
+					/* if we're not the first, write a comma */
+					if (i_i_edge != real_members.begin()) out << ",\n\t\t";
+
+					/* begin the struct */
+					out << "{ ";
+
+					// compute offset
+
+					out << *i_off << ", ";
+
+					// compute and print destination name
+					auto k = canonical_key_from_type(i_edge->get_type());
+					string mangled_name = mangle_typename(k);
+					if (names_emitted.find(mangled_name) == names_emitted.end())
 					{
-						if (i_name->substr(i_name->length() - k.second.length()) == k.second)
+						out << "Type " << i_edge->get_type()
+							<< ", concretely " << i_edge->get_type()->get_concrete_type()
+							<< " was not emitted previously." << endl;
+						for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
 						{
-							out << "Possible near-miss: " << *i_name << endl;
+							if (i_name->substr(i_name->length() - k.second.length()) == k.second)
+							{
+								out << "Possible near-miss: " << *i_name << endl;
+							}
 						}
+						assert(false);
 					}
-					assert(false);
+					out << "&" << mangled_name;
+
+					// end the struct
+					out << " }";
 				}
-				out << "&" << mangled_name;
+			}
+			else
+			{
+				/* If we're a base type having a signedness-complement, output
+				 * that, else output a null. */
+				/* begin the struct */
+				out << "{ " << 0 << ", ";
+				
+				if (i_vert->second.is_a<base_type_die>() && 
+					needs_complement(i_vert->second.as_a<base_type_die>()))
+				{
+					// compute and print complement name
+					auto k = make_pair(
+						summary_code_to_string(
+							signedness_complement_type_summary_code(
+								i_vert->second
+							)
+						),
+						name_for_complement_base_type(i_vert->second)
+					);
+					string mangled_name = mangle_typename(k);
+					out << "&" << mangled_name;
+				}
+				else out << "(void*) 0";
 
 				// end the struct
 				out << " }";
@@ -350,6 +526,118 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		
 		out << "\n\t}"; /* end contained */
 		out << "\n};\n"; /* end struct rec */
+		
+		/* Output a synthetic complement if we need one. */
+		if (synthesise_complements.find(i_vert->second) != synthesise_complements.end())
+		{
+			out << "\n/* synthesised signedness-complement type for \"" << i_vert->first.second 
+				<< "\" */\n";
+			// compute and print complement name
+			string complement_summary_code_string = summary_code_to_string(
+				signedness_complement_type_summary_code(
+					i_vert->second
+				)
+			);
+			auto k = make_pair(
+				complement_summary_code_string,
+				name_for_complement_base_type(i_vert->second)
+			);
+			string compl_name = mangle_typename(k);
+			out << "struct rec " << compl_name
+				<< " __attribute__((section (\"" << ".data." << compl_name << ", \\\"awG\\\", @progbits, " << compl_name << ", comdat#\")))"
+				<< " = {\n\t\"" << k.second << "\",\n\t"
+				<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
+				<< "0 /* neg_maxoff */,\n\t"
+				<< "0 /* nmemb */,\n\t"
+				<< "0 /* is_array */,\n\t"
+				<< "0 /* array_len */,\n\t"
+				<< /* contained[0] */ "/* contained */ {\n\t\t"
+				<< "{ 0, &" << mangled_name
+				<< " }";
+			out << "\n\t}"; /* end contained */
+			out << "\n};\n"; /* end struct rec */
+			
+			/* If our actual type has a C-style name, output a C-style alias for the 
+			 * complement we just output. FIXME: how *should* this work? Who consumes 
+			 * these aliases? Is it only our sloppy-dumptypes test case, i.e. typename-
+			 * -based client code that expects C-style names? 
+			 * 
+			 * In general we want to factor this into a pair of extra phases in crunchcc:
+			 * one which "lowers" trumptr-generated typenames into canonical
+			 * language-independent ones, 
+			 * and one which "re-aliases them" in language-dependent form. We could use
+			 * this to support e.g. Fortran at the same time as C, etc..
+			 * BUT NOTE that the "language-dependent" form is, in general, both language-
+			 * and *compiler*-dependent, i.e. more than one base type might be "unsigned long"
+			 * depending on compiler flags etc.. So it's not as simple as re-aliasing them.
+			 * The typestr APIs need to be sensitive to the *caller* (e.g. an alias for 
+			 * "unsigned_long" might meaningfully exist in a caller's typeobj, but not globally
+			 * since multiple distinct "unsigned long"s are defined across the whole program). 
+			 * A simple re-aliasing pass on a per-typeobj basis is "good enough" for now though. 
+			 * (The case of multiple distinct definitions in the same dynamic object is rare.)
+			 * */
+			if (i_vert->second.name_here())
+			{
+				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(
+					i_vert->second.name_here()->c_str());
+				if (equiv)
+				{
+					bool is_unsigned = (string(equiv[0]).find("unsigned") != string::npos);
+					// we are iterating through an array of pointer to equiv class
+					const char ** const* found_equiv = std::find(
+						abstract_c_compiler::base_typename_equivs,
+						abstract_c_compiler::base_typename_equivs_end,
+						equiv
+					);
+					assert(found_equiv);
+					// equiv classes are {s, u, s, u, ...}
+					const char **compl_equiv = is_unsigned ? found_equiv[-1]  : found_equiv[+1];
+					auto complement_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
+					out << "extern struct rec " << mangle_typename(complement_name_pair)
+						<< " __attribute__((alias(\"" << mangle_typename(k) << "\")));" << endl;
+					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
+				}
+			}
+		}
+		
+		/* Output any aliases for this type. */
+		for (auto i_alias = r.aliases[i_vert->second].begin(); 
+			i_alias != r.aliases[i_vert->second].end();
+			++i_alias)
+		{
+			out << "extern struct rec " << mangle_typename(make_pair(i_vert->first.first, *i_alias)) 
+				<< " __attribute__((alias(\"" << mangle_typename(i_vert->first) << "\")));" << endl;
+			types_by_name[*i_alias].insert(i_vert->second);
+			name_pairs_by_name[*i_alias].insert(i_vert->first);
+		}
 	}
-
+	
+	/* Codeless aliases: linker aliases for any concrete typenames *or* typedef names 
+	 * that were uniquely defined. */
+	out << "/* Begin codeless (__uniqtype__<typename>) aliases. */" << endl;
+	for (auto i_by_name_pair = name_pairs_by_name.begin(); i_by_name_pair != name_pairs_by_name.end();
+		++i_by_name_pair)
+	{
+		if (i_by_name_pair->second.size() == 1)
+		{
+			/* This name only denotes one type, so we can alias it. */
+			auto full_name_pair = *i_by_name_pair->second.begin();
+			string full_name = mangle_typename(full_name_pair);
+			pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
+			string abbrev_name = mangle_typename(abbrev_name_pair);
+			out << "extern struct rec " << abbrev_name << " __attribute__((alias(\""
+				<< cxxgen::escape(full_name) << "\")));" << endl;
+		}
+		else
+		{
+			out << "/* Not aliasing \"" << i_by_name_pair->first << "\"; set is {\n";
+			for (auto i_t = i_by_name_pair->second.begin(); i_t != i_by_name_pair->second.end(); ++i_t)
+			{
+				if (i_t != i_by_name_pair->second.begin()) cout << ",\n";
+				out << "\t" << mangle_typename(*i_t);
+			}
+			
+			out << "\n} */" << endl;
+		}
+	}
 }
