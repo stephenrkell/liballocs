@@ -1,6 +1,9 @@
 #include <stdlib.h>
 
 extern __thread void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
+extern __thread void *__current_allocfn __attribute__((weak)); // defined by heap_index_hooks
+extern __thread size_t __current_allocsz __attribute__((weak)); // defined by heap_index_hooks
+void __check_alloc_indexed(void *ptr) __attribute__((weak)); // defined by heap_index_hooks
 
 /* these are our per-allocfn wrappers */
 
@@ -26,8 +29,13 @@ extern __thread void *__current_allocsite __attribute__((weak)); // defined by h
 		if (&__current_allocsite && !__current_allocsite) \
 		{ \
 			__current_allocsite = __builtin_return_address(0); \
+			__current_allocfn = &__real_ ## name; \
+			__current_allocsz = size_arg_ ## name; \
 			void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+			__check_alloc_indexed(retval); \
 			__current_allocsite = (void*)0; \
+			__current_allocfn = (void*)0; \
+			__current_allocsz = 0; \
 			return retval; \
 		} \
 		else return __real_ ## name( arglist_ ## name (make_argname) ); \

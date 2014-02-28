@@ -234,12 +234,19 @@ def main():
                         retSig = m.groups()[2]
                         stubsfile.write("#define arglist_%s(make_arg) " % fnName)
                         ndx = 0
+                        sizendx = -1
                         for c in fnSig: 
                             if ndx != 0:
                                 stubsfile.write(", ")
                             stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                            if ord(c) in range(ord('A'), ord('Z') + 1):
+                                assert(sizendx == -1)
+                                sizendx = ndx
                             ndx += 1
                         stubsfile.write("\n")
+                        if sizendx != -1:
+                            # it's a size char, so flag that up
+                            stubsfile.write("#define size_arg_%s make_argname(%d, %c)\n" % (fnName, sizendx, c[sizendx]))
                         stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
                         stubsfile.flush()
             # now we compile the C file ourselves, rather than cilly doing it, 
