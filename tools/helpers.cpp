@@ -332,6 +332,38 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 			output_word << type_summary_code(enum_t->get_type());
 		}
 	} 
+	else if (concrete_t.is_a<subrange_type_die>())
+	{
+		auto subrange_t = concrete_t.as_a<subrange_type_die>();
+		
+		// shift in the name, if any
+		if (concrete_t.name_here())
+		{
+			output_word << *concrete_t.name_here();
+		} else output_word << concrete_t.offset_here();
+		
+		// then shift in the base type's summary code
+		if (!subrange_t->get_type())
+		{
+			cerr << "Warning: saw subrange with no type" << endl;
+		}
+		else
+		{
+			output_word << type_summary_code(subrange_t->get_type());
+		}
+		
+		/* Then shift in the upper bound and lower bound, if present
+		 * NOTE: this means unnamed boundless subrange types have the 
+		 * same code as their underlying type. This is probably what we want. */
+		if (subrange_t->get_upper_bound())
+		{
+			output_word << *subrange_t->get_upper_bound();
+		}
+		if (subrange_t->get_lower_bound())
+		{
+			output_word << *subrange_t->get_lower_bound();
+		}
+	} 
 	else if (concrete_t.is_a<subroutine_type_die>())
 	{
 		// shift in the argument and return types
