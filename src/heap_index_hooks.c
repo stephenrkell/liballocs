@@ -1,5 +1,5 @@
 /* This set of hook definitions will maintain a memtable of all
- * allocated heap chunks, and will store a "header" in each chunk
+ * allocated heap chunks, and will store an "insert" in each chunk
  * tracking its allocation site. 
  *
  * Compile in C99 mode! We use raw "inline" and possibly other C99 things.
@@ -41,12 +41,10 @@ size_t malloc_usable_size(void *ptr);
 /* This defines core hooks, and static prototypes for our hooks. */
 #include MALLOC_HOOKS_INCLUDE
 
-// always use the header for now, while we're changing stuff...
-//#ifndef NO_HEADER
 #include "heap_index.h"
 
-/* For now, headers increase memory usage.  
- * Ideally, we want to make headers/trailers fit in reclaimed space. 
+/* For now, inserts increase memory usage.  
+ * Ideally, we want to make headers/trailers which fit in reclaimed space. 
  * Specifically, we can steal bits from a "chunk size" field.
  * On 64-bit machines this is fairly easy. On 32-bit it's harder
  * because the size field is smaller! But it can be done.
@@ -189,13 +187,13 @@ init_hook(void)
 	assert(index_region != MAP_FAILED);
 }
 
-static inline struct header *header_for_chunk(void *userptr);
+static inline struct insert *insert_for_chunk(void *userptr);
 
 #ifndef NDEBUG
 /* In this newer, more space-compact implementation, we can't do as much
  * sanity checking. Check that if our entry is not present, our distance
  * is 0. */
-#define HEADER_SANITY_CHECK(p_t) assert( \
+#define INSERT_SANITY_CHECK(p_t) assert( \
 	!(!((p_t)->next.present) && (p_t)->next.distance != 0) \
 	&& !(!((p_t)->prev.present) && (p_t)->prev.distance != 0))
 
@@ -212,22 +210,22 @@ static void list_sanity_check(entry_type *head)
 	while (cur_userchunk != NULL)
 	{
 		++count;
-		HEADER_SANITY_CHECK(header_for_chunk(cur_userchunk));
+		INSERT_SANITY_CHECK(insert_for_chunk(cur_userchunk));
 		/* If the next chunk link is null, entry_to_same_range_addr
 		 * should detect this (.present == 0) and give us NULL. */
 		void *next_userchunk
 		 = entry_to_same_range_addr(
-			header_for_chunk(cur_userchunk)->next, 
+			insert_for_chunk(cur_userchunk)->next, 
 			cur_userchunk
 		);
 #ifdef TRACE_HEAP_INDEX
 		fprintf(stderr, "List has a chunk beginning at userptr %p"
-			" (usable_size %zu, header {next: %p, prev %p})\n",
+			" (usable_size %zu, insert {next: %p, prev %p})\n",
 			cur_userchunk, 
 			malloc_usable_size(userptr_to_allocptr(cur_userchunk)),
 			next_userchunk,
 			entry_to_same_range_addr(
-				header_for_chunk(cur_userchunk)->prev, 
+				insert_for_chunk(cur_userchunk)->prev, 
 				cur_userchunk
 			)
 		);
@@ -238,7 +236,7 @@ static void list_sanity_check(entry_type *head)
 		/* If we're not the first element, we should have a 
 		 * prev chunk. */
 		if (count > 1) assert(NULL != entry_to_same_range_addr(
-				header_for_chunk(cur_userchunk)->prev, 
+				insert_for_chunk(cur_userchunk)->prev, 
 				cur_userchunk
 			));
 
@@ -252,7 +250,7 @@ static void list_sanity_check(entry_type *head)
 #endif
 }
 #else /* NDEBUG */
-#define HEADER_SANITY_CHECK(p_t)
+#define INSERT_SANITY_CHECK(p_t)
 static void list_sanity_check(entry_type *head) {}
 #endif
 
@@ -281,20 +279,20 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	void *head_chunkptr = entry_ptr_to_addr(INDEX_LOC_FOR_ADDR(new_userchunkaddr));
 	
 	/* Populate our extra fields */
-	struct header *p_header = header_for_chunk(new_userchunkaddr);
-	p_header->alloc_site_flag = 0U;
-	p_header->alloc_site = (unsigned long) caller;
+	struct insert *p_insert = insert_for_chunk(new_userchunkaddr);
+	p_insert->alloc_site_flag = 0U;
+	p_insert->alloc_site = (unsigned long) caller;
 
 	/* Add it to the index. We always add to the start of the list, for now. */
-	/* 1. Initialize our header. */
-	p_header->next = addr_to_entry(head_chunkptr);
-	p_header->prev = addr_to_entry(NULL);
-	assert(!p_header->prev.present);
+	/* 1. Initialize our insert. */
+	p_insert->next = addr_to_entry(head_chunkptr);
+	p_insert->prev = addr_to_entry(NULL);
+	assert(!p_insert->prev.present);
 	
-	/* 2. Fix up the next header, if there is one */
-	if (p_header->next.present)
+	/* 2. Fix up the next insert, if there is one */
+	if (p_insert->next.present)
 	{
-		header_for_chunk(entry_to_same_range_addr(p_header->next, new_userchunkaddr))->prev
+		insert_for_chunk(entry_to_same_range_addr(p_insert->next, new_userchunkaddr))->prev
 		 = addr_to_entry(new_userchunkaddr);
 	}
 	/* 3. Fix up the index. */
@@ -303,169 +301,181 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	/* sanity checks */
 	struct entry *e = INDEX_LOC_FOR_ADDR(new_userchunkaddr);
 	assert(e->present); // it's there
-	assert(header_for_chunk(entry_ptr_to_addr(e)));
-	assert(header_for_chunk(entry_ptr_to_addr(e)) == p_header);
-	HEADER_SANITY_CHECK(p_header);
-	if (p_header->next.present) HEADER_SANITY_CHECK(
-		header_for_chunk(entry_to_same_range_addr(p_header->next, new_userchunkaddr)));
-	if (p_header->prev.present) HEADER_SANITY_CHECK(
-		header_for_chunk(entry_to_same_range_addr(p_header->prev, new_userchunkaddr)));
+	assert(insert_for_chunk(entry_ptr_to_addr(e)));
+	assert(insert_for_chunk(entry_ptr_to_addr(e)) == p_insert);
+	INSERT_SANITY_CHECK(p_insert);
+	if (p_insert->next.present) INSERT_SANITY_CHECK(
+		insert_for_chunk(entry_to_same_range_addr(p_insert->next, new_userchunkaddr)));
+	if (p_insert->prev.present) INSERT_SANITY_CHECK(
+		insert_for_chunk(entry_to_same_range_addr(p_insert->prev, new_userchunkaddr)));
 	list_sanity_check(INDEX_LOC_FOR_ADDR(new_userchunkaddr));
 }
 
-static void *allocptr_to_userptr(void *allocptr)
-{
-	/* The no-breadcrumb case is the common case. */
-	if (!allocptr) return NULL;
-	if (__builtin_expect(
-			(uintptr_t) ((struct header *) allocptr)->alloc_site >= 0x1000,
-			1)
-		)
-	{
-		return (char *)allocptr + sizeof (struct header);
-	}
-	else
-	{
-		/* The alloc-to-user breadcrumb case: the allocsite field low-order bits hold 
-		 * the alignment as a power of two, from which we can compute the user ptr. */
-		size_t requested_alignment
-		 = 1ul << (((uintptr_t) (((struct header *) allocptr)->alloc_site)) & 0xfff);
-		uintptr_t userptr
-		 = requested_alignment * (
-				((uintptr_t) ((char *)allocptr + sizeof (struct header)) / requested_alignment) + 1);
-		return (void*) userptr;
-	}
-}
+/* "headers" versions */
+// static void *allocptr_to_userptr(void *allocptr)
+// {
+// 	/* The no-breadcrumb case is the common case. */
+// 	if (!allocptr) return NULL;
+// 	if (__builtin_expect(
+// 			(uintptr_t) ((struct insert *) allocptr)->alloc_site >= 0x1000,
+// 			1)
+// 		)
+// 	{
+// 		return (char *)allocptr + sizeof (struct insert);
+// 	}
+// 	else
+// 	{
+// 		/* The alloc-to-user breadcrumb case: the allocsite field low-order bits hold 
+// 		 * the alignment as a power of two, from which we can compute the user ptr. */
+// 		size_t requested_alignment
+// 		 = 1ul << (((uintptr_t) (((struct insert *) allocptr)->alloc_site)) & 0xfff);
+// 		uintptr_t userptr
+// 		 = requested_alignment * (
+// 				((uintptr_t) ((char *)allocptr + sizeof (struct insert)) / requested_alignment) + 1);
+// 		return (void*) userptr;
+// 	}
+// }
+// 
+// static void *userptr_to_allocptr(void *userptr)
+// {
+// 	/* The no-breadcrumb case is the common case. */
+// 	if (!userptr) return NULL;
+// 	if (__builtin_expect(
+// 			(uintptr_t) ((struct insert *) ((char *) userptr - sizeof (struct insert)))
+// 				->alloc_site >= 0x1000,
+// 			1)
+// 		)
+// 	{
+// 		return (char *)userptr - sizeof (struct insert);
+// 	}
+// 	else
+// 	{
+// 		/* The user-to-alloc breadcrumb case: the allocsite field low-order bits hold
+// 		 * the alignment. */
+// 		size_t log_requested_alignment = ((uintptr_t) ((((struct insert *) userptr)-1)->alloc_site)) & 0xfff;
+// 		size_t requested_alignment = 1ul << log_requested_alignment;
+// 		
+// 		// 
+// 		// 	userptr = requested_alignment * (((uintptr_t) (allocptr + sizeof(struct insert)) / requested_alignment) + 1);
+// 		// 
+// 		// => userptr / requested_alignment == (((uintptr_t) (allocptr + sizeof(struct insert)) / requested_alignment) + 1);
+// 		// 
+// 		// => (u / r_a) - 1 == (((uintptr_t) (allocptr + sizeof(struct insert)) / requested_alignment)
+// 		//
+// 		// => r_a * ((u / r_a) - 1) + remainder == allocptr + sizeof(struct insert)
+// 		// 
+// 		// and we have asserted that the remainder == sizeof (struct insert), so 
+// 		// 
+// 		// => allocptr == r_a * ((u / r_a) - 1) - sizeof (struct insert) + remainder
+// 		// 
+// 		// => allocptr == r_a * ((u / r_a) - 1)
+// 
+// 		uintptr_t allocptr
+// 		 = requested_alignment * (((uintptr_t) userptr >> log_requested_alignment) - 1);
+// 		assert(allocptr_to_userptr((void*) allocptr) == userptr);
+// 		return (void*) allocptr;
+// 	}
+// }
+// 
+// // "headers" version
+// static inline struct insert *insert_for_chunk(void *userptr)
+// {
+// 	/* The no-breadcrumb case is the common case */
+// 	struct insert *possible = (struct insert*) ((char*) userptr - sizeof (struct insert));
+// 	if (__builtin_expect(
+// 			(uintptr_t) possible->alloc_site >= 0x1000, 
+// 			1)
+// 		)
+// 	{
+// 		return possible;
+// 	}
+// 	else
+// 	{
+// 		/* The real insert is *two* insert-sizes back. */
+// 		return (struct insert*) ((char*) userptr - 2 * sizeof (struct insert));
+// 	}
+// }
 
-static void *userptr_to_allocptr(void *userptr)
+static void *userptr_to_allocptr(void *userptr) { return userptr; }
+static void *allocptr_to_userptr(void *allocptr) { return allocptr; }
+static inline struct insert *insert_for_chunk(void *userptr)
 {
-	/* The no-breadcrumb case is the common case. */
-	if (!userptr) return NULL;
-	if (__builtin_expect(
-			(uintptr_t) ((struct header *) ((char *) userptr - sizeof (struct header)))
-				->alloc_site >= 0x1000,
-			1)
-		)
-	{
-		return (char *)userptr - sizeof (struct header);
-	}
-	else
-	{
-		/* The user-to-alloc breadcrumb case: the allocsite field low-order bits hold
-		 * the alignment. */
-		size_t log_requested_alignment = ((uintptr_t) ((((struct header *) userptr)-1)->alloc_site)) & 0xfff;
-		size_t requested_alignment = 1ul << log_requested_alignment;
-		
-		// 
-		// 	userptr = requested_alignment * (((uintptr_t) (allocptr + sizeof(struct header)) / requested_alignment) + 1);
-		// 
-		// => userptr / requested_alignment == (((uintptr_t) (allocptr + sizeof(struct header)) / requested_alignment) + 1);
-		// 
-		// => (u / r_a) - 1 == (((uintptr_t) (allocptr + sizeof(struct header)) / requested_alignment)
-		//
-		// => r_a * ((u / r_a) - 1) + remainder == allocptr + sizeof(struct header)
-		// 
-		// and we have asserted that the remainder == sizeof (struct header), so 
-		// 
-		// => allocptr == r_a * ((u / r_a) - 1) - sizeof (struct header) + remainder
-		// 
-		// => allocptr == r_a * ((u / r_a) - 1)
-
-		uintptr_t allocptr
-		 = requested_alignment * (((uintptr_t) userptr >> log_requested_alignment) - 1);
-		assert(allocptr_to_userptr((void*) allocptr) == userptr);
-		return (void*) allocptr;
-	}
-}
-
-static inline struct header *header_for_chunk(void *userptr)
-{
-	/* The no-breadcrumb case is the common case */
-	struct header *possible = (struct header*) ((char*) userptr - sizeof (struct header));
-	if (__builtin_expect(
-			(uintptr_t) possible->alloc_site >= 0x1000, 
-			1)
-		)
-	{
-		return possible;
-	}
-	else
-	{
-		/* The real header is *two* headers back. */
-		return (struct header*) ((char*) userptr - 2 * sizeof (struct header));
-	}
+	return (struct trailer*) ((char*) userptr + malloc_usable_size(userptr)) - 1;
 }
 
 static void 
 post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
 		size_t requested_size, size_t requested_alignment, const void *caller)
 {
-	/* We always index just the userptr! index_insert will use 
-	 * header_for_chunk to find its insert, even if it uses breadcrumbs. */
-	void *candidate_userptr = (char*) allocptr + sizeof (struct header); // HACK: shouldn't know this here
-	void *userptr;
+/* "headers" version */
+// 	/* We always index just the userptr! index_insert will use 
+// 	 * insert_for_chunk to find its insert, even if it uses breadcrumbs. */
+// 	void *candidate_userptr = (char*) allocptr + sizeof (struct insert); // HACK: shouldn't know this here
+// 	void *userptr;
+// 	
+// 	/* We need to set up breadcrumbs *right now*, because index_insert will want them. */
+// 	/* Since we have the pointer we were actually allocated, 
+// 	 * we can be conservative about whether to use breadcrumbs.  */
+// 	if (__builtin_expect((uintptr_t) candidate_userptr % requested_alignment != 0, 0))
+// 	{
+// 		/* We need breadcrumbs case: set up breadcrumbs so that our userptr 
+// 		 * and allocptr can be found from one another. We must have
+// 		 * at least three inserts' worth of space in the chunk -- which 
+// 		 * we ensured in pre_alloc. */
+// 		
+// 		userptr = (void*)(requested_alignment * (((uintptr_t) candidate_userptr / requested_alignment) + 1));
+// 		// i.e.
+// 		// userptr = requested_alignment * (((uintptr_t) ((char*) allocptr + sizeof (struct insert)) / requested_alignment) + 1);
+// 		assert((char *) userptr >= (char*) allocptr + 3 * sizeof (struct insert));
+// 		assert(userptr < allocptr + modified_size);
+// #ifdef TRACE_HEAP_INDEX
+// 		fprintf(stderr, "Alignment/breadcrumb logic issued user ptr %p for alloc ptr %p " 
+// 					"(user requested align %d, hook requested align %d, user requested size %d, hook requested size %d)\n", 
+// 					userptr, allocptr, requested_alignment, modified_alignment,
+// 					requested_size, modified_size);
+// #endif
+// 		/* We need to be able to reproduce the above userptr calculation 
+// 		 * in the alloc-to-user case, and *invert* it in the user-to-alloc case. 
+// 		 *
+// 		 * Reproducing it: store the requested alignment, as a power of two.
+// 		 
+// 		 * Inverting it: this means storing the *remainder* of the division. 
+// 		 * How large can the remainder get? Clearly it's in the range 
+// 		 * 0..(requested_alignment - 1).
+// 		 * And since we got it from allocptr + sizeof (struct insert), 
+// 		 * and allocptr is modified_alignment-aligned, 
+// 		 * it's very likely to be one word, or else one word plus some power of two
+// 		 * less than the modified alignment but greater than or equal to the 
+// 		 * requested alignment. That's only one possible power of two! 
+// 		 * I'm going to assert that it's one word, and figure out what's happening
+// 		 * in other cases via debugging. */
+// 		uintptr_t remainder = ((uintptr_t) candidate_userptr % requested_alignment);
+// 		assert(remainder == sizeof (struct insert));
+// 		
+// 		// user-to-alloc breadcrumb
+// 		struct insert bu = { 0, integer_log2(requested_alignment), 0, 0 };
+// 		// alloc_to_user breadcrumb
+// 		struct insert ba = { 0, integer_log2(requested_alignment), 0, 0 };
+// 		// actual insert: initialized by index_insert
+// 		
+// 		// write the breadcrumbs into the chunk
+// 		*(struct insert *)allocptr = ba;
+// 		*(((struct insert *)userptr) - 1) = bu;
+// 	} 
+// 	else
+// 	{
+// 		userptr = candidate_userptr;
+// 		/* HACK: 
+// 		 * we need to pre-initialize the insert because until we have a valid 
+// 		 * alloc_site, insert_to_chunk can't tell where to find the real insert
+// 		 * versus where the breadcrumbs are.
+// 		 */ 
+// 		*(((struct insert *)userptr) - 1) = (struct insert) { 0, (uintptr_t) caller, 0, 0};
+// 	}
+// 	
+// 	index_insert(userptr, modified_size, __current_allocsite ? __current_allocsite : caller);
 	
-	/* We need to set up breadcrumbs *right now*, because index_insert will want them. */
-	/* Since we have the pointer we were actually allocated, 
-	 * we can be conservative about whether to use breadcrumbs.  */
-	if (__builtin_expect((uintptr_t) candidate_userptr % requested_alignment != 0, 0))
-	{
-		/* We need breadcrumbs case: set up breadcrumbs so that our userptr 
-		 * and allocptr can be found from one another. We must have
-		 * at least three inserts' worth of space in the chunk -- which 
-		 * we ensured in pre_alloc. */
-		
-		userptr = (void*)(requested_alignment * (((uintptr_t) candidate_userptr / requested_alignment) + 1));
-		// i.e.
-		// userptr = requested_alignment * (((uintptr_t) ((char*) allocptr + sizeof (struct header)) / requested_alignment) + 1);
-		assert((char *) userptr >= (char*) allocptr + 3 * sizeof (struct header));
-		assert(userptr < allocptr + modified_size);
-#ifdef TRACE_HEAP_INDEX
-		fprintf(stderr, "Alignment/breadcrumb logic issued user ptr %p for alloc ptr %p " 
-					"(user requested align %d, hook requested align %d, user requested size %d, hook requested size %d)\n", 
-					userptr, allocptr, requested_alignment, modified_alignment,
-					requested_size, modified_size);
-#endif
-		/* We need to be able to reproduce the above userptr calculation 
-		 * in the alloc-to-user case, and *invert* it in the user-to-alloc case. 
-		 *
-		 * Reproducing it: store the requested alignment, as a power of two.
-		 
-		 * Inverting it: this means storing the *remainder* of the division. 
-		 * How large can the remainder get? Clearly it's in the range 
-		 * 0..(requested_alignment - 1).
-		 * And since we got it from allocptr + sizeof (struct header), 
-		 * and allocptr is modified_alignment-aligned, 
-		 * it's very likely to be one word, or else one word plus some power of two
-		 * less than the modified alignment but greater than or equal to the 
-		 * requested alignment. That's only one possible power of two! 
-		 * I'm going to assert that it's one word, and figure out what's happening
-		 * in other cases via debugging. */
-		uintptr_t remainder = ((uintptr_t) candidate_userptr % requested_alignment);
-		assert(remainder == sizeof (struct header));
-		
-		// user-to-alloc breadcrumb
-		struct header bu = { 0, integer_log2(requested_alignment), 0, 0 };
-		// alloc_to_user breadcrumb
-		struct header ba = { 0, integer_log2(requested_alignment), 0, 0 };
-		// actual insert: initialized by index_insert
-		
-		// write the breadcrumbs into the chunk
-		*(struct header *)allocptr = ba;
-		*(((struct header *)userptr) - 1) = bu;
-	} 
-	else
-	{
-		userptr = candidate_userptr;
-		/* HACK: 
-		 * we need to pre-initialize the header because until we have a valid 
-		 * alloc_site, header_to_chunk can't tell where to find the real header
-		 * versus where the breadcrumbs are.
-		 */ 
-		*(((struct header *)userptr) - 1) = (struct header) { 0, (uintptr_t) caller, 0, 0};
-	}
-	
-	index_insert(userptr, modified_size, __current_allocsite ? __current_allocsite : caller);
+	index_insert(allocptr /* == userptr */, modified_size, __current_allocsite ? __current_allocsite : caller);
 }
 
 static void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
@@ -473,31 +483,32 @@ static void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 	/* We increase the size by the amount of extra data we store, 
 	 * and possibly a bit more to allow for alignment.  */
 	size_t orig_size = *p_size;
-	size_t size_to_allocate = orig_size + sizeof (struct header);
-	if (*p_alignment > sizeof (void*))
-	{
-		// bump up size by alignment or two inserts (for breadcrumbs), whichever is more
-		size_t two_inserts = 2 * sizeof (struct header);
-		size_to_allocate += (two_inserts > *p_alignment) ? two_inserts : *p_alignment;
-		*p_alignment *= 2;
-		
-		/* Why is this sufficient? Recall that if we have a nontrivial alignment, 
-		 * it's because we're calling memalign. Memalign *will* return a pointer with
-		 * the requested alignment; it's just that our alloc-to-user is going
-		 * to destroy that alignment. 
-		 * 
-		 * One approach would be to ask for *twice* the alignment and *twice* the size. 
-		 * Then we're guaranteed an address in the *middle* of the chunk with adequate 
-		 * space and adequate alignment. But this seems unnecessarily wasteful. 
-		 * 
-		 * It is sufficient instead to bump up the size by alignment?  
-		 * Suppose we're asking for m bytes aligned to k bytes.
-		 * Does m + k aligned to k + 1 always contain an appropriate address?
-		 * We are issued a pointer p, 
-		 * the first possible userptr with appropriate alignment is p + k, 
-		 * which need only have (m + k) - k bytes remaining. This is clearly okay. */
-		
-	}
+	size_t size_to_allocate = orig_size + sizeof (struct insert);
+/* "headers" version */
+// 	if (*p_alignment > sizeof (void*))
+// 	{
+// 		// bump up size by alignment or two inserts (for breadcrumbs), whichever is more
+// 		size_t two_inserts = 2 * sizeof (struct insert);
+// 		size_to_allocate += (two_inserts > *p_alignment) ? two_inserts : *p_alignment;
+// 		*p_alignment *= 2;
+// 		
+// 		/* Why is this sufficient? Recall that if we have a nontrivial alignment, 
+// 		 * it's because we're calling memalign. Memalign *will* return a pointer with
+// 		 * the requested alignment; it's just that our alloc-to-user is going
+// 		 * to destroy that alignment. 
+// 		 * 
+// 		 * One approach would be to ask for *twice* the alignment and *twice* the size. 
+// 		 * Then we're guaranteed an address in the *middle* of the chunk with adequate 
+// 		 * space and adequate alignment. But this seems unnecessarily wasteful. 
+// 		 * 
+// 		 * It is sufficient instead to bump up the size by alignment?  
+// 		 * Suppose we're asking for m bytes aligned to k bytes.
+// 		 * Does m + k aligned to k + 1 always contain an appropriate address?
+// 		 * We are issued a pointer p, 
+// 		 * the first possible userptr with appropriate alignment is p + k, 
+// 		 * which need only have (m + k) - k bytes remaining. This is clearly okay. */
+// 		
+// 	}
 	*p_size = size_to_allocate;
 }
 static void index_delete(void *userptr/*, size_t freed_usable_size*/)
@@ -506,9 +517,9 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	 * for handling realloc after-the-fact. In this case, by the time we
 	 * get called, the usable size has already changed. However, after-the-fact
 	 * was a broken way to handle realloc() when we were using trailers instead
-	 * of headers, because in the case of a *smaller*
+	 * of inserts, because in the case of a *smaller*
 	 * realloc'd size, where the realloc happens in-place, realloc() would overwrite
-	 * our header with its own (regular heap metadata) trailer, breaking the list.
+	 * our insert with its own (regular heap metadata) trailer, breaking the list.
 	 */
 #ifdef TRACE_HEAP_INDEX
 	fprintf(stderr, "*** Deleting entry for chunk %p, from list indexed at %p\n", 
@@ -516,20 +527,20 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 #endif
 
 	list_sanity_check(INDEX_LOC_FOR_ADDR(userptr));
-	HEADER_SANITY_CHECK(header_for_chunk/*_with_usable_size*/(userptr/*, freed_usable_size*/));
+	INSERT_SANITY_CHECK(insert_for_chunk/*_with_usable_size*/(userptr/*, freed_usable_size*/));
 
 	/* (old comment; still true?) FIXME: we need a big lock around realloc()
-	 * to avoid concurrent in-place realloc()s messing with the other headers we access. */
+	 * to avoid concurrent in-place realloc()s messing with the other inserts we access. */
 
 	/* remove it from the bins */
-	void *our_next_chunk = entry_to_same_range_addr(header_for_chunk(userptr)->next, userptr);
-	void *our_prev_chunk = entry_to_same_range_addr(header_for_chunk(userptr)->prev, userptr);
+	void *our_next_chunk = entry_to_same_range_addr(insert_for_chunk(userptr)->next, userptr);
+	void *our_prev_chunk = entry_to_same_range_addr(insert_for_chunk(userptr)->prev, userptr);
 	
 	/* FIXME: make these atomic */
 	if (our_prev_chunk) 
 	{
-		HEADER_SANITY_CHECK(header_for_chunk(our_prev_chunk));
-		header_for_chunk(our_prev_chunk)->next = addr_to_entry(our_next_chunk);
+		INSERT_SANITY_CHECK(insert_for_chunk(our_prev_chunk));
+		insert_for_chunk(our_prev_chunk)->next = addr_to_entry(our_next_chunk);
 	}
 	else /* !our_prev_chunk */
 	{
@@ -548,10 +559,10 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 
 	if (our_next_chunk) 
 	{
-		HEADER_SANITY_CHECK(header_for_chunk(our_next_chunk));
+		INSERT_SANITY_CHECK(insert_for_chunk(our_next_chunk));
 		
 		/* may assign NULL here, if we're removing the head of the list */
-		header_for_chunk(our_next_chunk)->prev = addr_to_entry(our_prev_chunk);
+		insert_for_chunk(our_next_chunk)->prev = addr_to_entry(our_prev_chunk);
 	}
 	else /* !our_next_chunk */
 	{
@@ -559,8 +570,8 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		/* ... and NOT a singleton -- we've handled that case already */
 		assert(our_prev_chunk);
 	
-		/* update the previous chunk's header */
-		header_for_chunk(our_prev_chunk)->next = addr_to_entry(NULL);
+		/* update the previous chunk's insert */
+		insert_for_chunk(our_prev_chunk)->next = addr_to_entry(NULL);
 
 		/* nothing else to do here, as we don't keep a tail pointer */
 	}
@@ -583,7 +594,7 @@ static void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *
 	 * -- i.e. if the realloc fails, we will not actually free anything.
 	 * However, whn we were using trailers, and 
 	 * in the case of realloc()ing a *slightly smaller* region, 
-	 * the allocator might trash our header (by writing its own trailer over it). 
+	 * the allocator might trash our insert (by writing its own data over it). 
 	 * So we *must* delete the entry first,
 	 * then recreate it later, as it may not survive the realloc() uncorrupted. */
 	index_delete(userptr/*, malloc_usable_size(ptr)*/);
@@ -627,8 +638,8 @@ void *lookup_metadata(void *mem)
 		while (cur_chunk)
 		{
 			if (mem == cur_chunk) return cur_chunk;
-			struct header *cur_header = header_for_chunk(cur_chunk);
-			cur_chunk = entry_to_same_range_addr(cur_header->next, cur_chunk);
+			struct insert *cur_insert = insert_for_chunk(cur_chunk);
+			cur_chunk = entry_to_same_range_addr(cur_insert->next, cur_chunk);
 		}
 		/* we reached the end of the list */
 		return NULL; /* HACK: we can do this because the benchmark only passes object
@@ -644,7 +655,7 @@ void *lookup_metadata(void *mem)
 }
 
 /* A more client-friendly lookup function. */
-struct header *lookup_object_info(const void *mem, void **out_object_start)
+struct insert *lookup_object_info(const void *mem, void **out_object_start)
 {
 	/* Unlike our malloc hooks, we might get called before initialization,
 	   e.g. if someone tries to do a lookup before the first malloc of the
@@ -670,27 +681,27 @@ struct header *lookup_object_info(const void *mem, void **out_object_start)
 
 		while (cur_userchunk)
 		{
-			struct header *cur_header = header_for_chunk(cur_userchunk);
+			struct insert *cur_insert = insert_for_chunk(cur_userchunk);
 #ifndef NDEBUG
-			/* Sanity check on the header. */
-			if ((char*) cur_userchunk - (char*) cur_header != sizeof(struct header))
+			/* Sanity check on the insert. */
+			if ((char*) cur_userchunk - (char*) cur_insert != sizeof(struct insert))
 			{
-				fprintf(stderr, "Saw insane header address %p for chunk beginning %p "
+				fprintf(stderr, "Saw insane insert address %p for chunk beginning %p "
 					"(usable size %zu, allocptr %p); memory corruption?\n", 
-					cur_header, cur_userchunk, malloc_usable_size(userptr_to_allocptr(cur_userchunk)), userptr_to_allocptr(cur_userchunk));
+					cur_insert, cur_userchunk, malloc_usable_size(userptr_to_allocptr(cur_userchunk)), userptr_to_allocptr(cur_userchunk));
 			}	
 #endif
 			if (mem >= cur_userchunk
 				&& mem < cur_userchunk + malloc_usable_size(userptr_to_allocptr(cur_userchunk))) 
 			{
 				if (out_object_start) *out_object_start = cur_userchunk;
-				return cur_header;
+				return cur_insert;
 			}
 			
 			// do that optimisation
 			if (cur_userchunk < mem) seen_object_starting_earlier = 1;
 			
-			cur_userchunk = entry_to_same_range_addr(cur_header->next, cur_userchunk);
+			cur_userchunk = entry_to_same_range_addr(cur_insert->next, cur_userchunk);
 		}
 		
 		/* we reached the end of the list */
