@@ -933,15 +933,6 @@ _Bool
 	const void **out_alloc_site,
 	signed *out_target_offset_within_uniqtype)
 {
-/* HACK: pasted from heap.cpp in libpmirror */
-/* Do I want to pad to 4, 8 or (=== 4 (mod 8)) bytes? 
- * Try 4 mod 8. */
-#define PAD_TO_NBYTES(s, n) (((s) % (n) == 0) ? (s) : ((((s) / (n)) + 1) * (n)))
-#define PAD_TO_MBYTES_MOD_N(s, n, m) (((s) % (n) <= (m)) \
-? ((((s) / (n)) * (n)) + (m)) \
-: (((((s) / (n)) + 1) * (n)) + (m)))
-#define USABLE_SIZE_FROM_OBJECT_SIZE(s) (PAD_TO_MBYTES_MOD_N( ((s) + sizeof (struct trailer)) , 8, 4))
-#define HEAPSZ_ONE(t) (USABLE_SIZE_FROM_OBJECT_SIZE(sizeof ((t))))
 	int modulo; 
 	signed target_offset_wholeblock;
 	signed target_offset_within_uniqtype;
@@ -1149,7 +1140,7 @@ _Bool
 			 * is initialized during load, but can be extended as new allocsites
 			 * are discovered, e.g. indirect ones.)
 			 */
-			struct trailer *heap_info = lookup_object_info(obj, (void**) out_object_start);
+			struct insert *heap_info = lookup_object_info(obj, (void**) out_object_start);
 			if (!heap_info)
 			{
 				*out_reason = "unindexed heap object";
@@ -1162,7 +1153,7 @@ _Bool
 			assert(prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC);
 
 			/* Now we have a uniqtype or an allocsite. For long-lived objects 
-			 * the uniqtype will have been installed in the heap trailer already.
+			 * the uniqtype will have been installed in the heap header already.
 			 */
 			if (__builtin_expect(heap_info->alloc_site_flag, 1))
 			{
@@ -1204,14 +1195,14 @@ _Bool
 #endif
 			}
 
-			/* FIXME: scrounge in-heap trailer bits for next/prev and allocsite as follows:
+			/* FIXME: scrounge in-heap header bits for next/prev and allocsite as follows:
 			 *    on 32-bit x86, exploit that code is not loaded in top half of AS;
 			 *    on 64-bit x86, exploit that certain bits of an addr are always 0. 
 			 */
 			 
 			unsigned chunk_size = malloc_usable_size((void*) *out_object_start);
-			unsigned padded_trailer_size = USABLE_SIZE_FROM_OBJECT_SIZE(0);
-			*out_block_element_count = (chunk_size - padded_trailer_size) / (*out_alloc_uniqtype)->pos_maxoff;
+			unsigned header_size = sizeof (struct insert);
+			*out_block_element_count = (chunk_size - header_size) / (*out_alloc_uniqtype)->pos_maxoff;
 			//__libcrunch_private_assert(chunk_size % alloc_uniqtype->pos_maxoff == 0,
 			//	"chunk size should be multiple of element size", __FILE__, __LINE__, __func__);
 			break;
