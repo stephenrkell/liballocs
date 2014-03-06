@@ -70,6 +70,7 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 	std::ifstream infstream(argv[1]);
+	assert(infstream);
 	using core::root_die;
 	root_die r(fileno(infstream));
 	
