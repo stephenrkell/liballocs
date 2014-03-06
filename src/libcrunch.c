@@ -19,8 +19,10 @@
 
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
-static uintptr_t page_size;
-static uintptr_t page_mask;
+// keep these close, keep them fast
+uintptr_t page_size __attribute__((visibility("protected")));
+uintptr_t log_page_size __attribute__((visibility("protected")));
+uintptr_t page_mask __attribute__((visibility("protected")));
 
 int __libcrunch_debug_level;
 _Bool __libcrunch_is_initialized;
@@ -843,6 +845,7 @@ int __libcrunch_global_init(void)
 	assert(main_bp != 0);
 	
 	page_size = (uintptr_t) sysconf(_SC_PAGE_SIZE);
+	log_page_size = integer_log2(page_size);
 	page_mask = ~((uintptr_t) sysconf(_SC_PAGE_SIZE) - 1);
 	
 	// also init the prefix tree
@@ -1140,7 +1143,8 @@ _Bool
 			 * is initialized during load, but can be extended as new allocsites
 			 * are discovered, e.g. indirect ones.)
 			 */
-			struct insert *heap_info = lookup_object_info(obj, (void**) out_object_start);
+			struct deep_entry *deep = NULL;
+			struct insert *heap_info = lookup_object_info(obj, (void**) out_object_start, &deep);
 			if (!heap_info)
 			{
 				*out_reason = "unindexed heap object";
@@ -1149,9 +1153,15 @@ _Bool
 				return 1;
 			}
 			assert(get_object_memory_kind(heap_info) == HEAP
-				|| prefix_tree_get_memory_kind(heap_info) == HEAP);
+				|| get_object_memory_kind(heap_info) == UNKNOWN); // might not have seen that maps yet
 			assert(prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC);
 
+			unsigned alloc_chunksize;
+			if (deep) 
+			{
+				alloc_chunksize = deep->size_4bytes << 2;
+			} else alloc_chunksize = malloc_usable_size((void*) *out_object_start);
+			
 			/* Now we have a uniqtype or an allocsite. For long-lived objects 
 			 * the uniqtype will have been installed in the heap header already.
 			 */
@@ -1200,9 +1210,8 @@ _Bool
 			 *    on 64-bit x86, exploit that certain bits of an addr are always 0. 
 			 */
 			 
-			unsigned chunk_size = malloc_usable_size((void*) *out_object_start);
 			unsigned header_size = sizeof (struct insert);
-			*out_block_element_count = (chunk_size - header_size) / (*out_alloc_uniqtype)->pos_maxoff;
+			*out_block_element_count = (alloc_chunksize - header_size) / (*out_alloc_uniqtype)->pos_maxoff;
 			//__libcrunch_private_assert(chunk_size % alloc_uniqtype->pos_maxoff == 0,
 			//	"chunk size should be multiple of element size", __FILE__, __LINE__, __func__);
 			break;
@@ -1340,7 +1349,7 @@ int __is_a_internal(const void *obj, const void *arg)
 		&k,
 		&object_start,
 		&block_element_count,
-		&alloc_uniqtype, 
+		&alloc_uniqtype,
 		&alloc_site,
 		&target_offset_within_uniqtype);
 	
@@ -1359,7 +1368,7 @@ int __is_a_internal(const void *obj, const void *arg)
 	} while (descend_to_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype));
 	
 	// if we got here, the check failed
-	if (__current_allocsite)
+	if (__current_allocsite || __currently_freeing)
 	{
 		++__libcrunch_failed_in_alloc;
 		// suppress warning

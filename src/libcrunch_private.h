@@ -14,12 +14,32 @@
 
 #include "libcrunch.h"
 
+extern uintptr_t page_size __attribute__((visibility("protected")));
+extern uintptr_t log_page_size __attribute__((visibility("protected")));
+extern uintptr_t page_mask __attribute__((visibility("protected")));
+
 /* We use this prefix tree to map the address space. */
+struct node_info
+{
+	unsigned what:8;
+	union
+	{
+		unsigned long data_ptr:(ADDR_BITSIZE);
+		struct 
+		{
+			struct insert ins;
+			unsigned is_object_start:1;
+			unsigned npages:20;
+			unsigned obj_offset:7;
+		} ins_and_bits;
+	} un;
+};
 struct prefix_tree_node {
-	unsigned kind/*:2*/; // UNKNOWN, STACK, HEAP, STATIC
-	const void *data_ptr;
+	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC
+	struct node_info info;
 };
 void prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg);
+void prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *arg);
 void prefix_tree_del(void *base, size_t s);
 void init_prefix_tree_from_maps(void);
 void prefix_tree_add_missing_maps(void);
@@ -27,6 +47,8 @@ enum object_memory_kind prefix_tree_get_memory_kind(const void *obj);
 void prefix_tree_print_all_to_stderr(void);
 struct prefix_tree_node *
 prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr);
+struct prefix_tree_node *
+prefix_tree_bounds(const void *ptr, const void **begin, const void **end);
 void __libcrunch_scan_lazy_typenames(void *handle);
 int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data);
 #define debug_printf(lvl, ...) do { \

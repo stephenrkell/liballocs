@@ -20,7 +20,9 @@
 #include <stdarg.h>
 #include "libcrunch_private.h"
 
-#define safe_to_use_prefix_tree (__libcrunch_is_initialized)
+/* We should be safe to use it once malloc is initialized. */
+// #define safe_to_use_prefix_tree (__libcrunch_is_initialized)
+#define safe_to_use_prefix_tree (safe_to_call_malloc)
 
 static const char *filename_for_fd(int fd)
 {
@@ -145,14 +147,19 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 			struct prefix_tree_node *cur = prefix_tree_deepest_match_from_root(old_addr, NULL);
 			assert(cur != NULL);
 			unsigned kind = cur->kind;
-			const void *data_ptr = cur->data_ptr;
+			struct node_info saved = cur->info;
 			prefix_tree_del(old_addr, old_size);
-			prefix_tree_add(ret, new_size, kind, data_ptr);
+			prefix_tree_add_full(ret, new_size, kind, &saved);
 		}
 		return ret;
 	}
 #undef orig_call
 }
+
+#define ROUND_DOWN_TO_PAGE_SIZE(n) \
+	(assert(log_page_size), (n) % page_size == 0 ? (n) : ((((n >> log_page_size) - 1)) << log_page_size))
+#define ROUND_UP_TO_PAGE_SIZE(n) \
+	(assert(log_page_size), (n) % page_size == 0 ? (n) : ((((n >> log_page_size) + 1)) << log_page_size))
 
 int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
@@ -165,9 +172,14 @@ int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 			// if this phdr's a LOAD
 			if (info->dlpi_phdr[i].p_type == PT_LOAD)
 			{
+				// adjust start/end to be multiples of the page size
+				uintptr_t actual_base = (uintptr_t) info->dlpi_addr + (uintptr_t) info->dlpi_phdr[i].p_vaddr;
+				uintptr_t rounded_down_base = ROUND_DOWN_TO_PAGE_SIZE(actual_base);
 				// add it to the tree
-				prefix_tree_add((unsigned char *) info->dlpi_addr + info->dlpi_phdr[i].p_vaddr, 
-					info->dlpi_phdr[i].p_memsz, STATIC, info->dlpi_name);
+				prefix_tree_add(
+					(void*) rounded_down_base, 
+					ROUND_UP_TO_PAGE_SIZE(actual_base + info->dlpi_phdr[i].p_memsz) - rounded_down_base, 
+					STATIC, info->dlpi_name);
 			}
 		}
 		
@@ -189,7 +201,7 @@ void *dlopen(const char *filename, int flag)
 		assert(orig_dlopen);
 	}
 	
-	if (!safe_to_use_prefix_tree) return orig_dlopen(filename, flag);
+	if (!__libcrunch_is_initialized) return orig_dlopen(filename, flag);
 	else
 	{
 		void *ret = orig_dlopen(filename, flag);

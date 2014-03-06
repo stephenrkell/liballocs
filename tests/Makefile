@@ -1,4 +1,4 @@
-CFLAGS += -g3 -std=c99 -fno-eliminate-unused-debug-types -O2
+CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -O2
 CFLAGS += -DUSE_STARTUP_BRK
 
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
@@ -78,8 +78,15 @@ _onlyrun-%:
 _onlygdbrun-%:
 	gdb --eval-command "set environment LD_PRELOAD=$(PRELOAD)" --args ./$* ./$*
 
+build-%:
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" 
+
 run-%:
-	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( $(MAKE) -C "$*" $(INCLUDE_MK_INC) -f ../Makefile _onlyrun-$* )
+	$(MAKE) build-$* && ( $(MAKE) -C "$*" $(INCLUDE_MK_INC) -f ../Makefile _onlyrun-$* )
+
+cleanbuild-%:
+	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && \
+	$(MAKE) build-$* 
 
 cleanrun-%: 
 	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && \

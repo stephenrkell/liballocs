@@ -1,4 +1,6 @@
 CFLAGS += -std=gnu99 -g -O0 -pg -fPIC -I../include
+HEAP_INDEX_HOOKS := heap_index_fast_hooks
+#HEAP_INDEX_HOOKS := heap_index_hooks
 LDFLAGS += -pg
 
 CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
@@ -33,8 +35,8 @@ vpath %.c $(PMIRROR)/src
 # HMM. We still have to --wrap the allocation funcs, but we could put the wrappers in the preload lib...
 # BUT since they're generated per-build from the LIBCRUNCH_ALLOC_FNS content, this doesn't work --
 # stick with stubs!
-libcrunch_preload.so: libcrunch.o preload.o interval_tree.o maps.o addrmap.o
-	$(CXX) $(CXXFLAGS) -shared -o "$@" $^ $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -lheap_index_fast_hooks -Wl,--no-whole-archive -Wl,-Bdynamic 
+libcrunch_preload.so: libcrunch.o preload.o interval_tree.o maps.o addrmap.o $(PMIRROR)/lib/lib$(HEAP_INDEX_HOOKS).a
+	$(CXX) $(CXXFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -l$(HEAP_INDEX_HOOKS) -Wl,--no-whole-archive -Wl,-Bdynamic 
 
 # build libcrunch with C++ compiler -- this version lacks preload stuff
 libcrunch.so: libcrunch.o interval_tree.o maps.o addrmap.o

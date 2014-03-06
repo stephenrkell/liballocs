@@ -30,6 +30,28 @@ def isLinkCommand():
     # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
     return False
 
+def allL1OrWrapperAllocFns():
+    if "LIBCRUNCH_ALLOC_FNS" in os.environ:
+        return [s for s in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' ') if s != '']
+    else:
+        return []
+
+def allSubAllocFns():
+    if "LIBCRUNCH_SUBALLOC_FNS" in os.environ:
+        return [s for s in os.environ["LIBCRUNCH_SUBALLOC_FNS"].split(' ') if s != '']
+    else:
+        return []
+
+def allAllocFns():
+    return allL1OrWrapperAllocFns() + allSubAllocFns()
+
+def allSubFreeFns():
+    if "LIBCRUNCH_SUBFREE_FNS" in os.environ:
+        return [s for s in os.environ["LIBCRUNCH_SUBFREE_FNS"].split(' ') if s != '']
+    else:
+        return []
+
+
 def fixupDotO(filename):
     # also link the file with the uniqtypes it references
     cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
@@ -41,12 +63,11 @@ def fixupDotO(filename):
     # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
     # This is needed e.g. for SPEC benchmark bzip2
     allocFns = []
-    if "LIBCRUNCH_ALLOC_FNS" in os.environ:
-        for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
-            if allocFn != '':
-                m = re.match("(.*)\((.*)\)(.?)", allocFn)
-                fnName = m.groups()[0]
-                allocFns += [fnName]
+    for allocFn in allAllocFns():
+        if allocFn != '':
+            m = re.match("(.*)\((.*)\)(.?)", allocFn)
+            fnName = m.groups()[0]
+            allocFns += [fnName]
     sys.stderr.write("Looking for allocation functions that need unbinding\n")
     cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"" \
         % (filename, "|".join(allocFns))
@@ -80,7 +101,7 @@ def fixupDotO(filename):
     # grep for local symbols -- a lower-case letter after the symname is the giveaway
     cmdstring = "nm -fposix --defined-only \"%s\" | egrep \"^(%s) [a-z] \"" \
         % (filename, "|".join(allocFns))
-    sys.stderr.write("cmdstring is " + cmdstring)
+    sys.stderr.write("cmdstring is %s\n" % cmdstring)
     grep_ret = subprocess.call(["sh", "-c", cmdstring])
     if grep_ret == 0:
         sys.stderr.write("Found that we need to globalize\n")
@@ -186,13 +207,16 @@ def main():
     # objcopy option *if* we do symbol unbinding.
     
     mallocWrapArgs = []
-    if "LIBCRUNCH_ALLOC_FNS" in os.environ:
-        for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
-            if allocFn != '':
-                m = re.match("(.*)\((.*)\)(.?)", allocFn)
-                fnName = m.groups()[0]
-                fnSig = m.groups()[1]
-                mallocWrapArgs += ["-Wl,--wrap," + fnName]
+    for allocFn in allAllocFns():
+        if allocFn != '':
+            m = re.match("(.*)\((.*)\)(.?)", allocFn)
+            fnName = m.groups()[0]
+            mallocWrapArgs += ["-Wl,--wrap," + fnName]
+    for freeFn in allSubFreeFns():
+        if freeFn != '':
+            m = re.match("(.*)\((.*)\)(->[a-zA-Z0-9_]+)", freeFn)
+            fnName = m.groups()[0]
+            mallocWrapArgs += ["-Wl,--wrap," + fnName]
     
     # un-export CC from the env if it's set to crunchcc, because 
     # we don't want to recursively cruchcc the -uniqtypes.c files
@@ -225,36 +249,54 @@ def main():
             stubsfile = tempfile.NamedTemporaryFile(delete=False, suffix=".c")
             sys.stderr.write("stubsfile is %s\n" % stubsfile.name)
             stubsfile.write("#include \"stubgen.h\"\n")
-            if "LIBCRUNCH_ALLOC_FNS" in os.environ:
-                for allocFn in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' '):
-                    if allocFn != '':
-                        m = re.match("(.*)\((.*)\)(.?)", allocFn)
-                        fnName = m.groups()[0]
-                        fnSig = m.groups()[1]
-                        retSig = m.groups()[2]
-                        stubsfile.write("#define arglist_%s(make_arg) " % fnName)
-                        ndx = 0
-                        sizendx = -1
-                        for c in fnSig: 
-                            if ndx != 0:
-                                stubsfile.write(", ")
-                            stubsfile.write("make_arg(%d, %c)" % (ndx, c))
-                            if ord(c) in range(ord('A'), ord('Z') + 1):
-                                assert(sizendx == -1)
-                                sizendx = ndx
-                            ndx += 1
-                        stubsfile.write("\n")
-                        if sizendx != -1:
-                            # it's a size char, so flag that up
-                            stubsfile.write("#define size_arg_%s make_argname(%d, %c)\n" % (fnName, sizendx, c[sizendx]))
-                        stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
-                        stubsfile.flush()
+            
+            def writeArgList(fnName, fnSig):
+                stubsfile.write("#define arglist_%s(make_arg) " % fnName)
+                ndx = 0
+                for c in fnSig: 
+                    if ndx != 0:
+                        stubsfile.write(", ")
+                    stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                    ndx += 1
+                stubsfile.write("\n")
+            
+            for allocFn in allAllocFns():
+                m = re.match("(.*)\((.*)\)(.?)", allocFn)
+                fnName = m.groups()[0]
+                fnSig = m.groups()[1]
+                retSig = m.groups()[2]
+                writeArgList(fnName, fnSig)
+                sizendx = fnSig.find('Z')
+                if sizendx != -1:
+                    # it's a size char, so flag that up
+                    stubsfile.write("#define size_arg_%s make_argname(%d, %c)\n" % (fnName, sizendx, fnSig[sizendx]))
+                if allocFn in allL1OrWrapperAllocFns():
+                    stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
+                else:
+                    stubsfile.write("make_suballocator_alloc_wrapper(%s, %s)\n" % (fnName, retSig))
+                stubsfile.flush()
+            # also do free wrappers
+            for freeFn in allSubFreeFns():
+                m = re.match("(.*)\((.*)\)(->([a-zA-Z0-9_]+))", freeFn)
+                fnName = m.groups()[0]
+                fnSig = m.groups()[1]
+                allocFnName = m.groups()[3]
+                ptrndx = fnSig.find('P')
+                if ptrndx != -1:
+                    # it's a ptr, so flag that up
+                    stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
+                writeArgList(fnName, fnSig)
+                stubsfile.write("make_suballocator_free_wrapper(%s, %s)\n" % (fnName, allocFnName))
+                stubsfile.flush()
             # now we compile the C file ourselves, rather than cilly doing it, 
             # because it's a special magic stub
             stubs_bin = os.path.splitext(stubsfile.name)[0] + ".o"
-            ret_stubs = subprocess.call(["cc", "-g", "-c", "-o", stubs_bin, \
+            stubs_cmd = ["cc", "-save-temps", "-g", "-c", "-o", stubs_bin, \
                 "-I" + os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
-                stubsfile.name])
+                stubsfile.name]
+            sys.stderr.write("Compiling stubs file %s to %s with command %s\n" \
+                % (stubsfile.name, stubs_bin, " ".join(stubs_cmd)))
+            ret_stubs = subprocess.call(stubs_cmd)
             if ret_stubs != 0:
                 sys.stderr.write("Could not compile stubs file %s: compiler returned %d\n" \
                     % (stubsfile.name, ret_stubs))
