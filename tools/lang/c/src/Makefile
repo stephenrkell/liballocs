@@ -13,7 +13,7 @@ default: lower-typenames base-types-translation
 
 .PHONY: clean
 clean:
-	rm -f *.o .*.d lower-typenames
+	rm -f *.o .*.d lower-typenames base-types-translation
 
 CPP_DEPS := $(patsubst %.cpp,.%.d,$(CPP_SRC))
 DEPS := $(CPP_DEPS)
