@@ -14,6 +14,7 @@ default: src lib $(CIL)/bin/cilly sanity-tests
 
 clean:
 	for dir in $(CIL_TOOLS); do (cd $$dir && rm -f *.o *.cil.c *.i ); done
+	$(MAKE) -C src clean
 
 $(CIL)/bin/cilly: $(CIL_TOOLS_SRC)
 	cd $(CIL) && \
