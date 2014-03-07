@@ -204,12 +204,13 @@ static inline struct insert *insert_for_chunk(void *userptr);
  * sanity checking. Check that if our entry is not present, our distance
  * is 0. */
 #define INSERT_SANITY_CHECK(p_t) assert( \
-	!(!((p_t)->un.ptrs.next.present) && (p_t)->un.ptrs.next.distance != 0) \
-	&& !(!((p_t)->un.ptrs.prev.present) && (p_t)->un.ptrs.prev.distance != 0))
+	!(!((p_t)->un.ptrs.next.present) && !((p_t)->un.ptrs.next.removed) && (p_t)->un.ptrs.next.distance != 0) \
+	&& !(!((p_t)->un.ptrs.prev.present) && !((p_t)->un.ptrs.prev.removed) && (p_t)->un.ptrs.prev.distance != 0))
 
-static void list_sanity_check(entry_type *head)
+static void list_sanity_check(entry_type *head, const void *should_see_chunk)
 {
 	void *head_chunk = entry_ptr_to_addr(head);
+	_Bool saw_should_see_chunk = 0;
 #ifdef TRACE_HEAP_INDEX
 	fprintf(stderr,
 		"Begin sanity check of list indexed at %p, head chunk %p\n",
@@ -220,6 +221,7 @@ static void list_sanity_check(entry_type *head)
 	while (cur_userchunk != NULL)
 	{
 		++count;
+		if (should_see_chunk && cur_userchunk == should_see_chunk) saw_should_see_chunk = 1;
 		INSERT_SANITY_CHECK(insert_for_chunk(cur_userchunk));
 		/* If the next chunk link is null, entry_to_same_range_addr
 		 * should detect this (.present == 0) and give us NULL. */
@@ -253,6 +255,14 @@ static void list_sanity_check(entry_type *head)
 
 		cur_userchunk = next_userchunk;
 	}
+	if (should_see_chunk && !saw_should_see_chunk)
+	{
+#ifdef TRACE_HEAP_INDEX
+		fprintf(stderr, "Was expecting to find chunk at %p\n", should_see_chunk);
+#endif
+
+	}
+	assert(!should_see_chunk || saw_should_see_chunk);
 #ifdef TRACE_HEAP_INDEX
 	fprintf(stderr,
 		"Passed sanity check of list indexed at %p, head chunk %p, "
@@ -261,7 +271,7 @@ static void list_sanity_check(entry_type *head)
 }
 #else /* NDEBUG */
 #define INSERT_SANITY_CHECK(p_t)
-static void list_sanity_check(entry_type *head) {}
+static void list_sanity_check(entry_type *head, const void *should_see_chunk) {}
 #endif
 
 #define INDEX_LOC_FOR_ADDR(a) MEMTABLE_ADDR_WITH_TYPE(index_region, entry_type, \
@@ -326,7 +336,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	fprintf(stderr, "*** Inserting user chunk at %p into list indexed at %p\n", 
 		new_userchunkaddr, index_entry);
 #endif
-	list_sanity_check(index_entry);
+	list_sanity_check(index_entry, NULL);
 
 	void *head_chunkptr = entry_ptr_to_addr(index_entry);
 	
@@ -360,7 +370,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 		insert_for_chunk(entry_to_same_range_addr(p_insert->un.ptrs.next, new_userchunkaddr)));
 	if (p_insert->un.ptrs.prev.present) INSERT_SANITY_CHECK(
 		insert_for_chunk(entry_to_same_range_addr(p_insert->un.ptrs.prev, new_userchunkaddr)));
-	list_sanity_check(e);
+	list_sanity_check(e, new_userchunkaddr);
 }
 
 /* "headers" versions */
@@ -591,18 +601,42 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	 * our insert with its own (regular heap metadata) trailer, breaking the list.
 	 */
 	
+	if (userptr == NULL) return; // HACK: shouldn't be necessary; a BUG somewhere
+	
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(userptr);
 	/* unindex the l0 maps */
 	if (__builtin_expect(IS_L0_ENTRY(index_entry), 0))
 	{
+		void *allocptr = userptr_to_allocptr(userptr);
+		unsigned long size = malloc_usable_size(allocptr);
 #ifdef TRACE_HEAP_INDEX
-		fprintf(stderr, "*** Unindexing l0 entry for chunk %p\n", userptr);
+		fprintf(stderr, "*** Unindexing l0 entry for alloc chunk %p (size %lu)\n", 
+				allocptr, size);
 #endif
-		unsigned size = __unindex_l0(userptr_to_allocptr(userptr));
+		unsigned page_size = sysconf(_SC_PAGE_SIZE);
+		unsigned start_remainder = ((uintptr_t) allocptr) % page_size;
+		unsigned end_remainder = (((uintptr_t) allocptr) + size) % page_size;
+		
+		unsigned expected_pagewise_size = size 
+				+ start_remainder
+				+ ((end_remainder == 0) ? 0 : page_size - end_remainder);
+		unsigned size_unindexed = __unindex_l0(userptr_to_allocptr(userptr));
+#ifdef TRACE_HEAP_INDEX
+		if (size_unindexed > expected_pagewise_size)
+		{
+			fprintf(stderr, "*** ERROR: unindexed too much unindexing %p: %ld not %ld\n", 
+				allocptr, size_unindexed, expected_pagewise_size);
+		}
+		if (size_unindexed < expected_pagewise_size)
+		{
+			fprintf(stderr, "*** ERROR: unindexed too little unindexing %p: %ld not %ld\n", 
+				allocptr, size_unindexed, expected_pagewise_size);
+		}
+#endif
 		// memset the covered entries with the empty value
 		struct entry empty_value = { 0, 0, 0 };
 		assert(IS_EMPTY_ENTRY(&empty_value));
-		unsigned nbytes = size / entry_coverage_in_bytes;
+		unsigned nbytes = size_unindexed / entry_coverage_in_bytes;
 		memset(index_entry, *(char*) &empty_value, nbytes);
 		return;
 	}
@@ -621,7 +655,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		userptr, index_entry);
 #endif
 
-	list_sanity_check(index_entry);
+	list_sanity_check(index_entry, userptr);
 	INSERT_SANITY_CHECK(insert_for_chunk/*_with_usable_size*/(userptr/*, freed_usable_size*/));
 
 	/* (old comment; still true?) FIXME: we need a big lock around realloc()
@@ -673,7 +707,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	/* Now that we have deleted the record, our bin should be sane,
 	 * modulo concurrent reallocs. */
 out:
-	list_sanity_check(index_entry);
+	list_sanity_check(index_entry, NULL);
 }
 
 static void pre_nonnull_free(void *userptr, size_t freed_usable_size)
