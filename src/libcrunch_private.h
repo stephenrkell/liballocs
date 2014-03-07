@@ -35,6 +35,7 @@ struct node_info
 		} ins_and_bits;
 	} un;
 };
+extern unsigned char *l0index __attribute__((visibility("protected")));
 struct prefix_tree_node {
 	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC
 	struct node_info info;

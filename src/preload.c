@@ -1,8 +1,6 @@
 /* What we don't (yet) trap: 
  * 
  *  fork(), vfork(), clone()     -- FIXME: do we care about the fork-without-exec case?
- *
- *  dlopen(), dlclose()  -- hoping that mmap is enough
  */
 
 #define _GNU_SOURCE
@@ -22,7 +20,7 @@
 
 /* We should be safe to use it once malloc is initialized. */
 // #define safe_to_use_prefix_tree (__libcrunch_is_initialized)
-#define safe_to_use_prefix_tree (safe_to_call_malloc)
+#define safe_to_use_prefix_tree (l0index)
 
 static const char *filename_for_fd(int fd)
 {

@@ -35,15 +35,15 @@ vpath %.c $(PMIRROR)/src
 # HMM. We still have to --wrap the allocation funcs, but we could put the wrappers in the preload lib...
 # BUT since they're generated per-build from the LIBCRUNCH_ALLOC_FNS content, this doesn't work --
 # stick with stubs!
-libcrunch_preload.so: libcrunch.o preload.o interval_tree.o maps.o addrmap.o $(PMIRROR)/lib/lib$(HEAP_INDEX_HOOKS).a
-	$(CXX) $(CXXFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -l$(HEAP_INDEX_HOOKS) -Wl,--no-whole-archive -Wl,-Bdynamic 
+libcrunch_preload.so: libcrunch.o preload.o l0index.o maps.o addrmap.o $(PMIRROR)/lib/lib$(HEAP_INDEX_HOOKS).a
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -l$(HEAP_INDEX_HOOKS) -Wl,--no-whole-archive -Wl,-Bdynamic 
 
-libcrunch_nomemtable_preload.so: libcrunch_nomemtable.o preload.o interval_tree.o maps.o addrmap.o dummy_thread_locals.o
-	$(CXX) $(CXXFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` 
+libcrunch_nomemtable_preload.so: libcrunch_nomemtable.o preload.o l0index.o maps.o addrmap.o dummy_thread_locals.o
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` 
 
-# build libcrunch with C++ compiler -- this version lacks preload stuff
-libcrunch.so: libcrunch.o interval_tree.o maps.o addrmap.o
-	$(CXX) $(CXXFLAGS) -shared -o "$@" $^ $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
+# this version lacks preload stuff
+libcrunch.so: libcrunch.o l0index.o maps.o addrmap.o
+	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
 
 noop.o: CFLAGS += -fPIC 
 

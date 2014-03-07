@@ -16,14 +16,7 @@ typedef bool _Bool;
 /* We use this prefix trie to map the address space. */
 extern "C"
 {
-#include "libcrunch_private.h"
-	void prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg);
-	void prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *arg);
-	void prefix_tree_del(void *base, size_t s);
-	void init_prefix_tree_from_maps(void);
-	void prefix_tree_add_missing_maps(void);
-	enum object_memory_kind prefix_tree_get_memory_kind(const void *obj);
-	void prefix_tree_print_to_stderr(struct prefix_tree_node *start, int indent_level);
+	#include "libcrunch_private.h"
 }
 
 std::ostream& operator<<(std::ostream& s, const prefix_tree_node& n);
