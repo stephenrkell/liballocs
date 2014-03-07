@@ -124,69 +124,74 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 		
 		/* Collect a contiguous sequence of so-far-l0-unindexed mappings, 
 		 * starting from ptr. */
-		
-		const void *next_lower, *lowest = NULL, *upper = ptr, *cur = ptr;
+		const void *next_lower, *lowest_bound = NULL, *upper = ptr, *cur = ptr;
 		struct prefix_tree_node *n;
 		unsigned nmappings = 0;
 		do
 		{
 			n = prefix_tree_bounds(cur, &next_lower, &upper);
 			cur = n ? upper : cur;
-			if (n) ++nmappings;
-			if (n && !lowest) lowest = next_lower;
-		} while (n && !n->info.what);
+			if (n && n->info.what == DATA_PTR) ++nmappings;
+			if (n && !lowest_bound) lowest_bound = next_lower;
+		} while (n && n->info.what == DATA_PTR);
 		
 		// do the lower/upper we extracted match the allocation?
-		if ((uintptr_t) ptr <= (uintptr_t) lowest + MAXIMUM_MALLOC_HEADER_OVERHEAD 
-				&& (uintptr_t) upper >= (uintptr_t) lowest + modified_size
-					&& (uintptr_t) upper < (uintptr_t) lowest + modified_size + 2 * page_size)
+		if ((uintptr_t) ptr <= (uintptr_t) lowest_bound + MAXIMUM_MALLOC_HEADER_OVERHEAD 
+				&& (uintptr_t) upper >= (uintptr_t) lowest_bound + modified_size
+					&& (uintptr_t) upper < (uintptr_t) lowest_bound + modified_size + 2 * page_size)
 		{
 			/* We think we've got a mmap()'d region; */
 			assert(caller);
-			unsigned npages = ((uintptr_t) upper - (uintptr_t) lowest) >> log_page_size;
-			
-			/* We abuse the spare 16 bits in the word: 
-			 * the top bit is set in the node that starts the allocation, 
-			 * and the rest is the number of pages in the allocation. 
-			 * FIXME: we also need to store the object's logical start from
-			 * the start of the mapping, i.e. the malloc() header size.
-			 */
-			
+			unsigned npages = ((uintptr_t) upper - (uintptr_t) lowest_bound) >> log_page_size;
+
 			cur = ptr;
-			lowest = NULL;
 			struct prefix_tree_node *lowest_n = prefix_tree_bounds(ptr, NULL, NULL);
+			// iterate upwards, and remember the lowest base addr
+			unsigned nmappings_modified = 0;
 			do
 			{
 				n = prefix_tree_bounds(cur, &next_lower, &upper);
 				cur = n ? upper : cur;
-				if (n && !lowest) lowest = next_lower;
-				n->info = (struct node_info) {
-					.what = 1, 
-					.un = {
-						ins_and_bits: { 
-							.ins = (struct insert) {
-								.alloc_site_flag = 0,
-								.alloc_site = (uintptr_t) caller
-							},
-							.is_object_start = (n == lowest_n), 
-							.npages = npages, 
-							.obj_offset = (char*) ptr - (char*) lowest
+				if (n && !lowest_bound) lowest_bound = next_lower;
+				if (n && n->info.what == DATA_PTR) 
+				{
+					n->info = (struct node_info) {
+						.what = INS_AND_BITS, 
+						.un = {
+							ins_and_bits: { 
+								.ins = (struct insert) {
+									.alloc_site_flag = 0,
+									.alloc_site = (uintptr_t) caller
+								},
+								.is_object_start = (n == lowest_n), 
+								.npages = npages, 
+								.obj_offset = (char*) ptr - (char*) lowest_bound
+							}
 						}
-					}
-				};
-			} while (n && !n->info.what);
+					};
+					++nmappings_modified;
+				}
+				else n = NULL; // stop here
+			} while (n);
+			assert(nmappings_modified == nmappings);
 
-			assert(lowest_n->info.what);
+			assert(lowest_n->info.what == INS_AND_BITS);
 			return &lowest_n->info.un.ins_and_bits.ins;
 		}
 		else
 		{
 			debug_printf(3, "Warning: could not l0-index pointer %p in mapping range %p-%p (%u mappings)\n,", ptr, 
-				lowest, upper, nmappings);
+				lowest_bound, upper, nmappings);
 		}
 	}
 	
 	return NULL;
+}
+
+static unsigned unindex_l0_one_mapping(struct prefix_tree_node *n, const void *lower, const void *upper)
+{
+	n->info.what = 0;
+	return (char*) upper - (char*) lower;
 }
 
 unsigned __unindex_l0(const void *mem)
@@ -194,18 +199,24 @@ unsigned __unindex_l0(const void *mem)
 	const void *lower;
 	const void *upper;
 	struct prefix_tree_node *n = prefix_tree_bounds(mem, &lower, &upper);
+	unsigned lower_to_upper_npages = ((uintptr_t) upper - (uintptr_t) lower) >> log_page_size;
 	assert(n);
 
 	/* We want to unindex the same number of pages we indexed. */
 	unsigned npages_to_unindex = n->info.un.ins_and_bits.npages;
-	unsigned lower_to_upper_npages = ((uintptr_t) upper - (uintptr_t) lower) >> log_page_size;
-	
-	n->info.what = 0;
+	unsigned total_size_to_unindex = npages_to_unindex << log_page_size;
+
 	unsigned total_size_unindexed = lower_to_upper_npages << log_page_size;
-	if (lower_to_upper_npages < npages_to_unindex)
+	do
 	{
-		total_size_unindexed += __unindex_l0(upper);
-	}
+		total_size_unindexed += unindex_l0_one_mapping(n, lower, upper);
+		if (total_size_unindexed < total_size_to_unindex)
+		{
+			// advance to the next mapping
+			n = prefix_tree_bounds(upper, &lower, &upper);
+		}
+	} while (total_size_unindexed < total_size_to_unindex);
+	
 	return total_size_unindexed;
 }
 
@@ -227,9 +238,8 @@ struct insert *__lookup_l0(const void *mem, void **out_object_start)
 		// if n is null, it means we ran out of mappings before we saw the high bit
 		assert(n);
 		
-		// then HACK HACK HACK OUTRAGEOUS HACK: 
 		*out_object_start = (char*) lower + n->info.un.ins_and_bits.obj_offset;
-		return (struct insert *) &n->info.un.ins_and_bits.ins;
+		return &n->info.un.ins_and_bits.ins;
 	}
 	else return NULL;
 }

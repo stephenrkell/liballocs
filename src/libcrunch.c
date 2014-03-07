@@ -753,6 +753,7 @@ int __libcrunch_global_init(void)
 	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
 	assert(ret_types == 0);
 	
+#ifndef NO_MEMTABLE
 	/* Allocate the memtable. 
 	 * Assume we don't need to cover addresses >= STACK_BEGIN.
 	 * BUT we store vaddrs in the same table, with addresses ORed
@@ -769,7 +770,7 @@ int __libcrunch_global_init(void)
 
 	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_cb, NULL);
 	assert(ret_stackaddr == 0);
-	
+#endif
 	// grab the maximum stack size
 	struct rlimit rlim;
 	int rlret = getrlimit(RLIMIT_STACK, &rlim);

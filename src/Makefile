@@ -1,6 +1,6 @@
-CFLAGS += -std=gnu99 -g -O0 -pg -fPIC -I../include
-HEAP_INDEX_HOOKS := heap_index_fast_hooks
-#HEAP_INDEX_HOOKS := heap_index_hooks
+CFLAGS += -std=gnu99 -g -O3 -DNDEBUG -pg -fPIC -I../include
+#HEAP_INDEX_HOOKS := heap_index_fast_hooks
+HEAP_INDEX_HOOKS := heap_index_hooks
 LDFLAGS += -pg
 
 CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
@@ -38,11 +38,17 @@ vpath %.c $(PMIRROR)/src
 libcrunch_preload.so: libcrunch.o preload.o interval_tree.o maps.o addrmap.o $(PMIRROR)/lib/lib$(HEAP_INDEX_HOOKS).a
 	$(CXX) $(CXXFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -l$(HEAP_INDEX_HOOKS) -Wl,--no-whole-archive -Wl,-Bdynamic 
 
+libcrunch_nomemtable_preload.so: libcrunch_nomemtable.o preload.o interval_tree.o maps.o addrmap.o dummy_thread_locals.o
+	$(CXX) $(CXXFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` 
+
 # build libcrunch with C++ compiler -- this version lacks preload stuff
 libcrunch.so: libcrunch.o interval_tree.o maps.o addrmap.o
 	$(CXX) $(CXXFLAGS) -shared -o "$@" $^ $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` #-lheap_index_hooks
 
 noop.o: CFLAGS += -fPIC 
+
+libcrunch_nomemtable.o: libcrunch.c
+	$(CC) $(CFLAGS) -DNO_MEMTABLE -c -o "$@" "$<" 
 
 libcrunch_noop.so: noop.o
 	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)

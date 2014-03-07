@@ -19,12 +19,13 @@ extern uintptr_t log_page_size __attribute__((visibility("protected")));
 extern uintptr_t page_mask __attribute__((visibility("protected")));
 
 /* We use this prefix tree to map the address space. */
+enum node_info_kind { DATA_PTR, INS_AND_BITS };
 struct node_info
 {
-	unsigned what:8;
+	enum node_info_kind what;
 	union
 	{
-		unsigned long data_ptr:(ADDR_BITSIZE);
+		const void *data_ptr;
 		struct 
 		{
 			struct insert ins;

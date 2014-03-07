@@ -34,7 +34,7 @@ static boost::icl::split_interval_map<uintptr_t, prefix_tree_node> map;
 
 void prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr)
 {
-	struct node_info info = { .what = 0, .un = { data_ptr: (uintptr_t) data_ptr } };
+	struct node_info info = { .what = DATA_PTR, .un = { data_ptr: data_ptr } };
 	prefix_tree_add_full(base, s, kind, &info);
 }
 
@@ -95,8 +95,12 @@ enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
 }
 std::ostream& operator<<(std::ostream& s, const node_info& info)
 {
-	if (info.what) s << "(data ptr) " << (void*) (uintptr_t) info.un.data_ptr;
-	else s << "(insert + bits) " << (void*) (uintptr_t) info.un.ins_and_bits.ins.alloc_site;
+	if (info.what == DATA_PTR) s << "(data ptr) " << info.un.data_ptr;
+	else 
+	{
+		assert(info.what == INS_AND_BITS);
+		s << "(insert + bits) " << (void*) (uintptr_t) info.un.ins_and_bits.ins.alloc_site;
+	}
 	return s;
 }
 bool operator==(const insert& ins1, const insert& ins2)
@@ -108,11 +112,13 @@ bool operator==(const insert& ins1, const insert& ins2)
 bool operator==(const node_info& info1, const node_info& info2)
 {
 	return info1.what == info2.what && 
-	(info1.what ? info1.un.data_ptr == info2.un.data_ptr
-	            : (info1.un.ins_and_bits.ins == info2.un.ins_and_bits.ins
-	            && info1.un.ins_and_bits.npages == info2.un.ins_and_bits.npages
-	            && info1.un.ins_and_bits.obj_offset == info2.un.ins_and_bits.obj_offset
-	));
+	(info1.what == DATA_PTR ? info1.un.data_ptr == info2.un.data_ptr
+	            : (assert(info1.what == INS_AND_BITS), 
+					(info1.un.ins_and_bits.ins == info2.un.ins_and_bits.ins
+						&& info1.un.ins_and_bits.npages == info2.un.ins_and_bits.npages
+						&& info1.un.ins_and_bits.obj_offset == info2.un.ins_and_bits.obj_offset)
+					)
+	);
 }
 std::ostream& operator<<(std::ostream& s, const prefix_tree_node& n)
 {
