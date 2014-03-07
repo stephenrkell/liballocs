@@ -36,12 +36,14 @@ struct node_info
 	} un;
 };
 extern unsigned char *l0index __attribute__((visibility("protected")));
+extern _Bool initialized_maps __attribute__((visibility("protected")));
 struct prefix_tree_node {
 	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC
 	struct node_info info;
 };
-void prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg);
-void prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *arg);
+struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg);
+void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *arg);
+struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *arg);
 void prefix_tree_del(void *base, size_t s);
 void init_prefix_tree_from_maps(void);
 void prefix_tree_add_missing_maps(void);

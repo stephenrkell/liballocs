@@ -69,11 +69,26 @@ static struct mapping *find_free_mapping(void)
 	return NULL;
 }
 
+static _Bool
+is_unindexed(void *begin, void *end)
+{
+	unsigned char *pos = &l0index[pagenum(begin)];
+	while (pos < l0index + pagenum(end) && !*pos) { ++pos; }
+	
+	if (pos == l0index + pagenum(end)) return 1;
+	
+	debug_printf(3, "Found already-indexed position %p (mapping %d)\n", 
+			addr_of_pagenum(pos - l0index), *pos);
+	return 0;
+}
+
 static
 struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, struct node_info *p_info)
 {
 	assert((uintptr_t) base % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	assert(s % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
+	
+	assert(is_unindexed(base, (char*) base + s));
 	
 	// test for nearby mappings to extend
 	unsigned char abuts_existing_start = l0index[pagenum((char*) base + s)];
@@ -125,8 +140,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	return NULL;
 }
 
-
-void prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr)
+struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr)
 {
 	if (!l0index) init();
 	
@@ -134,69 +148,155 @@ void prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr)
 	return prefix_tree_add_full(base, s, kind, &info);
 }
 
-void prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *p_arg)
+void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *data_ptr)
 {
 	if (!l0index) init();
 
-	unsigned first_page_num = (uintptr_t) base >> LOG_PAGE_SIZE;
-	unsigned npages = s >> LOG_PAGE_SIZE;
+	/* What's the biggest mapping you can think of? 
+	 * 
+	 * We don't want to index our memtables. I'm going to be conservative
+	 * and avoid indexing anything above 4GB. */
+	if (s >= (1ul<<32))
+	{
+		debug_printf(3, "Warning: not indexing huge mapping (size %lu) at %p\n", (unsigned long) s, base);
+		return;
+	}
+	
+	struct node_info info = { .what = DATA_PTR, .un = { data_ptr: data_ptr } };
+	
+	/* Just add the as-yet-unmapped bits of the range. */
+	uintptr_t begin_pagenum = pagenum(base);
+	uintptr_t current_pagenum = begin_pagenum;
+	uintptr_t end_pagenum = pagenum((char*) base + s);
+	while (current_pagenum != end_pagenum)
+	{
+		uintptr_t next_indexed_pagenum = current_pagenum;
+		while (!l0index[next_indexed_pagenum] && next_indexed_pagenum < end_pagenum) { next_indexed_pagenum++;}
+		
+		if (next_indexed_pagenum > current_pagenum)
+		{
+			prefix_tree_add_full((void*) addr_of_pagenum(current_pagenum), 
+				(char*) addr_of_pagenum(next_indexed_pagenum) - (char*) addr_of_pagenum(current_pagenum), 
+				kind, &info);
+		}
+		
+		current_pagenum = next_indexed_pagenum;
+		while (l0index[current_pagenum] && current_pagenum < end_pagenum) { current_pagenum++; }
+	}
+}
+
+struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *p_arg)
+{
+	if (!l0index) init();
+
+	/* What's the biggest mapping you can think of? 
+	 * 
+	 * We don't want to index our memtables. I'm going to be conservative
+	 * and avoid indexing anything above 4GB. */
+	if (s >= (1ul<<32))
+	{
+		debug_printf(3, "Warning: not indexing huge mapping (size %lu) at %p\n", (unsigned long) s, base);
+		return NULL;
+	}
+	
+	uintptr_t first_page_num = (uintptr_t) base >> LOG_PAGE_SIZE;
+	uintptr_t npages = s >> LOG_PAGE_SIZE;
 
 	struct mapping *m = create_or_extend_mapping(base, s, kind, p_arg);
 	memset(l0index + first_page_num, (unsigned char) (m - &mappings[0]), npages);
+	return &m->n;
 }
 
 void prefix_tree_del(void *base, size_t s)
 {
 	if (!l0index) init();
 	
-	/* We shouldn't span multiple mappings. */
-	unsigned char first_mapping_num = l0index[(unsigned char) ((uintptr_t) base >> LOG_PAGE_SIZE)];
-	unsigned char last_mapping_num = l0index[(unsigned char) ((uintptr_t) (char*)base + (s-1) >> LOG_PAGE_SIZE)];
-	assert(first_mapping_num == last_mapping_num);
-	unsigned char mapping_num = first_mapping_num;
-	assert(mapping_num != 0);
-	
-	/* Do we need to chop an entry? */
-	_Bool remaining_before = mappings[mapping_num].begin < base;
-	_Bool remaining_after = (char*) mappings[mapping_num].end > (char*) base + s;
-	
-	/* If we're chopping before and after, we need to grab a *new* 
-	 * mapping number. */
-	if (__builtin_expect(remaining_before && remaining_after, 0))
+	// if we get mapping num 0, try again after forcing init_prefix_tree_from_maps()
+	unsigned char first_mapping_num;
+	do
 	{
-		// make a new entry for the remaining-after part, then just chop before
-		struct mapping *m = find_free_mapping();
-		assert(m);
-		m->begin = (char*) base + s;
-		m->end = mappings[mapping_num].end;
-		m->n = mappings[mapping_num].n;
+		/* We might span multiple mappings, because munmap() is like that. */
+		first_mapping_num = l0index[pagenum(base)];
+	}
+	while (first_mapping_num == 0 && (!initialized_maps ? (init_prefix_tree_from_maps(), 1) : 0));
+	
+	assert(first_mapping_num != 0);
+	
+	unsigned char last_mapping_num = l0index[pagenum((char*)base + (s-1))];
+	void *this_mapping_addr = mappings[first_mapping_num].begin;
+	size_t this_mapping_size = (char*) mappings[first_mapping_num].end
+			 - (char*) this_mapping_addr;
+	do
+	{
 		
-		// rewrite uses of the old mapping number in the new-mapping portion of the memtable
-		unsigned char new_mapping_num = m - &mappings[0];
-		unsigned npages = ((char*) mappings[mapping_num].end - ((char*) base + s)) >> LOG_PAGE_SIZE;
-		memset(l0index + pagenum((char*) base + s), new_mapping_num, npages);
+		/* Do we need to chop an entry? */
+		_Bool remaining_before = mappings[first_mapping_num].begin < base;
+		_Bool remaining_after = (char*) mappings[first_mapping_num].end > (char*) base + this_mapping_size;
+
+		/* If we're chopping before and after, we need to grab a *new* 
+		 * mapping number. */
+		if (__builtin_expect(remaining_before && remaining_after, 0))
+		{
+			// make a new entry for the remaining-after part, then just chop before
+			struct mapping *m = find_free_mapping();
+			assert(m);
+			m->begin = (char*) this_mapping_addr + this_mapping_size;
+			m->end = mappings[first_mapping_num].end;
+			m->n = mappings[first_mapping_num].n;
+
+			// rewrite uses of the old mapping number in the new-mapping portion of the memtable
+			unsigned char new_mapping_num = m - &mappings[0];
+			unsigned long npages = ((char*) mappings[first_mapping_num].end - ((char*) this_mapping_addr + this_mapping_size)) >> LOG_PAGE_SIZE;
+			memset(l0index + pagenum((char*) this_mapping_addr + this_mapping_size), new_mapping_num, npages);
+
+			remaining_after = 0;
+			mappings[first_mapping_num].end = (char*) this_mapping_addr + this_mapping_size;
+		}
+
+		if (__builtin_expect(remaining_before, 0))
+		{
+			memset(l0index + pagenum(mappings[first_mapping_num].end), 0, 
+					((char*) this_mapping_addr - (char*) mappings[first_mapping_num].end)>>LOG_PAGE_SIZE);
+			mappings[first_mapping_num].end = this_mapping_addr;
+		}
+		else if (__builtin_expect(remaining_after, 0))
+		{
+			void *new_begin = (char*) this_mapping_addr + this_mapping_size;
+			memset(l0index + pagenum(mappings[first_mapping_num].begin), 0, 
+					(new_begin - mappings[first_mapping_num].begin)>>LOG_PAGE_SIZE);
+			mappings[first_mapping_num].begin = new_begin;
+		}
+		else 
+		{
+			// else we're just deleting the whole entry
+			memset(l0index + pagenum(this_mapping_addr), 0, 
+					pagenum((char*) this_mapping_addr + this_mapping_size)
+					 - pagenum(this_mapping_addr));
+			mappings[first_mapping_num].begin = 
+				mappings[first_mapping_num].end = 
+					NULL;
+		}
 		
-		remaining_after = 0;
-		mappings[mapping_num].end = (char*) base + s;
-	}
+		// continue the loop
+		void *next_addr = (char*) this_mapping_addr + this_mapping_size;
+		uintptr_t next_pagenum = pagenum(next_addr);
+		first_mapping_num = l0index[next_pagenum];
+		// FIXME: if it's zero
+		if (__builtin_expect(first_mapping_num == 0, 0))
+		{
+			uintptr_t end_pagenum = pagenum((char*) base + s);
+			while (!(first_mapping_num = l0index[next_pagenum++]) && next_pagenum < end_pagenum);
+			debug_printf(3, "Warning: l0-unindexing a partially unmapped region %p-%p\n",
+				next_addr, addr_of_pagenum(next_pagenum));
+			if (first_mapping_num == 0) break;
+		}
+		this_mapping_addr = mappings[first_mapping_num].begin;
+		this_mapping_size = (char*) mappings[first_mapping_num].end - (char*) mappings[first_mapping_num].begin;
+	} while (first_mapping_num != last_mapping_num);
 	
-	if (__builtin_expect(remaining_before, 0))
-	{
-		mappings[mapping_num].end = base;
-		return;
-	}
-	
-	if (__builtin_expect(remaining_after, 0))
-	{
-		mappings[mapping_num].begin = (char*) base + s;
-		return;
-	}
-	
-	// else we're just deleting the whole entry
-	mappings[mapping_num].begin = 
-		mappings[mapping_num].end = 
-			NULL;
+	assert(is_unindexed(base, (char*) base + s));
 }
+
 enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
 {
 	if (!l0index) init();

@@ -673,6 +673,10 @@ int __libcrunch_global_init(void)
 	if (tried_to_initialize) return -1;
 	tried_to_initialize = 1;
 	
+	page_size = (uintptr_t) sysconf(_SC_PAGE_SIZE);
+	log_page_size = integer_log2(page_size);
+	page_mask = ~((uintptr_t) sysconf(_SC_PAGE_SIZE) - 1);
+	
 	// print a summary when the program exits
 	atexit(print_exit_summary);
 	
@@ -844,10 +848,6 @@ int __libcrunch_global_init(void)
 		main_bp = (void*) (intptr_t) our_sp;
 	}
 	assert(main_bp != 0);
-	
-	page_size = (uintptr_t) sysconf(_SC_PAGE_SIZE);
-	log_page_size = integer_log2(page_size);
-	page_mask = ~((uintptr_t) sysconf(_SC_PAGE_SIZE) - 1);
 	
 	// also init the prefix tree
 	init_prefix_tree_from_maps();

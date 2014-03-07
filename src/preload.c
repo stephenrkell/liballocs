@@ -35,6 +35,10 @@ static const char *filename_for_fd(int fd)
 	
 	return out_buf;
 }
+#define ROUND_DOWN_TO_PAGE_SIZE(n) \
+	(assert(sysconf(_SC_PAGE_SIZE) == 4096), ((n)>>12)<<12)
+#define ROUND_UP_TO_PAGE_SIZE(n) \
+	(assert(sysconf(_SC_PAGE_SIZE) == 4096), (n) % 4096 == 0 ? (n) : ((((n) >> 12) + 1) << 12))
 
 /* NOTE that our wrappers are all init-on-use. This is because 
  * we might get called very early, and even if we're not trying to
@@ -78,11 +82,11 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		/* Add to the prefix tree */
 		if (fd != -1)
 		{
-			prefix_tree_add(ret, length, MAPPED_FILE, filename_for_fd(fd));
+			prefix_tree_add(ret, ROUND_UP_TO_PAGE_SIZE(length), MAPPED_FILE, filename_for_fd(fd));
 		}
 		else
 		{
-			prefix_tree_add(ret, length, HEAP, NULL);
+			prefix_tree_add(ret, ROUND_UP_TO_PAGE_SIZE(length), HEAP, NULL);
 		}
 	}
 	return ret;
@@ -146,18 +150,14 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 			assert(cur != NULL);
 			unsigned kind = cur->kind;
 			struct node_info saved = cur->info;
-			prefix_tree_del(old_addr, old_size);
-			prefix_tree_add_full(ret, new_size, kind, &saved);
+			prefix_tree_del(old_addr, ROUND_UP_TO_PAGE_SIZE(old_size));
+			prefix_tree_add_full(ret, ROUND_UP_TO_PAGE_SIZE(new_size), kind, &saved);
 		}
 		return ret;
 	}
 #undef orig_call
 }
 
-#define ROUND_DOWN_TO_PAGE_SIZE(n) \
-	(assert(log_page_size), (n) % page_size == 0 ? (n) : ((((n >> log_page_size) - 1)) << log_page_size))
-#define ROUND_UP_TO_PAGE_SIZE(n) \
-	(assert(log_page_size), (n) % page_size == 0 ? (n) : ((((n >> log_page_size) + 1)) << log_page_size))
 
 int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
@@ -173,11 +173,15 @@ int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 				// adjust start/end to be multiples of the page size
 				uintptr_t actual_base = (uintptr_t) info->dlpi_addr + (uintptr_t) info->dlpi_phdr[i].p_vaddr;
 				uintptr_t rounded_down_base = ROUND_DOWN_TO_PAGE_SIZE(actual_base);
+				uintptr_t rounded_up_end
+					 = ROUND_UP_TO_PAGE_SIZE(actual_base + info->dlpi_phdr[i].p_memsz);
 				// add it to the tree
-				prefix_tree_add(
+				struct prefix_tree_node *added = prefix_tree_add(
 					(void*) rounded_down_base, 
-					ROUND_UP_TO_PAGE_SIZE(actual_base + info->dlpi_phdr[i].p_memsz) - rounded_down_base, 
+					rounded_up_end - rounded_down_base,
 					STATIC, info->dlpi_name);
+				// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
+				if (added && added->kind != STATIC) added->kind = STATIC;
 			}
 		}
 		

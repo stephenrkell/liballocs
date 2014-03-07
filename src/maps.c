@@ -10,15 +10,21 @@
 #include <link.h>
 #include "libcrunch_private.h"
 
+_Bool initialized_maps __attribute__((visibility("protected")));
+
 void init_prefix_tree_from_maps(void)
 {
-	/* First use dl_iterate_phdr to check that all library mappings are in the tree 
-	 * with a STATIC kind. Since we hook dlopen(), at least from the point where we're
-	 * initialized, we should only have to do this on startup.  */
-	dl_iterate_phdr(__libcrunch_add_all_mappings_cb, NULL);
-	
-	/* Now fill in the rest from /proc. */
-	prefix_tree_add_missing_maps();
+	if (!initialized_maps)
+	{
+		/* First use dl_iterate_phdr to check that all library mappings are in the tree 
+		 * with a STATIC kind. Since we hook dlopen(), at least from the point where we're
+		 * initialized, we should only have to do this on startup.  */
+		dl_iterate_phdr(__libcrunch_add_all_mappings_cb, NULL);
+
+		/* Now fill in the rest from /proc. */
+		prefix_tree_add_missing_maps();
+		initialized_maps = 1;
+	}
 }
 
 void prefix_tree_add_missing_maps(void)
@@ -69,7 +75,8 @@ void prefix_tree_add_missing_maps(void)
 				switch (rest[0])
 				{
 					case '\0': 
-						prefix_tree_add(obj, second - first, HEAP, NULL);
+						// be sloppy, because anonymous mappings can grow without our knowledge
+						prefix_tree_add_sloppy(obj, second - first, HEAP, NULL);
 						break;
 					case '/': 
 						/* library mappings are handled in the dlopen hook, so this 
@@ -85,8 +92,8 @@ void prefix_tree_add_missing_maps(void)
 							prefix_tree_add(obj, second - first, STACK, obj);
 						}
 						else // treat it as heap
-						{
-							prefix_tree_add(obj, second - first, HEAP, NULL);
+						{	// be sloppy because the heap grows
+							prefix_tree_add_sloppy(obj, second - first, HEAP, NULL);
 						}
 						break;
 					default:
