@@ -21,6 +21,7 @@
 /* We should be safe to use it once malloc is initialized. */
 // #define safe_to_use_prefix_tree (__libcrunch_is_initialized)
 #define safe_to_use_prefix_tree (l0index)
+#define safe_to_call_dlsym (safe_to_call_malloc)
 
 static const char *filename_for_fd(int fd)
 {
@@ -35,10 +36,6 @@ static const char *filename_for_fd(int fd)
 	
 	return out_buf;
 }
-#define ROUND_DOWN_TO_PAGE_SIZE(n) \
-	(assert(sysconf(_SC_PAGE_SIZE) == 4096), ((n)>>12)<<12)
-#define ROUND_UP_TO_PAGE_SIZE(n) \
-	(assert(sysconf(_SC_PAGE_SIZE) == 4096), (n) % 4096 == 0 ? (n) : ((((n) >> 12) + 1) << 12))
 
 /* NOTE that our wrappers are all init-on-use. This is because 
  * we might get called very early, and even if we're not trying to
@@ -63,7 +60,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	 * in these cases.
 	 */
 
-	if (!safe_to_use_prefix_tree)
+	if (!safe_to_use_prefix_tree || !safe_to_call_dlsym)
 	{
 		// call via syscall
 		return (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
@@ -109,7 +106,7 @@ int munmap(void *addr, size_t length)
 		int ret = orig_munmap(addr, length);
 		if (ret == 0)
 		{
-			prefix_tree_del(addr, length);
+			prefix_tree_del(addr, ROUND_UP_TO_PAGE_SIZE(length));
 		}
 		return ret;
 	}

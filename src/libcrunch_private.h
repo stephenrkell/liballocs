@@ -17,6 +17,10 @@
 extern uintptr_t page_size __attribute__((visibility("protected")));
 extern uintptr_t log_page_size __attribute__((visibility("protected")));
 extern uintptr_t page_mask __attribute__((visibility("protected")));
+#define ROUND_DOWN_TO_PAGE_SIZE(n) \
+	(assert(sysconf(_SC_PAGE_SIZE) == 4096), ((n)>>12)<<12)
+#define ROUND_UP_TO_PAGE_SIZE(n) \
+	(assert(sysconf(_SC_PAGE_SIZE) == 4096), (n) % 4096 == 0 ? (n) : ((((n) >> 12) + 1) << 12))
 
 /* We use this prefix tree to map the address space. */
 enum node_info_kind { DATA_PTR, INS_AND_BITS };
@@ -35,7 +39,8 @@ struct node_info
 		} ins_and_bits;
 	} un;
 };
-extern unsigned char *l0index __attribute__((visibility("protected")));
+typedef uint16_t mapping_num_t;
+mapping_num_t *l0index __attribute__((visibility("protected")));
 extern _Bool initialized_maps __attribute__((visibility("protected")));
 struct prefix_tree_node {
 	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC
