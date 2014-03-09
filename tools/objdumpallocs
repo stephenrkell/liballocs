@@ -128,14 +128,15 @@ case "$filetype" in
 esac
 
 line_regexp='^([0-9a-f]*) <([^>]*)>'
-alloc_descriptors="${LIBCRUNCH_ALLOC_FNS:-malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p}"
+alloc_descriptors="${LIBCRUNCH_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p"
 suballoc_descriptors="${LIBCRUNCH_SUBALLOC_FNS:-}"
 all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}"
+echo "all_alloc_descriptors is: $all_alloc_descriptors" 1>&2
 alloc_site_regexp="${line_regexp}.*call.*(<($( 
     echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc' | \
     make_match_any_line_floating_eregexp )|$( 
     echo -n "${all_alloc_descriptors}" | \
-        sed 's/\([a-zA-Z0-9_]\+\)([^)]*)[a-zA-Z]\?\( \+\|$\)/\1\n__wrap_\1\n/g' | \
+        sed -r 's/([a-zA-Z0-9_]+)\([^\)]*\)[a-zA-Z]?( +|$)/\1\n__wrap_\1\n/g' | \
     make_match_any_line_floating_eregexp ))|.*\*)"
 # HACK: if libcrunch_alloc_fns is unset, use "malloc" a second time
 # (leaving this out will make the regexp end "|)" so match all calls)
