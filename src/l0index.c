@@ -26,6 +26,17 @@ struct mapping mappings[NMAPPINGS]; // NOTE: we *don't* use mappings[0]; the 0 b
 // mappings over 4GB in size are assumed to be memtables and are ignored
 #define BIGGEST_MAPPING (1ull<<32) 
 
+#define SANITY_CHECK_MAPPING(m) \
+	do { \
+		if (MAPPING_IN_USE((m))) { \
+			for (unsigned long i = pagenum((m)->begin); i < pagenum((m)->end); ++i) { \
+				assert(l0index[i] == ((m) - &mappings[0])); \
+			} \
+			assert(l0index[pagenum((m)->begin)-1] != ((m) - &mappings[0])); \
+			assert(l0index[pagenum((m)->end)] != ((m) - &mappings[0])); \
+		} \
+	} while (0)
+	
 mapping_num_t *l0index __attribute__((visibility("protected")));
 
 static void memset_mapping(mapping_num_t *begin, mapping_num_t num, size_t n)
@@ -94,6 +105,8 @@ static struct mapping *find_free_mapping(void)
 {
 	for (struct mapping *p = &mappings[1]; p < &mappings[NMAPPINGS]; ++p)
 	{
+		SANITY_CHECK_MAPPING(p);
+		
 		if (!MAPPING_IN_USE(p))
 		{
 			return p;
@@ -133,14 +146,21 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 {
 	assert((uintptr_t) base % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	assert(s % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
+
+	debug_printf(3, "%s: creating mapping base %p, size %lu, kind %u, info %p\n", 
+		__func__, base, (unsigned long) s, kind, p_info);
 	
 	/* In the case of heap regions, libc can munmap them without our seeing it. 
 	 * So, we might be surprised to find that our index is out-of-date here. 
 	 * We force a deletion if so. */
 	mapping_num_t mapping_num = l0index[pagenum(base)];
+	SANITY_CHECK_MAPPING(&mappings[mapping_num]);
+	
 	if (mapping_num != 0 && mappings[mapping_num].n.kind == 3)
 	{
 		// force an unmapping of this region
+		debug_printf(3, "%s: forcing unmapping of %p-%p, the first part of which is mapped "
+				"at number %d\n", __func__, base, (char*) base + s, mapping_num);
 		prefix_tree_del(base, s);
 	}
 	assert(is_unindexed_or_heap(base, (char*) base + s));
@@ -149,17 +169,24 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	mapping_num_t abuts_existing_start = l0index[pagenum((char*) base + s)];
 	mapping_num_t abuts_existing_end = l0index[pagenum((char*) base - 1)];
 
+	debug_printf(3, "node info is %p\n", p_info);
+	
 	debug_printf(3, "%s: abuts_existing_start: %d, abuts_existing_end: %d\n",
 			__func__, abuts_existing_start, abuts_existing_end);
 
+	_Bool kind_matches = 1;
+	_Bool node_matches = 1;
+	
 	_Bool can_coalesce_after = abuts_existing_start
-				&& mappings[abuts_existing_start].n.kind == kind
-				&& node_info_equal(&mappings[abuts_existing_start].n.info, p_info);
+				&& (kind_matches = (mappings[abuts_existing_start].n.kind == kind))
+				&& (node_matches = (node_info_equal(&mappings[abuts_existing_start].n.info, p_info)));
 	_Bool can_coalesce_before = abuts_existing_end
-				&& mappings[abuts_existing_end].n.kind == kind
-				&& node_info_equal(&mappings[abuts_existing_end].n.info, p_info);
-	debug_printf(3, "%s: can_coalesce_after: %s, can_coalesce_before: %s\n",
-			__func__, can_coalesce_after ? "true" : "false", can_coalesce_before ? "true" : "false");
+				&& (kind_matches = (mappings[abuts_existing_end].n.kind == kind))
+				&& (node_matches = (node_info_equal(&mappings[abuts_existing_end].n.info, p_info)));
+	debug_printf(3, "%s: can_coalesce_after: %s, can_coalesce_before: %s, "
+			"kind_matches: %s, node_matches: %s \n",
+			__func__, can_coalesce_after ? "true" : "false", can_coalesce_before ? "true" : "false", 
+			kind_matches ? "true": "false", node_matches ? "true": "false" );
 	
 	/* If we *both* abut a start and an end, we're coalescing 
 	 * three mappings. If so, just bump up our base and s, 
@@ -178,7 +205,10 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	{
 		debug_printf(3, "%s: post-extending existing mapping ending at %p\n", __func__,
 				mappings[abuts_existing_end].end);
+		memset_mapping(l0index + pagenum(mappings[abuts_existing_end].end), abuts_existing_end, 
+			s >> LOG_PAGE_SIZE);
 		mappings[abuts_existing_end].end = (char*) base + s;
+		SANITY_CHECK_MAPPING(&mappings[abuts_existing_end]);
 		return &mappings[abuts_existing_end];
 	}
 	if (can_coalesce_after)
@@ -186,6 +216,8 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 		debug_printf(3, "%s: pre-extending existing mapping at %p-%p\n", __func__,
 				mappings[abuts_existing_start].begin, mappings[abuts_existing_start].end);
 		mappings[abuts_existing_start].begin = (char*) base;
+		memset_mapping(l0index + pagenum(base), abuts_existing_start, s >> LOG_PAGE_SIZE);
+		SANITY_CHECK_MAPPING(&mappings[abuts_existing_start]);
 		return &mappings[abuts_existing_start];
 	}
 	
@@ -199,6 +231,8 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 		found->end = (char*) base + s;
 		found->n.kind = kind;
 		found->n.info = *p_info;
+		memset_mapping(l0index + pagenum(base), (mapping_num_t) (found - &mappings[0]), s >> LOG_PAGE_SIZE);
+		SANITY_CHECK_MAPPING(found);
 		return found;
 	}
 	
@@ -281,7 +315,7 @@ struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kin
 	uintptr_t npages = s >> LOG_PAGE_SIZE;
 
 	struct mapping *m = create_or_extend_mapping(base, s, kind, p_arg);
-	memset_mapping(l0index + first_page_num, (mapping_num_t) (m - &mappings[0]), npages);
+	SANITY_CHECK_MAPPING(m);
 	return &m->n;
 }
 
@@ -307,6 +341,9 @@ static struct mapping *split_mapping(struct mapping *m, void *split_addr)
 
 	// delete (from m) the part now covered by new_m
 	m->end = new_m->begin;
+	
+	SANITY_CHECK_MAPPING(m);
+	SANITY_CHECK_MAPPING(new_m);
 	
 	return new_m;
 }
@@ -340,6 +377,7 @@ void prefix_tree_del(void *base, size_t s)
 		mapping_num = l0index[cur_pagenum];
 		assert(mapping_num != 0);
 		struct mapping *m = &mappings[mapping_num];
+		SANITY_CHECK_MAPPING(m);
 		size_t this_mapping_size = (char*) m->end - (char*) m->begin;
 		
 		/* Do we need to chop an entry? */
@@ -376,6 +414,7 @@ void prefix_tree_del(void *base, size_t s)
 			// this mapping now ends at the unmapped base addr
 			next_addr = m->end;
 			m->end = base;
+			SANITY_CHECK_MAPPING(m);
 		}
 		else if (__builtin_expect(remaining_after, 0))
 		{
@@ -387,6 +426,7 @@ void prefix_tree_del(void *base, size_t s)
 			memset_mapping(l0index + pagenum(m->begin), 0, npages);
 			m->begin = new_begin;
 			next_addr = new_begin; // should terminate us
+			SANITY_CHECK_MAPPING(m);
 		}
 		else 
 		{
@@ -505,6 +545,7 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 				cur_num = l0index[pagenum(mappings[cur_num].end)])
 		{
 			struct mapping *m = &mappings[cur_num];
+			SANITY_CHECK_MAPPING(m);
 			
 			// on our first run, remember the lowest ptr
 			if (!lowest_bound)
@@ -528,7 +569,9 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 				// if we leave a later part of the mapping remaining, split off
 				if ((char*) m->end > chunk_end)
 				{
+					SANITY_CHECK_MAPPING(m);
 					split_mapping(m, chunk_end);
+					SANITY_CHECK_MAPPING(m);
 				}
 				
 				break;
@@ -550,6 +593,8 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 			mapping_num_t mapping_num = l0index[bottom_pagenum];
 			assert(mapping_num != 0);
 			struct mapping *m = &mappings[mapping_num];
+			SANITY_CHECK_MAPPING(m);
+			
 			assert(mappings[last_num].end == chunk_end);
 			
 			assert(m->n.info.what == DATA_PTR);
@@ -574,8 +619,15 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 			{
 				size_t s = chunk_end - (char*) m->end;
 				prefix_tree_del(m->end, s);
+				debug_printf(3, "node_info is %p\n,",&m->n.info ); 
+				debug_printf(3, "We want to extend our bottom mapping number %d (%p-%p) "
+					"to include %ld bytes from %p\n", 
+					m - &mappings[0], m->begin, m->end, s, m->end); 
+				assert(l0index[pagenum((char*) m->end - 1)] == m - &mappings[0]);
+				SANITY_CHECK_MAPPING(m);
 				struct mapping *new_m = create_or_extend_mapping(
 						m->end, s, m->n.kind, &m->n.info);
+				SANITY_CHECK_MAPPING(new_m);
 				assert(new_m == m);
 			}
 
