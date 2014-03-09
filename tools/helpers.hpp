@@ -25,11 +25,27 @@ using lib::Dwarf_Unsigned;
 
 typedef pair<string, string> uniqued_name;
 
-uniqued_name
-canonical_key_from_type(core::iterator_df<core::type_die> t);
+inline opt<string>
+name_for_type_die(core::iterator_df<core::type_die> t)
+{
+	/* Normally we just return the name. However: HACK HACK HACK. 
+	 * If it's a CIL name like __anonstruct_BLAH_nn, we erase the nn. 
+	 * This is so that we don't generate nominally distinct types 
+	 * in different compilation units. */
+	if (t.name_here() && t.name_here()->find("__anonstruct_") == 0)
+	{
+		string replacement_name = *t.name_here();
+		unsigned last_underscore_pos = replacement_name.find_last_of('_');
+		assert(last_underscore_pos && last_underscore_pos + 1 < replacement_name.length());
+		replacement_name.replace(last_underscore_pos, 
+			replacement_name.length() - last_underscore_pos, "_1");
+		return replacement_name;
+	}
+	else return *t.name_here();
+}
 
 uniqued_name
-mayalias_key_from_type(core::iterator_df<core::type_die> t);
+canonical_key_from_type(core::iterator_df<core::type_die> t);
 
 uniqued_name
 language_specific_key_from_type(core::iterator_df<core::type_die> t);

@@ -76,7 +76,7 @@ pair<bool, uniqued_name> add_type_if_absent(iterator_df<type_die> t, master_rela
 		// add the alias, if we have a name
 		if (t.name_here())
 		{
-			add_alias_if_absent(*t.name_here(), concrete_t, r);
+			add_alias_if_absent(*name_for_type_die(t), concrete_t, r);
 		}
 		return ret;
 	}
@@ -89,11 +89,11 @@ pair<bool, uniqued_name> add_type_if_absent(iterator_df<type_die> t, master_rela
 		// add the alias, if we have a name
 		if (t.name_here())
 		{
-			add_alias_if_absent(*t.name_here(), concrete_t, r);
+			add_alias_if_absent(*name_for_type_die(t), concrete_t, r);
 			/* HACK: for good measure, also ensure that we add the 
 			 * canonical C name, if the name we have is in some equivalence class. */
 			const char **c_equiv_class = abstract_c_compiler::get_equivalence_class_ptr(
-				t.name_here()->c_str());
+				name_for_type_die(t)->c_str());
 			if (c_equiv_class)
 			{
 				add_alias_if_absent(c_equiv_class[0], concrete_t, r);
@@ -112,7 +112,7 @@ void add_alias_if_absent(const string& s, iterator_df<type_die> concrete_t, mast
 	 * we also need to ignore this kind of alias here. Be careful about base types though: 
 	 * we *do* need their actual-name aliases. */
 	if (!concrete_t.is_a<base_type_die>() 
-		&& concrete_t.name_here() && s == *concrete_t.name_here()) return;
+		&& concrete_t.name_here() && s == *name_for_type_die(concrete_t)) return;
 	
 	r.aliases[concrete_t].insert(s);
 }
@@ -243,10 +243,6 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 			{
 				string name = *opt_name;
 				assert(name != "");
-				if (name == "abstract_def")
-				{
-					assert(true); // for debugging
-				}
 			}
 			add_type(i.as_a<type_die>(), rel);
 		}
@@ -579,7 +575,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			if (i_vert->second.name_here())
 			{
 				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(
-					i_vert->second.name_here()->c_str());
+					name_for_type_die(i_vert->second)->c_str());
 				if (equiv)
 				{
 					bool is_unsigned = (string(equiv[0]).find("unsigned") != string::npos);

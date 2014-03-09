@@ -180,7 +180,7 @@ int main(int argc, char **argv)
 				assert(concrete_t.is_a<base_type_die>());
 				// if the base type has no name, this DWARF type is useless to us
 				if (!concrete_t.name_here()) continue;
-				canonical_or_base_typename = *concrete_t.name_here();
+				canonical_or_base_typename = *name_for_type_die(concrete_t);
 			}
 			string codeless_symname = mangle_typename(make_pair("", canonical_or_base_typename));
 
@@ -193,11 +193,11 @@ int main(int argc, char **argv)
 			{
 				types_by_uniqtype_name.insert(
 					make_pair(
-						mangle_typename(make_pair("", *concrete_t.name_here())), 
+						mangle_typename(make_pair("", *name_for_type_die(concrete_t))), 
 						concrete_t
 					)
 				);
-				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(concrete_t.name_here()->c_str());
+				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(name_for_type_die(concrete_t)->c_str());
 				if (equiv)
 				{
 					types_by_uniqtype_name.insert(

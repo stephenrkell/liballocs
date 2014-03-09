@@ -15,17 +15,6 @@ using std::deque;
 using namespace dwarf::core;
 using dwarf::tool::abstract_c_compiler;
 
-uniqued_name
-mayalias_key_from_type(iterator_df<type_die> t)
-{
-	/* If we have a name, return our summary code and our name. */
-	if (t.name_here())
-	{
-		auto canonical_name = canonical_key_from_type(t);
-		return make_pair(canonical_name.first, *t.name_here());
-	} else return canonical_key_from_type(t);
-}
-
 string summary_code_to_string(uint32_t code)
 {
 	ostringstream summary_string_str;
@@ -98,7 +87,7 @@ all_names_for_type_t::all_names_for_type_t() :
 		assert(t.is_a<type_chain_die>());
 		deque<string> synonyms = operator()(t.as_a<type_chain_die>()->get_type());
 		// append our name at the end (less canonical)
-		synonyms.push_back(*t.name_here());
+		synonyms.push_back(*name_for_type_die(t));
 		return synonyms;
 	}),
 	base_type_case([this](iterator_df<base_type_die> t)        { 
@@ -106,7 +95,7 @@ all_names_for_type_t::all_names_for_type_t() :
 		deque<string> synonyms(1, name_for_base_type(t.as_a<base_type_die>()));
 		if (t.name_here())
 		{
-			synonyms.push_back(*t.name_here());
+			synonyms.push_back(*name_for_type_die(t));
 		}
 		return synonyms;
 	}),
@@ -254,11 +243,11 @@ all_names_for_type_t::all_names_for_type_t() :
 	}),
 	with_data_members_case([this](iterator_df<with_data_members_die> t) {
 		// we're a named struct/union/class type or an enumeration
-		return deque<string>(1, t.name_here() ? *t.name_here() : offset_to_string(t.offset_here()));
+		return deque<string>(1, t.name_here() ? *name_for_type_die(t) : offset_to_string(t.offset_here()));
 	}), 
 	default_case([this](iterator_df<type_die> t) -> deque<string> {
 		// we're probably a subrange type
-		return deque<string>(1, t.name_here() ? *t.name_here() : offset_to_string(t.offset_here()));
+		return deque<string>(1, t.name_here() ? *name_for_type_die(t) : offset_to_string(t.offset_here()));
 	})
 {} // constructor body
 
@@ -318,7 +307,7 @@ canonical_key_from_type(iterator_df<type_die> t)
 			   local data types, C++ namespaces). */
 			/* FIXME: deal with struct/union tags also (but being sensitive to language: 
 			   don't do it with C++ CUs). */
-			name_to_use = t.name_here() ? *t.name_here() : offset_to_string(t.offset_here());
+			name_to_use = t.name_here() ? *name_for_type_die(t) : offset_to_string(t.offset_here());
 		}
 // 		else // t->name_here() && t.tag_here() == DW_TAG_base_type
 // 		{
@@ -561,7 +550,7 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 		// shift in the enumeration name
 		if (concrete_t.name_here())
 		{
-			output_word << *concrete_t.name_here();
+			output_word << *name_for_type_die(concrete_t);
 		} else output_word << concrete_t.offset_here();
 		
 		// shift in the names and values of each enumerator
@@ -595,7 +584,7 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 		// shift in the name, if any
 		if (concrete_t.name_here())
 		{
-			output_word << *concrete_t.name_here();
+			output_word << *name_for_type_die(concrete_t);
 		} else output_word << concrete_t.offset_here();
 		
 		// then shift in the base type's summary code
@@ -669,7 +658,7 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 			// add in the name only
 			if (target_t.name_here())
 			{
-				tmp_output_word << *target_t.name_here();
+				tmp_output_word << *name_for_type_die(target_t);
 			} else tmp_output_word << target_t.offset_here();
 
 			target_code = tmp_output_word.val;
@@ -681,7 +670,7 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 		// add in the name
 		if (concrete_t.name_here())
 		{
-			output_word << *concrete_t.name_here();
+			output_word << *name_for_type_die(concrete_t);
 		} else output_word << concrete_t.offset_here();
 
 		// for each member 
