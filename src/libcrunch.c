@@ -628,6 +628,8 @@ unsigned long __libcrunch_succeeded;
 
 static void print_exit_summary(void)
 {
+	if (__libcrunch_begun == 0) return;
+	
 	fprintf(stderr, "libcrunch summary: \n");
 	fprintf(stderr, "checks begun:                             % 7ld\n", __libcrunch_begun);
 	fprintf(stderr, "-------------------------------------------------\n");
