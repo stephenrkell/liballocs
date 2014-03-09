@@ -54,7 +54,6 @@ def allSubFreeFns():
     else:
         return []
 
-
 def fixupDotO(filename):
     # also link the file with the uniqtypes it references
     cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
@@ -152,6 +151,13 @@ def makeDotOAndPassThrough(argv, customArgs, cInputFiles):
 
     sys.stderr.write("After making .o files, passing through arguments " + " ".join(argvToPassThrough) + "\n")
     return argvToPassThrough
+
+def findFirstUpperCase(s):
+    allLower = s.lower()
+    for i in range(0, len(s)):
+        if s[i] != allLower[i]:
+            return i
+    return -1
 
 def main():
     sys.stderr.write("crunchcc called with args  " + " ".join(sys.argv) + "\n")
@@ -269,7 +275,7 @@ def main():
                 fnSig = m.groups()[1]
                 retSig = m.groups()[2]
                 writeArgList(fnName, fnSig)
-                sizendx = fnSig.find('Z')
+                sizendx = findFirstUpperCase(fnSig)
                 if sizendx != -1:
                     # it's a size char, so flag that up
                     stubsfile.write("#define size_arg_%s make_argname(%d, %c)\n" % (fnName, sizendx, fnSig[sizendx]))
