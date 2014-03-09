@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <dwarfpp/lib.hpp>
 #include <srk31/rotate.hpp>
+#include <cxxgen/cxx_compiler.hpp>
 #include <cstdint>
 #include <iomanip>
 #include <deque>
@@ -83,8 +84,8 @@ name_for_complement_base_type(core::iterator_df<core::base_type_die> base_t);
 string 
 summary_code_to_string(uint32_t code);
 
-core::iterator_df<core::type_die>
-find_type_in_cu(core::iterator_df<core::compile_unit_die> cu, const string& name);
+// core::iterator_df<core::type_die>
+// find_type_in_cu(core::iterator_df<core::compile_unit_die> cu, const string& name);
 
 inline string mangle_spaces(const string& s)
 {

@@ -37,6 +37,7 @@ using dwarf::core::type_die;
 using dwarf::core::subprogram_die;
 using dwarf::core::compile_unit_die;
 using dwarf::core::pointer_type_die;
+using dwarf::tool::abstract_c_compiler;
 
 // regex usings
 using boost::regex;
@@ -228,6 +229,44 @@ int main(int argc, char **argv)
 				auto cu_die_name = *i_cu->get_name();
 				auto cu_comp_dir = *i_cu->get_comp_dir();
 				
+				map<string, iterator_df<type_die> > named_toplevel_types;
+				auto seq = i_cu.children_here().subseq_of<type_die>();
+				for (auto i = seq.first; i != seq.second; ++i)
+				{
+					auto t = i.base().base(); // FIXME
+					if (t.name_here())
+					{
+						if (t.is_a<core::base_type_die>())
+						{
+							const char *c_normalized_name;
+							// add the C-canonical name for now. (FIXME: avoid c-specificity!)
+							const char **c_equiv_class = abstract_c_compiler::get_equivalence_class_ptr(
+								t.name_here()->c_str());
+							if (c_equiv_class)
+							{
+								c_normalized_name = c_equiv_class[0];
+								named_toplevel_types.insert(
+									make_pair(
+										c_normalized_name,
+										t
+									)
+								);
+							}
+							// also add the language-independent canonical name
+							named_toplevel_types.insert(
+								make_pair(
+									name_for_base_type(t),
+									t
+								)
+							);
+						}
+						else
+						{
+							named_toplevel_types.insert(make_pair(*name_for_type_die(t), t));
+						}
+					}
+				}
+				
 				for (unsigned i_srcfile = 1; i_srcfile <= i_cu->source_file_count(); i_srcfile++)
 				{
 					/* Does this source file have a matching name? */
@@ -270,12 +309,13 @@ int main(int argc, char **argv)
 						}
 						else
 						{
-							found_type = find_type_in_cu(i_cu, clean_typename);
-							if (found_type/* && (
+							auto found_type_entry = named_toplevel_types.find(clean_typename);
+							if (found_type_entry != named_toplevel_types.end() /* && (
 										found_type->get_tag() == DW_TAG_base_type ||
 										(found_type->get_decl_file()
 											&& *found_type->get_decl_file() == i_srcfile))*/)
 							{
+								found_type = found_type_entry->second;
 								found_cu = i_cu;
 								found_sourcefile_path = current_sourcepath;
 								goto cu_loop_exit;
@@ -341,7 +381,7 @@ int main(int argc, char **argv)
 			<< std::hex << "0x" << i_site->first.second << std::dec << " */";
 		cout << "\n\t{ (void*)0, (void*)0, "
 			<< "(char*) " << "0" // will fix up at load time
-			<< " + " << i_site->first.second << "UL, " 
+			<< " + 0x" << std::hex << i_site->first.second << std::dec << "UL, " 
 			<< "&" << mangle_typename(i_site->second)
 			<< " }";
 	}

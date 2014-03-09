@@ -4,7 +4,6 @@
 #include <sstream>
 #include <fstream>
 #include <iomanip>
-#include <cxxgen/cxx_compiler.hpp>
 #include <srk31/algorithm.hpp>
 
 using std::cerr;
@@ -426,30 +425,30 @@ canonical_key_from_type(iterator_df<type_die> t)
 	assert(false); // should have returned by now
 }
 
-iterator_df<type_die>
-find_type_in_cu(iterator_df<compile_unit_die> cu, const string& name)
-{
-	/* For the most part, we just do named_child.
-	 * BUT, for base types, we widen the search, using our equivalence classes. */
-	for (const char **const *p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
-	{
-		for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
-		{
-			if (name == string(*p_el))
-			{
-				/* We try every element in the class */
-				for (const char **i_attempt = p_equiv[0]; *i_attempt != NULL; ++i_attempt)
-				{
-					iterator_df<type_die> found = cu.named_child(string(*i_attempt));
-					if (found != iterator_base::END) return found;
-				}
-			}
-		}
-	}
-
-	// if we got here, just try named_child
-	return iterator_df<type_die>(cu.named_child(name)); //shared_ptr<type_die>();
-}
+// iterator_df<type_die>
+// find_type_in_cu(iterator_df<compile_unit_die> cu, const string& name)
+// {
+// 	/* For the most part, we just do named_child.
+// 	 * BUT, for base types, we widen the search, using our equivalence classes. */
+// 	for (const char **const *p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
+// 	{
+// 		for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
+// 		{
+// 			if (name == string(*p_el))
+// 			{
+// 				/* We try every element in the class */
+// 				for (const char **i_attempt = p_equiv[0]; *i_attempt != NULL; ++i_attempt)
+// 				{
+// 					iterator_df<type_die> found = cu.named_child(string(*i_attempt));
+// 					if (found != iterator_base::END) return found;
+// 				}
+// 			}
+// 		}
+// 	}
+// 
+// 	// if we got here, just try named_child
+// 	return iterator_df<type_die>(cu.named_child(name)); //shared_ptr<type_die>();
+// }
 
 struct output_word_t
 {

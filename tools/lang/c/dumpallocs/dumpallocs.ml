@@ -298,6 +298,12 @@ let trim str =   if str = "" then "" else   let search_pos init p next =
     in
     String.sub str left (right - left + 1)   with   | Failure "empty" -> "" ;;
 
+(* WORKAROUND for CIL's anonymous structure types: 
+   we undo the numbering (set to 1) and hope for the best. *)
+let hackTypeName s = if (string_match (regexp "__anonstruct_.*_[0-9]+$") s 0)
+   then Str.global_replace (Str.regexp "_[0-9]+$") "_1" s
+   else s
+
 let rec stringFromSig tsig = (* = Pretty.sprint 80 (d_typsig () (getEffectiveType ts)) *)
  let rec commaSeparatedArgTs ts =
    match ts with
@@ -320,7 +326,7 @@ let rec stringFromSig tsig = (* = Pretty.sprint 80 (d_typsig () (getEffectiveTyp
  match tsig with
    TSArray(tNestedSig, optSz, attrs) -> "impossible"
  | TSPtr(tNestedSig, attrs) -> "^" ^ (stringFromSig tNestedSig)
- | TSComp(isSpecial, name, attrs) -> name
+ | TSComp(isSpecial, name, attrs) -> (hackTypeName name)
  | TSFun(returnTs, argsTss, isSpecial, attrs) -> 
       "(" ^ (commaSeparatedArgTs argsTss) ^ (if isSpecial then "..." else "") ^ ")=>" ^ (stringFromSig returnTs) 
  | TSEnum(enumName, attrs) -> enumName
