@@ -30,11 +30,14 @@ def isLinkCommand():
     # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
     return False
 
+def defaultL1AllocFns():
+    return ["malloc(Z)p", "calloc(zZ)p", "realloc(pZ)p", "memalign(zZ)p"]
+
 def allL1OrWrapperAllocFns():
     if "LIBCRUNCH_ALLOC_FNS" in os.environ:
-        return [s for s in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' ') if s != '']
+        return defaultL1AllocFns() + [s for s in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' ') if s != '']
     else:
-        return []
+        return defaultL1AllocFns()
 
 def allSubAllocFns():
     if "LIBCRUNCH_SUBALLOC_FNS" in os.environ:
