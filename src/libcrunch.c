@@ -835,7 +835,8 @@ int __libcrunch_global_init(void)
 			main_bp = (void*) (intptr_t) sp;
 		}
 	}
-	else 
+	
+	if (main_bp == 0) 
 	{
 		// underapproximate bp as our current sp!
 		debug_printf(1, "Warning: using egregious approximation for bp of main().\n");
