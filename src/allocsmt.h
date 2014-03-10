@@ -1,13 +1,13 @@
 #ifndef LIBCRUNCH_ALLOCSMT_H_
 #define LIBCRUNCH_ALLOCSMT_H_
 
-struct rec;
+struct uniqtype;
 struct allocsite_entry
 { 
 	void *next; 
 	void *prev;
 	void *allocsite; 
-	struct rec *uniqtype;
+	struct uniqtype *uniqtype;
 };
 
 /* allocsmt is a memtable lookup mainly because it's easy 

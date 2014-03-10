@@ -68,21 +68,21 @@ int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 extern __thread void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 
 /* Copied from dumptypes.cpp */
-struct rec
+struct uniqtype
 {
 	const char *name;
-	short pos_maxoff; // 16 bits
-	short neg_maxoff; // 16 bits
+	unsigned short pos_maxoff; // 16 bits
+	unsigned short neg_maxoff; // 16 bits
 	unsigned nmemb:12;         // 12 bits -- number of `contained's (always 1 if array)
 	unsigned is_array:1;       // 1 bit
 	unsigned array_len:19;     // 19 bits; 0 means undetermined length
 	struct { 
 		signed offset;
-		struct rec *ptr;
+		struct uniqtype *ptr;
 	} contained[];
 };
 
-static inline struct rec *allocsite_to_uniqtype(const void *allocsite)
+static inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite)
 {
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, allocsite);
@@ -98,7 +98,7 @@ static inline struct rec *allocsite_to_uniqtype(const void *allocsite)
 }
 
 #define maximum_vaddr_range_size (4*1024) // HACK
-static inline struct rec *vaddr_to_uniqtype(const void *vaddr)
+static inline struct uniqtype *vaddr_to_uniqtype(const void *vaddr)
 {
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)vaddr | STACK_BEGIN));
@@ -131,7 +131,7 @@ static inline struct rec *vaddr_to_uniqtype(const void *vaddr)
 #undef maximum_vaddr_range_size
 
 #define maximum_static_obj_size (64*1024) // HACK
-static inline struct rec *static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
+static inline struct uniqtype *static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 {
 	assert(__libcrunch_allocsmt != NULL);
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)static_addr | (STACK_BEGIN<<1)));

@@ -339,7 +339,7 @@ int main(int argc, char **argv)
 	// defining it under the alias name (do *not* use the other name at all!)
 	for (auto i_pair = aliases_needed.begin(); i_pair != aliases_needed.end(); ++i_pair)
 	{
-		//cout << "extern struct rec " << i_pair->first << " __attribute__((alias(\"" << i_pair->second << "\")));"
+		//cout << "extern struct uniqtype " << i_pair->first << " __attribute__((alias(\"" << i_pair->second << "\")));"
 		// 	<< endl;
 		
 		// i_pair is (orig_key_symname, (orig_substitute_key, substitute_key_with_typecode))

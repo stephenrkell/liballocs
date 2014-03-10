@@ -56,11 +56,11 @@ static void consider_blacklisting(const void *obj);
  * environment variable to add these. */
 static unsigned lazy_heap_types_count;
 static const char **lazy_heap_typenames;
-static struct rec **lazy_heap_types;
+static struct uniqtype **lazy_heap_types;
 
-static int iterate_types(void *typelib_handle, int (*cb)(struct rec *t, void *arg), void *arg);
+static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg);
 
-static int print_type_cb(struct rec *t, void *ignored)
+static int print_type_cb(struct uniqtype *t, void *ignored)
 {
 	fprintf(stderr, "uniqtype addr %p, name %s, size %d bytes\n", 
 		t, t->name, t->pos_maxoff);
@@ -68,7 +68,7 @@ static int print_type_cb(struct rec *t, void *ignored)
 	return 0;
 }
 
-static int match_typename_cb(struct rec *t, void *ignored)
+static int match_typename_cb(struct uniqtype *t, void *ignored)
 {
 	for (unsigned i = 0; i < lazy_heap_types_count; ++i)
 	{
@@ -96,7 +96,7 @@ void __libcrunch_scan_lazy_typenames(void *typelib_handle)
 	// 		// look up 
 	// 		const void *u = typestr_to_uniqtype_from_lib(typelib_handle, lazy_heap_typenames[i]);
 	// 		// if we found it, install it
-	// 		if (u) lazy_heap_types[i] = (struct rec *) u;
+	// 		if (u) lazy_heap_types[i] = (struct uniqtype *) u;
 	//	}
 	// }
 }
@@ -120,7 +120,7 @@ static ElfW(Dyn) *get_dynamic_entry_from_handle(void *handle, unsigned long tag)
 	return get_dynamic_entry_from_section(((struct link_map *) handle)->l_ld, tag);
 }
 
-static int iterate_types(void *typelib_handle, int (*cb)(struct rec *t, void *arg), void *arg)
+static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg)
 {
 	/* Don't use dladdr() to iterate -- too slow! Instead, iterate 
 	 * directly over the dynsym section. */
@@ -152,7 +152,7 @@ static int iterate_types(void *typelib_handle, int (*cb)(struct rec *t, void *ar
 			p_sym->st_shndx != SHN_UNDEF &&
 			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8))
 		{
-			struct rec *t = (struct rec *) (load_addr + p_sym->st_value);
+			struct uniqtype *t = (struct uniqtype *) (load_addr + p_sym->st_value);
 			// if our name comes out as null, we've probably done something wrong
 			if (t->name)
 			{
@@ -594,9 +594,9 @@ static void consider_blacklisting(const void *obj)
 
 static void *main_bp; // beginning of main's stack frame
 
-const struct rec *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
-const struct rec *__libcrunch_uniqtype_signed_char;
-const struct rec *__libcrunch_uniqtype_unsigned_char;
+const struct uniqtype *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
+const struct uniqtype *__libcrunch_uniqtype_signed_char;
+const struct uniqtype *__libcrunch_uniqtype_unsigned_char;
 #define LOOKUP_CALLER_TYPE(frag, caller) /* FIXME: use caller not RTLD_DEFAULT -- use interval tree? */ \
     ( \
 		(__libcrunch_uniqtype_ ## frag) ? __libcrunch_uniqtype_ ## frag : \
@@ -709,7 +709,7 @@ int __libcrunch_global_init(void)
 	}
 	/* Allocate and populate. */
 	lazy_heap_typenames = calloc(upper_bound, sizeof (const char *));
-	lazy_heap_types = calloc(upper_bound, sizeof (struct rec *));
+	lazy_heap_types = calloc(upper_bound, sizeof (struct uniqtype *));
 
 	// the first entry is always signed char
 	lazy_heap_typenames[0] = "signed char";
@@ -924,7 +924,7 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 	void *returned = dlsym(RTLD_DEFAULT, typestr);
 	if (!returned) return NULL;
 
-	return (struct rec *) returned;
+	return (struct uniqtype *) returned;
 }
 
 static inline 
@@ -936,7 +936,7 @@ _Bool
 	memory_kind *out_memory_kind,
 	const void **out_object_start,
 	unsigned *out_block_element_count,
-	struct rec **out_alloc_uniqtype, 
+	struct uniqtype **out_alloc_uniqtype, 
 	const void **out_alloc_site,
 	signed *out_target_offset_within_uniqtype)
 {
@@ -1089,7 +1089,7 @@ _Bool
 				 * The difficulty is in the fact that frame offsets can be
 				 * negative, i.e. arguments exist somewhere in the parent
 				 * frame. */
-				struct rec *frame_desc = vaddr_to_uniqtype((void *) ip);
+				struct uniqtype *frame_desc = vaddr_to_uniqtype((void *) ip);
 				if (!frame_desc)
 				{
 					// no frame descriptor for this frame; that's okay!
@@ -1099,7 +1099,7 @@ _Bool
 				// 2. what's the frame base? it's the higherframe stack pointer
 				unsigned char *frame_base = (unsigned char *) higherframe_sp;
 				// 3. is our candidate addr between frame-base - negoff and frame_base + posoff?
-				if ((unsigned char *) obj >= frame_base + frame_desc->neg_maxoff  // is -ve, so add it
+				if ((unsigned char *) obj >= frame_base - frame_desc->neg_maxoff  // is unsigned, so subtract
 					&& (unsigned char *) obj < frame_base + frame_desc->pos_maxoff)
 				{
 					*out_object_start = frame_base;
@@ -1111,7 +1111,7 @@ _Bool
 				{
 					// have we gone too far? we are going upwards in memory...
 					// ... so if our lowest addr is still too high
-					if (frame_base + frame_desc->neg_maxoff > (unsigned char *) obj)
+					if (frame_base - frame_desc->neg_maxoff > (unsigned char *) obj)
 					{
 						*out_reason = "stack walk reached higher frame";
 						goto abort_stack;
@@ -1183,7 +1183,7 @@ _Bool
 				 * cast we're checking is the one we assign to the . */
 				void *alloc_site = (void*)(uintptr_t)heap_info->alloc_site;
 				*out_alloc_site = alloc_site;
-				struct rec *alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
+				struct uniqtype *alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
 				*out_alloc_uniqtype = alloc_uniqtype;
 				if (!alloc_uniqtype) 
 				{
@@ -1198,7 +1198,7 @@ _Bool
 					heap_info->alloc_site_flag = 1;
 					heap_info->alloc_site = (uintptr_t) test_uniqtype;
 					*out_alloc_site = 0;
-					*out_alloc_uniqtype = (struct rec *) test_uniqtype;
+					*out_alloc_uniqtype = (struct uniqtype *) test_uniqtype;
 					goto out_success; // FIXME: we'd rather return from __is_a early right here
 				}
 				
@@ -1277,55 +1277,66 @@ out_success:
 }
 
 static inline _Bool descend_to_subobject_spanning(signed *p_target_offset_within_uniqtype,
-	struct rec **p_cur_obj_uniqtype)
+	struct uniqtype **p_cur_obj_uniqtype)
 {
-	struct rec *cur_obj_uniqtype = *p_cur_obj_uniqtype;
+	struct uniqtype *cur_obj_uniqtype = *p_cur_obj_uniqtype;
 	signed target_offset_within_uniqtype = *p_target_offset_within_uniqtype;
-	/* calculate the offset to descend to, if any */
-	unsigned num_contained = cur_obj_uniqtype->nmemb;
-	int lower_ind = 0;
-	int upper_ind = num_contained;
-	while (lower_ind + 1 < upper_ind) // difference of >= 2
+	/* Calculate the offset to descend to, if any. This is different for 
+	 * structs versus arrays. */
+	if (cur_obj_uniqtype->is_array)
 	{
-		/* Bisect the interval */
-		int bisect_ind = (upper_ind + lower_ind) / 2;
-		__libcrunch_private_assert(bisect_ind > lower_ind, "bisection progress", 
-			__FILE__, __LINE__, __func__);
-		if (cur_obj_uniqtype->contained[bisect_ind].offset > target_offset_within_uniqtype)
+		unsigned num_contained = cur_obj_uniqtype->array_len;
+		struct uniqtype *element_uniqtype = cur_obj_uniqtype->contained[0].ptr;
+		unsigned target_element_index
+		 = target_offset_within_uniqtype / element_uniqtype->pos_maxoff;
+		if (num_contained > target_element_index)
 		{
-			/* Our solution lies in the lower half of the interval */
-			upper_ind = bisect_ind;
-		} else lower_ind = bisect_ind;
+			*p_cur_obj_uniqtype = element_uniqtype;
+			*p_target_offset_within_uniqtype = target_offset_within_uniqtype % element_uniqtype->pos_maxoff;
+			return 1;
+		} else return 0;
 	}
-
-	if (lower_ind + 1 == upper_ind)
+	else // struct/union case
 	{
-		/* We found one offset */
-		__libcrunch_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset_within_uniqtype,
-			"offset underapproximates", __FILE__, __LINE__, __func__);
-		
-		*p_cur_obj_uniqtype
-		 = cur_obj_uniqtype->contained[lower_ind].ptr;
-		if (!cur_obj_uniqtype->is_array)
+		unsigned num_contained = cur_obj_uniqtype->nmemb;
+
+		int lower_ind = 0;
+		int upper_ind = num_contained;
+		while (lower_ind + 1 < upper_ind) // difference of >= 2
 		{
+			/* Bisect the interval */
+			int bisect_ind = (upper_ind + lower_ind) / 2;
+			__libcrunch_private_assert(bisect_ind > lower_ind, "bisection progress", 
+				__FILE__, __LINE__, __func__);
+			if (cur_obj_uniqtype->contained[bisect_ind].offset > target_offset_within_uniqtype)
+			{
+				/* Our solution lies in the lower half of the interval */
+				upper_ind = bisect_ind;
+			} else lower_ind = bisect_ind;
+		}
+
+		if (lower_ind + 1 == upper_ind)
+		{
+			/* We found one offset */
+			__libcrunch_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset_within_uniqtype,
+				"offset underapproximates", __FILE__, __LINE__, __func__);
+
+			*p_cur_obj_uniqtype
+			 = cur_obj_uniqtype->contained[lower_ind].ptr;
+			/* p_cur_obj_uniqtype now points to the subobject's uniqtype. 
+			 * We still have to adjust the offset. */
 			*p_target_offset_within_uniqtype
 			 = target_offset_within_uniqtype - cur_obj_uniqtype->contained[lower_ind].offset;
+
+			return 1;
 		}
-		else
+		else /* lower_ind >= upper_ind */
 		{
-			assert(cur_obj_uniqtype->contained[lower_ind].offset == 0);
-			*p_target_offset_within_uniqtype
-			 = target_offset_within_uniqtype % cur_obj_uniqtype->contained[0].ptr->pos_maxoff;
-			// - cur_obj_uniqtype->contained[lower_ind].offset;
+			// this should mean num_contained == 0
+			__libcrunch_private_assert(num_contained == 0,
+				"no contained objects", __FILE__, __LINE__, __func__);
+			return 0;
 		}
-		return 1;
-	}
-	else /* lower_ind >= upper_ind */
-	{
-		// this should mean num_contained == 0
-		__libcrunch_private_assert(num_contained == 0,
-			"no contained objects", __FILE__, __LINE__, __func__);
-		return 0;
 	}
 }
 
@@ -1336,13 +1347,13 @@ int __is_a_internal(const void *obj, const void *arg)
 	 * not a constructor, because it's not safe to call super-early). */
 	__libcrunch_check_init();
 	
-	const struct rec *test_uniqtype = (const struct rec *) arg;
+	const struct uniqtype *test_uniqtype = (const struct uniqtype *) arg;
 	const char *reason = NULL; // if we abort, set this to a string lit
 	const void *reason_ptr = NULL; // if we abort, set this to a useful address
 	memory_kind k;
 	const void *object_start;
 	unsigned block_element_count = 1;
-	struct rec *alloc_uniqtype = (struct rec *)0;
+	struct uniqtype *alloc_uniqtype = (struct uniqtype *)0;
 	const void *alloc_site;
 	signed target_offset_within_uniqtype;
 	
@@ -1359,12 +1370,22 @@ int __is_a_internal(const void *obj, const void *arg)
 	
 	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
 	
-	struct rec *cur_obj_uniqtype = alloc_uniqtype;
+	struct uniqtype *cur_obj_uniqtype = alloc_uniqtype;
 	do
 	{
-		/* If we have offset == 0, we can check at this uniqtype. */
-		if (target_offset_within_uniqtype == 0
-			&& cur_obj_uniqtype == test_uniqtype) 
+		/* If we have offset == 0, we can check at this uniqtype.
+		 * We also pass if our current object is an array of the test uniqtype
+		 * and the offset is a multiple of the array element size. 
+		 * FIXME: handle this better in descend_to_subobject_spanning? 
+		 * FIXME: we don't check the bounds of the array, but I think we 
+		 * don't have to. */
+		if (
+				(target_offset_within_uniqtype == 0
+					&& cur_obj_uniqtype == test_uniqtype) 
+			//|| (cur_obj_uniqtype->is_array 
+			//	&& cur_obj_uniqtype->contained[0].ptr == test_uniqtype
+			//	&& target_offset_within_uniqtype % cur_obj_uniqtype->contained[0].ptr->pos_maxoff == 0)
+			)
 		{
 			++__libcrunch_succeeded;
 			return 1;
@@ -1397,13 +1418,13 @@ int __like_a_internal(const void *obj, const void *arg)
 	 * not a constructor, because it's not safe to call super-early). */
 	__libcrunch_check_init();
 	
-	const struct rec *test_uniqtype = (const struct rec *) arg;
+	const struct uniqtype *test_uniqtype = (const struct uniqtype *) arg;
 	const char *reason = NULL; // if we abort, set this to a string lit
 	const void *reason_ptr = NULL; // if we abort, set this to a useful address
 	memory_kind k;
 	const void *object_start;
 	unsigned block_element_count = 1;
-	struct rec *alloc_uniqtype = (struct rec *)0;
+	struct uniqtype *alloc_uniqtype = (struct uniqtype *)0;
 	const void *alloc_site;
 	signed target_offset_within_uniqtype;
 	void *caller_address = __builtin_return_address(0);
@@ -1420,7 +1441,7 @@ int __like_a_internal(const void *obj, const void *arg)
 		&target_offset_within_uniqtype);
 	
 	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
-	struct rec *cur_obj_uniqtype = alloc_uniqtype;
+	struct uniqtype *cur_obj_uniqtype = alloc_uniqtype;
 	
 	/* Descend the subobject hierarchy until our target offset is zero, i.e. we 
 	 * find the outermost thing in the subobject tree that starts at the address

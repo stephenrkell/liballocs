@@ -604,10 +604,10 @@ int main(int argc, char **argv)
 				 << " defined in " << cu_name << ", "
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 				 
-			cout << "struct rec " << mangle_typename(make_pair(cu_name, unmangled_typename))
+			cout << "struct uniqtype " << mangle_typename(make_pair(cu_name, unmangled_typename))
 				<< " = {\n\t\"" << unmangled_typename << "\",\n\t"
 				<< frame_maxoff << " /* pos_maxoff */,\n\t"
-				<< frame_minoff << " /* neg_maxoff */,\n\t"
+				<< -frame_minoff << " /* neg_maxoff */,\n\t"
 				<< i_frame_int->second.size() << " /* nmemb */,\n\t"
 				<< "0 /* is_array */,\n\t"
 				<< "0 /* array_len */,\n\t"
@@ -660,7 +660,7 @@ int main(int argc, char **argv)
 	void *next; \n\
 	void *prev; \n\
 	void *allocsite; \n\
-	struct rec *uniqtype; \n\
+	struct uniqtype *uniqtype; \n\
 };\n";
 	cout << "struct allocsite_entry frame_vaddrs[] = {" << endl;
 
@@ -706,7 +706,7 @@ int main(int argc, char **argv)
 		++total_emitted;
 	}
 	// output a null terminator entry
-	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct rec *)0 }";
+	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 }";
 	
 	// close the list
 	cout << "\n};\n";
@@ -769,7 +769,7 @@ int main(int argc, char **argv)
 	}
 
 	// output a null terminator entry
-	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct rec *)0 }";
+	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 }";
 	
 	// close the list
 	cout << "\n};\n";

@@ -255,17 +255,17 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	std::set< std::string >& names_emitted,
 	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name)
 {
-	if (emit_struct_def) cout << "struct rec \n\
+	if (emit_struct_def) cout << "struct uniqtype \n\
 { \n\
 	const char *name; \n\
-	short pos_maxoff; \n\
-	short neg_maxoff; \n\
+	unsigned short pos_maxoff; \n\
+	unsigned short neg_maxoff; \n\
 	unsigned nmemb:12;         // 12 bits -- number of `contained's\n\
 	unsigned is_array:1;       // 1 bit\n\
 	unsigned array_len:19;\n\
 	struct { \n\
 		signed offset; \n\
-		struct rec *ptr; \n\
+		struct uniqtype *ptr; \n\
 	} contained[]; \n\
 };\n";
 
@@ -281,7 +281,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	{
 		/* DWARF doesn't reify void, but we do. So output a rec for void first of all. */
 		out << "\n/* uniqtype for void */\n";
-		out << "struct rec " << mangle_typename(make_pair(string(""), string("void")))
+		out << "struct uniqtype " << mangle_typename(make_pair(string(""), string("void")))
 			<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
 			<< " = {\n\t\"" << "void" << "\",\n\t"
 			<< "0" << " /* pos_maxoff (void) */,\n\t"
@@ -326,7 +326,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			}
 		}
 		
-		out << "extern struct rec " << s << ";" << endl;
+		out << "extern struct uniqtype " << s << ";" << endl;
 	}
 	/* Declare any signedness-complement base types that we didn't see. 
 	 * We will emit these specially. */
@@ -372,7 +372,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		);
 		string s = mangle_typename(k);
 
-		out << "extern struct rec " << s << ";" << endl;
+		out << "extern struct uniqtype " << s << ";" << endl;
 	}
 
 	/* Output the canonical definitions. */
@@ -419,7 +419,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			else array_len = 0;
 		} else array_len = 0;
 		string mangled_name = mangle_typename(i_vert->first);
-		out << "struct rec " << mangled_name
+		out << "struct uniqtype " << mangled_name
 			<< " __attribute__((section (\"" << ".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
 			<< " = {\n\t\"" << i_vert->first.second << "\",\n\t"
 			<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
@@ -521,7 +521,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		}
 		
 		out << "\n\t}"; /* end contained */
-		out << "\n};\n"; /* end struct rec */
+		out << "\n};\n"; /* end struct uniqtype */
 		
 		/* Output a synthetic complement if we need one. */
 		if (synthesise_complements.find(i_vert->second) != synthesise_complements.end())
@@ -539,7 +539,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				name_for_complement_base_type(i_vert->second)
 			);
 			string compl_name = mangle_typename(k);
-			out << "struct rec " << compl_name
+			out << "struct uniqtype " << compl_name
 				<< " __attribute__((section (\"" << ".data." << compl_name << ", \\\"awG\\\", @progbits, " << compl_name << ", comdat#\")))"
 				<< " = {\n\t\"" << k.second << "\",\n\t"
 				<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
@@ -551,7 +551,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				<< "{ 0, &" << mangled_name
 				<< " }";
 			out << "\n\t}"; /* end contained */
-			out << "\n};\n"; /* end struct rec */
+			out << "\n};\n"; /* end struct uniqtype */
 			
 			/* If our actual type has a C-style name, output a C-style alias for the 
 			 * complement we just output. FIXME: how *should* this work? Who consumes 
@@ -589,7 +589,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 					// equiv classes are {s, u, s, u, ...}
 					const char **compl_equiv = is_unsigned ? found_equiv[-1]  : found_equiv[+1];
 					auto complement_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
-					out << "extern struct rec " << mangle_typename(complement_name_pair)
+					out << "extern struct uniqtype " << mangle_typename(complement_name_pair)
 						<< " __attribute__((alias(\"" << mangle_typename(k) << "\")));" << endl;
 					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
 				}
@@ -601,7 +601,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			i_alias != r.aliases[i_vert->second].end();
 			++i_alias)
 		{
-			out << "extern struct rec " << mangle_typename(make_pair(i_vert->first.first, *i_alias)) 
+			out << "extern struct uniqtype " << mangle_typename(make_pair(i_vert->first.first, *i_alias)) 
 				<< " __attribute__((alias(\"" << mangle_typename(i_vert->first) << "\")));" << endl;
 			types_by_name[*i_alias].insert(i_vert->second);
 			name_pairs_by_name[*i_alias].insert(i_vert->first);
@@ -621,7 +621,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			string full_name = mangle_typename(full_name_pair);
 			pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
 			string abbrev_name = mangle_typename(abbrev_name_pair);
-			out << "extern struct rec " << abbrev_name << " __attribute__((alias(\""
+			out << "extern struct uniqtype " << abbrev_name << " __attribute__((alias(\""
 				<< cxxgen::escape(full_name) << "\")));" << endl;
 		}
 		else

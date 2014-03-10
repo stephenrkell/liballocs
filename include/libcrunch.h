@@ -5,7 +5,7 @@
 extern void warnx(const char *fmt, ...); // avoid repeating proto
 
 /* Copied from dumptypes.cpp */
-struct rec; // opaque
+struct uniqtype; // opaque
 
 extern int __libcrunch_debug_level;
 extern _Bool __libcrunch_is_initialized __attribute__((weak));
@@ -24,7 +24,7 @@ int __is_a_internal(const void *obj, const void *uniqtype) __attribute__((weak))
 int __like_a_internal(const void *obj, const void *uniqtype) __attribute__((weak));
 
 /* Uniqtypes for signed_char and unsigned_char -- we declare them as int 
- * to avoid the need to define struct rec in this header file. */
+ * to avoid the need to define struct uniqtype in this header file. */
 
 extern int __uniqtype__signed_char __attribute__((weak));
 extern int __uniqtype__unsigned_char __attribute__((weak));
