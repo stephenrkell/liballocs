@@ -175,7 +175,6 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	assert((uintptr_t) base % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	assert(s % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 
-	SANITY_CHECK_NEW_MAPPING(base, s);
 	
 	debug_printf(3, "%s: creating mapping base %p, size %lu, kind %u, info %p\n", 
 		__func__, base, (unsigned long) s, kind, p_info);
@@ -193,7 +192,6 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 				"at number %d\n", __func__, base, (char*) base + s, mapping_num);
 		prefix_tree_del(base, s);
 	}
-	assert(is_unindexed_or_heap(base, (char*) base + s));
 	
 	// test for nearby mappings to extend
 	mapping_num_t abuts_existing_start = l0index[pagenum((char*) base + s)];
@@ -204,6 +202,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	 */
 	if (kind == HEAP)
 	{
+		SANITY_CHECK_NEW_MAPPING(base, s);
 		// adjust w.r.t. abutments
 		if (abuts_existing_start 
 			&& range_overlaps_mapping(&mappings[abuts_existing_start], base, s)
@@ -245,6 +244,36 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 		
 		STRICT_SANITY_CHECK_NEW_MAPPING(base, s);
 	}
+	else if (kind == STACK)
+	{
+		/* Tolerate sharing an upper boundary with an existing mapping. */
+		mapping_num_t our_end_overlaps = l0index[pagenum((char*) base + s) - 1];
+		
+		if (our_end_overlaps)
+		{
+			_Bool contracting = base > mappings[our_end_overlaps].begin;
+			struct mapping *m = &mappings[our_end_overlaps];
+			
+			if (contracting)
+			{
+				// simply update the lower bound, do the memset, sanity check and exit
+				void *old_begin = m->begin;
+				m->begin = base;
+				assert(m->end == (char*) base + s);
+				memset_mapping(l0index + pagenum(old_begin), 0, 
+							((char*) old_begin - (char*) base) >> LOG_PAGE_SIZE);
+				SANITY_CHECK_MAPPING(m);
+				return m;
+			}
+			else // expanding
+			{
+				// set our lower bound to be flush, then continue
+				s = (char*) m->begin - (char*) base;
+			}
+		}
+		STRICT_SANITY_CHECK_NEW_MAPPING(base, s);
+	}
+	assert(is_unindexed_or_heap(base, (char*) base + s));
 	
 	debug_printf(3, "node info is %p\n", p_info);
 	
