@@ -141,12 +141,42 @@ is_unindexed_or_heap(void *begin, void *end)
 	return 0;
 }
 
+static _Bool range_overlaps_mapping(struct mapping *m, void *base, size_t s)
+{
+	return (char*) base < (char*) m->end && (char*) base + s > (char*) m->begin;
+}
+
+#define SANITY_CHECK_NEW_MAPPING(base, s) \
+	/* We have to tolerate overlaps in the case of anonymous mappings, because */ \
+	/* they come and go without our direct oversight. */ \
+	do { \
+		for (unsigned i = 1; i < NMAPPINGS; ++i) { \
+			assert(mappings[i].n.kind == HEAP || \
+				!range_overlaps_mapping(&mappings[i], (base), (s))); \
+		} \
+	} while (0)
+#define STRICT_SANITY_CHECK_NEW_MAPPING(base, s) \
+	/* Don't tolerate overlaps! */ \
+	do { \
+		for (unsigned i = 1; i < NMAPPINGS; ++i) { \
+			assert(!range_overlaps_mapping(&mappings[i], (base), (s))); \
+		} \
+	} while (0)
+
+#define MAXPTR(a, b) \
+	((((char*)(a)) > ((char*)(b))) ? (a) : (b))
+
+#define MINPTR(a, b) \
+	((((char*)(a)) < ((char*)(b))) ? (a) : (b))
+
 static
 struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, struct node_info *p_info)
 {
 	assert((uintptr_t) base % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	assert(s % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 
+	SANITY_CHECK_NEW_MAPPING(base, s);
+	
 	debug_printf(3, "%s: creating mapping base %p, size %lu, kind %u, info %p\n", 
 		__func__, base, (unsigned long) s, kind, p_info);
 	
@@ -168,7 +198,54 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	// test for nearby mappings to extend
 	mapping_num_t abuts_existing_start = l0index[pagenum((char*) base + s)];
 	mapping_num_t abuts_existing_end = l0index[pagenum((char*) base - 1)];
+	
+	/* Tolerate overlapping either of these two, if we're mapping heap (anonymous). 
+	 * We simply adjust our base and size so that we fit exactly. 
+	 */
+	if (kind == HEAP)
+	{
+		// adjust w.r.t. abutments
+		if (abuts_existing_start 
+			&& range_overlaps_mapping(&mappings[abuts_existing_start], base, s)
+			&& mappings[abuts_existing_start].n.kind == HEAP)
+		{
+			s = (char*) mappings[abuts_existing_start].begin - (char*) base;
+		}
+		if (abuts_existing_end
+			&& range_overlaps_mapping(&mappings[abuts_existing_end], base, s)
+			&& mappings[abuts_existing_start].n.kind == HEAP)
+		{
+			base = mappings[abuts_existing_end].end;
+		}
+		
+		// also adjust w.r.t. overlaps
+		mapping_num_t our_end_overlaps = l0index[pagenum((char*) base + s) - 1];
+		mapping_num_t our_begin_overlaps = l0index[pagenum((char*) base)];
 
+		if (our_end_overlaps
+			&& range_overlaps_mapping(&mappings[our_end_overlaps], base, s)
+			&& mappings[our_end_overlaps].n.kind == HEAP)
+		{
+			// move our end earlier, but not to earlier than base
+			void *cur_end = (char *) base + s;
+			void *new_end = MAXPTR(base, mappings[our_end_overlaps].begin);
+			s = (char*) new_end - (char*) base;
+		}
+		if (our_begin_overlaps
+			&& range_overlaps_mapping(&mappings[our_begin_overlaps], base, s)
+			&& mappings[our_begin_overlaps].n.kind == HEAP)
+		{
+			// move our begin later, but not to later than base + s
+			void *new_begin = MINPTR(mappings[our_begin_overlaps].begin, (char*) base + s); 
+			ptrdiff_t length_reduction = (char*) new_begin - (char*) base;
+			assert(length_reduction >= 0);
+			base = new_begin;
+			s -= length_reduction;
+		}		
+		
+		STRICT_SANITY_CHECK_NEW_MAPPING(base, s);
+	}
+	
 	debug_printf(3, "node info is %p\n", p_info);
 	
 	debug_printf(3, "%s: abuts_existing_start: %d, abuts_existing_end: %d\n",
@@ -195,7 +272,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	{
 		s += (char*) mappings[abuts_existing_start].end - (char*) mappings[abuts_existing_start].begin;
 		mappings[abuts_existing_start].begin = 
-			mappings[abuts_existing_start].begin =
+			mappings[abuts_existing_start].end =
 				NULL;
 		debug_printf(3, "%s: bumped up size to join two mappings\n", __func__);
 		can_coalesce_after = 0;
@@ -436,6 +513,7 @@ void prefix_tree_del(void *base, size_t s)
 					 - pagenum(m->begin));
 			next_addr = m->end;
 			m->begin = m->end = NULL;
+			SANITY_CHECK_MAPPING(m);
 		}
 		
 		assert((uintptr_t) m->begin % PAGE_SIZE == 0);
