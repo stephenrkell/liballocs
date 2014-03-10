@@ -89,7 +89,9 @@ void prefix_tree_add_missing_maps(void)
 					case '[':
 						if (0 == strcmp(rest, "[stack]"))
 						{
-							prefix_tree_add(obj, second - first, STACK, obj);
+							// don't need to be sloppy, because prefix_tree_add allows stack growth
+							prefix_tree_add(obj, second - first, STACK, (void*) second);
+							// NOTE that for stacks, the "obj" is the upper bound
 						}
 						else // treat it as heap
 						{	// be sloppy because the heap grows

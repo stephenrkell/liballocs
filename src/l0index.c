@@ -267,10 +267,18 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 			}
 			else // expanding
 			{
-				// set our lower bound to be flush, then continue
-				s = (char*) m->begin - (char*) base;
+				// simply update the lower bound, do the memset, sanity check and exit
+				void *old_begin = m->begin;
+				m->begin = base;
+				assert(m->end == (char*) base + s);
+				memset_mapping(l0index + pagenum(base), our_end_overlaps, 
+							((char*) old_begin - (char*) base) >> LOG_PAGE_SIZE);
+				SANITY_CHECK_MAPPING(m);
+				return m;
 			}
 		}
+		
+		// neither expanding nor contracting, so we look for strictly correct
 		STRICT_SANITY_CHECK_NEW_MAPPING(base, s);
 	}
 	assert(is_unindexed_or_heap(base, (char*) base + s));
