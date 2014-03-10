@@ -204,7 +204,7 @@ void *dlopen(const char *filename, int flag)
 	else
 	{
 		void *ret = orig_dlopen(filename, flag);
-		if (ret != NULL)
+		if (ret != NULL && !(flag & RTLD_NOLOAD))
 		{
 			__libcrunch_scan_lazy_typenames(ret);
 		
