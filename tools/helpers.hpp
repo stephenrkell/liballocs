@@ -30,10 +30,11 @@ inline opt<string>
 name_for_type_die(core::iterator_df<core::type_die> t)
 {
 	/* Normally we just return the name. However: HACK HACK HACK. 
-	 * If it's a CIL name like __anonstruct_BLAH_nn, we erase the nn. 
+	 * If it's a CIL name like __anon(struct|union)_BLAH_nn, we erase the nn. 
 	 * This is so that we don't generate nominally distinct types 
 	 * in different compilation units. */
-	if (t.name_here() && t.name_here()->find("__anonstruct_") == 0)
+	if (t.name_here() && (t.name_here()->find("__anonstruct_") == 0
+					|| (t.name_here()->find("__anonunion_") == 0)))
 	{
 		string replacement_name = *t.name_here();
 		unsigned last_underscore_pos = replacement_name.find_last_of('_');
