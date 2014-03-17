@@ -626,9 +626,23 @@ unsigned long __libcrunch_failed;
 unsigned long __libcrunch_failed_in_alloc;
 unsigned long __libcrunch_succeeded;
 
+static unsigned long suppression_count;
+enum check
+{
+	IS_A,
+	LIKE_A
+};
+static enum check last_suppressed_check_kind;
+
 static void print_exit_summary(void)
 {
 	if (__libcrunch_begun == 0) return;
+	
+	if (suppression_count > 0)
+	{
+		debug_printf(0, "Suppressed %d further occurrences of the previous error\n", 
+				suppression_count);
+	}
 	
 	fprintf(stderr, "libcrunch summary: \n");
 	fprintf(stderr, "checks begun:                             % 7ld\n", __libcrunch_begun);
@@ -1401,12 +1415,42 @@ int __is_a_internal(const void *obj, const void *arg)
 	else
 	{
 		++__libcrunch_failed;
-		debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
-			obj, test_uniqtype, test_uniqtype->name,
-			__builtin_return_address(0), // make sure our *caller*, if any, is inlined
-			name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
-			alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
-			alloc_site);
+		
+		static const void *last_failed_site;
+		static const void *last_failed_object;
+		static const struct uniqtype *last_failed_test_type;
+		
+		if (last_failed_site == __builtin_return_address(0)
+				&& last_failed_object == obj
+				&& last_failed_test_type == test_uniqtype
+				&& last_suppressed_check_kind == IS_A)
+		{
+			++suppression_count;
+		}
+		else
+		{
+			if (suppression_count > 0)
+			{
+			debug_printf(0, "Suppressed %d further occurrences of the previous error\n", 
+					suppression_count);
+			}
+			
+			debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, "
+					"%d bytes into an allocation of a %s%s%s "
+					"(deepest subobject: %s at offset %d) "
+					"originating at %p\n", 
+				obj, test_uniqtype, test_uniqtype->name,
+				__builtin_return_address(0), // make sure our *caller*, if any, is inlined
+				(char*) obj - (char*) object_start,
+				name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
+				alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
+				(cur_obj_uniqtype ? cur_obj_uniqtype->name : "(none)"), target_offset_within_uniqtype, 
+				alloc_site);
+			last_failed_site = __builtin_return_address(0);
+			last_failed_object = obj;
+			last_failed_test_type = test_uniqtype;
+			suppression_count = 0;
+		}
 	}
 	return 1; // HACK: so that the program will continue
 }
