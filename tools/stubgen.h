@@ -2,10 +2,17 @@
 #include <assert.h>
 #include <stdio.h>
 
+#ifndef NO_TLS
 extern __thread void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 extern __thread void *__current_allocfn __attribute__((weak)); // defined by heap_index_hooks
 extern __thread size_t __current_allocsz __attribute__((weak)); // defined by heap_index_hooks
 extern __thread int __currently_freeing __attribute__((weak)); // defined by heap_index_hooks
+#else // DOUBLE HACK: make weak *definitions* here
+void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
+void *__current_allocfn __attribute__((weak)); // defined by heap_index_hooks
+size_t __current_allocsz __attribute__((weak)); // defined by heap_index_hooks
+int __currently_freeing __attribute__((weak)); // defined by heap_index_hooks
+#endif
 
 int  __index_deep_alloc(void *ptr, int level, unsigned size_bytes); // defined by heap_index_hooks (and libcrunch_noop)
 void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks (and libcrunch_noop)
@@ -84,6 +91,18 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks 
 			__current_allocsz = 0; \
 		} \
 		return retval; \
+	}
+
+#define make_free_wrapper(name) /* HACK: assume void-returning for now */ \
+	void ( __attribute__((weak)) __real_ ## name ) ( arglist_ ## name (make_argdecl) ); \
+	void __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
+	{ \
+		_Bool we_are_toplevel_free; \
+		if (&__currently_freeing && !__currently_freeing) we_are_toplevel_free = 1; \
+		else we_are_toplevel_free = 0; \
+		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 1; \
+		__real_ ## name( arglist_ ## name (make_argname) ); \
+		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 0; \
 	}
 
 #define make_suballocator_free_wrapper(name, alloc_name) /* HACK: assume void-returning for now */ \

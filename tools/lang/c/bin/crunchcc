@@ -48,6 +48,15 @@ def allSubAllocFns():
 def allAllocFns():
     return allL1OrWrapperAllocFns() + allSubAllocFns()
 
+def defaultFreeFns():
+    return ["free(P)"]
+
+def allFreeFns():
+    if "LIBCRUNCH_FREE_FNS" in os.environ:
+        return defaultFreeFns() + [s for s in os.environ["LIBCRUNCH_FREE_FNS"].split(' ') if s != '']
+    else:
+        return defaultFreeFns()
+
 def allSubFreeFns():
     if "LIBCRUNCH_SUBFREE_FNS" in os.environ:
         return [s for s in os.environ["LIBCRUNCH_SUBFREE_FNS"].split(' ') if s != '']
@@ -226,6 +235,11 @@ def main():
             m = re.match("(.*)\((.*)\)(->[a-zA-Z0-9_]+)", freeFn)
             fnName = m.groups()[0]
             mallocWrapArgs += ["-Wl,--wrap," + fnName]
+    for freeFn in allFreeFns():
+        if freeFn != '':
+            m = re.match("(.*)\((.*)\)", freeFn)
+            fnName = m.groups()[0]
+            mallocWrapArgs += ["-Wl,--wrap," + fnName]
     
     # un-export CC from the env if it's set to crunchcc, because 
     # we don't want to recursively cruchcc the -uniqtypes.c files
@@ -284,7 +298,7 @@ def main():
                 else:
                     stubsfile.write("make_suballocator_alloc_wrapper(%s, %s)\n" % (fnName, retSig))
                 stubsfile.flush()
-            # also do free wrappers
+            # also do subfree wrappers
             for freeFn in allSubFreeFns():
                 m = re.match("(.*)\((.*)\)(->([a-zA-Z0-9_]+))", freeFn)
                 fnName = m.groups()[0]
@@ -297,9 +311,22 @@ def main():
                 writeArgList(fnName, fnSig)
                 stubsfile.write("make_suballocator_free_wrapper(%s, %s)\n" % (fnName, allocFnName))
                 stubsfile.flush()
+            # also do free (non-sub) -wrappers
+            for freeFn in allFreeFns():
+                m = re.match("(.*)\((.*)\)", freeFn)
+                fnName = m.groups()[0]
+                fnSig = m.groups()[1]
+                ptrndx = fnSig.find('P')
+                if ptrndx != -1:
+                    # it's a ptr, so flag that up
+                    stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
+                writeArgList(fnName, fnSig)
+                stubsfile.write("make_free_wrapper(%s)\n" % fnName)
+                stubsfile.flush()
             # now we compile the C file ourselves, rather than cilly doing it, 
             # because it's a special magic stub
             stubs_bin = os.path.splitext(stubsfile.name)[0] + ".o"
+            # FIXME: we *should* pass through some options here, like -DNO_TLS
             stubs_cmd = ["cc", "-save-temps", "-g", "-c", "-o", stubs_bin, \
                 "-I" + os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
                 stubsfile.name]
