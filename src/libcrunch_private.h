@@ -65,7 +65,11 @@ int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
       warnx( __VA_ARGS__ );  \
     } \
   } while (0)
+#ifndef NO_TLS
 extern __thread void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
+#else
+extern void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
+#endif
 
 /* Copied from dumptypes.cpp */
 struct uniqtype
