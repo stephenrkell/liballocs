@@ -74,6 +74,11 @@ void *sbrk(intptr_t incr);
 #else
 #define SHARED_LIBRARY_MIN_ADDRESS 0xb0000000
 #endif
+
+// glibc-specific HACK!
+extern void *__curbrk;
+#define CUR_BRK __curbrk
+// #define CUR_BRK (sbrk(0))
 static inline 
 enum object_memory_kind 
 (__attribute__((always_inline,gnu_inline)) get_object_memory_kind)(const void *obj)
@@ -102,7 +107,7 @@ enum object_memory_kind
 		if (__builtin_expect(addr <  (uintptr_t) __addrmap_executable_end_addr, 0)) return STATIC;
 		/* expect this to succeed, i.e. brk-delimited heap region is the common case. */
 		if (__builtin_expect(addr >=  (uintptr_t) __addrmap_executable_end_addr && addr 
-			< (uintptr_t) sbrk(0), 1)) return HEAP;
+			< (uintptr_t) CUR_BRK, 1)) return HEAP;
 #ifndef USE_STARTUP_BRK
 	}
 	else 
@@ -111,7 +116,7 @@ enum object_memory_kind
 		/* imprecise startup_brk version -- always compiled in, but usually bypassed */
 		if (__builtin_expect(addr < startup_brk, 0)) return STATIC;
 		/* expect this to succeed, i.e. brk-delimited heap region is the common case. */
-		if (__builtin_expect(addr >= startup_brk && addr < (uintptr_t) sbrk(0), 1)) return HEAP;
+		if (__builtin_expect(addr >= startup_brk && addr < (uintptr_t) CUR_BRK, 1)) return HEAP;
 #ifndef USE_STARTUP_BRK
 	}
 #endif
