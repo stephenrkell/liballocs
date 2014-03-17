@@ -75,6 +75,17 @@ void *index_max_address;
 typedef struct entry entry_type;
 void *index_begin_addr;
 void *index_end_addr;
+#ifndef LOOKUP_CACHE_SIZE
+#define LOOKUP_CACHE_SIZE 4
+#endif
+
+struct lookup_cache_entry;
+static void install_cache_entry(void *object_start,
+	size_t usable_size,
+	struct deep_entry *deep,
+	struct insert *insert);
+static void invalidate_cache_entry(void *object_start,
+	size_t usable_size);
 
 /* "Distance" is a right-shifted offset within a memory region. */
 static inline ptrdiff_t entry_to_offset(struct entry e) 
@@ -314,6 +325,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 			unsigned nbytes = 1 + ((modified_size - 1) / entry_coverage_in_bytes);
 			memset(INDEX_LOC_FOR_ADDR(new_userchunkaddr), *(char*) &l0_value, nbytes);
 			assert(IS_L0_ENTRY(INDEX_LOC_FOR_ADDR(new_userchunkaddr)));
+			assert(IS_L0_ENTRY(INDEX_LOC_FOR_ADDR((char*) new_userchunkaddr + modified_size - 1)));
 			return;
 		}
 	}
@@ -460,11 +472,15 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 
 static void *userptr_to_allocptr(void *userptr) { return userptr; }
 static void *allocptr_to_userptr(void *allocptr) { return allocptr; }
+static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);
 static inline struct insert *insert_for_chunk(void *userptr)
 {
-	return (struct trailer*) ((char*) userptr + malloc_usable_size(userptr)) - 1;
+	return insert_for_chunk_and_usable_size(userptr, malloc_usable_size(userptr)); 
 }
-
+static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, size_t usable_size)
+{
+	return (struct insert*) ((char*) userptr + usable_size) - 1;
+}
 static void 
 post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
 		size_t requested_size, size_t requested_alignment, const void *caller)
@@ -646,7 +662,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 #ifdef TRACE_HEAP_INDEX
 	fprintf(stderr, "*** Unindexing deep entry for chunk %p\n", userptr);
 #endif
-		__unindex_deep_alloc(userptr, 1);
+		__unindex_deep_alloc(userptr, 1); // invalidates cache
 		return;
 	}
 	
@@ -707,6 +723,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	/* Now that we have deleted the record, our bin should be sane,
 	 * modulo concurrent reallocs. */
 out:
+	invalidate_cache_entry(userptr, malloc_usable_size(userptr_to_allocptr(userptr)));
 	list_sanity_check(index_entry, NULL);
 }
 
@@ -755,6 +772,63 @@ static struct deep_entry *lookup_deep_alloc(void *ptr, int level_upper_bound, in
 		struct deep_entry_region **out_region, 
 		_Bool *out_seen_object_starting_earlier);
 
+#define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
+static inline _Bool find_next_nonempty_bin(struct entry **p_cur, 
+		struct entry *limit,
+		size_t *p_object_minimum_size
+		)
+{
+	// first version: just what the old loop did
+	--(*p_cur);
+	*p_object_minimum_size += entry_coverage_in_bytes;
+	
+	return *p_object_minimum_size <= BIGGEST_SENSIBLE_OBJECT && *p_cur > limit;
+
+	// FIXME: adapt http://www.int80h.org/strlen/ 
+	// or memrchr.S from eglibc
+	// to do what we want.
+}
+
+#ifndef LOOKUP_CACHE_SIZE
+#define LOOKUP_CACHE_SIZE 4
+#endif
+struct lookup_cache_entry
+{
+	void *object_start;
+	size_t usable_size;
+	struct deep_entry *deep;
+	struct insert *insert;
+} lookup_cache[LOOKUP_CACHE_SIZE];
+static struct lookup_cache_entry *next_to_evict = &lookup_cache[0];
+
+static void install_cache_entry(void *object_start,
+	size_t usable_size,
+	struct deep_entry *deep,
+	struct insert *insert)
+{
+	assert(next_to_evict <= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
+	*next_to_evict = (struct lookup_cache_entry) {
+		object_start, usable_size, deep, insert
+	}; // FIXME: thread safety
+}
+
+static void invalidate_cache_entry(void *object_start,
+	size_t usable_size)
+{
+	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
+	{
+		if (object_start == lookup_cache[i].object_start 
+				&& usable_size == lookup_cache[i].usable_size) 
+		{
+			lookup_cache[i] = (struct lookup_cache_entry) {
+				NULL, 0, NULL, NULL
+			};
+			next_to_evict = &lookup_cache[i];
+			return;
+		}
+	}
+}
+
 /* A more client-friendly lookup function. */
 struct insert *lookup_object_info(const void *mem, void **out_object_start, struct deep_entry **out_deep)
 {
@@ -764,10 +838,27 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, stru
 	   in the fast-path functions, we bail here.  */
 	if (!index_region) return NULL;
 	
+	/* Try matching in the cache. NOTE: how does this impact l0 and deep-indexed 
+	 * entries? In all cases, we cache them here. Invalidate if we deep-index
+	 * an existing allocation. */
+	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
+	{
+		if ((char*) mem >= (char*) lookup_cache[i].object_start 
+				&& (char*) mem < (char*) lookup_cache[i].object_start + lookup_cache[i].usable_size)
+		{
+			if (out_object_start) *out_object_start = lookup_cache[i].object_start;
+			if (out_deep) *out_deep = lookup_cache[i].deep;
+			// ensure we're not about to evict this guy
+			if (next_to_evict - &lookup_cache[0] == i) next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
+			return lookup_cache[i].insert;
+			// case of deep inserts means we need to store the insert ptr specially
+				//insert_for_chunk_and_usable_size(lookup_cache[i].object_start, lookup_cache[i].usable_size);
+		}
+	}
+	
 	struct entry *cur_head = INDEX_LOC_FOR_ADDR(mem);
 	size_t object_minimum_size = 0;
 
-#define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
 	// Optimisation: if we see an object
 	// in the current bucket that starts before our object, 
 	// but doesn't span the address we're searching for,
@@ -800,7 +891,9 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, stru
 			if (found)
 			{
 				if (out_deep) *out_deep = found;
-				if (out_object_start) *out_object_start = (char*) region->base_addr + (found->distance_4bytes << 2);
+				void *object_start = (char*) region->base_addr + (found->distance_4bytes << 2);
+				if (out_object_start) *out_object_start = object_start;
+				install_cache_entry(object_start, (found->size_4bytes << 2), found, &found->u_tail.ins);
 				return &found->u_tail.ins;
 			}
 			else
@@ -835,6 +928,8 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, stru
 			{
 				if (out_deep) *out_deep = NULL;
 				if (out_object_start) *out_object_start = cur_userchunk;
+				install_cache_entry(cur_userchunk, malloc_usable_size(userptr_to_allocptr(cur_userchunk)), 
+						NULL, cur_insert);
 				return cur_insert;
 			}
 			
@@ -846,8 +941,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, stru
 		
 		/* we reached the end of the list */ // FIXME: use assembly-language replacement for cur_head--
 	} while (!seen_object_starting_earlier
-		&& (object_minimum_size += entry_coverage_in_bytes,
-		cur_head-- > &index_region[0] && object_minimum_size <= BIGGEST_SENSIBLE_OBJECT));
+		&& find_next_nonempty_bin(&cur_head, &index_region[0], &object_minimum_size)); 
 	fprintf(stderr, "Heap index lookup failed with "
 		"cur_head %p, object_minimum_size %zu, seen_object_starting_earlier %d",
 		cur_head, object_minimum_size, (int) seen_object_starting_earlier);
@@ -1025,6 +1119,9 @@ static void convert_index_range_to_deep_alloc(void *start_addr, void *end_addr)
 		while (cur_userchunk)
 		{
 			struct insert *cur_insert = insert_for_chunk(cur_userchunk);
+			
+			// cache-invalidate this entry
+			invalidate_cache_entry(cur_entry, malloc_usable_size(userptr_to_allocptr(cur_userchunk)));
 
 			// build an equivalent entry in the deep space -- FIXME: thread-safety, but to be handled in grab_, not here
 			*grab_first_free_deep_entry(ind, cur_userchunk) = (struct deep_entry) {
@@ -1123,6 +1220,8 @@ void __unindex_deep_alloc(void *ptr, int level)
 	_Bool ignored;
 	struct deep_entry *found = lookup_deep_alloc(ptr, level, level, &region, &ignored);
 	assert(found);
+	invalidate_cache_entry((char*) region->base_addr + (found->distance_4bytes << 2),
+			found->size_4bytes << 2);
 	*found = (struct deep_entry) {
 		.valid = 0
 	};
