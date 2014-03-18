@@ -1,7 +1,6 @@
-CFLAGS += -std=gnu99 -g -O0 -pg -fPIC -I../include
+CFLAGS += -std=gnu99 -g -O3 -DNDEBUG -fPIC -I../include
 HEAP_INDEX_HOOKS := heap_index_fast_hooks
 #HEAP_INDEX_HOOKS := heap_index_hooks
-LDFLAGS += -pg
 
 CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
 

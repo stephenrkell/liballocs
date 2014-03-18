@@ -55,7 +55,7 @@ checkrun-%:
 	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
 	$(MAKE) cleanrun-$* 1>$$out 2>$$err && \
 		tail -n6 "$$err" | tr '\n' '\f' | \
-		grep ' 0.* 0.* 0.* 0.* 0.* [0-9]\+$$' >/dev/null || \
+		grep ' 0.* 0.* 0.* [0-9]\+.* 0.* [0-9]\+$$' >/dev/null || \
 		(tail -n20 $$err; false)
 
 # Some cases are special and require only an exit status of zero

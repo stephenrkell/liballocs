@@ -1290,8 +1290,11 @@ out_success:
 	return 0;
 }
 
-static inline _Bool descend_to_subobject_spanning(signed *p_target_offset_within_uniqtype,
-	struct uniqtype **p_cur_obj_uniqtype)
+static inline _Bool descend_to_first_subobject_spanning(
+	signed *p_target_offset_within_uniqtype,
+	struct uniqtype **p_cur_obj_uniqtype,
+	struct uniqtype **p_cur_containing_uniqtype,
+	struct contained **p_cur_contained_pos)
 {
 	struct uniqtype *cur_obj_uniqtype = *p_cur_obj_uniqtype;
 	signed target_offset_within_uniqtype = *p_target_offset_within_uniqtype;
@@ -1305,6 +1308,8 @@ static inline _Bool descend_to_subobject_spanning(signed *p_target_offset_within
 		 = target_offset_within_uniqtype / element_uniqtype->pos_maxoff;
 		if (num_contained > target_element_index)
 		{
+			*p_cur_containing_uniqtype = cur_obj_uniqtype;
+			*p_cur_contained_pos = &cur_obj_uniqtype->contained[0];
 			*p_cur_obj_uniqtype = element_uniqtype;
 			*p_target_offset_within_uniqtype = target_offset_within_uniqtype % element_uniqtype->pos_maxoff;
 			return 1;
@@ -1335,6 +1340,18 @@ static inline _Bool descend_to_subobject_spanning(signed *p_target_offset_within
 			__libcrunch_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset_within_uniqtype,
 				"offset underapproximates", __FILE__, __LINE__, __func__);
 
+			/* ... but we might not have found the *lowest* index, in the 
+			 * case of a union. Scan backwards so that we have the lowest. 
+			 * FIXME: need to account for the element size? Or here are we
+			 * ignoring padding anyway? */
+			while (lower_ind > 0 
+				&& cur_obj_uniqtype->contained[lower_ind-1].offset
+					 == cur_obj_uniqtype->contained[lower_ind].offset)
+			{
+				--lower_ind;
+			}
+			*p_cur_contained_pos = &cur_obj_uniqtype->contained[lower_ind];
+			*p_cur_containing_uniqtype = cur_obj_uniqtype;
 			*p_cur_obj_uniqtype
 			 = cur_obj_uniqtype->contained[lower_ind].ptr;
 			/* p_cur_obj_uniqtype now points to the subobject's uniqtype. 
@@ -1351,6 +1368,56 @@ static inline _Bool descend_to_subobject_spanning(signed *p_target_offset_within
 				"no contained objects", __FILE__, __LINE__, __func__);
 			return 0;
 		}
+	}
+}
+
+static inline _Bool recursively_test_subobjects(signed target_offset_within_uniqtype,
+	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype)
+{
+	if (target_offset_within_uniqtype == 0 && cur_obj_uniqtype == test_uniqtype) return 1;
+	else
+	{
+		/* We might have *multiple* subobjects spanning the offset. 
+		 * Test all of them. */
+		struct uniqtype *containing_uniqtype = NULL;
+		struct contained *contained_pos = NULL;
+		
+		signed sub_target_offset = target_offset_within_uniqtype;
+		struct uniqtype *contained_uniqtype = cur_obj_uniqtype;
+		
+		_Bool success = descend_to_first_subobject_spanning(
+			&sub_target_offset, &contained_uniqtype,
+			&containing_uniqtype, &contained_pos);
+		// now we have a *new* sub_target_offset and contained_uniqtype
+		
+		if (!success) return 0;
+		do {
+			assert(containing_uniqtype == cur_obj_uniqtype);
+			_Bool recursive_test = recursively_test_subobjects(
+					sub_target_offset,
+					contained_uniqtype, test_uniqtype);
+			if (__builtin_expect(recursive_test, 1)) return 1;
+			// else look for a later contained subobject at the same offset
+			unsigned subobj_ind = contained_pos - &containing_uniqtype->contained[0];
+			assert(subobj_ind >= 0);
+			assert(subobj_ind == 0 || subobj_ind < containing_uniqtype->nmemb);
+			if (__builtin_expect(
+					containing_uniqtype->nmemb <= subobj_ind + 1
+					|| containing_uniqtype->contained[subobj_ind + 1].offset != 
+						containing_uniqtype->contained[subobj_ind].offset,
+				1))
+			{
+				// no more subobjects at the same offset, so fail
+				return 0;
+			} 
+			else
+			{
+				contained_pos = &containing_uniqtype->contained[subobj_ind + 1];
+				contained_uniqtype = contained_pos->ptr;
+			}
+		} while (1);
+		
+		assert(0);
 	}
 }
 
@@ -1385,26 +1452,30 @@ int __is_a_internal(const void *obj, const void *arg)
 	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
 	
 	struct uniqtype *cur_obj_uniqtype = alloc_uniqtype;
-	do
+	struct uniqtype *cur_containing_uniqtype = NULL;
+	struct contained *cur_contained_pos = NULL;
+// 	do
+// 	{
+// 		/* If we have offset == 0, we can check at this uniqtype.
+// 		 * We also pass if our current object is an array of the test uniqtype
+// 		 * and the offset is a multiple of the array element size. 
+// 		 * FIXME: we don't check the bounds of the array, but I think we 
+// 		 * don't have to. */
+// 		if (target_offset_within_uniqtype == 0
+// 					&& cur_obj_uniqtype == test_uniqtype) 
+// 		{
+// 			++__libcrunch_succeeded;
+// 			return 1;
+// 		}
+// 	} while (descend_to_first_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype,
+// 			&cur_containing_uniqtype, &cur_contained_pos));
+	_Bool success = recursively_test_subobjects(target_offset_within_uniqtype, 
+			cur_obj_uniqtype, test_uniqtype);
+	if (__builtin_expect(success, 1))
 	{
-		/* If we have offset == 0, we can check at this uniqtype.
-		 * We also pass if our current object is an array of the test uniqtype
-		 * and the offset is a multiple of the array element size. 
-		 * FIXME: handle this better in descend_to_subobject_spanning? 
-		 * FIXME: we don't check the bounds of the array, but I think we 
-		 * don't have to. */
-		if (
-				(target_offset_within_uniqtype == 0
-					&& cur_obj_uniqtype == test_uniqtype) 
-			//|| (cur_obj_uniqtype->is_array 
-			//	&& cur_obj_uniqtype->contained[0].ptr == test_uniqtype
-			//	&& target_offset_within_uniqtype % cur_obj_uniqtype->contained[0].ptr->pos_maxoff == 0)
-			)
-		{
 			++__libcrunch_succeeded;
 			return 1;
-		}
-	} while (descend_to_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype));
+	}
 	
 	// if we got here, the check failed
 	if (__current_allocsite || __currently_freeing)
@@ -1458,6 +1529,8 @@ int __is_a_internal(const void *obj, const void *arg)
 /* Optimised version, for when you already know the uniqtype address. */
 int __like_a_internal(const void *obj, const void *arg)
 {
+	// FIXME: use our recursive subobject search here? HMM -- semantics are non-obvious.
+	
 	/* We might not be initialized yet (recall that __libcrunch_global_init is 
 	 * not a constructor, because it's not safe to call super-early). */
 	__libcrunch_check_init();
@@ -1486,13 +1559,17 @@ int __like_a_internal(const void *obj, const void *arg)
 	
 	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
 	struct uniqtype *cur_obj_uniqtype = alloc_uniqtype;
+	struct uniqtype *cur_containing_uniqtype = NULL;
+	struct contained *cur_contained_pos = NULL;
 	
 	/* Descend the subobject hierarchy until our target offset is zero, i.e. we 
 	 * find the outermost thing in the subobject tree that starts at the address
 	 * we were passed (obj). */
 	while (target_offset_within_uniqtype != 0)
 	{
-		_Bool success = descend_to_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype);
+		_Bool success = descend_to_first_subobject_spanning(
+				&target_offset_within_uniqtype, &cur_obj_uniqtype, &cur_containing_uniqtype,
+				&cur_contained_pos);
 		if (!success) goto like_a_failed;
 	}
 	
