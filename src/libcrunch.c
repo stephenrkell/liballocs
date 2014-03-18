@@ -645,36 +645,36 @@ static void print_exit_summary(void)
 	}
 	
 	fprintf(stderr, "libcrunch summary: \n");
-	fprintf(stderr, "checks begun:                             % 7ld\n", __libcrunch_begun);
-	fprintf(stderr, "-------------------------------------------------\n");
+	fprintf(stderr, "checks begun:                             % 9ld\n", __libcrunch_begun);
+	fprintf(stderr, "---------------------------------------------------\n");
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks aborted due to init failure:       % 7ld\n", __libcrunch_aborted_init);
+	fprintf(stderr, "checks aborted due to init failure:       % 9ld\n", __libcrunch_aborted_init);
 #endif
-	fprintf(stderr, "checks aborted for bad typename:          % 7ld\n", __libcrunch_aborted_typestr);
-	fprintf(stderr, "checks aborted for unknown storage:       % 7ld\n", __libcrunch_aborted_unknown_storage);
+	fprintf(stderr, "checks aborted for bad typename:          % 9ld\n", __libcrunch_aborted_typestr);
+	fprintf(stderr, "checks aborted for unknown storage:       % 9ld\n", __libcrunch_aborted_unknown_storage);
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks trivially passed:                  % 7ld\n", __libcrunch_trivially_succeeded);
+	fprintf(stderr, "checks trivially passed:                  % 9ld\n", __libcrunch_trivially_succeeded);
 #endif
-	fprintf(stderr, "=================================================\n");
+	fprintf(stderr, "===================================================\n");
 #ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks remaining                          % 7ld\n", __libcrunch_begun - (__libcrunch_trivially_succeeded + __libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr + __libcrunch_aborted_init));
+	fprintf(stderr, "checks remaining                          % 9ld\n", __libcrunch_begun - (__libcrunch_trivially_succeeded + __libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr + __libcrunch_aborted_init));
 #else
-	fprintf(stderr, "checks remaining                          % 7ld\n", __libcrunch_begun - (__libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr));
+	fprintf(stderr, "checks remaining                          % 9ld\n", __libcrunch_begun - (__libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr));
 #endif	
-	fprintf(stderr, "-------------------------------------------------\n");
-	fprintf(stderr, "checks handled by static case:            % 7ld\n", __libcrunch_hit_static_case);
-	fprintf(stderr, "checks handled by stack case:             % 7ld\n", __libcrunch_hit_stack_case);
-	fprintf(stderr, "checks handled by heap case:              % 7ld\n", __libcrunch_hit_heap_case);
-	fprintf(stderr, "-------------------------------------------------\n");
-	fprintf(stderr, "   of which did lazy heap type assignment:% 7ld\n", __libcrunch_lazy_heap_type_assignment);
-	fprintf(stderr, "-------------------------------------------------\n");
-	fprintf(stderr, "checks aborted for unindexed heap:        % 7ld\n", __libcrunch_aborted_unindexed_heap);
-	fprintf(stderr, "checks aborted for unknown heap allocsite:% 7ld\n", __libcrunch_aborted_unrecognised_allocsite);
-	fprintf(stderr, "checks aborted for unknown stackframes:   % 7ld\n", __libcrunch_aborted_stack);
-	fprintf(stderr, "checks aborted for unknown static obj:    % 7ld\n", __libcrunch_aborted_static);
-	fprintf(stderr, "checks failed inside allocation functions:% 7ld\n", __libcrunch_failed_in_alloc);
-	fprintf(stderr, "checks failed otherwise:                  % 7ld\n", __libcrunch_failed);
-	fprintf(stderr, "checks nontrivially passed:               % 7ld\n", __libcrunch_succeeded);
+	fprintf(stderr, "---------------------------------------------------\n");
+	fprintf(stderr, "checks handled by static case:            % 9ld\n", __libcrunch_hit_static_case);
+	fprintf(stderr, "checks handled by stack case:             % 9ld\n", __libcrunch_hit_stack_case);
+	fprintf(stderr, "checks handled by heap case:              % 9ld\n", __libcrunch_hit_heap_case);
+	fprintf(stderr, "---------------------------------------------------\n");
+	fprintf(stderr, "   of which did lazy heap type assignment:% 9ld\n", __libcrunch_lazy_heap_type_assignment);
+	fprintf(stderr, "---------------------------------------------------\n");
+	fprintf(stderr, "checks aborted for unindexed heap:        % 9ld\n", __libcrunch_aborted_unindexed_heap);
+	fprintf(stderr, "checks aborted for unknown heap allocsite:% 9ld\n", __libcrunch_aborted_unrecognised_allocsite);
+	fprintf(stderr, "checks aborted for unknown stackframes:   % 9ld\n", __libcrunch_aborted_stack);
+	fprintf(stderr, "checks aborted for unknown static obj:    % 9ld\n", __libcrunch_aborted_static);
+	fprintf(stderr, "checks failed inside allocation functions:% 9ld\n", __libcrunch_failed_in_alloc);
+	fprintf(stderr, "checks failed otherwise:                  % 9ld\n", __libcrunch_failed);
+	fprintf(stderr, "checks nontrivially passed:               % 9ld\n", __libcrunch_succeeded);
 }
 
 /* This is *not* a constructor. We don't want to be called too early,
