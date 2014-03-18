@@ -263,7 +263,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	unsigned nmemb:12;         // 12 bits -- number of `contained's\n\
 	unsigned is_array:1;       // 1 bit\n\
 	unsigned array_len:19;\n\
-	struct { \n\
+	struct contained { \n\
 		signed offset; \n\
 		struct uniqtype *ptr; \n\
 	} contained[]; \n\

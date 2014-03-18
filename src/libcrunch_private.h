@@ -80,7 +80,7 @@ struct uniqtype
 	unsigned nmemb:12;         // 12 bits -- number of `contained's (always 1 if array)
 	unsigned is_array:1;       // 1 bit
 	unsigned array_len:19;     // 19 bits; 0 means undetermined length
-	struct { 
+	struct contained { 
 		signed offset;
 		struct uniqtype *ptr;
 	} contained[];
