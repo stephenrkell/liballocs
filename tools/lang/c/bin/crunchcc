@@ -51,7 +51,7 @@ def allAllocFns():
 def defaultFreeFns():
     return ["free(P)"]
 
-def allFreeFns():
+def allL1FreeFns():
     if "LIBCRUNCH_FREE_FNS" in os.environ:
         return defaultFreeFns() + [s for s in os.environ["LIBCRUNCH_FREE_FNS"].split(' ') if s != '']
     else:
@@ -63,6 +63,28 @@ def allSubFreeFns():
     else:
         return []
 
+def allFreeFns():
+    return allL1FreeFns() + allSubFreeFns()
+
+def allWrappedSymNames():
+    syms = []
+    for allocFn in allAllocFns():
+        if allocFn != '':
+            m = re.match("(.*)\((.*)\)(.?)", allocFn)
+            fnName = m.groups()[0]
+            syms += [fnName]
+    for freeFn in allSubFreeFns():
+        if freeFn != '':
+            m = re.match("(.*)\((.*)\)(->[a-zA-Z0-9_]+)", freeFn)
+            fnName = m.groups()[0]
+            syms += [fnName]
+    for freeFn in allL1FreeFns():
+        if freeFn != '':
+            m = re.match("(.*)\((.*)\)", freeFn)
+            fnName = m.groups()[0]
+            syms += [fnName]
+    return syms
+
 def fixupDotO(filename):
     # also link the file with the uniqtypes it references
     cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
@@ -73,15 +95,10 @@ def fixupDotO(filename):
     # do we need to unbind? 
     # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
     # This is needed e.g. for SPEC benchmark bzip2
-    allocFns = []
-    for allocFn in allAllocFns():
-        if allocFn != '':
-            m = re.match("(.*)\((.*)\)(.?)", allocFn)
-            fnName = m.groups()[0]
-            allocFns += [fnName]
-    sys.stderr.write("Looking for allocation functions that need unbinding\n")
+    wrappedFns = allWrappedSymNames()
+    sys.stderr.write("Looking for wrapped functions that need unbinding\n")
     cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"" \
-        % (filename, "|".join(allocFns))
+        % (filename, "|".join(wrappedFns))
     sys.stderr.write("cmdstring is " + cmdstring + "\n")
     grep_ret = subprocess.call(["sh", "-c", cmdstring])
     if grep_ret == 0:
@@ -91,7 +108,7 @@ def fixupDotO(filename):
         # for the allocation function. We then rename these to 
         # __real_ and __wrap_ respectively. 
         sys.stderr.write("Found that we need to unbind\n")
-        unbind_pairs = [["--unbind-sym", sym] for sym in allocFns]
+        unbind_pairs = [["--unbind-sym", sym] for sym in wrappedFns]
         objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
          + [opt for pair in unbind_pairs for opt in pair] \
          + [filename])
@@ -101,22 +118,22 @@ def fixupDotO(filename):
             # one more objcopy to rename the __def_ and __ref_ symbols
             sys.stderr.write("Renaming __def_ and __ref_ alloc symbols\n")
             def_ref_args = [["--redefine-sym", "__def_" + sym + "=" + sym, \
-               "--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in allocFns]
+               "--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in wrappedFns]
             objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
              + [opt for seq in def_ref_args for opt in seq] \
              + [filename])
             if objcopy_ret != 0:
                 return objcopy_ret
     
-    sys.stderr.write("Looking for allocation functions that need globalizing\n")
+    sys.stderr.write("Looking for wrapped functions that need globalizing\n")
     # grep for local symbols -- a lower-case letter after the symname is the giveaway
     cmdstring = "nm -fposix --defined-only \"%s\" | egrep \"^(%s) [a-z] \"" \
-        % (filename, "|".join(allocFns))
+        % (filename, "|".join(wrappedFns))
     sys.stderr.write("cmdstring is %s\n" % cmdstring)
     grep_ret = subprocess.call(["sh", "-c", cmdstring])
     if grep_ret == 0:
         sys.stderr.write("Found that we need to globalize\n")
-        globalize_pairs = [["--globalize-symbol", sym] for sym in allocFns]
+        globalize_pairs = [["--globalize-symbol", sym] for sym in wrappedFns]
         objcopy_ret = subprocess.call(["objcopy"] \
          + [opt for pair in globalize_pairs for opt in pair] \
          + [filename])
@@ -225,21 +242,8 @@ def main():
     # objcopy option *if* we do symbol unbinding.
     
     mallocWrapArgs = []
-    for allocFn in allAllocFns():
-        if allocFn != '':
-            m = re.match("(.*)\((.*)\)(.?)", allocFn)
-            fnName = m.groups()[0]
-            mallocWrapArgs += ["-Wl,--wrap," + fnName]
-    for freeFn in allSubFreeFns():
-        if freeFn != '':
-            m = re.match("(.*)\((.*)\)(->[a-zA-Z0-9_]+)", freeFn)
-            fnName = m.groups()[0]
-            mallocWrapArgs += ["-Wl,--wrap," + fnName]
-    for freeFn in allFreeFns():
-        if freeFn != '':
-            m = re.match("(.*)\((.*)\)", freeFn)
-            fnName = m.groups()[0]
-            mallocWrapArgs += ["-Wl,--wrap," + fnName]
+    for sym in allWrappedSymNames():
+        mallocWrapArgs += ["-Wl,--wrap," + sym]
     
     # un-export CC from the env if it's set to crunchcc, because 
     # we don't want to recursively cruchcc the -uniqtypes.c files
@@ -312,7 +316,7 @@ def main():
                 stubsfile.write("make_suballocator_free_wrapper(%s, %s)\n" % (fnName, allocFnName))
                 stubsfile.flush()
             # also do free (non-sub) -wrappers
-            for freeFn in allFreeFns():
+            for freeFn in allL1FreeFns():
                 m = re.match("(.*)\((.*)\)", freeFn)
                 fnName = m.groups()[0]
                 fnSig = m.groups()[1]
