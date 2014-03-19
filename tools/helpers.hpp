@@ -146,6 +146,10 @@ inline std::string offset_to_string(lib::Dwarf_Off o)
 	return s.str();
 }
 
+void get_types_by_codeless_uniqtype_name(
+	std::multimap<string, dwarf::core::iterator_df<dwarf::core::type_die> >& types_by_codeless_uniqtype_name, 
+	dwarf::core::iterator_df<> begin, dwarf::core::iterator_df<> end);
+
 inline int read_allocs_line(
 	const string& str,
 	string& objname,

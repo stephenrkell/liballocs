@@ -726,3 +726,92 @@ uint32_t signedness_complement_type_summary_code(core::iterator_df<core::base_ty
 		<< byte_size << bit_size << bit_offset;
 	return output_word.val;
 }	
+
+void get_types_by_codeless_uniqtype_name(
+	std::multimap<string, iterator_df<type_die> >& m, 
+	iterator_df<> begin, iterator_df<> end)
+{	
+		
+	/* First we look through the whole file and index its types by their *codeless*
+	 * *canonical* uniqtype name, i.e. we blank out the first element of the name pair. */
+	for (iterator_df<> i = begin; i != end; ++i)
+	{
+		if (i.is_a<type_die>())
+		{
+			opt<string> opt_name = i.name_here(); // for debugging
+			if (opt_name)
+			{
+				string name = *opt_name;
+				assert(name != "");
+			}
+			
+			auto t = i.as_a<type_die>();
+			assert(t.is_real_die_position());
+			auto concrete_t = t->get_concrete_type();
+			pair<string, string> uniqtype_name_pair;
+			
+			// handle void case specially
+			if (!concrete_t.is_real_die_position())
+			{
+				uniqtype_name_pair = make_pair("", "void");
+			}
+			else
+			{
+				uniqtype_name_pair = canonical_key_from_type(t);
+			}
+
+			/* CIL/trumptr will only generate references to aliases in the case of 
+			 * base types. We need to handle these here. What should happen? 
+			 * 
+			 * - we will see references looking like __uniqtype__signed_char
+			 * - we want to link in two things:
+			 *    1. the nameless __uniqtype_<code>_ definition of this base type
+			 *    2. the alias    __uniqtype_<code>_signed_char from the usual alias handling
+			 * - we do this by indexing all our types by a *codeless* version of their
+			 *   name, then matching our inputs lines against that.
+			 * - the input lines will have signed_char instead of ""
+			 * - ... so that's what we need to put in our index.
+			 * 
+			 * IT GETS WORSE: the same is true for any typename *mentioning* a base
+			 * type! We will see references in terms of C-canonicalised base type names, 
+			 * but we will be trying to match them against language-independent names. 
+			 * It seems that we need to do a separate "C fix up" pass first.
+			 * */
+			
+			string canonical_or_base_typename = uniqtype_name_pair.second;
+			if (canonical_or_base_typename == "")
+			{
+				assert(concrete_t.is_a<base_type_die>());
+				// if the base type has no name, this DWARF type is useless to us
+				if (!concrete_t.name_here()) continue;
+				canonical_or_base_typename = *name_for_type_die(concrete_t);
+			}
+			string codeless_symname = mangle_typename(make_pair("", canonical_or_base_typename));
+
+			m.insert(make_pair(codeless_symname, concrete_t));
+
+			/* Special handling for base types: also add them by the name in which they 
+			 * appear in the DWARF, *and* by their C-canonical name. Our CIL frontend
+			 * doesn't know the exact bit-widths so must use the latter. */
+			if (concrete_t.is_a<base_type_die>() && concrete_t.name_here())
+			{
+				m.insert(
+					make_pair(
+						mangle_typename(make_pair("", *name_for_type_die(concrete_t))), 
+						concrete_t
+					)
+				);
+				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(name_for_type_die(concrete_t)->c_str());
+				if (equiv)
+				{
+					m.insert(
+						make_pair(
+							mangle_typename(make_pair("", equiv[0])), 
+							concrete_t
+						)
+					);
+				}
+			}
+		}
+	}
+}

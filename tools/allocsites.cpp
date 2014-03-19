@@ -23,6 +23,7 @@ using std::cin;
 using std::cout;
 using std::cerr;
 using std::map;
+using std::multimap;
 using std::ios;
 using std::ifstream;
 using boost::optional;
@@ -151,213 +152,214 @@ int main(int argc, char **argv)
 			}
 		}
 		//cerr << "After nonconsting, typename " << alloc_typename << " is " << nonconst_typename << endl;
-		string clean_typename;
-		
-		smatch match;
-		// HACK: we allow embedded spaces to allow "unsigned int" et al
-		const regex ident("[[:blank:]]*([a-zA-Z_][a-zA-Z0-9_ ]*)[[:blank:]]*", egrep /*std::regex::awk*/);
-		//const regex ident(" *([a-zA-Z0-9_]*) *", egrep);
-		//const boost::regex ident_ptr("[[:blank:]]*([a-zA-Z_][a-zA-Z0-9]*)(([[:blank:]]*\\*)*)[[:blank:]]*");
-		if (regex_match(nonconst_typename, match, ident))
-		{
-			clean_typename = match[0];
-		}
-		//else if (boost::regex_match(nonconst_typename, match, ident_ptr))
-		else if (regex_match(nonconst_typename, match, regex("^(\\^+)(.*)", egrep)))
-		{
-			// this is a pointer. we need to fix on a single typename for these guys,
-			// then (below) look in the dieset for an instance,
-			// and assuming it's found (FIXME: it might not be present, theoretically)
-			// generate it a unique name
-			
-			// with the new caret-based name, it's already clean! 
-			clean_typename = nonconst_typename;
-			
-// 			clean_typename = match[0];
-// 			unsigned stars_count = 0; 
-// 			size_t pos = 0; 
-// 			size_t foundpos;
-// 			string matched_string = match[1];
-// 			while ((foundpos = matched_string.find_first_of("*", pos)) != string::npos)
-// 			{
-// 				++stars_count;
-// 				++foundpos;
-// 			}
-// 			for (int i = 0; i < stars_count; ++i) clean_typename += '*';
-		}
-		else if (regex_match(nonconst_typename, match, regex("\\$FAILED\\$", egrep)))
-		{
-			cerr << "skipping unidentified type at allocsite " 
-			     << objname << "<" << symname << ">" 
-				 << "@ 0x" << std::hex << file_addr << std::dec << endl;
-			continue;
-		}
-		else
-		{
-			cerr << "warning: bad typename " << nonconst_typename 
-				<< " from " << sourcefile << ":" << line << "-" << end_line << endl;
-			continue;
-		}
+		string clean_typename = nonconst_typename;
 		boost::trim(clean_typename);
 		
 		allocsites_to_add.push_back((allocsite_to_add){ clean_typename, sourcefile, objname, file_addr });
 	} // end while read line
 	cerr << "Found " << allocsites_to_add.size() << " allocation sites" << endl;
-	
-	for (auto i_alloc = allocsites_to_add.begin(); i_alloc != allocsites_to_add.end(); ++i_alloc)
+
+	if (allocsites_to_add.size() > 0)
 	{
-		string clean_typename = i_alloc->clean_typename;
-		string sourcefile = i_alloc->sourcefile;
-		string objname = i_alloc->objname;
-		unsigned file_addr = i_alloc->file_addr;
-		
-		iterator_df<compile_unit_die> found_cu;
-		optional<string> found_sourcefile_path;
-		iterator_df<type_die> found_type;
-		/* Find a CU such that 
-		 - one of its source files is named sourcefile, taken relative to comp_dir if necessary;
-		 - that file defines a type of the name we want
-		 */ 
-		
-		std::vector<iterator_df<compile_unit_die> > embodying_cus;
-		auto cus = p_root->begin().children();
-		for (iterator_sibs<compile_unit_die> i_cu = cus.first;
-			 i_cu != cus.second; ++i_cu)
+		multimap<string, iterator_df<type_die> > types_by_codeless_name;
+		get_types_by_codeless_uniqtype_name(types_by_codeless_name,
+			p_root->begin(), p_root->end());
+
+		for (auto i_alloc = allocsites_to_add.begin(); i_alloc != allocsites_to_add.end(); ++i_alloc)
 		{
-			if (i_cu->get_name() && i_cu->get_comp_dir())
+			string type_symname = i_alloc->clean_typename;
+			string sourcefile = i_alloc->sourcefile;
+			string objname = i_alloc->objname;
+			unsigned file_addr = i_alloc->file_addr;
+
+			iterator_df<compile_unit_die> found_cu;
+			optional<string> found_sourcefile_path;
+			iterator_df<type_die> found_type;
+			/* Find a CU such that 
+			 - one of its source files is named sourcefile, taken relative to comp_dir if necessary;
+			 - that file defines a type of the name we want
+			 */ 
+
+			// look for a CU embodying this source file 
+			std::vector<iterator_df<compile_unit_die> > embodying_cus;
+			auto cus = p_root->begin().children();
+			for (iterator_sibs<compile_unit_die> i_cu = cus.first;
+				 i_cu != cus.second; ++i_cu)
 			{
-				auto cu_die_name = *i_cu->get_name();
-				auto cu_comp_dir = *i_cu->get_comp_dir();
-				
-				map<string, iterator_df<type_die> > named_toplevel_types;
-				auto seq = i_cu.children_here().subseq_of<type_die>();
-				for (auto i = seq.first; i != seq.second; ++i)
+				if (i_cu->get_name() && i_cu->get_comp_dir())
 				{
-					auto t = i.base().base(); // FIXME
-					if (t.name_here())
+					auto cu_die_name = *i_cu->get_name();
+					auto cu_comp_dir = *i_cu->get_comp_dir();
+
+	// 				auto seq = i_cu.children_here().subseq_of<type_die>();
+	// 				for (auto i = seq.first; i != seq.second; ++i)
+	// 				{
+	// 					auto t = i.base().base(); // FIXME
+	// 					if (t.name_here())
+	// 					{
+	// 						if (t.is_a<core::base_type_die>())
+	// 						{
+	// 							const char *c_normalized_name;
+	// 							// add the C-canonical name for now. (FIXME: avoid c-specificity!)
+	// 							const char **c_equiv_class = abstract_c_compiler::get_equivalence_class_ptr(
+	// 								t.name_here()->c_str());
+	// 							if (c_equiv_class)
+	// 							{
+	// 								c_normalized_name = c_equiv_class[0];
+	// 								named_toplevel_types.insert(
+	// 									make_pair(
+	// 										c_normalized_name,
+	// 										t
+	// 									)
+	// 								);
+	// 							}
+	// 							// also add the language-independent canonical name
+	// 							named_toplevel_types.insert(
+	// 								make_pair(
+	// 									name_for_base_type(t),
+	// 									t
+	// 								)
+	// 							);
+	// 						}
+	// 						else
+	// 						{
+	// 							named_toplevel_types.insert(make_pair(*name_for_type_die(t), t));
+	// 						}
+	// 					}
+	// 				}
+
+					for (unsigned i_srcfile = 1; i_srcfile <= i_cu->source_file_count(); i_srcfile++)
 					{
-						if (t.is_a<core::base_type_die>())
-						{
-							const char *c_normalized_name;
-							// add the C-canonical name for now. (FIXME: avoid c-specificity!)
-							const char **c_equiv_class = abstract_c_compiler::get_equivalence_class_ptr(
-								t.name_here()->c_str());
-							if (c_equiv_class)
-							{
-								c_normalized_name = c_equiv_class[0];
-								named_toplevel_types.insert(
-									make_pair(
-										c_normalized_name,
-										t
-									)
-								);
-							}
-							// also add the language-independent canonical name
-							named_toplevel_types.insert(
-								make_pair(
-									name_for_base_type(t),
-									t
-								)
-							);
+						/* Does this source file have a matching name? */
+						string current_sourcepath;
+						string cu_srcfile_mayberelative = i_cu->source_file_name(i_srcfile);
+						//cerr << "CU " << *i_cu->get_name() << " sourcefile " << i_srcfile << " is " <<
+						//	cu_srcfile_mayberelative << endl;
+						//if (!path(cu_srcfile_mayberelative).has_root_directory())
+						if (cu_srcfile_mayberelative.length() > 0 && cu_srcfile_mayberelative.at(0) != '/')
+						{ 
+							current_sourcepath = cu_comp_dir + '/' + cu_srcfile_mayberelative;
 						}
-						else
-						{
-							named_toplevel_types.insert(make_pair(*name_for_type_die(t), t));
+						else current_sourcepath = /*path(*/cu_srcfile_mayberelative/*)*/;
+
+						// FIXME: smarter search
+						// FIXME: look around a bit, since sizeof isn't enough to keep DIE in the object file
+						if (current_sourcepath == /*path(*/sourcefile/*)*/)
+						{ 
+							// YES this CU embodies the source file, so we can search for the type
+							embodying_cus.push_back(i_cu);
+
+							if (type_symname.size() > 0)
+							{
+								//auto found_type_entry = named_toplevel_types.find(clean_typename);
+								auto found_types = types_by_codeless_name.equal_range(type_symname);
+
+
+	// 							if (found_type_entry != named_toplevel_types.end() /* && (
+	// 										found_type->get_tag() == DW_TAG_base_type ||
+	// 										(found_type->get_decl_file()
+	// 											&& *found_type->get_decl_file() == i_srcfile))*/)
+	// 							{
+	// 								found_type = found_type_entry->second;
+	// 								found_cu = i_cu;
+	// 								found_sourcefile_path = current_sourcepath;
+	// 								goto cu_loop_exit;
+	// 							}
+
+								/* Make sure we get the version that is defined in this CU. */
+								for (auto i_found = found_types.first; i_found != found_types.second; ++i_found)
+								{
+									if (i_found->second.enclosing_cu()
+										== i_cu)
+									{
+										found_type = i_found->second;
+										// we can exit the loop now
+											
+										cerr << "Success: found a type named " << i_found->first
+											<< " in a CU named "
+											<< *i_found->second.enclosing_cu().name_here()
+											<< " == "
+											<< *i_cu.name_here()
+											<< endl;
+										goto cu_loop_exit;
+									}
+									else 
+									{
+										assert(i_found->second.enclosing_cu().offset_here()
+											!= i_cu.offset_here());
+											
+										cerr << "Found a type named " << i_found->first
+											<< " but it was defined in a CU named "
+											<< *i_found->second.enclosing_cu().name_here()
+											<< " whereas we want one named "
+											<< *i_cu.name_here()
+											<< endl;
+									}
+
+								}
+								
+								if (found_types.first == found_types.second)
+								{
+									cerr << "Found no types for symbol name "
+										<< type_symname << "; unique symbol names were: " << endl;
+									set<string> uniques;
+									for (auto i_el = types_by_codeless_name.begin();
+										i_el != types_by_codeless_name.end(); ++i_el)
+									{
+										uniques.insert(i_el->first);
+									}
+									for (auto i_el = uniques.begin();
+										i_el != uniques.end(); ++i_el)
+									{
+										if (i_el != uniques.begin()) cerr << ", ";
+										cerr << *i_el;
+									}
+								}
+								
+								/* If we fail, we will go round again, since 
+								 * we might find another CU that 
+								 * - embodies this source file, and
+								 * - contains more DWARF types. */
+
+								found_type = iterator_base::END;
+							}
 						}
 					}
 				}
-				
-				for (unsigned i_srcfile = 1; i_srcfile <= i_cu->source_file_count(); i_srcfile++)
-				{
-					/* Does this source file have a matching name? */
-					string current_sourcepath;
-					string cu_srcfile_mayberelative = i_cu->source_file_name(i_srcfile);
-					//cerr << "CU " << *i_cu->get_name() << " sourcefile " << i_srcfile << " is " <<
-					//	cu_srcfile_mayberelative << endl;
-					//if (!path(cu_srcfile_mayberelative).has_root_directory())
-					if (cu_srcfile_mayberelative.length() > 0 && cu_srcfile_mayberelative.at(0) != '/')
-					{ 
-						current_sourcepath = cu_comp_dir + '/' + cu_srcfile_mayberelative;
+			} // end for each CU
+		cu_loop_exit:
+			if (!found_type)
+			{
+				cerr << "Warning: no type named " << type_symname 
+					<< " in CUs (found " << embodying_cus.size() << ":";
+					for (auto i_cu = embodying_cus.begin(); i_cu != embodying_cus.end(); ++i_cu)
+					{
+						if (i_cu != embodying_cus.begin()) cerr << ", ";
+						cerr << *(*i_cu)->get_name();
 					}
-					else current_sourcepath = /*path(*/cu_srcfile_mayberelative/*)*/;
-					
-					// FIXME: smarter search
-					// FIXME: look around a bit, since sizeof isn't enough to keep DIE in the object file
-					if (current_sourcepath == /*path(*/sourcefile/*)*/)
-					{ 
-						// YES this CU embodies the source file, so we can search for the type
-						embodying_cus.push_back(i_cu);
-						
-						// handle pointers here
-						// HACK: find *any* pointer type,
-						// and use that, with empty sourcefile.
-						if (clean_typename.size() > 0 && *clean_typename.begin() == '^')
-						{
-							auto toplevel_pointers = i_cu.children().subseq_of<pointer_type_die>();
-							if (toplevel_pointers.first == toplevel_pointers.second)
-							{
-								cerr << "Warning: no pointer type children in CU! Trying the next one." << endl;
-								continue;
-							}
-							else
-							{
-								found_cu = i_cu;
-								found_type = toplevel_pointers.first.base().base();
-								found_sourcefile_path = current_sourcepath;
-								goto cu_loop_exit;
-							}
-						}
-						else
-						{
-							auto found_type_entry = named_toplevel_types.find(clean_typename);
-							if (found_type_entry != named_toplevel_types.end() /* && (
-										found_type->get_tag() == DW_TAG_base_type ||
-										(found_type->get_decl_file()
-											&& *found_type->get_decl_file() == i_srcfile))*/)
-							{
-								found_type = found_type_entry->second;
-								found_cu = i_cu;
-								found_sourcefile_path = current_sourcepath;
-								goto cu_loop_exit;
-							}
-							else found_type = iterator_base::END;
-						}
-					}
-				}
+					cerr << ") embodying " 
+					<< sourcefile << ":" << line << "-" << end_line
+					<< " (allocsite: " << objname 
+					<< "<" << symname << "> @" << std::hex << file_addr << std::dec << ">)" << endl;
+				continue; // next allocsite
 			}
-		} // end for each CU
-	cu_loop_exit:
-		if (!found_type)
-		{
-			cerr << "Warning: no type named " << clean_typename 
-				<< " in CUs (found " << embodying_cus.size() << ":";
-				for (auto i_cu = embodying_cus.begin(); i_cu != embodying_cus.end(); ++i_cu)
-				{
-					if (i_cu != embodying_cus.begin()) cerr << ", ";
-					cerr << *(*i_cu)->get_name();
-				}
-				cerr << ") embodying " 
-				<< sourcefile << ":" << line << "-" << end_line
-				<< " (allocsite: " << objname 
-				<< "<" << symname << "> @" << std::hex << file_addr << std::dec << ">)" << endl;
-			continue; // next allocsite
-		}
-		// now we found the type
-		//cerr << "SUCCESS: found type: " << *found_type << endl;
+			// now we found the type
+			//cerr << "SUCCESS: found type: " << *found_type << endl;
 
-		uniqued_name name_used = canonical_key_from_type(found_type);
+			uniqued_name name_used = canonical_key_from_type(found_type);
 
-		// add to the allocsites table too
-		// recall: this is the mapping from allocsites to uniqtype addrs
-		// the uniqtype addrs are given as idents, so we just have to use the same name
-		allocsites_relation.insert(
-			make_pair(
-				make_pair(objname, file_addr),
-				name_used
-			)
-		);
-	} // end for allocsite
-
+			// add to the allocsites table too
+			// recall: this is the mapping from allocsites to uniqtype addrs
+			// the uniqtype addrs are given as idents, so we just have to use the same name
+			allocsites_relation.insert(
+				make_pair(
+					make_pair(objname, file_addr),
+					name_used
+				)
+			);
+		} // end for allocsite
+	}	
+	
 	cout << "struct allocsite_entry\n\
 { \n\
 	void *next; \n\

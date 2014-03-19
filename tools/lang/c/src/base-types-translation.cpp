@@ -64,10 +64,20 @@ using boost::format_all;
 
 int main(int argc, char **argv)
 {
+	optional<string> cu_name;
+	optional<string> cu_comp_dir;
 	if (argc <= 1) 
 	{
 		cerr << "Please name an input file." << endl;
 		exit(1);
+	}
+	if (argc > 2 && strlen(argv[2]) > 0)
+	{
+		cu_name = argv[2];
+	}
+	if (argc > 3 && strlen(argv[3]) > 0)
+	{
+		cu_comp_dir = argv[3];
 	}
 	std::ifstream infstream(argv[1]);
 	assert(infstream);
@@ -87,20 +97,30 @@ int main(int argc, char **argv)
 	 * and use this to grep for symbol names containing the C name.
 	 */
 
-	for (iterator_df<> i = r.begin(); i != r.end(); ++i)
-	{
-		if (i.is_a<base_type_die>() && i.name_here())
+	auto cu_seq = r.begin().children_here().subseq_of<compile_unit_die>();
+	for (auto i_cu = cu_seq.first; i_cu != cu_seq.second; ++i_cu)
+	{	
+		// if we were passed a cu_name or comp_dir and they don't match, skip it
+		if (cu_name && *i_cu->get_name() != *cu_name) continue;
+		if (cu_comp_dir && i_cu->get_comp_dir()  && *i_cu->get_comp_dir() != *cu_comp_dir) continue;
+
+		auto i_next_cu = i_cu; ++i_next_cu;
+
+		for (iterator_df<> i = i_cu.base().base(); i != i_next_cu.base().base(); ++i)
 		{
-			const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(i.name_here()->c_str());
-			
-			if (equiv)
+			if (i.is_a<base_type_die>() && i.name_here())
 			{
-				cout << mangle_string(equiv[0]) 
-					<< "\t" 
-					<< mangle_string(name_for_base_type(i.as_a<base_type_die>()))
-					<< endl;
+				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(i.name_here()->c_str());
+
+				if (equiv)
+				{
+					cout << mangle_string(equiv[0]) 
+						<< "\t" 
+						<< mangle_string(name_for_base_type(i.as_a<base_type_die>()))
+						<< endl;
+				}
+
 			}
-			
 		}
 	}
 	return 0;

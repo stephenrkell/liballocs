@@ -68,18 +68,66 @@ let rec sizeExprHasNoSizeof (e: exp) =
  | StartOf((Var(v),o)) -> true
  | StartOf((Mem(ex),o)) -> sizeExprHasNoSizeof ex
 
+let rec decayArrayInTypesig ts = match ts with
+   TSArray(tsig, optSz, attrs) -> decayArrayInTypesig tsig (* recurse for multidim arrays *)
+ | _ -> ts
+
+let maybeDecayArrayTypesig maybeTs = match maybeTs with
+    Some(ts) -> Some(decayArrayInTypesig ts)
+  | None -> None
 
 let rec getSizeExpr (ex: exp) (env : (int * typsig) list) = 
   output_string Pervasives.stderr ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ")\n");  flush Pervasives.stderr; 
   match ex with
    |  BinOp(Mult, e1, e2, t) -> begin
          match (getSizeExpr e1 env) with
-           | Some(s1) -> Some(s1)
+           | Some(s1) -> begin match (getSizeExpr e2 env) with
+                 None -> Some(s1)
+              |  Some(s2) -> 
+                    (* Multiplying two sizeofnesses together is weird. Just 
+                       go with the first one. *)
+                    Some(s1)
+             end
            | None -> begin match (getSizeExpr e2 env) with
               | Some(s2) -> Some(s2)
               | None -> None
               end
          end
+   |  BinOp(PlusA, e1, e2, t) -> begin
+         match (getSizeExpr e1 env) with
+           | Some(s1) -> begin match (getSizeExpr e2 env) with
+                 None -> (* okay, adding character padding to a single size *)
+                    Some(s1)
+              |  Some(s2) -> begin (* If we're adding Xs to Xs, OR array of Xs to some more sizeof X, the whole
+                                expr has sizeofness X *)
+                     let decayedS1 = decayArrayInTypesig s1
+                     in 
+                     let decayedS2 = decayArrayInTypesig s2
+                     in 
+                     if decayedS1 = decayedS2 then Some(decayedS1)
+                     else
+                         (* "True composite" case. Not yet supported... *)
+                         None
+                  end
+             end
+           | None -> begin match (getSizeExpr e2 env) with
+              | Some(s2) -> Some(s2)
+              | None -> None
+              end
+         end
+   |  BinOp(Div, e1, e2, t) -> begin
+         (* We can "divide away" sizeofness e.g. by dividing sizeof (array_of_X) / (sizeof (X)) *)
+         let maybeDecayedS1 = (maybeDecayArrayTypesig (getSizeExpr e1 env))
+         in 
+         let maybeDecayedS2 = (maybeDecayArrayTypesig (getSizeExpr e2 env))
+         in
+         match (maybeDecayedS1, maybeDecayedS2) with 
+             (Some(decayed1), Some(decayed2)) -> if decayed1 = decayed2 then None (* divided away *)
+              else (* dimensionally incompatible division -- what to do? *) Some(decayed1)
+            | (Some(s), None) -> Some(s)
+            | _ -> None
+         
+      end
    |  SizeOf(t) -> Some(typeSig t)
    |  SizeOfE(e) -> Some(typeSig (typeOf e))
    |  SizeOfStr(s) -> Some(typeSig charType)
@@ -298,40 +346,54 @@ let trim str =   if str = "" then "" else   let search_pos init p next =
     in
     String.sub str left (right - left + 1)   with   | Failure "empty" -> "" ;;
 
+(* HACK: pasted from trumptr *)
+           (* The string representation needs tweaking to make it a symname:
+               - prepend "__uniqtype_" 
+               - insert the defining header file, with the usual munging for slashes, hyphens, dots, and spaces
+               - FIXME: fix up base types specially!
+               - replace '^' with '__PTR_' 
+               - replace '()=>' with '__FUN_'.
+               NOTE that arrays probably shouldn't come up here.
+
+               We can't get the declaring file/line ("location" in CIL-speak) from a typesig,
+               nor from its type -- we need the global.  *)
+
 (* WORKAROUND for CIL's anonymous structure types: 
    we undo the numbering (set to 1) and hope for the best. *)
 let hackTypeName s = if (string_match (regexp "__anon\\(struct\\|union\\|enum\\)_.*_[0-9]+$") s 0)
    then Str.global_replace (Str.regexp "_[0-9]+$") "_1" s
    else s
 
-let rec stringFromSig tsig = (* = Pretty.sprint 80 (d_typsig () (getEffectiveType ts)) *)
- let rec commaSeparatedArgTs ts =
+let rec barenameFromSig ts = 
+ let rec labelledArgTs ts startAt =
    match ts with
      [] -> ""
   | t :: morets -> 
-         let commaSeparatedRest = commaSeparatedArgTs morets
-         in
-         let stringOfT = stringFromSig t
-         in
-         if String.length commaSeparatedRest > 0 then (stringOfT ^ "," ^ commaSeparatedRest) else stringOfT
+      let remainder = (labelledArgTs morets (startAt + 1))
+      in
+      "__ARG" ^ (string_of_int startAt) ^ "_" ^ (barenameFromSig t) ^ remainder
  in
  let baseTypeStr ts = 
    let rawString = match ts with 
      TInt(kind,attrs) -> (Pretty.sprint 80 (d_ikind () kind))
    | TFloat(kind,attrs) -> (Pretty.sprint 80 (d_fkind () kind))
-   | _ -> raise(Failure "bad base type")
+   | TBuiltin_va_list(attrs) -> "__builtin_va_list"
+   | _ -> raise(Failure ("bad base type: " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_type ts))))
    in 
-   (* Str.global_replace (Str.regexp "[. /-]") "_" ( *) canonicalizeBaseTypeStr (trim rawString)(* ) *)
+   Str.global_replace (Str.regexp "[. /-]") "_" (canonicalizeBaseTypeStr (trim rawString))
  in
- match tsig with
-   TSArray(tNestedSig, optSz, attrs) -> "impossible"
- | TSPtr(tNestedSig, attrs) -> "^" ^ (stringFromSig tNestedSig)
+ match ts with
+   TSArray(tNestedSig, optSz, attrs) -> "__ARR" ^ (match optSz with Some(s) -> (string_of_int (i64_to_int s)) | None -> "0") ^ "_" ^ (barenameFromSig tNestedSig)
+ | TSPtr(tNestedSig, attrs) -> "__PTR_" ^ (barenameFromSig tNestedSig)
  | TSComp(isSpecial, name, attrs) -> (hackTypeName name)
  | TSFun(returnTs, argsTss, isSpecial, attrs) -> 
-      "(" ^ (commaSeparatedArgTs argsTss) ^ (if isSpecial then "..." else "") ^ ")=>" ^ (stringFromSig returnTs) 
+      "__FUN_FROM_" ^ (labelledArgTs argsTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (barenameFromSig returnTs) 
  | TSEnum(enumName, attrs) -> enumName
  | TSBase(TVoid(attrs)) -> "void"
  | TSBase(tbase) -> baseTypeStr tbase
+
+let symnameFromSig ts = "__uniqtype_" ^ "" ^ "_" ^ (barenameFromSig ts)
+
 
 (* I so do not understand Pretty.dprintf *)
 let printAllocFn fileAndLine chan maybeFunvar allocExpr = 
@@ -531,7 +593,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Sizeof V also lets us terminate
                  Mul where an arg is a Sizeof lets us terminate *)
               match (getAllocExpr i maybeFunvar args !sizeEnv functionTs) with
-                 Some(ts) -> printAllocFn fileAndLine chan maybeFunvar (stringFromSig ts); SkipChildren
+                 Some(ts) -> printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts); SkipChildren
               |  _ -> 
                   (* (output_string Pervasives.stderr (
                      "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
