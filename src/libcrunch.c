@@ -1077,7 +1077,7 @@ _Bool
 					unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
 					// try to get the bp, but no problem if we don't
 					unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &higherframe_bp); 
-					got_higherframe_bp = (unw_ret == 0);
+					got_higherframe_bp = (unw_ret == 0) && higherframe_bp != 0;
 				}
 				/* NOTE that -UNW_EBADREG happens near the top of the stack where 
 				 * unwind info gets patchy, so we should handle it mostly like the 
@@ -1113,7 +1113,10 @@ _Bool
 				 * negative, i.e. arguments exist somewhere in the parent
 				 * frame. */
 				// 0. if our target address is greater than higherframe_bp, continue
-				if (got_higherframe_bp && (uintptr_t) obj > higherframe_bp) continue;
+				if (got_higherframe_bp && (uintptr_t) obj > higherframe_bp)
+				{
+					continue;
+				}
 				
 				// (if our target address is *lower* than sp, we'll abandon the walk, below)
 				
