@@ -14,6 +14,13 @@ struct mapping
 	void *end;
 	struct prefix_tree_node n;
 };
+
+static struct mapping *get_mapping_from_node(struct prefix_tree_node *n)
+{
+	/* HACK: FIXME: please get rid of this stupid node-based interface. */
+	return (struct mapping *)((char*) n - offsetof(struct mapping, n));
+}
+
 /* How many mappings? 256 is a bit stingy. 
  * Each mapping is 48--64 bytes, so 4096 of them would take 256KB.
  * Maybe stick to 1024? */
@@ -22,9 +29,6 @@ struct mapping mappings[NMAPPINGS]; // NOTE: we *don't* use mappings[0]; the 0 b
 
 #define PAGE_SIZE 4096
 #define LOG_PAGE_SIZE 12
-
-// mappings over 4GB in size are assumed to be memtables and are ignored
-#define BIGGEST_MAPPING (1ull<<32) 
 
 #define SANITY_CHECK_MAPPING(m) \
 	do { \
@@ -50,13 +54,13 @@ static void memset_mapping(mapping_num_t *begin, mapping_num_t num, size_t n)
 		*begin++ = num;
 		--n;
 	}
-	assert((uintptr_t) begin % sizeof (wchar_t) == 0);
+	assert(n == 0 || (uintptr_t) begin % sizeof (wchar_t) == 0);
 	
 	// double up the value
 	wchar_t wchar_val = ((wchar_t) num) << (8 * sizeof(mapping_num_t)) | num;
 	
 	// do the memset
-	wmemset((wchar_t *) begin, wchar_val, n / 2);
+	if (n != 0) wmemset((wchar_t *) begin, wchar_val, n / 2);
 	
 	// if we missed one off the end, do it now
 	if (n % 2 == 1)
@@ -265,14 +269,17 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 				SANITY_CHECK_MAPPING(m);
 				return m;
 			}
-			else // expanding
+			else // expanding or zero-growth
 			{
 				// simply update the lower bound, do the memset, sanity check and exit
 				void *old_begin = m->begin;
 				m->begin = base;
 				assert(m->end == (char*) base + s);
-				memset_mapping(l0index + pagenum(base), our_end_overlaps, 
-							((char*) old_begin - (char*) base) >> LOG_PAGE_SIZE);
+				if (old_begin != base)
+				{
+					memset_mapping(l0index + pagenum(base), our_end_overlaps, 
+								((char*) old_begin - (char*) base) >> LOG_PAGE_SIZE);
+				}
 				SANITY_CHECK_MAPPING(m);
 				return m;
 			}
@@ -357,6 +364,9 @@ struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, co
 {
 	if (!l0index) init();
 	
+	assert(!data_ptr || kind == STACK || 
+			0 == strcmp(data_ptr, realpath_quick(data_ptr)));
+	
 	struct node_info info = { .what = DATA_PTR, .un = { data_ptr: data_ptr } };
 	return prefix_tree_add_full(base, s, kind, &info);
 }
@@ -386,21 +396,31 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 	uintptr_t begin_pagenum = pagenum(base);
 	uintptr_t current_pagenum = begin_pagenum;
 	uintptr_t end_pagenum = pagenum((char*) base + s);
-	while (current_pagenum != end_pagenum)
+	while (current_pagenum < end_pagenum)
 	{
 		uintptr_t next_indexed_pagenum = current_pagenum;
-		while (!l0index[next_indexed_pagenum] && next_indexed_pagenum < end_pagenum) { next_indexed_pagenum++;}
+		while (next_indexed_pagenum < end_pagenum && !l0index[next_indexed_pagenum])
+		{ ++next_indexed_pagenum; }
 		
 		if (next_indexed_pagenum > current_pagenum)
 		{
 			prefix_tree_add_full((void*) addr_of_pagenum(current_pagenum), 
-				(char*) addr_of_pagenum(next_indexed_pagenum) - (char*) addr_of_pagenum(current_pagenum), 
+				(char*) addr_of_pagenum(next_indexed_pagenum)
+					 - (char*) addr_of_pagenum(current_pagenum), 
 				kind, &info);
 		}
 		
 		current_pagenum = next_indexed_pagenum;
-		while (l0index[current_pagenum] && current_pagenum < end_pagenum) { current_pagenum++; }
+		// skip over any indexed bits so we're pointing at the next unindexed bit
+		while (l0index[current_pagenum] && ++current_pagenum < end_pagenum);
 	}
+}
+
+int 
+prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end)
+{
+	struct mapping *m = get_mapping_from_node(n);
+	return m->begin == begin && m->end == end;
 }
 
 struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *p_arg)
@@ -460,6 +480,17 @@ static struct mapping *split_mapping(struct mapping *m, void *split_addr)
 	SANITY_CHECK_MAPPING(new_m);
 	
 	return new_m;
+}
+
+void prefix_tree_del_node(struct prefix_tree_node *n)
+{
+	/* HACK: FIXME: please get rid of this stupid node-based interface. */
+	struct mapping *m = get_mapping_from_node(n);
+	
+	// check sanity
+	assert(l0index[pagenum(m->begin)] == m - &mappings[0]);
+	
+	prefix_tree_del(m->begin, (char*) m->end - (char*) m->begin);
 }
 
 void prefix_tree_del(void *base, size_t s)
@@ -604,6 +635,30 @@ prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_p
 	mapping_num_t mapping_num = l0index[pagenum(base)];
 	if (mapping_num == 0) return NULL;
 	else return &mappings[mapping_num].n;
+}
+
+size_t
+prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
+		size_t out_size, void *begin, void *end)
+{
+	struct prefix_tree_node **out = out_begin;
+	uintptr_t end_pagenum = pagenum(end);
+	uintptr_t begin_pagenum = pagenum(begin);
+	while (out - out_begin < out_size)
+	{
+		// look for the next mapping that overlaps: skip unmapped bits
+		while (begin_pagenum < end_pagenum && !l0index[begin_pagenum])
+		{ ++begin_pagenum; }
+		
+		if (begin_pagenum >= end_pagenum) break; // normal termination case
+		
+		mapping_num_t num = l0index[begin_pagenum];
+		*out++ = &mappings[num].n;
+		
+		// advance begin_pagenum to one past the end of this mapping
+		begin_pagenum = pagenum(mappings[num].end);
+	}
+	return out - out_begin;
 }
 
 struct prefix_tree_node *

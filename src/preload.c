@@ -33,6 +33,7 @@ static const char *filename_for_fd(int fd)
 	assert(ret > 0);
 	ret = readlink(proc_path, out_buf, sizeof out_buf);
 	assert(ret != -1);
+	out_buf[ret] = '\0';
 	
 	return out_buf;
 }
@@ -173,10 +174,11 @@ int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 				uintptr_t rounded_up_end
 					 = ROUND_UP_TO_PAGE_SIZE(actual_base + info->dlpi_phdr[i].p_memsz);
 				// add it to the tree
+				// HACK HACK HACK HACK: memory leak: please don't strdup
 				struct prefix_tree_node *added = prefix_tree_add(
 					(void*) rounded_down_base, 
 					rounded_up_end - rounded_down_base,
-					STATIC, info->dlpi_name);
+					STATIC, strdup(dynobj_name_from_dlpi_name(info->dlpi_name, (void*) info->dlpi_addr)));
 				// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
 				if (added && added->kind != STATIC) added->kind = STATIC;
 			}

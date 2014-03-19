@@ -21,7 +21,14 @@ extern uintptr_t page_mask __attribute__((visibility("protected")));
 	(assert(sysconf(_SC_PAGE_SIZE) == 4096), ((n)>>12)<<12)
 #define ROUND_UP_TO_PAGE_SIZE(n) \
 	(assert(sysconf(_SC_PAGE_SIZE) == 4096), (n) % 4096 == 0 ? (n) : ((((n) >> 12) + 1) << 12))
+// mappings over 4GB in size are assumed to be memtables and are ignored
+#define BIGGEST_MAPPING (1ull<<32) 
 
+const char *
+dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
+		__attribute__((visibility("protected")));
+char execfile_name[4096] __attribute__((visibility("protected")));
+char *realpath_quick(const char *arg) __attribute__((visibility("protected")));
 /* We use this prefix tree to map the address space. */
 enum node_info_kind { DATA_PTR, INS_AND_BITS };
 struct node_info
@@ -50,6 +57,11 @@ struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, co
 void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *arg);
 struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *arg);
 void prefix_tree_del(void *base, size_t s);
+void prefix_tree_del_node(struct prefix_tree_node *n);
+int prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end);
+size_t
+prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
+		size_t out_size, void *begin, void *end);
 void init_prefix_tree_from_maps(void);
 void prefix_tree_add_missing_maps(void);
 enum object_memory_kind prefix_tree_get_memory_kind(const void *obj);

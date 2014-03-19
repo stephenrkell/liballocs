@@ -185,16 +185,15 @@ void __libcrunch_main_init(void)
 }
 
 // FIXME: do better!
-static char *realpath_quick_hack(const char *arg)
+char *realpath_quick(const char *arg)
 {
 	static char buf[4096];
 	return realpath(arg, &buf[0]);
 }
 
-static const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
+char execfile_name[4096];
+const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 {
-	static char execfile_name[4096];
-	
 	if (strlen(dlpi_name) == 0)
 	{
 		/* libdl can give us an empty name for 
@@ -209,9 +208,13 @@ static const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_
 		 */
 		if (dlpi_addr == 0)
 		{
-			// use /proc to get our executable filename
-			int count = readlink("/proc/self/exe", execfile_name, sizeof execfile_name);
-			assert(count != -1); // nothing we can do
+			if (execfile_name[0] == '\0')
+			{
+				// use /proc to get our executable filename
+				int count = readlink("/proc/self/exe", execfile_name, sizeof execfile_name);
+				assert(count != -1); // nothing we can do
+				execfile_name[count] = '\0';
+			}
 			
 			// use this filename now
 			return execfile_name;
@@ -232,13 +235,13 @@ static const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_
 				// assert(0 && "no filename available for some loaded object");
 			}
 			assert(addr_info.dli_fname != NULL);
-			return realpath_quick_hack(addr_info.dli_fname);
+			return realpath_quick(addr_info.dli_fname);
 		}
 	} 
 	else
 	{
 		// we need to realpath() it
-		return realpath_quick_hack(dlpi_name);
+		return realpath_quick(dlpi_name);
 	}
 }
 
@@ -999,7 +1002,7 @@ _Bool
 			 * FIXME: better would be to write this function in C90 and compile with
 			 * special flags. */
 			unw_cursor_t cursor, saved_cursor, prev_saved_cursor;
-			unw_word_t higherframe_sp = 0, sp, bp = 0, ip = 0, higherframe_ip = 0, callee_ip;
+			unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0, callee_ip;
 			int unw_ret;
 			unw_context_t unw_context;
 
@@ -1038,6 +1041,7 @@ _Bool
 				// try to get the bp, but no problem if we don't
 				unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); 
 				_Bool got_bp = (unw_ret == 0);
+				_Bool got_higherframe_bp = 0;
 				/* Also do a test about whether we're in main, above which we want to
 				 * tolerate unwind failures more gracefully.
 				 */
@@ -1071,6 +1075,9 @@ _Bool
 						// 	higherframe_sp, bp);
 					}
 					unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
+					// try to get the bp, but no problem if we don't
+					unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &higherframe_bp); 
+					got_higherframe_bp = (unw_ret == 0);
 				}
 				/* NOTE that -UNW_EBADREG happens near the top of the stack where 
 				 * unwind info gets patchy, so we should handle it mostly like the 
@@ -1080,6 +1087,8 @@ _Bool
 				else if (step_ret == 0 || (at_or_above_main && step_ret == -UNW_EBADREG))
 				{
 					higherframe_sp = BEGINNING_OF_STACK;
+					higherframe_bp = BEGINNING_OF_STACK;
+					got_higherframe_bp = 1;
 					higherframe_ip = 0x0;
 				}
 				else
@@ -1096,13 +1105,19 @@ _Bool
 				// callee_ip
 
 				// now do the stuff
-				// 1. get the frame uniqtype for frame_ip
+				
 				/* NOTE: here we are doing one vaddr_to_uniqtype per frame.
 				 * Can we optimise this, by ruling out some frames just by
 				 * their bounding sps? YES, I'm sure we can. FIXME: do this!
 				 * The difficulty is in the fact that frame offsets can be
 				 * negative, i.e. arguments exist somewhere in the parent
 				 * frame. */
+				// 0. if our target address is greater than higherframe_bp, continue
+				if (got_higherframe_bp && (uintptr_t) obj > higherframe_bp) continue;
+				
+				// (if our target address is *lower* than sp, we'll abandon the walk, below)
+				
+				// 1. get the frame uniqtype for frame_ip
 				struct uniqtype *frame_desc = vaddr_to_uniqtype((void *) ip);
 				if (!frame_desc)
 				{
