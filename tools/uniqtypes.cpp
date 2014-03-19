@@ -253,7 +253,8 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 void write_master_relation(master_relation_t& r, dwarf::core::root_die& root, 
 	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def, 
 	std::set< std::string >& names_emitted,
-	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name)
+	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name,
+	bool emit_codeless_aliases)
 {
 	if (emit_struct_def) cout << "struct uniqtype \n\
 { \n\
@@ -596,7 +597,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			}
 		}
 		
-		/* Output any aliases for this type. */
+		/* Output any (typedef-or-base-type) aliases for this type. */
 		for (auto i_alias = r.aliases[i_vert->second].begin(); 
 			i_alias != r.aliases[i_vert->second].end();
 			++i_alias)
@@ -610,30 +611,33 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	
 	/* Codeless aliases: linker aliases for any concrete typenames *or* typedef names 
 	 * that were uniquely defined. */
-	out << "/* Begin codeless (__uniqtype__<typename>) aliases. */" << endl;
-	for (auto i_by_name_pair = name_pairs_by_name.begin(); i_by_name_pair != name_pairs_by_name.end();
-		++i_by_name_pair)
+	if (emit_codeless_aliases)
 	{
-		if (i_by_name_pair->second.size() == 1)
+		out << "/* Begin codeless (__uniqtype__<typename>) aliases. */" << endl;
+		for (auto i_by_name_pair = name_pairs_by_name.begin(); i_by_name_pair != name_pairs_by_name.end();
+			++i_by_name_pair)
 		{
-			/* This name only denotes one type, so we can alias it. */
-			auto full_name_pair = *i_by_name_pair->second.begin();
-			string full_name = mangle_typename(full_name_pair);
-			pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
-			string abbrev_name = mangle_typename(abbrev_name_pair);
-			out << "extern struct uniqtype " << abbrev_name << " __attribute__((alias(\""
-				<< cxxgen::escape(full_name) << "\")));" << endl;
-		}
-		else
-		{
-			out << "/* Not aliasing \"" << i_by_name_pair->first << "\"; set is {\n";
-			for (auto i_t = i_by_name_pair->second.begin(); i_t != i_by_name_pair->second.end(); ++i_t)
+			if (i_by_name_pair->second.size() == 1)
 			{
-				if (i_t != i_by_name_pair->second.begin()) cout << ",\n";
-				out << "\t" << mangle_typename(*i_t);
+				/* This name only denotes one type, so we can alias it. */
+				auto full_name_pair = *i_by_name_pair->second.begin();
+				string full_name = mangle_typename(full_name_pair);
+				pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
+				string abbrev_name = mangle_typename(abbrev_name_pair);
+				out << "extern struct uniqtype " << abbrev_name << " __attribute__((weak, alias(\""
+					<< cxxgen::escape(full_name) << "\")));" << endl;
 			}
-			
-			out << "\n} */" << endl;
+			else
+			{
+				out << "/* Not aliasing \"" << i_by_name_pair->first << "\"; set is {\n";
+				for (auto i_t = i_by_name_pair->second.begin(); i_t != i_by_name_pair->second.end(); ++i_t)
+				{
+					if (i_t != i_by_name_pair->second.begin()) cout << ",\n";
+					out << "\t" << mangle_typename(*i_t);
+				}
+
+				out << "\n} */" << endl;
+			}
 		}
 	}
 }

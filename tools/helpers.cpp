@@ -274,7 +274,7 @@ canonical_key_from_type(iterator_df<type_die> t)
 
 	/* we no longer use the defining_header -- use instead
 	 * the type summary code */
-	auto code = type_summary_code(t);
+	uint32_t code = type_summary_code(t);
 	string summary_string = summary_code_to_string(code);
 	assert(summary_string.size() == 2 * sizeof code);
 	

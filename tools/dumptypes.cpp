@@ -151,7 +151,7 @@ int main(int argc, char **argv)
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	
 	write_master_relation(master_relation, root, cout, cerr, true /* emit_void */, true, 
-		names_emitted, types_by_name);
+		names_emitted, types_by_name, /* emit_codeless_alises */ true);
 	
 	// now output for the subprograms
 	cout << "/* Begin stack frame types. */" << endl;
