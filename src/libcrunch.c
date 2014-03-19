@@ -1372,7 +1372,8 @@ static inline _Bool descend_to_first_subobject_spanning(
 }
 
 static inline _Bool recursively_test_subobjects(signed target_offset_within_uniqtype,
-	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype)
+	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
+	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset)
 {
 	if (target_offset_within_uniqtype == 0 && cur_obj_uniqtype == test_uniqtype) return 1;
 	else
@@ -1391,11 +1392,16 @@ static inline _Bool recursively_test_subobjects(signed target_offset_within_uniq
 		// now we have a *new* sub_target_offset and contained_uniqtype
 		
 		if (!success) return 0;
+		
+		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
+		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;
+		
 		do {
 			assert(containing_uniqtype == cur_obj_uniqtype);
 			_Bool recursive_test = recursively_test_subobjects(
 					sub_target_offset,
-					contained_uniqtype, test_uniqtype);
+					contained_uniqtype, test_uniqtype, 
+					last_attempted_uniqtype, last_uniqtype_offset);
 			if (__builtin_expect(recursive_test, 1)) return 1;
 			// else look for a later contained subobject at the same offset
 			unsigned subobj_ind = contained_pos - &containing_uniqtype->contained[0];
@@ -1470,7 +1476,7 @@ int __is_a_internal(const void *obj, const void *arg)
 // 	} while (descend_to_first_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype,
 // 			&cur_containing_uniqtype, &cur_contained_pos));
 	_Bool success = recursively_test_subobjects(target_offset_within_uniqtype, 
-			cur_obj_uniqtype, test_uniqtype);
+			cur_obj_uniqtype, (struct uniqtype *) test_uniqtype, &cur_obj_uniqtype, &target_offset_within_uniqtype);
 	if (__builtin_expect(success, 1))
 	{
 			++__libcrunch_succeeded;
@@ -1488,11 +1494,11 @@ int __is_a_internal(const void *obj, const void *arg)
 		++__libcrunch_failed;
 		
 		static const void *last_failed_site;
-		static const void *last_failed_object;
+		static const void *last_failed_object_start;
 		static const struct uniqtype *last_failed_test_type;
 		
 		if (last_failed_site == __builtin_return_address(0)
-				&& last_failed_object == obj
+				&& last_failed_object_start == object_start
 				&& last_failed_test_type == test_uniqtype
 				&& last_suppressed_check_kind == IS_A)
 		{
@@ -1502,8 +1508,8 @@ int __is_a_internal(const void *obj, const void *arg)
 		{
 			if (suppression_count > 0)
 			{
-			debug_printf(0, "Suppressed %d further occurrences of the previous error\n", 
-					suppression_count);
+				debug_printf(0, "Suppressed %d further occurrences of the previous error\n", 
+						suppression_count);
 			}
 			
 			debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, "
@@ -1518,7 +1524,7 @@ int __is_a_internal(const void *obj, const void *arg)
 				(cur_obj_uniqtype ? cur_obj_uniqtype->name : "(none)"), target_offset_within_uniqtype, 
 				alloc_site);
 			last_failed_site = __builtin_return_address(0);
-			last_failed_object = obj;
+			last_failed_object_start = object_start;
 			last_failed_test_type = test_uniqtype;
 			suppression_count = 0;
 		}
