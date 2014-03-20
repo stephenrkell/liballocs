@@ -146,7 +146,7 @@ static inline struct uniqtype *vaddr_to_uniqtype(const void *vaddr)
 }
 #undef maximum_vaddr_range_size
 
-#define maximum_static_obj_size (64*1024) // HACK
+#define maximum_static_obj_size (256*1024) // HACK
 static inline struct uniqtype *static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 {
 	assert(__libcrunch_allocsmt != NULL);
