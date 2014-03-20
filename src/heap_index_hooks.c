@@ -42,6 +42,7 @@ size_t malloc_usable_size(void *ptr);
 #include MALLOC_HOOKS_INCLUDE
 
 #include "heap_index.h"
+#define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
 
 /* For now, inserts increase memory usage.  
  * Ideally, we want to make headers/trailers which fit in reclaimed space. 
@@ -291,9 +292,24 @@ static void list_sanity_check(entry_type *head, const void *should_see_chunk) {}
 #define INDEX_BIN_START_ADDRESS_FOR_ADDR(a) MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
 		entry_coverage_in_bytes, \
 		index_begin_addr, index_end_addr, (a))
-#define INDEX_BIN_END_ADDRESS_FOR_ADDR(a) MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
+#define INDEX_BIN_END_ADDRESS_FOR_ADDR(a) ((char*)(MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
 		entry_coverage_in_bytes, \
-		index_begin_addr, index_end_addr, ((char*)(a)) + entry_coverage_in_bytes)
+		index_begin_addr, index_end_addr, ((char*)(a)))) + entry_coverage_in_bytes)
+#define ADDR_FOR_INDEX_LOC(e) MEMTABLE_ENTRY_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
+		entry_coverage_in_bytes, index_begin_addr, index_end_addr, (e))
+
+static uintptr_t nbytes_in_index_for_l0_entry(void *userchunk_base)
+{
+	assert(sysconf(_SC_PAGE_SIZE) == 4096);
+	void *allocptr = userptr_to_allocptr(userchunk_base);
+	void *end_addr = (char*) allocptr + malloc_usable_size(allocptr);
+	uintptr_t begin_pagenum = ((uintptr_t) userchunk_base >> 12);
+	uintptr_t end_pagenum = ((uintptr_t) end_addr >> 12)
+			 + (((((uintptr_t) end_addr) % 4096) == 0) ? 0 : 1);
+	unsigned long nbytes_in_index = ((end_pagenum - begin_pagenum) << 12)
+			/ entry_coverage_in_bytes;
+	return nbytes_in_index;
+}
 
 static void 
 index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
@@ -322,8 +338,8 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 			// memset the covered entries with the l0 value
 			struct entry l0_value = { 0, 1, 63 };
 			assert(IS_L0_ENTRY(&l0_value));
-			unsigned nbytes = 1 + ((modified_size - 1) / entry_coverage_in_bytes);
-			memset(INDEX_LOC_FOR_ADDR(new_userchunkaddr), *(char*) &l0_value, nbytes);
+			memset(INDEX_LOC_FOR_ADDR(new_userchunkaddr), *(char*) &l0_value, 
+				nbytes_in_index_for_l0_entry(new_userchunkaddr));
 			assert(IS_L0_ENTRY(INDEX_LOC_FOR_ADDR(new_userchunkaddr)));
 			assert(IS_L0_ENTRY(INDEX_LOC_FOR_ADDR((char*) new_userchunkaddr + modified_size - 1)));
 			return;
@@ -472,6 +488,10 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 
 static void *userptr_to_allocptr(void *userptr) { return userptr; }
 static void *allocptr_to_userptr(void *allocptr) { return allocptr; }
+static size_t allocsize_to_usersize(size_t usersize) { return usersize; }
+static size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
+static size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr_to_allocptr(userptr))); }
+static size_t allocsize(void *allocptr) { return malloc_usable_size(allocptr); }
 static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);
 static inline struct insert *insert_for_chunk(void *userptr)
 {
@@ -652,14 +672,13 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		// memset the covered entries with the empty value
 		struct entry empty_value = { 0, 0, 0 };
 		assert(IS_EMPTY_ENTRY(&empty_value));
-		unsigned nbytes = size_unindexed / entry_coverage_in_bytes;
-		memset(index_entry, *(char*) &empty_value, nbytes);
+		memset(index_entry, *(char*) &empty_value, nbytes_in_index_for_l0_entry(userptr));
 		return;
 	}
 
 	if (__builtin_expect(IS_DEEP_ENTRY(index_entry), 0))
 	{
-#ifdef TRACE_HEAP_INDEX
+#ifdef TRACE_DEEP_HEAP_INDEX
 	fprintf(stderr, "*** Unindexing deep entry for chunk %p\n", userptr);
 #endif
 		__unindex_deep_alloc(userptr, 1); // invalidates cache
@@ -723,7 +742,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	/* Now that we have deleted the record, our bin should be sane,
 	 * modulo concurrent reallocs. */
 out:
-	invalidate_cache_entry(userptr, malloc_usable_size(userptr_to_allocptr(userptr)));
+	invalidate_cache_entry(userptr, usersize(userptr));
 	list_sanity_check(index_entry, NULL);
 }
 
@@ -768,11 +787,10 @@ static void post_nonnull_nonzero_realloc(void *userptr,
 
 struct deep_entry_region deep_entry_regions[1u<<6]; // must match the bit size of "distance"!
 
-static struct deep_entry *lookup_deep_alloc(void *ptr, int level_upper_bound, int level_lower_bound,
+static struct deep_entry *lookup_deep_alloc(void *ptr,/* struct entry *bucket,*/ int level_upper_bound, int level_lower_bound,
 		struct deep_entry_region **out_region, 
 		_Bool *out_seen_object_starting_earlier);
 
-#define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
 static inline _Bool find_next_nonempty_bin(struct entry **p_cur, 
 		struct entry *limit,
 		size_t *p_object_minimum_size
@@ -802,23 +820,23 @@ struct lookup_cache_entry
 static struct lookup_cache_entry *next_to_evict = &lookup_cache[0];
 
 static void install_cache_entry(void *object_start,
-	size_t usable_size,
+	size_t object_size,
 	struct deep_entry *deep,
 	struct insert *insert)
 {
-	assert(next_to_evict <= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
+	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
 	*next_to_evict = (struct lookup_cache_entry) {
-		object_start, usable_size, deep, insert
+		object_start, object_size, deep, insert
 	}; // FIXME: thread safety
 }
 
 static void invalidate_cache_entry(void *object_start,
-	size_t usable_size)
+	size_t object_size)
 {
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
 		if (object_start == lookup_cache[i].object_start 
-				&& usable_size == lookup_cache[i].usable_size) 
+				&& object_size == lookup_cache[i].usable_size) 
 		{
 			lookup_cache[i] = (struct lookup_cache_entry) {
 				NULL, 0, NULL, NULL
@@ -849,14 +867,19 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, stru
 			if (out_object_start) *out_object_start = lookup_cache[i].object_start;
 			if (out_deep) *out_deep = lookup_cache[i].deep;
 			// ensure we're not about to evict this guy
-			if (next_to_evict - &lookup_cache[0] == i) next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
+			if (next_to_evict - &lookup_cache[0] == i)
+			{
+				next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
+				assert(next_to_evict - &lookup_cache[0] < LOOKUP_CACHE_SIZE);
+			}
 			return lookup_cache[i].insert;
 			// case of deep inserts means we need to store the insert ptr specially
 				//insert_for_chunk_and_usable_size(lookup_cache[i].object_start, lookup_cache[i].usable_size);
 		}
 	}
 	
-	struct entry *cur_head = INDEX_LOC_FOR_ADDR(mem);
+	struct entry *first_head = INDEX_LOC_FOR_ADDR(mem);
+	struct entry *cur_head = first_head;
 	size_t object_minimum_size = 0;
 
 	// Optimisation: if we see an object
@@ -885,8 +908,22 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, stru
 	
 		if (__builtin_expect(IS_DEEP_ENTRY(cur_head), 0))
 		{
+			if (cur_head != first_head)
+			{
+				/* If we didn't point into non-deep-indexed memory at ptr,
+				 * we're not going to find our allocation in a deep-indexed
+				 * region, since we always upgrade units of at least a whole
+				 * chunk. So we can abort now. 
+				 */
+#ifdef TRACE_DEEP_HEAP_INDEX
+				fprintf(stderr, "Strayed into deep-indexed region (bucket base %p) "
+						"searching for chunk overlapping %p, so aborting\n", 
+					ADDR_FOR_INDEX_LOC(cur_head), mem);
+#endif
+				goto fail;
+			}
 			struct deep_entry_region *region;
-			struct deep_entry *found = lookup_deep_alloc((void*) mem, -1, -1, &region, &seen_object_starting_earlier);
+			struct deep_entry *found = lookup_deep_alloc((void*) mem, /*cur_head,*/ -1, -1, &region, &seen_object_starting_earlier);
 			// did we find an overlapping object?
 			if (found)
 			{
@@ -928,8 +965,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, stru
 			{
 				if (out_deep) *out_deep = NULL;
 				if (out_object_start) *out_object_start = cur_userchunk;
-				install_cache_entry(cur_userchunk, malloc_usable_size(userptr_to_allocptr(cur_userchunk)), 
-						NULL, cur_insert);
+				install_cache_entry(cur_userchunk, usersize(cur_userchunk), NULL, cur_insert);
 				return cur_insert;
 			}
 			
@@ -942,16 +978,14 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, stru
 		/* we reached the end of the list */ // FIXME: use assembly-language replacement for cur_head--
 	} while (!seen_object_starting_earlier
 		&& find_next_nonempty_bin(&cur_head, &index_region[0], &object_minimum_size)); 
+fail:
 	fprintf(stderr, "Heap index lookup failed with "
 		"cur_head %p, object_minimum_size %zu, seen_object_starting_earlier %d",
 		cur_head, object_minimum_size, (int) seen_object_starting_earlier);
 	return NULL;
 	/* FIXME: use the actual biggest allocated object, not a guess. */
-
-#undef BIGGEST_SENSIBLE_OBJECT
 }
 
-static unsigned biggest_index_displacement_from_natural;
 static int new_deep_alloc_index(void *start_addr, void *end_addr, int undersize_factor_as_right_shift)
 {
 	// 0. mmap-allocate a region
@@ -981,23 +1015,32 @@ static int new_deep_alloc_index(void *start_addr, void *end_addr, int undersize_
 	return -1;
 }
 
-static struct deep_entry *grab_first_free_deep_entry(int index, void *addr)
+static struct deep_entry *grab_first_free_deep_entry(int index, void *addr, unsigned size_4bytes, char level_minus_one)
 {
 	// find the first possible slot
-	int highest_index = ((char*) addr - (char*) deep_entry_regions[index].base_addr)
-		 >> (2 + deep_entry_regions[index].undersize_right_shift);
-	struct deep_entry *first_attempt = &deep_entry_regions[index].region[highest_index];
+	struct deep_entry_region *r = &deep_entry_regions[index];
+	int highest_index = ((char*) addr - (char*)r->base_addr)
+		 >> (2 + r->undersize_right_shift);
+	struct deep_entry *first_attempt = &r->region[highest_index];
 	struct deep_entry *attempt = first_attempt;
 	while (attempt->valid) { --attempt; }// FIXME: use CAS to grab
 	
 	unsigned displacement_from_natural = first_attempt - attempt;
-	if (displacement_from_natural > biggest_index_displacement_from_natural)
+	if (displacement_from_natural > r->biggest_index_displacement_from_natural)
 	{
-		biggest_index_displacement_from_natural = displacement_from_natural;
+		r->biggest_index_displacement_from_natural = displacement_from_natural;
 	}
-#ifdef TRACE_HEAP_INDEX
+	if (size_4bytes > r->biggest_object_in_4bytes_total)
+	{
+		r->biggest_object_in_4bytes_total = size_4bytes;
+	}
+	if (size_4bytes > r->biggest_object_in_4bytes_by_level_minus_one[level_minus_one])
+	{
+		r->biggest_object_in_4bytes_by_level_minus_one[level_minus_one] = size_4bytes;
+	}
+#ifdef TRACE_DEEP_HEAP_INDEX
 	fprintf(stderr, 
-		"Had to seek back %d places from %p to find free deep entry for %p\n", displacement_from_natural, first_attempt, addr);
+		"Had to walk back %d places from %p to find free deep entry for %p (level %d)\n", displacement_from_natural, first_attempt, addr, (int) level_minus_one + 1);
 #endif
 	return attempt;
 }
@@ -1011,14 +1054,17 @@ static struct deep_entry *lookup_deep_alloc(void *ptr, int level_upper_bound, in
 		struct deep_entry_region **out_region, 
 		_Bool *out_seen_object_starting_earlier)
 {
+	//assert(INDEX_LOC_FOR_ADDR(ptr) >= bucket);
 	// find the relevant region 
 	struct entry *e = INDEX_LOC_FOR_ADDR(ptr);
-	int index = e->distance;
 	assert(IS_DEEP_ENTRY(e));
-	*out_region = &deep_entry_regions[index];
+	int index = e->distance;
+	assert(deep_entry_regions[index].region);
+	struct deep_entry_region *r = &deep_entry_regions[index];
+	if (out_region) *out_region = r;
 	
 	// reject queries for below this region's deepest level
-	if (level_lower_bound > (*out_region)->deepest_level_minus_one + 1)
+	if (level_lower_bound > r->deepest_level_minus_one + 1)
 	{
 		return NULL;
 	}
@@ -1037,17 +1083,27 @@ static struct deep_entry *lookup_deep_alloc(void *ptr, int level_upper_bound, in
 	#define MATCH_LEVEL(e, lub, llb) (((lub) == -1 || (e)->level_minus_one + 1 <= (lub)) && \
 		((llb) == -1 || (e)->level_minus_one + 1 >= (llb)))
 
+	/* NOTE: how can we bound the search? 
+	 * The biggest_index_displacement_from_natural is not the whole story, because 
+	 * it's computed from the object's start address. When we're searching, we might
+	 * not be starting from there. We need biggest_object_by_level too. */
+	unsigned biggest_search_distance
+	 = r->biggest_index_displacement_from_natural
+	  + ((level_upper_bound == -1 || level_lower_bound == -1 || level_lower_bound != level_upper_bound)
+	  	 ? (r->biggest_object_in_4bytes_total >> r->undersize_right_shift)
+		 : (r->biggest_object_in_4bytes_by_level_minus_one[level_lower_bound - 1] >> r->undersize_right_shift));
+		 
 	struct deep_entry *candidate = NULL;
 	do
 	{
-		while (first_poss - poss <= biggest_index_displacement_from_natural 
+		while (first_poss - poss <= biggest_search_distance
 			&& (!poss->valid 
-				|| !DEEP_ENTRY_OVERLAPS(*out_region, poss, ptr) 
+				|| !DEEP_ENTRY_OVERLAPS(r, poss, ptr) 
 				|| !MATCH_LEVEL(poss, level_upper_bound, level_lower_bound)))
 		{
 			/* If we saw any object starting before ptr, tell the enclosing loop in lookup_object_info
 			 * that it can give up if we fail. */
-			if (poss->valid && DEEP_ENTRY_START(*out_region, poss) < (char*) ptr
+			if (poss->valid && DEEP_ENTRY_START(r, poss) < (char*) ptr
 				&& MATCH_LEVEL(poss, level_upper_bound, level_lower_bound))
 			{
 				*out_seen_object_starting_earlier = 1;
@@ -1057,10 +1113,10 @@ static struct deep_entry *lookup_deep_alloc(void *ptr, int level_upper_bound, in
 			assert((char*) poss >= (char*) deep_entry_regions[index].region - deep_entry_regions[index].half_size);
 		}
 
-		if (first_poss - poss > biggest_index_displacement_from_natural)
+		if (first_poss - poss > biggest_search_distance)
 		{
 			// we've failed
-		#ifdef TRACE_HEAP_INDEX
+		#ifdef TRACE_DEEP_HEAP_INDEX
 			fprintf(stderr, 
 				"Failed lookup of deep entry for %p at level >= %d after seeking back %ld places from %p\n", 
 					ptr, level_upper_bound, first_poss - poss, first_poss);
@@ -1072,11 +1128,12 @@ static struct deep_entry *lookup_deep_alloc(void *ptr, int level_upper_bound, in
 		/* Okay, we've found a candidate; might there be a better candidate? */
 		candidate = poss;
 	} while (candidate->level_minus_one + 1 < level_upper_bound 
-			&& candidate->level_minus_one < (*out_region)->deepest_level_minus_one);
+			&& candidate->level_minus_one < r->deepest_level_minus_one);
 	
-#ifdef TRACE_HEAP_INDEX
+#ifdef TRACE_DEEP_HEAP_INDEX
 	fprintf(stderr, 
-		"Had to seek back %ld places from %p to look up deep entry for %p\n", first_poss - candidate, first_poss, ptr);
+		"Had to search back %ld places from %p to find deep entry for %p (level %d)\n", first_poss - candidate, first_poss, ptr,
+			candidate->level_minus_one + 1);
 #endif
 	assert(level_lower_bound == -1 || candidate->level_minus_one + 1 >= level_lower_bound);
 	assert(level_upper_bound == -1 || candidate->level_minus_one + 1 <= level_upper_bound);
@@ -1092,7 +1149,17 @@ struct deep_entry *__lookup_deep_alloc(void *ptr, int level_upper_bound, int lev
 	if (!index_region) init_hook();
 	
 	_Bool ignored;
-	return lookup_deep_alloc(ptr, level_upper_bound, level_lower_bound, out_region, &ignored);
+	//struct entry *e = INDEX_LOC_FOR_ADDR(ptr);
+	//do 
+	//{
+	//	if (IS_DEEP_ENTRY(e))
+	//	{
+			struct deep_entry *found = lookup_deep_alloc(ptr,/* e,*/ level_upper_bound, level_lower_bound, out_region, &ignored);
+			if (found) return found;
+	//	}
+	//	--e;
+	//} while ((INDEX_LOC_FOR_ADDR(ptr) - e) * entry_coverage_in_bytes < BIGGEST_SENSIBLE_OBJECT);
+	return NULL;
 }
 
 
@@ -1101,17 +1168,52 @@ static void convert_index_range_to_deep_alloc(void *start_addr, void *end_addr)
 	/* Walk the bins covering these ranges, and make deep alloc structures
 	 * out of them, to replace the existing memtable structures. */
 	struct entry *begin_head = INDEX_LOC_FOR_ADDR(start_addr);
-	struct entry *end_head = INDEX_LOC_FOR_ADDR(end_addr);
 
 	/* If end_addr is exactly at the start of a bin range, we don't walk that bin, 
 	 * but otherwise we do. */
 	void *real_end_addr = INDEX_BIN_END_ADDRESS_FOR_ADDR((char*)end_addr - 1);
+	struct entry *end_head = INDEX_LOC_FOR_ADDR(real_end_addr);
+	
+	/* Can we extend an existing deep alloc range?
+	 * Short answer: no! Not without resizing the virtual memory region. 
+	 * We could do this, but in-place mremap might fail. HMM. a mremap that
+	 * moved us somewhere else in the VAS would be okay. But we shouldn't
+	 * need to merge/resize regions; we should know how big they are. 
+	 *
+	 * AH, but Perl doesn't work this way: it allocates a ton of page-sized
+	 * regions and links them together. BAH. So not only do we need mremap(), 
+	 * but there's no guarantee Perl will get contiguous pages, so we might
+	 * just run out of deep regions. */
+// 	struct deep_entry_region *abuts_our_start = NULL;
+// 	struct deep_entry_region *abuts_our_end = NULL;
+// 	for (auto p_might_extend = &deep_entry_regions[0]; 
+// 			p_might_extend < &deep_entry_regions[MAX_DEEP_ENTRY_REGIONS]; 
+// 			++p_might_extend)
+// 	{
+// 		if (p_might_extend->base_addr == real_end_addr) 
+// 		{ assert(!abuts_our_end); abuts_our_end = p_might_extend; }
+// 		if (p_might_extend->end_addr == start_addr)
+// 		{ assert(!abuts_our_start); abuts_our_start = p_might_extend; }
+// 		
+// 		if (abuts_our_end && abuts_our_start) break; // short-circuit
+// 	}
+// 	
+// 	assert(!(abuts_our_end && abuts_our_start)); // merge case -- handle this later
+// 	
+// 	if (abuts_our_end)
+// 	{
+// 		// extend this one to cover our 
+// 	}
+// 	else if (abuts_our_start)
+// 	{
+// 		
+// 	}
 	
 	/* Allocate a deep index. */
-	int ind = new_deep_alloc_index(start_addr, real_end_addr, /* HACK / GUESS */ 4);
-	// i.e. one deep entry (16 bytes) for every 4 bytes / 0.0625 i.e. every 64 bytes, so 25% space overhead
+	int ind = new_deep_alloc_index(start_addr, real_end_addr, /* HACK / GUESS */ 3);
+	// i.e. one deep entry (16 bytes) for every 4 bytes / 0.125 i.e. every 32 bytes, so 50% space overhead
 	
-	for (struct entry *cur_entry = begin_head; cur_entry != end_head; ++cur_entry)
+	for (struct entry *cur_entry = begin_head; cur_entry < end_head; ++cur_entry)
 	{
 		assert(!IS_L0_ENTRY(cur_entry)); // FIXME: promote l0 entries too
 		
@@ -1120,34 +1222,44 @@ static void convert_index_range_to_deep_alloc(void *start_addr, void *end_addr)
 		{
 			struct insert *cur_insert = insert_for_chunk(cur_userchunk);
 			
+			char *allocptr = userptr_to_allocptr(cur_userchunk);
+			size_t alloc_chunk_size = malloc_usable_size(allocptr);
+			size_t chunk_size_from_userptr = alloc_chunk_size - ((char*) cur_userchunk - allocptr);
+			
 			// cache-invalidate this entry
-			invalidate_cache_entry(cur_entry, malloc_usable_size(userptr_to_allocptr(cur_userchunk)));
+			invalidate_cache_entry(cur_userchunk, alloc_chunk_size);
 
 			// build an equivalent entry in the deep space -- FIXME: thread-safety, but to be handled in grab_, not here
-			*grab_first_free_deep_entry(ind, cur_userchunk) = (struct deep_entry) {
+			*grab_first_free_deep_entry(ind, cur_userchunk, chunk_size_from_userptr >> 2, 0) = (struct deep_entry) {
 				.valid = 1,
 				.distance_4bytes = ((char*) cur_userchunk - (char*) start_addr) >> 2,
 				.level_minus_one = 0,   // allocation level of this object *minus one*, i.e. 1..4
-				.size_4bytes = malloc_usable_size(cur_userchunk) >> 2, // byte size in multiples of four bytes -- v. large is very unlikely for nested allocations
+				.size_4bytes = chunk_size_from_userptr >> 2, // byte size in multiples of four bytes -- v. large is very unlikely for nested allocations
 				.u_tail = { ins: (struct insert) {
 					.alloc_site_flag = cur_insert->alloc_site_flag,
 					.alloc_site = cur_insert->alloc_site
 				} }
 			};
-#ifdef TRACE_HEAP_INDEX
+#ifdef TRACE_DEEP_HEAP_INDEX
 			fprintf(stderr, 
 				"Upgraded l1 chunk at %p to deep alloc representation\n", cur_userchunk);
 #endif
 
 			// move to the next chunk
 			cur_userchunk = entry_to_same_range_addr(cur_insert->un.ptrs.next, cur_userchunk);
-		}
+		} // end while chunk
 		
 		// now unlink the whole lot
 		// FIXME: thread-safety: unlink as we go
 		*cur_entry = (struct entry) { .present = 0, .removed = 1, .distance = ind }; 
-	}
-#ifdef TRACE_HEAP_INDEX
+		assert(IS_DEEP_ENTRY(cur_entry));
+#ifdef TRACE_DEEP_HEAP_INDEX
+			fprintf(stderr, 
+				"Upgraded l1 bucket, entry addr %p, range %p-%p, to deep alloc region, index %d\n", 
+					cur_entry, ADDR_FOR_INDEX_LOC(cur_entry), ADDR_FOR_INDEX_LOC(cur_entry+1), ind);
+#endif
+	} // end for head
+#ifdef TRACE_DEEP_HEAP_INDEX
 			fprintf(stderr, 
 				"Established deep alloc index between %p and %p\n", start_addr, real_end_addr);
 #endif
@@ -1159,29 +1271,96 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
 	if (!index_region) init_hook();
 	
-	// case-split on the ptr
-	struct entry *e = INDEX_LOC_FOR_ADDR(ptr);
+	/* Note that once a bucket becomes "deep", we get called for malloc() allocations
+	 * too. If this happens, ptr is our malloc chunk ptr. We can identify this because
+	 * level == 1. */
 	
-	if (!IS_DEEP_ENTRY(e))
+	/* Get the malloc chunk that contains this ptr. It may or may not 
+	 * already be deep-indexed. */
+	void *malloc_userchunk_start;
+	struct deep_entry *existing_deep;
+	struct insert *p_ins = NULL;
+	if (level != 1)
 	{
-		// it's an empty or non-deep entry; convert it for the whole malloc-span of our current object
-		convert_index_range_to_deep_alloc(INDEX_BIN_START_ADDRESS_FOR_ADDR(ptr), 
-			INDEX_BIN_END_ADDRESS_FOR_ADDR((char*) ptr + malloc_usable_size(userptr_to_allocptr(ptr))));
+		p_ins = lookup_object_info(ptr, &malloc_userchunk_start, &existing_deep);
 	}
-	assert(IS_DEEP_ENTRY(e));
+	else
+	{
+		malloc_userchunk_start = ptr;
+		p_ins = insert_for_chunk(ptr);
+	}
+	assert(p_ins);
+	assert(malloc_userchunk_start);
+	size_t malloc_chunk_size = malloc_usable_size(userptr_to_allocptr(malloc_userchunk_start));
+	void *chunk_end_address = (char*) malloc_userchunk_start
+			 + malloc_chunk_size;
+	_Bool malloc_chunk_completely_fills_last_bucket
+			 = (chunk_end_address == ADDR_FOR_INDEX_LOC(INDEX_BIN_END_ADDRESS_FOR_ADDR((char*) chunk_end_address - 1)));
+	_Bool malloc_chunk_is_only_one_bucket
+			= (INDEX_LOC_FOR_ADDR(malloc_userchunk_start)
+			 == INDEX_LOC_FOR_ADDR((char*) chunk_end_address - 1));
+	_Bool ptr_starts_in_last_bucket = !malloc_chunk_is_only_one_bucket && 
+			(INDEX_LOC_FOR_ADDR(malloc_userchunk_start) == INDEX_LOC_FOR_ADDR((char*) chunk_end_address - 1));
+	
+	struct entry *first_malloc_chunk_entry = INDEX_LOC_FOR_ADDR(malloc_userchunk_start);
+	struct entry *ptr_entry = INDEX_LOC_FOR_ADDR(ptr);
+	/* If there's any deep, it should all be deep. */
+	if (!existing_deep)
+	{
+		assert(!IS_DEEP_ENTRY(first_malloc_chunk_entry));
+
+		/* It's an empty or non-deep entry; convert it for the whole malloc-span of our current object
+		 * EXCEPT for the last bucket, assuming we don't completely fill it *AND* if we don't begin
+		 * in it. 
+		 * In that cases it's allowed to stay normal-l1-indexed
+		 * since later chunks which don't want to be deep-indexed can still begin in it
+		 * i.e. preventing endless extension creep of our deep region.
+		 * (we will seek backwards into the deep bit if we start at the end of our object, so we can still find deep objects). */
+		_Bool deep_alloc_begins_in_last_bucket 
+				= (INDEX_LOC_FOR_ADDR(ptr) == INDEX_LOC_FOR_ADDR((char*) chunk_end_address - 1));
+		convert_index_range_to_deep_alloc(
+			INDEX_BIN_START_ADDRESS_FOR_ADDR(malloc_userchunk_start), 
+					(malloc_chunk_completely_fills_last_bucket || malloc_chunk_is_only_one_bucket)
+					? INDEX_BIN_END_ADDRESS_FOR_ADDR(chunk_end_address)
+					: ADDR_FOR_INDEX_LOC(INDEX_LOC_FOR_ADDR(chunk_end_address) - 1));
+	}
+	assert(IS_DEEP_ENTRY(first_malloc_chunk_entry));
+	// the last entry is not normally a deep one, 
+	// ... FIXME: unless it already was one?
+	assert(!IS_DEEP_ENTRY(INDEX_LOC_FOR_ADDR((char*) malloc_userchunk_start + malloc_chunk_size - 1))
+		|| malloc_chunk_completely_fills_last_bucket || malloc_chunk_is_only_one_bucket);
+	
+	/* What about ptr_entry? By definition, it's in the span of the malloc 
+	 * chunk, so it should normally be a deep entry too. */
+	assert(ptr_starts_in_last_bucket || IS_DEEP_ENTRY(ptr_entry));
+	
+	/* Disgusting HACK: if our indexed object's start address is in the last bucket, 
+	 * pretend it was indexed in the previous bucket. Lookups should still work, because
+	 * we keep searching backwards, and once we're searching the deep index 
+	 * we don't care that we got there from the wrong memtable bucket -- we can still
+	 * represent the allocation's address. */
+	if (ptr_starts_in_last_bucket)
+	{
+		--ptr_entry;
+		assert(IS_DEEP_ENTRY(ptr_entry)); // HMM -- how do we know this?
+	}
 	
 	/* Now find the deepest entry spanning this address already. */
-	struct deep_entry_region *region;
+	struct deep_entry_region *region = NULL;
 	struct deep_entry *found_parent = __lookup_deep_alloc(ptr, -1, -1, &region);
-	assert(found_parent);
-	assert(region == &deep_entry_regions[e->distance]);
+	/* If we're a bona fide deep alloc, we should have at least a malloc above us. 
+	 * AND if that malloc hadn't been made into a deep alloc yet, we just did that.
+	 * So we'd better be a level-1 alloc or have found a parent. */
+	assert(level == 1 || found_parent);
+	assert(!found_parent || region == &deep_entry_regions[ptr_entry->distance]);
 	
 	unsigned distance_4bytes = ((char*) ptr - (char*) region->base_addr) >> 2;
-	unsigned level_minus_one = found_parent->level_minus_one + 1;
-	if (level != -1) assert(level_minus_one + 1 == level);
-	unsigned parent_distance = distance_4bytes - found_parent->distance_4bytes;
+	if (level == -1) level = found_parent->level_minus_one + 1 + 1;
+	unsigned level_minus_one = level - 1;
+
+	unsigned parent_distance = distance_4bytes - ((level == 1) ? 0 : found_parent->distance_4bytes);
 	// add to the existing index
-	*grab_first_free_deep_entry(e->distance, ptr) = (struct deep_entry) {
+	*grab_first_free_deep_entry(ptr_entry->distance, ptr, size_bytes >> 2, level_minus_one) = (struct deep_entry) {
 		.valid = 1,
 		.distance_4bytes = distance_4bytes,
 		.level_minus_one = level_minus_one,   // allocation level of this object *minus one*, i.e. 1..4
@@ -1218,7 +1397,7 @@ void __unindex_deep_alloc(void *ptr, int level)
 	/* Find the deep alloc entry and free it. */
 	struct deep_entry_region *region;
 	_Bool ignored;
-	struct deep_entry *found = lookup_deep_alloc(ptr, level, level, &region, &ignored);
+	struct deep_entry *found = lookup_deep_alloc(ptr, /*INDEX_LOC_FOR_ADDR(ptr),*/ level, level, &region, &ignored);
 	assert(found);
 	invalidate_cache_entry((char*) region->base_addr + (found->distance_4bytes << 2),
 			found->size_4bytes << 2);
