@@ -1293,9 +1293,11 @@ _Bool
 	
 out_success:
 	target_offset_wholeblock = (char*) obj - (char*) *out_object_start;
-	/* If we're searching in an array, we need to take the offset modulo the 
+	/* If we're searching in a heap array, we need to take the offset modulo the 
 	 * element size. Otherwise just take the whole-block offset. */
-	if ((*out_alloc_uniqtype)->pos_maxoff != 0 && (*out_alloc_uniqtype)->neg_maxoff == 0)
+	if (k == HEAP && 
+			(*out_alloc_uniqtype)->pos_maxoff != 0 
+			&& (*out_alloc_uniqtype)->neg_maxoff == 0)
 	{
 		target_offset_within_uniqtype = target_offset_wholeblock % (*out_alloc_uniqtype)->pos_maxoff;
 	} else target_offset_within_uniqtype = target_offset_wholeblock;
