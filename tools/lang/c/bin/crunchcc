@@ -297,6 +297,28 @@ def main():
                 if sizendx != -1:
                     # it's a size char, so flag that up
                     stubsfile.write("#define size_arg_%s make_argname(%d, %c)\n" % (fnName, sizendx, fnSig[sizendx]))
+                else:
+                    # If there's no size arg, it's a typed allocation primitive, and 
+                    # the size is the size of the thing it returns. How can we get
+                    # at that? Have we built the typeobj already? No, because we haven't
+                    # even built the binary. But we have built the .o, including the
+                    # one containing the "real" allocator function. Call a helper
+                    # to do this.
+                    size_find_command = [os.path.dirname(sys.argv[0]) + \
+                        "/../../../allocsites/find-allocated-type-size", fnName] + [ \
+                        objfile for objfile in passedThroughArgs if objfile.endswith(".o")]
+                    sys.stderr.write("Calling " + " ".join(size_find_command) + "\n")
+                    outp = subprocess.Popen(size_find_command, stdout=subprocess.PIPE).communicate()[0]
+                    sys.stderr.write("Got output: " + outp + "\n")
+                    sys.stderr.flush()
+                    # we get lines of the form <number> \t <explanation>
+                    # so just chomp the first number
+                    outp_lines = outp.split("\n")
+                    if (len(outp_lines) < 1):
+                        sys.stderr.write("No output from %s" % " ".join(size_find_command))
+                        return ret  # give up now
+                    sz = int(outp_lines[0].split("\t")[0])
+                    stubsfile.write("#define size_arg_%s %d\n" % (fnName, sz))
                 if allocFn in allL1OrWrapperAllocFns():
                     stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
                 else:
