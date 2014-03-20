@@ -569,7 +569,12 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 		// then shift in the base type's summary code
 		if (!enum_t->get_type())
 		{
-			cerr << "Warning: saw enum with no type" << endl;
+			// cerr << "Warning: saw enum with no type" << endl;
+			auto implicit_t = enum_t.enclosing_cu()->implicit_enum_base_type();
+			if (!implicit_t)
+			{
+				cerr << "Warning: saw enum with no type" << endl;
+			} else output_word << type_summary_code(implicit_t);
 		}
 		else
 		{
