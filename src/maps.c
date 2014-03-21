@@ -158,7 +158,8 @@ void prefix_tree_add_missing_maps(void)
 					&overlapping[0], MAX_OVERLAPPING, obj, (char*) obj + size);
 			assert(n_overlapping < MAX_OVERLAPPING); // '<=' would mean we might have run out of space
 			
-			_Bool need_to_add = 0;
+			// if we have nothing overlapping, we should definitely add it....
+			_Bool need_to_add = (n_overlapping == 0);
 					
 			/* Else some other number of overlapping mappings exists. */
 			for (unsigned i = 0; i < n_overlapping; ++i)
