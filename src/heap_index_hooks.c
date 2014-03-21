@@ -57,11 +57,13 @@ __thread void *__current_allocsite;
 __thread void *__current_allocfn;
 __thread size_t __current_allocsz;
 __thread int __currently_freeing;
+__thread int __currently_allocating;
 #else
 void *__current_allocsite;
 void *__current_allocfn;
 size_t __current_allocsz;
 int __currently_freeing;
+int __currently_allocating;
 #endif
 
 #ifdef MALLOC_USABLE_SIZE_HACK
@@ -351,7 +353,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	/* If we got a deep alloc entry, do the deep thing. */
 	if (__builtin_expect(IS_DEEP_ENTRY(index_entry), 0))
 	{
-		_Bool unset_allocsite = NULL;
+		_Bool unset_allocsite = 0;
 		if (!__current_allocsite) { __current_allocsite = (void *) caller; unset_allocsite = 1; }
 		assert(__current_allocsite == caller);
 		__index_deep_alloc(new_userchunkaddr, 1, malloc_usable_size(userptr_to_allocptr(new_userchunkaddr)));
@@ -1130,9 +1132,15 @@ static struct deep_entry *lookup_deep_alloc(void *ptr, int level_upper_bound, in
 	} while (candidate->level_minus_one + 1 < level_upper_bound 
 			&& candidate->level_minus_one < r->deepest_level_minus_one);
 	
+	unsigned nbytes_back = (first_poss - candidate) * sizeof (struct deep_entry);
+	unsigned nbytes_back_max = r->half_size + (highest_index * sizeof (struct deep_entry));
+	assert(nbytes_back <= nbytes_back_max);
+	
 #ifdef TRACE_DEEP_HEAP_INDEX
 	fprintf(stderr, 
-		"Had to search back %ld places from %p to find deep entry for %p (level %d)\n", first_poss - candidate, first_poss, ptr,
+		"Had to search back %ld places (%ld bytes; max %ld) from %p to find deep entry for %p (level %d)\n", 
+			first_poss - candidate, 
+			(long) nbytes_back, (long) nbytes_back_max, first_poss, ptr,
 			candidate->level_minus_one + 1);
 #endif
 	assert(level_lower_bound == -1 || candidate->level_minus_one + 1 >= level_lower_bound);
