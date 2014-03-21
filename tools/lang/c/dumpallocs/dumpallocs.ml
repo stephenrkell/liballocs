@@ -258,7 +258,11 @@ let userAllocFunctions () : string list =
     (Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_SUBALLOC_FNS")) 
   end with Not_found -> []
   in
-  wrappers @ suballocs
+  let sizeOnlyAllocs = try begin
+    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOCSZ_FNS")) 
+  end with Not_found -> []
+  in
+  wrappers @ suballocs @ sizeOnlyAllocs
 
 (* FIXME: distinguish "it is an allocation function, but I couldn't identify what it's allocating"
    from "it doesn't appear to be an allocation function". *)

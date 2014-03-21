@@ -130,7 +130,8 @@ esac
 line_regexp='^([0-9a-f]*) <([^>]*)>'
 alloc_descriptors="${LIBCRUNCH_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p"
 suballoc_descriptors="${LIBCRUNCH_SUBALLOC_FNS:-}"
-all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}"
+allocsz_descriptors="${LIBCRUNCH_ALLOCSZ_FNS:-}"
+all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}${allocsz_descriptors:+ ${allocsz_descriptors}}"
 echo "all_alloc_descriptors is: $all_alloc_descriptors" 1>&2
 alloc_site_regexp="${line_regexp}.*call.*(<($( 
     echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc' | \

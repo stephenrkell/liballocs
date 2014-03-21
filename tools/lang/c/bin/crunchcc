@@ -45,8 +45,14 @@ def allSubAllocFns():
     else:
         return []
 
+def allAllocSzFns():
+    if "LIBCRUNCH_ALLOCSZ_FNS" in os.environ:
+        return [s for s in os.environ["LIBCRUNCH_ALLOCSZ_FNS"].split(' ') if s != '']
+    else:
+        return []
+
 def allAllocFns():
-    return allL1OrWrapperAllocFns() + allSubAllocFns()
+    return allL1OrWrapperAllocFns() + allSubAllocFns() + allAllocSzFns()
 
 def defaultFreeFns():
     return ["free(P)"]
@@ -107,7 +113,10 @@ def fixupDotO(filename):
         # This will give us a file with __def_ and __ref_ symbols
         # for the allocation function. We then rename these to 
         # __real_ and __wrap_ respectively. 
-        sys.stderr.write("Found that we need to unbind\n")
+        backup_filename = os.path.splitext(filename)[0] + ".backup.o"
+        sys.stderr.write("Found that we need to unbind... making backup as %s\n" % \
+            backup_filename)
+        subprocess.call(["cp", filename, backup_filename])
         unbind_pairs = [["--unbind-sym", sym] for sym in wrappedFns]
         objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
          + [opt for pair in unbind_pairs for opt in pair] \
@@ -321,6 +330,8 @@ def main():
                     stubsfile.write("#define size_arg_%s %d\n" % (fnName, sz))
                 if allocFn in allL1OrWrapperAllocFns():
                     stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
+                elif allocFn in allAllocSzFns():
+                    stubsfile.write("make_size_wrapper(%s, %s)\n" % (fnName, retSig))
                 else:
                     stubsfile.write("make_suballocator_alloc_wrapper(%s, %s)\n" % (fnName, retSig))
                 stubsfile.flush()
@@ -351,19 +362,43 @@ def main():
                 stubsfile.flush()
             # now we compile the C file ourselves, rather than cilly doing it, 
             # because it's a special magic stub
+            stubs_pp = os.path.splitext(stubsfile.name)[0] + ".i"
             stubs_bin = os.path.splitext(stubsfile.name)[0] + ".o"
-            # FIXME: we *should* pass through some options here, like -DNO_TLS
-            stubs_cmd = ["cc", "-save-temps", "-g", "-c", "-o", stubs_bin, \
+            # We *should* pass through some options here, like -DNO_TLS. 
+            # To do "mostly the right thing", we preprocess with 
+            # most of the user's options, 
+            # then compile with a more tightly controlled set
+            stubs_pp_cmd = ["cc", "-E", "-o", stubs_pp, \
+                "-I" + os.path.dirname(sys.argv[0]) + "/../../../allocsites"] \
+                + [arg for arg in passedThroughArgs if arg.startswith("-D")] \
+                + [stubsfile.name]
+            sys.stderr.write("Preprocessing stubs file %s to %s with command %s\n" \
+                % (stubsfile.name, stubs_pp, " ".join(stubs_pp_cmd)))
+            ret_stubs_pp = subprocess.call(stubs_pp_cmd)
+            if ret_stubs_pp != 0:
+                sys.stderr.write("Could not preproces stubs file %s: compiler returned %d\n" \
+                    % (stubsfile.name, ret_stubs_pp))
+                exit(1)
+            # now erase the '# ... file ' lines that refer to our stubs file,
+            # and add some line breaks
+            stubs_sed_cmd = ["sed", "-r", "-i", "s^#.*crunch.*/stubgen\\.h\" *[0-9]* *$^^\n " \
+            + "/__real_|__wrap_|__current_/ s^[;\\{\\}]^&\\n^g", stubs_pp]
+            ret_stubs_sed = subprocess.call(stubs_sed_cmd)
+            if ret_stubs_sed != 0:
+                sys.stderr.write("Could not sed stubs file %s: sed returned %d\n" \
+                    % (stubs_pp, ret_stubs_sed))
+                exit(1)
+            stubs_cc_cmd = ["cc", "-g", "-c", "-o", stubs_bin, \
                 "-I" + os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
-                stubsfile.name]
+                stubs_pp]
             sys.stderr.write("Compiling stubs file %s to %s with command %s\n" \
-                % (stubsfile.name, stubs_bin, " ".join(stubs_cmd)))
-            ret_stubs = subprocess.call(stubs_cmd)
+                % (stubs_pp, stubs_bin, " ".join(stubs_cc_cmd)))
+            ret_stubs = subprocess.call(stubs_cc_cmd)
             if ret_stubs != 0:
                 sys.stderr.write("Could not compile stubs file %s: compiler returned %d\n" \
                     % (stubsfile.name, ret_stubs))
                 exit(1)
-            
+           
             # HACK: fix this once I sort out linking
             linkArgs += [stubs_bin]
             linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
