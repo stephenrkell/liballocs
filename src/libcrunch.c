@@ -1227,7 +1227,13 @@ _Bool
 					++__libcrunch_aborted_unrecognised_allocsite;
 					return 1;
 				}
-				if (__builtin_expect(is_lazy_uniqtype(alloc_uniqtype), 0))
+				/* Don't do lazy heap type assignment within an alloc fn, or other
+				 * alloc machinery. (NOTE that in the case of a size-only outer function, 
+				 * we might have already reset the __current_allocfn by the point we do a 
+				 * cast that is still logically during allocation. That's why we need the
+				 * extra flag.) */
+				if (__builtin_expect(is_lazy_uniqtype(alloc_uniqtype)
+						&& !__currently_allocating, 0))
 				{
 					++__libcrunch_lazy_heap_type_assignment;
 					heap_info->alloc_site_flag = 1;
@@ -1396,7 +1402,8 @@ static inline _Bool descend_to_first_subobject_spanning(
 
 static inline _Bool recursively_test_subobjects(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
-	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset)
+	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
+		signed *p_cumulative_offset_searched)
 {
 	if (target_offset_within_uniqtype == 0 && cur_obj_uniqtype == test_uniqtype) return 1;
 	else
@@ -1416,15 +1423,16 @@ static inline _Bool recursively_test_subobjects(signed target_offset_within_uniq
 		
 		if (!success) return 0;
 		
+		*p_cumulative_offset_searched += sub_target_offset - target_offset_within_uniqtype;
+		
 		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
 		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;
-		
 		do {
 			assert(containing_uniqtype == cur_obj_uniqtype);
 			_Bool recursive_test = recursively_test_subobjects(
 					sub_target_offset,
 					contained_uniqtype, test_uniqtype, 
-					last_attempted_uniqtype, last_uniqtype_offset);
+					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched);
 			if (__builtin_expect(recursive_test, 1)) return 1;
 			// else look for a later contained subobject at the same offset
 			unsigned subobj_ind = contained_pos - &containing_uniqtype->contained[0];
@@ -1498,8 +1506,10 @@ int __is_a_internal(const void *obj, const void *arg)
 // 		}
 // 	} while (descend_to_first_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype,
 // 			&cur_containing_uniqtype, &cur_contained_pos));
+	signed cumulative_offset_searched = 0;
 	_Bool success = recursively_test_subobjects(target_offset_within_uniqtype, 
-			cur_obj_uniqtype, (struct uniqtype *) test_uniqtype, &cur_obj_uniqtype, &target_offset_within_uniqtype);
+			cur_obj_uniqtype, (struct uniqtype *) test_uniqtype, &cur_obj_uniqtype, 
+			&target_offset_within_uniqtype, &cumulative_offset_searched);
 	if (__builtin_expect(success, 1))
 	{
 			++__libcrunch_succeeded;
@@ -1507,7 +1517,7 @@ int __is_a_internal(const void *obj, const void *arg)
 	}
 	
 	// if we got here, the check failed
-	if (__current_allocsite || __currently_freeing)
+	if (__currently_allocating || __currently_freeing)
 	{
 		++__libcrunch_failed_in_alloc;
 		// suppress warning
@@ -1544,7 +1554,8 @@ int __is_a_internal(const void *obj, const void *arg)
 				(char*) obj - (char*) object_start,
 				name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
 				alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
-				(cur_obj_uniqtype ? cur_obj_uniqtype->name : "(none)"), target_offset_within_uniqtype, 
+				(cur_obj_uniqtype ? cur_obj_uniqtype->name : "(none)"), 
+					cumulative_offset_searched, 
 				alloc_site);
 			last_failed_site = __builtin_return_address(0);
 			last_failed_object_start = object_start;
@@ -1622,6 +1633,18 @@ int __like_a_internal(const void *obj, const void *arg)
 		if (matches) goto like_a_succeeded; else goto like_a_failed;
 	}
 	
+	/* If we're not an array and nmemb is zero, we might have base types with
+	 * signedness complements. */
+	if (!cur_obj_uniqtype->is_array && !test_uniqtype->is_array
+			&&  cur_obj_uniqtype->nmemb == 0 && test_uniqtype->nmemb == 0)
+	{
+		/* Does the cur obj type have a signedness complement matching the test type? */
+		if (cur_obj_uniqtype->contained[0].ptr == test_uniqtype) goto like_a_succeeded;
+		/* Does the test type have a signedness complement matching the cur obj type? */
+		if (test_uniqtype->contained[0].ptr == cur_obj_uniqtype) goto like_a_succeeded;
+	}
+			
+	
 	/* Okay, we can start the like-a test: for each element in the test type, 
 	 * do we have a type-equivalent in the object type?
 	 * 
@@ -1671,7 +1694,7 @@ like_a_succeeded:
 	// if we got here, we've failed
 	// if we got here, the check failed
 like_a_failed:
-	if (__current_allocsite) 
+	if (__currently_allocating || __currently_freeing) 
 	{
 		++__libcrunch_failed_in_alloc;
 		// suppress warning
