@@ -1190,7 +1190,10 @@ _Bool
 			}
 			assert(get_object_memory_kind(heap_info) == HEAP
 				|| get_object_memory_kind(heap_info) == UNKNOWN); // might not have seen that maps yet
-			assert(prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC);
+			assert(
+				prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC
+				|| (prefix_tree_add_missing_maps(),
+					 prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC));
 
 			unsigned alloc_chunksize;
 			if (deep) 
