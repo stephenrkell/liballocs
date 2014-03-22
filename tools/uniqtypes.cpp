@@ -256,8 +256,17 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name,
 	bool emit_codeless_aliases)
 {
-	if (emit_struct_def) cout << "struct uniqtype \n\
+	/* Keep in sync with libcrunch_private.h! */
+	if (emit_struct_def) cout << "struct uniqtype_cache_word \n\
+{\n\
+	unsigned long addr:47;\n\
+	unsigned flag:1;\n\
+	unsigned bits:16;\n\
+};\n\
+\n\
+struct uniqtype \n\
 { \n\
+	struct uniqtype_cache_word cache_word; \n\
 	const char *name; \n\
 	unsigned short pos_maxoff; \n\
 	unsigned short neg_maxoff; \n\
@@ -284,7 +293,9 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		out << "\n/* uniqtype for void */\n";
 		out << "struct uniqtype " << mangle_typename(make_pair(string(""), string("void")))
 			<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
-			<< " = {\n\t\"" << "void" << "\",\n\t"
+			<< " = {\n\t" 
+			<< "{ 0, 0, 0 },\n\t"
+			<< "\"void\"" << ",\n\t"
 			<< "0" << " /* pos_maxoff (void) */,\n\t"
 			<< "0" << " /* neg_maxoff (void) */,\n\t"
 			<< "0" << " /* nmemb (void) */,\n\t"
@@ -422,7 +433,9 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		string mangled_name = mangle_typename(i_vert->first);
 		out << "struct uniqtype " << mangled_name
 			<< " __attribute__((section (\"" << ".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
-			<< " = {\n\t\"" << i_vert->first.second << "\",\n\t"
+			<< " = {\n\t" 
+			<< "{ 0, 0, 0 },\n\t"
+			<< "\"" << i_vert->first.second << "\",\n\t"
 			<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
 			<< "0 /* neg_maxoff */,\n\t"
 			<< (i_vert->second.is_a<array_type_die>() ? 1 : members_count) << " /* nmemb */,\n\t"
@@ -542,7 +555,9 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			string compl_name = mangle_typename(k);
 			out << "struct uniqtype " << compl_name
 				<< " __attribute__((section (\"" << ".data." << compl_name << ", \\\"awG\\\", @progbits, " << compl_name << ", comdat#\")))"
-				<< " = {\n\t\"" << k.second << "\",\n\t"
+				<< " = {\n\t" 
+				<< "{ 0, 0, 0 },\n\t"
+				<< "\"" << k.second << "\",\n\t"
 				<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
 				<< "0 /* neg_maxoff */,\n\t"
 				<< "0 /* nmemb */,\n\t"

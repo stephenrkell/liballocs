@@ -145,7 +145,6 @@ int main(int argc, char **argv)
 	 * - a list of <offset, included-type-record ptr> pairs.
 	 */
 
-
 	// write a forward declaration for every uniqtype we need
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
@@ -605,7 +604,9 @@ int main(int argc, char **argv)
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 				 
 			cout << "struct uniqtype " << mangle_typename(make_pair(cu_name, unmangled_typename))
-				<< " = {\n\t\"" << unmangled_typename << "\",\n\t"
+				<< " = {\n\t" 
+				<< "{ 0, 0, 0 },\n\t"
+				<< "\"" << unmangled_typename << "\",\n\t"
 				<< frame_maxoff << " /* pos_maxoff */,\n\t"
 				<< -frame_minoff << " /* neg_maxoff */,\n\t"
 				<< i_frame_int->second.size() << " /* nmemb */,\n\t"

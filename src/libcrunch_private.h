@@ -83,20 +83,28 @@ extern __thread void *__current_allocsite __attribute__((weak)); // defined by h
 extern void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 #endif
 
-/* Copied from dumptypes.cpp */
+struct uniqtype_cache_word 
+{
+	unsigned long addr:47;
+	unsigned flag:1;
+	unsigned bits:16;
+};
+
 struct uniqtype
 {
+	struct uniqtype_cache_word cache_word;
 	const char *name;
 	unsigned short pos_maxoff; // 16 bits
 	unsigned short neg_maxoff; // 16 bits
 	unsigned nmemb:12;         // 12 bits -- number of `contained's (always 1 if array)
 	unsigned is_array:1;       // 1 bit
 	unsigned array_len:19;     // 19 bits; 0 means undetermined length
-	struct contained { 
+	struct contained {         // there's always at least one of these, even if nmemb == 0
 		signed offset;
 		struct uniqtype *ptr;
 	} contained[];
 };
+#define UNIQTYPE_IS_SUBPROGRAM(u) (((u)->pos_maxoff == 0) && ((u)->neg_maxoff == 0))
 
 static inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite)
 {

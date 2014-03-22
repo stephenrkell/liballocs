@@ -1423,7 +1423,7 @@ static inline _Bool recursively_test_subobjects(signed target_offset_within_uniq
 		
 		if (!success) return 0;
 		
-		*p_cumulative_offset_searched += sub_target_offset - target_offset_within_uniqtype;
+		*p_cumulative_offset_searched += contained_pos->offset;
 		
 		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
 		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;

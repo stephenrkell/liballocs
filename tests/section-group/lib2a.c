@@ -1,8 +1,15 @@
 #include <dlfcn.h>
 #include "libcrunch.h"
 
+struct uniqtype_cache_word
+{
+	unsigned long addr:47;
+	unsigned flag:1;
+	unsigned bits:16;
+};
 struct uniqtype
 {
+	struct uniqtype_cache_word cache_word;
 	const char *name;
 	unsigned short pos_maxoff; // 16 bits
 	unsigned short neg_maxoff; // 16 bits
