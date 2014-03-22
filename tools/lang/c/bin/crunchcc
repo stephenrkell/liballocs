@@ -323,9 +323,9 @@ def main():
                     # we get lines of the form <number> \t <explanation>
                     # so just chomp the first number
                     outp_lines = outp.split("\n")
-                    if (len(outp_lines) < 1):
+                    if (len(outp_lines) < 1 or outp_lines[0] == ""):
                         sys.stderr.write("No output from %s" % " ".join(size_find_command))
-                        return ret  # give up now
+                        return 1  # give up now
                     sz = int(outp_lines[0].split("\t")[0])
                     stubsfile.write("#define size_arg_%s %d\n" % (fnName, sz))
                 if allocFn in allL1OrWrapperAllocFns():
