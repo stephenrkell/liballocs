@@ -154,9 +154,9 @@ pair<bool, uniqued_name> add_concrete_type_if_absent(iterator_df<type_die> t, ma
 	bool already_present = r.find(n) != r.end();
 	if (already_present
 		&& t.tag_here() != DW_TAG_base_type
-		&& !regex_match(n.second, m, regex(".*__(PTR|REF|RR|ARR[0-9]+)_.*")))
+		&& !regex_match(n.second, m, regex(".*__(PTR|REF|FUN|RR|ARR[0-9]+)_.*")))
 	{
-		cerr << "warning: non-base non-pointer non-array type named " << n.second << " already exists!" << endl;
+		cerr << "warning: non-base non-pointer non-array non-function type named " << n.second << " already exists!" << endl;
 	}
 	r[n] = t;
 	return make_pair(!already_present, n);
@@ -207,15 +207,16 @@ pair<bool, uniqued_name> transitively_add_type(iterator_df<type_die> t, master_r
 		auto opt_el_t = t.as_a<array_type_die>()->ultimate_element_type();
 		if (opt_el_t) transitively_add_type(opt_el_t->get_concrete_type(), r);
 	}
-	else if (t.is_a<subroutine_type_die>())
+	else if (t.is_a<subroutine_type_die>()
+	|| t.is_a<subprogram_die>())
 	{
-		auto opt_ret_t = t.as_a<subroutine_type_die>()->get_type();
+		auto opt_ret_t = RETURN_TYPE(t); 
 		if (opt_ret_t) transitively_add_type(opt_ret_t, r);
 		
-		auto member_fps = t.as_a<subroutine_type_die>().children().subseq_of<formal_parameter_die>();
+		auto member_fps = t.children().subseq_of<formal_parameter_die>();
 		for (auto i_fp = member_fps.first; i_fp != member_fps.second; ++i_fp)
 		{
-			transitively_add_type(i_fp->get_type(), r);
+			transitively_add_type(i_fp->find_type(), r);
 		}
 	}
 	else if (t.is_a<address_holding_type_die>())
@@ -238,7 +239,7 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 		if (i.is_a<type_die>())
 		{
 			// add it to the relation
-			opt<string> opt_name = i.name_here(); // for debugging
+			opt<string> opt_name = !i.is_a<subprogram_die>() ? i.name_here() : opt<string>(); // for debugging
 			if (opt_name)
 			{
 				string name = *opt_name;

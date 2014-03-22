@@ -134,21 +134,20 @@ all_names_for_type_t::all_names_for_type_t() :
 		}
 		return all;
 	}),
-	subroutine_case([this](iterator_df<subroutine_type_die> t) {
+	subroutine_case([this](iterator_df<type_die> t) {
 		// "__FUN_FROM_" ^ (labelledArgTs argTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (stringFromSig returnTs) 		
-		auto sub_t = t.as_a<subroutine_type_die>();
 		deque<string> working;
 
 		string funprefix = "__FUN_FROM_";
 		working.push_back(funprefix);
-		auto fps = sub_t.children().subseq_of<formal_parameter_die>();
+		auto fps = t.children().subseq_of<formal_parameter_die>();
 		
 		// get a feel for the size of the problem.
 		cerr << "We have " << srk31::count(fps.first, fps.second) << " fps with [";
 		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp)
 		{
 			if (i_fp != fps.first) cerr << ", ";
-			deque<string> arg_allnames = operator()(i_fp->get_type());
+			deque<string> arg_allnames = operator()(i_fp->find_type());
 			cerr << arg_allnames.size();
 		}
 		cerr << "] typenames." << endl;
@@ -173,7 +172,7 @@ all_names_for_type_t::all_names_for_type_t() :
 			ostringstream argprefix;
 			argprefix << "__ARG" << argnum << "_";
 
-			deque<string> arg_allnames = operator()(i_fp->get_type());
+			deque<string> arg_allnames = operator()(i_fp->find_type());
 			cerr << "Found an fp with " << arg_allnames.size() << " names" << endl;
 			auto i_working = working.begin(); 
 			while (i_working != working.end())
@@ -203,7 +202,7 @@ all_names_for_type_t::all_names_for_type_t() :
 					<< (i_working - working.begin()) << " from the start" << endl;
 			}
 		}
-		if (sub_t->is_variadic())
+		if (IS_VARIADIC(t))
 		{
 			for (auto i_working = working.begin(); i_working != working.end(); ++i_working)
 			{
@@ -215,7 +214,7 @@ all_names_for_type_t::all_names_for_type_t() :
 			*i_working = *i_working + "__FUN_TO_";
 		}
 
-		deque<string> all_retnames = operator()(sub_t->get_type());
+		deque<string> all_retnames = operator()(RETURN_TYPE(t));
 		auto i_working = working.begin(); 
 		while (i_working != working.end())
 		{
@@ -259,7 +258,8 @@ deque<string> all_names_for_type_t::operator()(iterator_df<type_die> t) const
 	if (t.is_a<base_type_die>()) return base_type_case(t.as_a<base_type_die>());
 	if (t.is_a<address_holding_type_die>()) return pointer_case(t.as_a<address_holding_type_die>());
 	if (t.is_a<array_type_die>()) return array_case(t.as_a<array_type_die>());
-	if (t.is_a<subroutine_type_die>()) return subroutine_case(t.as_a<subroutine_type_die>());
+	if (t.is_a<subroutine_type_die>()
+	||  t.is_a<subprogram_die>()) return subroutine_case(t);
 	if (t.is_a<with_data_members_die>()) return with_data_members_case(t.as_a<with_data_members_die>());
 	return default_case(t);
 }
@@ -278,7 +278,8 @@ canonical_key_from_type(iterator_df<type_die> t)
 	string summary_string = summary_code_to_string(code);
 	assert(summary_string.size() == 2 * sizeof code);
 	
-	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>())
+	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>()
+		&& !t.is_a<subprogram_die>())
 	{
 		/* for base types, the canonical key is *always* the summary code *only*, 
 		 * i.e. the name component is empty. UNLESS we can place ourselves in a C
@@ -339,26 +340,26 @@ canonical_key_from_type(iterator_df<type_die> t)
 
 		return make_pair(summary_string, name_to_use);
 	}
-	else if (t.is_a<subroutine_type_die>())
+	else if (t.is_a<subroutine_type_die>() || t.is_a<subprogram_die>())
 	{
 		// "__FUN_FROM_" ^ (labelledArgTs argTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (stringFromSig returnTs) 		
 		ostringstream s;
-		auto sub_t = t.as_a<subroutine_type_die>();
 		s << "__FUN_FROM_";
-		auto fps = sub_t.children().subseq_of<formal_parameter_die>();
+		auto fps = t.children().subseq_of<formal_parameter_die>();
 		unsigned argnum = 0;
 		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp, ++argnum)
 		{
 			/* args should not be void */
 			/* We're making a canonical typename, so use canonical argnames. */
-			s << "__ARG" << argnum << "_" << canonical_key_from_type(i_fp->get_type()).second;
+			s << "__ARG" << argnum << "_" << canonical_key_from_type(i_fp->find_type()).second;
 		}
-		if (sub_t->is_variadic())
+		if (IS_VARIADIC(t))
 		{
 			s << "__VA_";
 		}
 		s << "__FUN_TO_";
-		s << ((!sub_t->get_type() || !sub_t->get_concrete_type()) ? string("void") : canonical_key_from_type(sub_t->get_type()).second);
+		iterator_df<type_die> return_t = RETURN_TYPE(t);
+		s << ((!return_t || !return_t->get_concrete_type()) ? string("void") : canonical_key_from_type(return_t).second);
 		return make_pair(summary_string, s.str());
 	}
 	else if (t.is_a<array_type_die>())
@@ -613,23 +614,22 @@ uint32_t type_summary_code(core::iterator_df<core::type_die> t)
 			output_word << *subrange_t->get_lower_bound();
 		}
 	} 
-	else if (concrete_t.is_a<subroutine_type_die>())
+	else if (concrete_t.is_a<subroutine_type_die>()
+		|| concrete_t.is_a<subprogram_die>())
 	{
 		// shift in the argument and return types
-		auto subr_t = concrete_t.as_a<subroutine_type_die>();
-		if (subr_t->get_type()) output_word << type_summary_code(subr_t->get_type());
+		if (RETURN_TYPE(concrete_t)) output_word << type_summary_code(RETURN_TYPE(concrete_t));
 		
 		// shift in something to distinguish void(void) from void
 		output_word << "()";
 		
-		auto fps = subr_t.children().subseq_of<formal_parameter_die>();
+		auto fps = concrete_t.children().subseq_of<formal_parameter_die>();
 		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp)
 		{
-			output_word << type_summary_code(i_fp->get_type());
+			output_word << type_summary_code(i_fp->find_type());
 		}
 		
-		auto varargs = subr_t.children().subseq_of<unspecified_parameters_die>();
-		if (srk31::count(varargs.first, varargs.second) > 0)
+		if (IS_VARIADIC(concrete_t))
 		{
 			output_word << "...";
 		}

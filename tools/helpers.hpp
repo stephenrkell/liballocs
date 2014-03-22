@@ -24,6 +24,15 @@ using namespace dwarf;
 using spec::opt;
 using lib::Dwarf_Unsigned;
 
+#define IS_VARIADIC(t) \
+((t).is_a<subroutine_type_die>() ? (t).as_a<subroutine_type_die>()->is_variadic() \
+		:   (t).is_a<subprogram_die>() ? (t).as_a<subprogram_die>()->is_variadic() \
+		:   false )
+#define RETURN_TYPE(t) \
+((t).is_a<subroutine_type_die>() ? (t).as_a<subroutine_type_die>()->get_type() \
+		:   (t).is_a<subprogram_die>() ? (t).as_a<subprogram_die>()->get_type() \
+		:   (assert(false), iterator_base::END) )
+
 typedef pair<string, string> uniqued_name;
 
 inline opt<string>
@@ -43,6 +52,11 @@ name_for_type_die(core::iterator_df<core::type_die> t)
 		replacement_name.replace(last_underscore_pos, 
 			replacement_name.length() - last_underscore_pos, "_1");
 		return replacement_name;
+	}
+	else if (t.is_a<dwarf::core::subprogram_die>())
+	{
+		/* When interpreted as types, subprograms don't have names. */
+		return opt<string>();
 	}
 	else return *t.name_here();
 }

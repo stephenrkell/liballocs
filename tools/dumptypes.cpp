@@ -44,6 +44,7 @@ using dwarf::core::compile_unit_die;
 using dwarf::core::member_die;
 using dwarf::core::with_data_members_die;
 using dwarf::core::variable_die;
+using dwarf::core::program_element_die;
 using dwarf::core::with_dynamic_location_die;
 using dwarf::core::address_holding_type_die;
 using dwarf::core::array_type_die;
@@ -58,16 +59,6 @@ using boost::smatch;
 using boost::regex_constants::egrep;
 using boost::match_default;
 using boost::format_all;
-
-// we store *iterators* to avoid the inefficient iterator_here(), find() stuff
-// BUT note that iterators are not totally ordered, so we can't store them 
-// as keys in a set (without breaking the equality test). So we use a map
-// keyed on their full source path. 
-typedef std::map< pair<string, string>, iterator_sibs<core::subprogram_die> > subprograms_list_t;
-typedef std::map< pair<string, string>, iterator_sibs<core::variable_die> > statics_list_t;
-
-void print_stacktypes_output(const subprograms_list_t& l);
-void print_statics_output(const statics_list_t& l);
 
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval);
@@ -713,16 +704,16 @@ int main(int argc, char **argv)
 	cout << "\n};\n";
 
 	/* Now write static allocsites. As above, we also have to sort them. */
-	set<pair< Dwarf_Addr, iterator_df<variable_die> > > sorted_statics;
+	set<pair< Dwarf_Addr, iterator_df<program_element_die> > > sorted_statics;
 
 	for (auto i = root.begin(); i != root.end(); ++i)
 	{
+		boost::icl::interval_map<Dwarf_Addr, Dwarf_Unsigned> intervals;
 		if (i.tag_here() == DW_TAG_variable
 			&& i.has_attribute_here(DW_AT_location)
 			&& i.as_a<variable_die>()->has_static_storage(root))
 		{
 			iterator_df<variable_die> i_var = i.as_a<variable_die>();
-			boost::icl::interval_map<Dwarf_Addr, Dwarf_Unsigned> intervals;
 			try
 			{
 				intervals = 
@@ -736,17 +727,33 @@ int main(int argc, char **argv)
 				// this happens if we don't have a real location -- continue
 				continue;
 			}
-			if (intervals.size() == 0)
+		}
+		else if (i.is_a<subprogram_die>())
+		{
+			try
+			{
+				intervals = 
+					i.as_a<subprogram_die>()->file_relative_intervals(
+						root, 
+						0 /* sym_binding_t (*sym_resolve)(const std::string& sym, void *arg) */, 
+						0 /* arg */);
+			}
+			catch (dwarf::lib::No_entry)
 			{
 				// this happens if we don't have a real location -- continue
 				continue;
 			}
-			
-			// calculate its file-relative addr
-			Dwarf_Off addr = intervals.begin()->first.lower();
-			
-			sorted_statics.insert(make_pair(addr, i_var));
 		}
+		if (intervals.size() == 0)
+		{
+			// this happens if we don't have a real location -- continue
+			continue;
+		}
+
+		// calculate its file-relative addr
+		Dwarf_Off addr = intervals.begin()->first.lower();
+
+		sorted_statics.insert(make_pair(addr, i.as_a<program_element_die>()));
 	}
 	
 	cout << "struct allocsite_entry statics[] = {" << endl;
@@ -764,7 +771,8 @@ int main(int argc, char **argv)
 		cout << "\n\t{ (void*)0, (void*)0, "
 			<< "(char*) " << "0" // will fix up at load time
 			<< " + " << addr << "UL, " 
-			<< "&" << mangle_typename(canonical_key_from_type(i_var->find_type()))
+			<< "&" << mangle_typename(canonical_key_from_type(
+				i_var.is_a<subprogram_die>() ? i_var.as_a<type_die>() : i_var.as_a<variable_die>()->find_type()))
 			<< " }";
 		cout << ",";
 	}
