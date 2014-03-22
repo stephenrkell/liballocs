@@ -45,6 +45,16 @@ default: checkall
 
 checkall: $(patsubst %,checkrun-%,$(cases))
 
+# Some cases are expected to fail
+checkrun-fail-%:
+	@echo "expected-fail case is fail-$*" && \
+	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
+	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
+	$(MAKE) cleanrun-fail-$* 1>$$out 2>$$err && \
+		tail -n6 "$$err" | tr '\n' '\f' | \
+		grep ' 0.* 0.* 0.* 0\+.* [1-9][0-9]*.* 0\+$$' >/dev/null || \
+		(tail -n20 $$err; false)
+
 # Most test cases should output a libcrunch summary in which 
 # -- zero or more checks passed (trivially or by lazy typing)
 # -- zero checks aborted

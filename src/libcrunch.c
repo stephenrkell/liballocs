@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <link.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -1710,4 +1711,76 @@ like_a_failed:
 			alloc_site);
 	}
 	return 1; // HACK: so that the program will continue
+}
+
+int 
+__check_args_internal(const void *obj, int nargs, ...)
+{
+	/* We might not be initialized yet (recall that __libcrunch_global_init is 
+	 * not a constructor, because it's not safe to call super-early). */
+	__libcrunch_check_init();
+
+	const char *reason = NULL; // if we abort, set this to a string lit
+	const void *reason_ptr = NULL; // if we abort, set this to a useful address
+	memory_kind k;
+	const void *object_start;
+	unsigned block_element_count = 1;
+	struct uniqtype *alloc_uniqtype = (struct uniqtype *)0;
+	const void *alloc_site;
+	signed target_offset_within_uniqtype;
+
+	struct uniqtype *fun_uniqtype = NULL;
+	
+	_Bool abort = get_alloc_info(obj, 
+		NULL, 
+		&reason,
+		&reason_ptr,
+		&k,
+		&object_start,
+		&block_element_count,
+		&fun_uniqtype,
+		&alloc_site,
+		&target_offset_within_uniqtype);
+	
+	assert(fun_uniqtype);
+	assert(object_start == obj);
+	assert(UNIQTYPE_IS_SUBPROGRAM(fun_uniqtype));
+	
+	/* Walk the arguments that the function expects. Simultaneously, 
+	 * walk our arguments. */
+	va_list ap;
+	va_start(ap, nargs);
+	
+	// FIXME: this function screws with the __libcrunch_begun count somehow
+	// -- try hello-funptr
+	
+	_Bool success = 1;
+	int i;
+	for (i = 0; i < nargs && i < fun_uniqtype->array_len; ++i)
+	{
+		void *argval = va_arg(ap, void*);
+		/* contained[0] is the return type */
+		struct uniqtype *expected_arg = fun_uniqtype->contained[i+1].ptr;
+		/* We only check casts that are to pointer targets types.
+		 * How to test this? */
+		if (!expected_arg->is_array && expected_arg->array_len == MAGIC_LENGTH_POINTER)
+		{
+			struct uniqtype *expected_arg_pointee_type = expected_arg->contained[0].ptr;
+			success &= __is_aU(argval, expected_arg_pointee_type);
+		}
+		if (!success) break;
+	}
+	if (i == nargs && i < fun_uniqtype->array_len)
+	{
+		/* This means we exhausted nargs before we got to the end of the array. */
+	}
+	if (i < nargs && i == fun_uniqtype->array_len)
+	{
+		/* This means we passed more args than the uniqtype told us about. 
+		 * FIXME: check for its varargs-ness. */
+	}
+	
+	va_end(ap);
+	
+	return success ? 0 : i; // 0 means success here
 }

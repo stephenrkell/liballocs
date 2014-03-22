@@ -104,8 +104,11 @@ struct uniqtype
 		struct uniqtype *ptr;
 	} contained[];
 };
-#define UNIQTYPE_IS_SUBPROGRAM(u) (((u)->pos_maxoff == 0) && ((u)->neg_maxoff == 0))
-
+#define UNIQTYPE_IS_SUBPROGRAM(u) \
+(((u) != (struct uniqtype *) &__uniqtype__void) && \
+((u)->pos_maxoff == 0) && \
+((u)->neg_maxoff == 0) && !(u)->is_array)
+#define MAGIC_LENGTH_POINTER ((1u << 19) - 1u)
 static inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite)
 {
 	assert(__libcrunch_allocsmt != NULL);

@@ -304,6 +304,11 @@ struct uniqtype \n\
 			<< "0" << " /* array_len (void) */,\n\t"
 			<< "/* contained */ { }\n};\n";
 	}
+	else // always declare it, at least, with weak attribute
+	{
+		out << "extern struct uniqtype " << mangle_typename(make_pair(string(""), string("void")))
+			<< " __attribute__((weak));" << endl;
+	}
 	
 	/* The complement relation among signed and unsigned integer types. */
 	map<unsigned, map<bool, set< master_relation_t::value_type > > > integer_base_types_by_size_and_signedness;
@@ -409,20 +414,32 @@ struct uniqtype \n\
 		
 		out << "\n/* uniqtype for \"" << i_vert->first.second 
 			<< "\" with summary code " << i_vert->first.first << " */\n";
-		auto members = i_vert->second.children().subseq_of<member_die>();
 		std::vector< iterator_base > real_members;
 		std::vector< Dwarf_Unsigned > real_member_offsets;
-		for (auto i_edge = members.first; i_edge != members.second; ++i_edge)
+		std::vector< iterator_base > fp_types;
+		if (i_vert->second.is_a<subprogram_die>())
 		{
-			/* if we don't have a byte offset, skip it */
-			opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(root);
-			if (!opt_offset) continue;
-			else
-			{ 
-				real_members.push_back(i_edge.base().base()); 
-				real_member_offsets.push_back(*opt_offset);
+			auto fps = i_vert->second.children().subseq_of<formal_parameter_die>();
+			for (auto i_edge = fps.first; i_edge != fps.second; ++i_edge)
+			{
+				fp_types.push_back(i_edge->find_type()); 
 			}
-		}		
+		}
+		else
+		{
+			auto members = i_vert->second.children().subseq_of<member_die>();
+			for (auto i_edge = members.first; i_edge != members.second; ++i_edge)
+			{
+				/* if we don't have a byte offset, skip it ( -- it's a static var?) */
+				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(root);
+				if (!opt_offset) continue;
+				else
+				{ 
+					real_members.push_back(i_edge.base().base()); 
+					real_member_offsets.push_back(*opt_offset);
+				}
+			}
+		}
 		unsigned members_count = real_members.size();
 		unsigned array_len;
 		if  (i_vert->second.is_a<array_type_die>())
@@ -430,6 +447,16 @@ struct uniqtype \n\
 			auto opt_array_len = i_vert->second.as_a<array_type_die>()->element_count(root);
 			if (opt_array_len) array_len = *opt_array_len;
 			else array_len = 0;
+		} else if (i_vert->second.is_a<subprogram_die>())
+		{
+			/* use array len to encode the number of fps */
+			array_len = fp_types.size();
+		} else if (i_vert->second.is_a<address_holding_type_die>())
+		{
+			/* HACK HACK HACK: encode the type's pointerness into array_len. 
+			 * We should rationalise struct uniqtype to require less of this
+			 * sort of thing. */
+			array_len = /* MAGIC_LENGTH_POINTER */(1u << 19) - 1u;
 		} else array_len = 0;
 		string mangled_name = mangle_typename(i_vert->first);
 		out << "struct uniqtype " << mangled_name
@@ -459,7 +486,47 @@ struct uniqtype \n\
 			// end the struct
 			out << " }";
 		}
-		else // non-array -- use real members
+		else if (i_vert->second.is_a<address_holding_type_die>())
+		{
+			// array: write a single entry, for the target type
+			out << "{ " << "0, ";
+
+			// compute and print destination name
+			auto k = canonical_key_from_type(i_vert->second.as_a<address_holding_type_die>()->get_type());
+			string mangled_name = mangle_typename(k);
+			out << "&" << mangled_name;
+
+			// end the struct
+			out << " }";
+		}
+		else if (i_vert->second.is_a<subprogram_die>())
+		{
+			/* Output the return type and argument types. We always output
+			 * a return type, even if it's &__uniqtype__void. */
+			auto return_type = i_vert->second.as_a<subprogram_die>()->find_type();
+			/* begin the struct */
+			out << "{ ";
+			out << "0, ";
+			out << "&" << mangle_typename(canonical_key_from_type(return_type));
+
+			// end the struct
+			out << " }";
+			
+			for (auto i_t = fp_types.begin(); i_t != fp_types.end(); ++i_t)
+			{
+				/* always write a comma */
+				out << ",\n\t\t";
+
+				/* begin the struct */
+				out << "{ ";
+				out << "0, ";
+				out << "&" << mangle_typename(canonical_key_from_type(*i_t));
+
+				// end the struct
+				out << " }";
+			}
+		}
+		else // non-array non-subprogram -- use real members
 		{
 			unsigned i_membernum = 0;
 			std::set<lib::Dwarf_Unsigned> used_offsets;

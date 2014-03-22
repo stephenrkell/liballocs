@@ -1,4 +1,4 @@
-CFLAGS += -std=gnu99 -g -O0 -fPIC -I../include
+CFLAGS += -std=gnu99 -g -O3 -DNDEBUG -fPIC -I../include
 HEAP_INDEX_HOOKS := heap_index_fast_hooks
 #HEAP_INDEX_HOOKS := heap_index_hooks
 

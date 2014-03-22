@@ -269,8 +269,11 @@ all_names_for_type_t default_all_names_for_type;
 uniqued_name
 canonical_key_from_type(iterator_df<type_die> t)
 {
+	if (!t) return make_pair("", "void");
 	assert(t);
 	t = t->get_concrete_type();
+	if (!t) return make_pair("", "void");
+	assert(t);
 
 	/* we no longer use the defining_header -- use instead
 	 * the type summary code */
@@ -756,14 +759,7 @@ void get_types_by_codeless_uniqtype_name(
 			pair<string, string> uniqtype_name_pair;
 			
 			// handle void case specially
-			if (!concrete_t.is_real_die_position())
-			{
-				uniqtype_name_pair = make_pair("", "void");
-			}
-			else
-			{
-				uniqtype_name_pair = canonical_key_from_type(t);
-			}
+			uniqtype_name_pair = canonical_key_from_type(t);
 
 			/* CIL/trumptr will only generate references to aliases in the case of 
 			 * base types. We need to handle these here. What should happen? 

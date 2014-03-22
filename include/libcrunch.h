@@ -22,12 +22,14 @@ const void *__libcrunch_typestr_to_uniqtype(const char *typestr) __attribute__((
 void *__libcrunch_my_typeobj(void) __attribute__((weak));
 int __is_a_internal(const void *obj, const void *uniqtype) __attribute__((weak));
 int __like_a_internal(const void *obj, const void *uniqtype) __attribute__((weak));
+int __check_args_internal(const void *obj, int nargs, ...) __attribute__((weak));
 
 /* Uniqtypes for signed_char and unsigned_char -- we declare them as int 
  * to avoid the need to define struct uniqtype in this header file. */
 
 extern int __uniqtype__signed_char __attribute__((weak));
 extern int __uniqtype__unsigned_char __attribute__((weak));
+extern int __uniqtype__void __attribute__((weak));
 
 /* The main public API to libcrunch is through several small functions 
  * which are *always* inlined. NOTE: repeat these in trumptr.ml so that
