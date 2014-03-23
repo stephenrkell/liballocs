@@ -1180,8 +1180,10 @@ _Bool
 			 * is initialized during load, but can be extended as new allocsites
 			 * are discovered, e.g. indirect ones.)
 			 */
-			struct deep_entry *deep = NULL;
-			struct insert *heap_info = lookup_object_info(obj, (void**) out_object_start, &deep);
+			struct suballocated_chunk_rec *containing_suballoc = NULL;
+			size_t alloc_chunksize;
+			struct insert *heap_info = lookup_object_info(obj, (void**) out_object_start, 
+					&alloc_chunksize, &containing_suballoc);
 			if (!heap_info)
 			{
 				*out_reason = "unindexed heap object";
@@ -1196,12 +1198,6 @@ _Bool
 				|| (prefix_tree_add_missing_maps(),
 					 prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC));
 
-			unsigned alloc_chunksize;
-			if (deep) 
-			{
-				alloc_chunksize = deep->size_4bytes << 2;
-			} else alloc_chunksize = malloc_usable_size((void*) *out_object_start);
-			
 			/* Now we have a uniqtype or an allocsite. For long-lived objects 
 			 * the uniqtype will have been installed in the heap header already.
 			 */
