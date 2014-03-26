@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 #include <errno.h>
 #include <assert.h>
@@ -91,7 +92,7 @@ static void install_cache_entry(void *object_start,
 	struct suballocated_chunk_rec *containing_chunk,
 	struct insert *insert);
 static void invalidate_cache_entry(void *object_start,
-	struct suballocated_chunk_rec *sub);
+	struct suballocated_chunk_rec *sub, struct insert *ins);
 
 /* "Distance" is a right-shifted offset within a memory region. */
 static inline ptrdiff_t entry_to_offset(struct entry e) 
@@ -139,6 +140,8 @@ static inline struct entry addr_to_entry(void *a)
 }
 
 static void delete_suballocated_chunk(struct suballocated_chunk_rec *p_rec);
+static void unindex_deep_alloc_internal(void *ptr, struct insert *existing_ins, 
+		struct suballocated_chunk_rec *p_rec);
 static struct suballocated_chunk_rec *suballocated_chunks;
 
 /* The (unsigned) -1 conversion here provokes a compiler warning,
@@ -753,7 +756,7 @@ out:
 	{
 		delete_suballocated_chunk(&suballocated_chunks[(unsigned) saved_ins.alloc_site]);
 	}
-	invalidate_cache_entry(userptr, NULL);
+	invalidate_cache_entry(userptr, NULL, NULL);
 	list_sanity_check(index_entry, NULL);
 }
 
@@ -824,32 +827,54 @@ struct lookup_cache_entry
 } lookup_cache[LOOKUP_CACHE_SIZE];
 static struct lookup_cache_entry *next_to_evict = &lookup_cache[0];
 
+static void check_cache_sanity(void)
+{
+#ifndef NDEBUG
+	for (int i = 0; i < LOOKUP_CACHE_SIZE; ++i)
+	{
+		assert(!lookup_cache[i].object_start || 
+				!ALLOC_IS_SUBALLOCATED(lookup_cache[i].insert));
+	}
+#endif
+}
+
 static void install_cache_entry(void *object_start,
 	size_t object_size,
 	struct suballocated_chunk_rec *containing_chunk,
 	struct insert *insert)
 {
+	check_cache_sanity();
 	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
+	assert((char*)(uintptr_t) insert->alloc_site >= MINIMUM_USER_ADDRESS);
 	*next_to_evict = (struct lookup_cache_entry) {
 		object_start, object_size, containing_chunk, insert
 	}; // FIXME: thread safety
+	// don't immediately evict the entry we just created
+	next_to_evict = &lookup_cache[(next_to_evict + 1 - &lookup_cache[0]) % LOOKUP_CACHE_SIZE];
+	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
+	check_cache_sanity();
 }
 
 static void invalidate_cache_entry(void *object_start,
-	struct suballocated_chunk_rec *containing)
+	struct suballocated_chunk_rec *containing,
+	struct insert *ins)
 {
+	check_cache_sanity();
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
-		if (object_start == lookup_cache[i].object_start 
-				&& containing == lookup_cache[i].containing_chunk) 
+		if ((!object_start || object_start == lookup_cache[i].object_start)
+				&& (!containing || containing == lookup_cache[i].containing_chunk)
+				&& (!ins || ins == lookup_cache[i].insert)) 
 		{
 			lookup_cache[i] = (struct lookup_cache_entry) {
 				NULL, 0, NULL, NULL
 			};
 			next_to_evict = &lookup_cache[i];
+			check_cache_sanity();
 			return;
 		}
 	}
+	check_cache_sanity();
 }
 
 static
@@ -875,22 +900,31 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 	/* Try matching in the cache. NOTE: how does this impact l0 and deep-indexed 
 	 * entries? In all cases, we cache them here. Invalidate if we deep-index
 	 * an existing allocation. Never cache non-leaf allocations. */
+	check_cache_sanity();
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
-		if ((char*) mem >= (char*) lookup_cache[i].object_start 
+		if (lookup_cache[i].object_start && 
+				(char*) mem >= (char*) lookup_cache[i].object_start 
 				&& (char*) mem < (char*) lookup_cache[i].object_start + lookup_cache[i].usable_size)
 		{
+			// HIT!
+			assert(lookup_cache[i].object_start);
+#if defined(TRACE_DEEP_HEAP_INDEX) || defined(TRACE_HEAP_INDEX)
+			fprintf(stderr, "Cache hit at pos %d (%p) with alloc site %p\n", i, 
+					lookup_cache[i].object_start, (void*) (uintptr_t) lookup_cache[i].insert->alloc_site);
+			fflush(stderr);
+#endif
+			assert((char*)(uintptr_t)(lookup_cache[i].insert->alloc_site) >= MINIMUM_USER_ADDRESS);
+			
 			if (out_object_start) *out_object_start = lookup_cache[i].object_start;
 			if (out_containing_chunk) *out_containing_chunk = lookup_cache[i].containing_chunk;
-			// HIT! so ensure we're not about to evict this guy
+			// ... so ensure we're not about to evict this guy
 			if (next_to_evict - &lookup_cache[0] == i)
 			{
 				next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
 				assert(next_to_evict - &lookup_cache[0] < LOOKUP_CACHE_SIZE);
 			}
 			return lookup_cache[i].insert;
-			// case of deep inserts means we need to store the insert ptr specially
-				//insert_for_chunk_and_usable_size(lookup_cache[i].object_start, lookup_cache[i].usable_size);
 		}
 	}
 	void *l01_object_start;
@@ -919,6 +953,13 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 				found = found_deeper;
 				size = deep_object_size;
 			}
+			else
+			{
+				// we still have to point the metadata at the *sub*indexed copy
+				assert((char*)(uintptr_t) found->alloc_site < MINIMUM_USER_ADDRESS);
+				found = &suballocated_chunks[(unsigned) found->alloc_site].higherlevel_ins;
+			}
+			
 		}
 
 		install_cache_entry(object_start, size, containing_chunk_rec, found);
@@ -928,7 +969,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 		if (out_containing_chunk) *out_containing_chunk = containing_chunk_rec;
 	}
 	
-	
+	assert(!found || (char*)(uintptr_t) found->alloc_site >= MINIMUM_USER_ADDRESS);
 	return found;
 }
 
@@ -1029,7 +1070,7 @@ struct insert *lookup_l01_object_info(const void *mem, void **out_object_start)
 		&& find_next_nonempty_bin(&cur_head, &index_region[0], &object_minimum_size)); 
 fail:
 	fprintf(stderr, "Heap index lookup failed with "
-		"cur_head %p, object_minimum_size %zu, seen_object_starting_earlier %d",
+		"cur_head %p, object_minimum_size %zu, seen_object_starting_earlier %d\n",
 		cur_head, object_minimum_size, (int) seen_object_starting_earlier);
 	return NULL;
 	/* FIXME: use the actual biggest allocated object, not a guess. */
@@ -1050,6 +1091,9 @@ fail:
 static unsigned long *suballocated_chunks_bitmap;
 static unsigned long bitmap_nwords;
 #define UNSIGNED_LONG_NBITS (NBITS(unsigned long))
+static 
+void 
+check_bucket_sanity(struct insert *p_bucket, struct suballocated_chunk_rec *p_rec);
 
 #define MAX_PITCH 256 /* Don't support larger than 256-byte pitches, s.t. remainder fits in one byte */
 
@@ -1075,6 +1119,8 @@ static struct suballocated_chunk_rec *make_suballocated_chunk(void *chunk_base, 
 		struct insert *chunk_existing_ins, size_t guessed_average_size)
 {
 	if (!suballocated_chunks) init_suballocs();
+	assert(chunk_size != 0);
+	check_cache_sanity();
 	
 	/* Use the bitmap to find the first unused bit EXCEPT THE FIRST one.
 	 * This is because we don't want the case of a NULL alloc_site field
@@ -1111,7 +1157,7 @@ static struct suballocated_chunk_rec *make_suballocated_chunk(void *chunk_base, 
 	}; // others 0 for now
 	
 	if (guessed_average_size > MAX_PITCH) guessed_average_size = MAX_PITCH;
-	p_rec->log_pitch = next_power_of_two_ge(guessed_average_size);
+	p_rec->log_pitch = integer_log2(next_power_of_two_ge(guessed_average_size));
 	
 	/* The size of a layer is (normally) 
 	 * the number of bytes required to store one metadata record per average-size unit. */
@@ -1152,9 +1198,12 @@ static struct suballocated_chunk_rec *make_suballocated_chunk(void *chunk_base, 
 	assert(p_rec->metadata_recs != MAP_FAILED);
 	
 	/* Update the old insert with our info. */
+	check_cache_sanity();
 	chunk_existing_ins->alloc_site = free_index;
 	chunk_existing_ins->alloc_site_flag = 0;
-	chunk_existing_ins->un.bits = 0;
+	// NO! WE DON'T do this because we need to leave the l1 linked list intact! 
+	// chunk_existing_ins->un.bits = 0;
+	check_cache_sanity();
 	
 	return p_rec;
 }
@@ -1170,18 +1219,23 @@ static void delete_suballocated_chunk(struct suballocated_chunk_rec *p_rec)
 	/* munmap it. */
 	int ret = munmap(p_rec->metadata_recs, (sizeof (struct insert)) * p_rec->size);
 	assert(ret == 0);
+	
+	// bzero the chunk rec
+	bzero(p_rec, sizeof (struct suballocated_chunk_rec));
 			
 	/* We might want to restore the previous alloc_site bits in the higher-level 
 	 * chunk. But we assume that's been/being deleted, so we don't bother. */
 }
 
 #define NBUCKET_OF(addr, p_rec)  ((uintptr_t) (addr) - (uintptr_t) (p_rec)->begin) >> (p_rec)->log_pitch
-#define MODULUS_OF(addr, p_rec)  ((uintptr_t) (addr) - (uintptr_t) (p_rec)->begin) % (1ul<<(p_rec)->log_pitch)
+#define MODULUS_OF_ADDR(addr, p_rec)  ((uintptr_t) (addr) - (uintptr_t) (p_rec)->begin) % (1ul<<(p_rec)->log_pitch)
 #define BUCKET_PITCH(p_rec) (1ul<<((p_rec)->log_pitch))
 #define INSERTS_PER_LAYER(p_rec) ((p_rec)->size >> (p_rec)->log_pitch)
 #define NLAYERS(p_rec) (1ul<<(p_rec)->log_pitch)
 #define BUCKET_RANGE_BASE(p_bucket, p_rec) \
-    (((char*)((p_rec)->begin)) + (((p_bucket) - (p_rec)->metadata_recs)>>((p_rec)->log_pitch)))
+    (((char*)((p_rec)->begin)) + (((p_bucket) - (p_rec)->metadata_recs)<<((p_rec)->log_pitch)))
+#define BUCKET_RANGE_END(p_bucket, p_rec) \
+    (((char*)BUCKET_RANGE_BASE((p_bucket), (p_rec))) + BUCKET_PITCH((p_rec)))
 #define BUCKET_PTR_FROM_INSERT_PTR(p_ins, p_rec) \
 	((p_rec)->metadata_recs + (((p_ins) - (p_rec)->metadata_recs) % INSERTS_PER_LAYER(p_rec)))
 
@@ -1201,19 +1255,21 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	 * of this alloc. */
 	assert(size_bytes >= 1);
 	void *existing_object_start;
-	struct suballocated_chunk_rec *containing_deep_chunk;
+	struct suballocated_chunk_rec *containing_deep_chunk = NULL;
 	char *end_addr = (char*) ptr + size_bytes;
 	
-	struct insert *found_ins = lookup_object_info(ptr, &existing_object_start, NULL, &containing_deep_chunk);
+	// HACK: just l01 for now
+	struct insert *found_ins = lookup_l01_object_info(ptr, &existing_object_start
+			/*, NULL, &containing_deep_chunk*/);
 	assert(found_ins);
 	
-	// invalidate any cache entry for the l1 entry
-	invalidate_cache_entry(existing_object_start, NULL);
-	
 	// assert that we find the same chunk if we look up the *end* of the region
-	assert(found_ins == lookup_object_info((char*) ptr + size_bytes - 1, NULL, NULL, NULL));
+	assert(found_ins == lookup_l01_object_info((char*) ptr + size_bytes - 1, NULL));
 	// FIXME: we don't support level>2 for now
 	assert(!containing_deep_chunk);
+
+	// invalidate any cache entry for the l1 entry
+	invalidate_cache_entry(existing_object_start, NULL, NULL);
 	
 	/* Do we already have a deep region covering this? Put differently, is the containing
 	 * chunk already deep-allocated? If not, we have to make a new deep record for it. */
@@ -1225,12 +1281,76 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 				usersize(existing_object_start) - sizeof (struct insert), 
 				found_ins, /* guessed_average_size */ size_bytes);
 	} else p_rec = &suballocated_chunks[(uintptr_t) found_ins->alloc_site];
-	
-	/* Now we need to find a free metadata record to index this allocation at. */
+
+	/* Get the relevant bucket. */
 	unsigned long bucket_num = NBUCKET_OF(ptr, p_rec);
-	unsigned char modulus = MODULUS_OF(ptr, p_rec);
-	/* What's the first layer that's free? */
 	struct insert *p_bucket = p_rec->metadata_recs + bucket_num;
+	check_bucket_sanity(p_bucket, p_rec);
+
+	/* Assert we don't already have metadata for this object.
+	 * But actually, for GC'd heaps, shouldn't we just overwrite it?
+	 * Then we don't need to interpose on the free operation, which
+	 * might not be procedurally abstracted. */
+	// struct insert *p_found_ins0 = lookup_deep_alloc(ptr, 1, 
+	//	found_ins, NULL, NULL, NULL);
+	// assert(!p_found_ins0);
+	char *unindexed_up_to = ptr;
+	char *unindex_end = (char*) ptr + size_bytes;
+	// instead of walking bytewise, we should just walk up the allocs
+	// 0. handle the case of an object starting [maybe much] earlier
+	// creeping over into this bucket.
+	void *earlier_object_start;
+	size_t earlier_object_size;
+	struct insert *p_old_ins = lookup_deep_alloc(ptr, 1, found_ins, &earlier_object_start,
+			&earlier_object_size, NULL);
+	if (p_old_ins) 
+	{
+		unindex_deep_alloc_internal(earlier_object_start, p_old_ins, p_rec); // FIXME: support deeper
+	}
+	unsigned short modulus = MODULUS_OF_ADDR(ptr, p_rec);
+	// 1. now any object that overlaps us must start later than us, walk up the buckets
+	for (struct insert *p_search_bucket = p_bucket;
+			// we might find an object overlapping that starts in this bucket if 
+			// -- our bucket range base is not later than the end of our object, and
+			// -- our bucket range end is not earlier than the 
+			(char*) BUCKET_RANGE_BASE(p_search_bucket, p_rec) < (char*) unindex_end; 
+					//|| (char*) ptr >= BUCKET_RANGE_BASE(p_search_bucket, p_rec);
+			
+			++p_search_bucket)
+	{
+		for (struct insert *i_layer = p_search_bucket; 
+				i_layer->alloc_site; 
+				i_layer += INSERTS_PER_LAYER(p_rec))
+		{
+			/* Does this object overlap our allocation? */
+			char *this_object_start;
+			char *this_object_end_thisbucket;
+			struct insert *this_object_ins;
+			
+			/* We don't care about continuation records; we'll find the 
+			 * start record before any relevant continuation record. */
+			if (IS_CONTINUATION_REC(i_layer))
+			{
+				// FIXME: assert that it doesn't overlap
+				continue;
+			}
+			
+			/* We have a start record. Check for overlap. */
+			this_object_start = (char*) BUCKET_RANGE_BASE(p_search_bucket, p_rec) + MODULUS_OF_INSERT(i_layer);
+			this_object_end_thisbucket = this_object_start + THISBUCKET_SIZE_OF_INSERT(i_layer);
+			// if it overlaps us at all, it must overlap us in this bucket
+			if (this_object_start < unindex_end 
+					&& this_object_end_thisbucket > (char*) ptr)
+			{
+				unindex_deep_alloc_internal(this_object_start, i_layer, p_rec);
+				/* HACK: this deletes i_layer, so move it back one. */
+				i_layer -= INSERTS_PER_LAYER(p_rec);
+			}
+		}
+	}
+
+	/* Now we need to find a free metadata record to index this allocation at. */
+	/* What's the first layer that's free? */
 	struct insert *p_ins = p_bucket;
 	unsigned layer_num = 0;
 	while (p_ins->alloc_site)
@@ -1250,24 +1370,30 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	 * have alloc_site_flag == 1 and alloc_site < MINIMUM_USER_ADDRESS, and the "overhang"
 	 * in bits (0 means "full bucket"). 
 	 * The alloc site records the bucket number in which the object starts. This limits us to
-	 * 16M buckets, so a 128MByte chunk for 8-byte-pitch, etc., which seems
-	 * bearable. 
+	 * 4M buckets, so a 32MByte chunk for 8-byte-pitch, etc., which seems
+	 * bearable for the moment. 
 	 */
-	char thisbucket_size = (NBUCKET_OF(end_addr, p_rec) == bucket_num) 
+	unsigned short thisbucket_size = (NBUCKET_OF(end_addr, p_rec) == bucket_num) 
 			? size_bytes
 			: (BUCKET_PITCH(p_rec) - modulus);
-	// unsigned short continuation_overhang = end_addr % (1ul<<p_rec->log_pitch);
+	assert(thisbucket_size != 0);
+	assert(thisbucket_size <= BUCKET_PITCH(p_rec));
 	
 	p_ins->un.bits = (thisbucket_size << 8) | modulus;
 	
-	/* If we spill into the next bucket, set the continuation records */
-	if ((char*)(BUCKET_RANGE_BASE(p_bucket, p_rec)) < end_addr)
+	/* We should be sane already, even though our continuation is not recorded. */
+	check_bucket_sanity(p_bucket, p_rec);
+	
+	/* If we spill into the next bucket, set the continuation record */
+	if ((char*)(BUCKET_RANGE_END(p_bucket, p_rec)) < end_addr)
 	{
-		++p_bucket;
-		struct insert *p_ins = p_bucket;
+		struct insert *p_continuation_bucket = p_bucket + 1;
+		assert(p_continuation_bucket - &p_rec->metadata_recs[0] < (uintptr_t) MINIMUM_USER_ADDRESS);
+		struct insert *p_continuation_ins = p_continuation_bucket;
 		/* Find a free slot */
 		unsigned layer_num = 0;
-		while (p_ins->alloc_site) { p_ins += INSERTS_PER_LAYER(p_rec); ++layer_num; }
+		while (p_continuation_ins->alloc_site) 
+		{ p_continuation_ins += INSERTS_PER_LAYER(p_rec); ++layer_num; }
 		assert(layer_num < NLAYERS(p_rec));
 		
 		//unsigned short thisbucket_size = (end_addr >= BUCKET_RANGE_BASE(p_bucket + 1, p_rec))
@@ -1275,18 +1401,126 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 		//		: (char*) end_addr - (char*) BUCKET_RANGE_BASE(p_bucket, p_rec);
 		//assert(thisbucket_size < 256);
 		
-		assert(bucket_num < (uintptr_t) MINIMUM_USER_ADDRESS);
-		*p_ins = (struct insert) {
-			.alloc_site = size_bytes,
-			.alloc_site_flag = 1,
-			.un = { bits: 0 }
+		unsigned long size_after_first_bucket = size_bytes - thisbucket_size;
+		assert(size_after_first_bucket != 0);
+		unsigned long size_in_continuation_bucket 
+		 = (size_after_first_bucket > BUCKET_PITCH(p_rec)) ? 0 : size_after_first_bucket;
+		
+		*p_continuation_ins = (struct insert) {
+			.alloc_site = size_bytes, // NOTE what we're doing here!
+			.alloc_site_flag = 1,     // ditto
+			.un = { bits: (unsigned short) (size_in_continuation_bucket << 8) }  // ditto: modulus is zero, BUT size is included
 		};
+		assert(IS_CONTINUATION_REC(p_continuation_ins));
+		check_bucket_sanity(p_continuation_bucket, p_rec);
 	}
 	
+	check_bucket_sanity(p_bucket, p_rec);
+	if (p_rec->biggest_object < size_bytes) p_rec->biggest_object = size_bytes;
+	
+#ifndef NDEBUG
+	struct insert *p_found_ins1 = lookup_deep_alloc(ptr, 1, 
+		found_ins, NULL, NULL, NULL);
+	assert(p_found_ins1 == p_ins);
+	struct insert *p_found_ins2 = lookup_deep_alloc((char*) ptr + size_bytes - 1, 1, 
+		found_ins, NULL, NULL, NULL);
+	assert(p_found_ins2 == p_ins);
+#endif
+	check_cache_sanity();
 	return 2; // FIXME
 }
 
-#define IS_CONTINUATION_REC(ins) ((char*)((uintptr_t)(ins)->alloc_site) < (char*) MINIMUM_USER_ADDRESS && (ins)->alloc_site_flag)
+static _Bool
+get_start_from_continuation(struct insert *p_ins, struct insert *p_bucket, struct suballocated_chunk_rec *p_rec,
+		void **out_object_start, size_t *out_object_size, struct insert **out_object_ins)
+{
+	/* NOTE: don't sanity check buckets in this function, because we might be 
+	 * called from inside check_bucket_sanity(). */
+	
+	// the object starts somewhere in the previous bucket
+	// okay: hop back to the object start
+	struct insert *p_object_start_bucket = p_bucket - 1;
+
+	// walk the object start bucket looking for the *last* object i.e. biggest modulus
+	struct insert *object_ins;
+	struct insert *biggest_modulus_pos = NULL;
+	for (struct insert *i_layer = p_object_start_bucket;
+			i_layer->alloc_site;
+			i_layer += INSERTS_PER_LAYER(p_rec))
+	{
+		if (IS_CONTINUATION_REC(i_layer)) continue;
+		// the modulus tells us where this object starts in the bucket range
+		unsigned short modulus = p_object_start_bucket->un.bits & 0xff;
+		if (!biggest_modulus_pos || 
+				MODULUS_OF_INSERT(i_layer) > MODULUS_OF_INSERT(biggest_modulus_pos))
+		{
+			biggest_modulus_pos = i_layer;
+		}
+	}
+	// we must have seen the last object
+	assert(biggest_modulus_pos);
+	object_ins = biggest_modulus_pos;
+	char *object_start = (char*)(BUCKET_RANGE_BASE(p_object_start_bucket, p_rec)) 
+			+ MODULUS_OF_INSERT(biggest_modulus_pos);
+	uintptr_t object_size = p_ins->alloc_site;
+	
+	if (out_object_start) *out_object_start = object_start;
+	if (out_object_size) *out_object_size = object_size;
+	if (out_object_ins) *out_object_ins = object_ins;
+	
+	return 1;
+}
+
+static 
+void 
+check_bucket_sanity(struct insert *p_bucket, struct suballocated_chunk_rec *p_rec)
+{
+#ifndef NDEBUG
+	/* Walk the bucket */
+	unsigned layer_num = 0;
+	for (struct insert *i_layer = p_bucket;
+			i_layer->alloc_site;
+			i_layer += INSERTS_PER_LAYER(p_rec), ++layer_num)
+	{
+		// we should never need to go beyond the last layer
+		assert(layer_num < NLAYERS(p_rec));
+		
+		unsigned short thisbucket_size = i_layer->un.bits >> 8;
+		unsigned short modulus = i_layer->un.bits & 0xff;
+		
+		assert(modulus < BUCKET_PITCH(p_rec));
+		
+		if (IS_CONTINUATION_REC(i_layer))
+		{
+			/* Check that the *previous* bucket contains the object start */
+			assert(get_start_from_continuation(i_layer, p_bucket, p_rec, 
+					NULL, NULL, NULL));
+		}
+		
+		/* Check we don't overlap with anything else in this bucket. */
+		for (struct insert *i_earlier_layer = p_bucket;
+			i_earlier_layer != i_layer;
+			i_earlier_layer += INSERTS_PER_LAYER(p_rec))
+		{
+			unsigned short thisbucket_earlier_size = i_earlier_layer->un.bits >> 8;
+			unsigned short earlier_modulus = i_earlier_layer->un.bits & 0xff;
+			
+			// note that either record might be a continuation record
+			// ... in which case zero-size means "the whole bucket"
+			assert(!(IS_CONTINUATION_REC(i_earlier_layer) && thisbucket_earlier_size == 0));
+			assert(!(IS_CONTINUATION_REC(i_layer) && thisbucket_size == 0));
+
+			unsigned earlier_end = earlier_modulus + thisbucket_earlier_size;
+			unsigned our_end = modulus + thisbucket_size;
+			
+			// conventional overlap
+			assert(!(earlier_end > modulus && earlier_modulus < our_end));
+			assert(!(our_end > earlier_modulus && modulus < earlier_end));
+		}
+	}
+
+#endif
+}
 
 static
 struct insert *lookup_deep_alloc(const void *ptr, int max_levels, 
@@ -1302,7 +1536,7 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 	
 	assert(max_levels == 1);// i.e. we go down to l2 only
 	assert(start);
-	assert((char*)(uintptr_t) start->alloc_site < (char*) MINIMUM_USER_ADDRESS);
+	assert((char*)(uintptr_t) start->alloc_site < MINIMUM_USER_ADDRESS);
 	
 	struct suballocated_chunk_rec *p_rec = &suballocated_chunks[(unsigned) start->alloc_site];
 	
@@ -1313,18 +1547,24 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 	 * If it has itself been sub-allocated, we recurse (FIXME), 
 	 * and if that fails, stick with the result we have. */
 	unsigned start_bucket_num = NBUCKET_OF(ptr, p_rec);
-	struct insert *p_bucket = &p_rec->metadata_recs[start_bucket_num];
+	struct insert *p_start_bucket = &p_rec->metadata_recs[start_bucket_num];
+	struct insert *p_bucket = p_start_bucket;
 	_Bool must_see_continuation = 0; // a bit like seen_object_starting_earlier
+	char *earliest_possible_start = (char*) ptr - p_rec->biggest_object;
 	do 
 	{
-
 		/* walk this bucket looking for an object overlapping us */
-		struct insert *bucket_start = p_rec->metadata_recs + start_bucket_num;
-		char *thisbucket_base_addr = BUCKET_RANGE_BASE(bucket_start, p_rec);
-		struct insert *p_ins = bucket_start;
+		char *thisbucket_base_addr = BUCKET_RANGE_BASE(p_bucket, p_rec);
+
+		check_bucket_sanity(p_bucket, p_rec);
+		
 		unsigned layer_num = 0;
-		while (p_ins->alloc_site)
+		for (struct insert *p_ins = p_bucket;
+			p_ins->alloc_site;
+			p_ins += INSERTS_PER_LAYER(p_rec), ++layer_num)
 		{
+			// we should never need to go beyond the last layer
+			assert(layer_num < NLAYERS(p_rec));
 			/* We are walking the bucket. Possibilities: 
 			 * 
 			 * it's a continuation record (may or may not overlap our ptr);
@@ -1338,34 +1578,14 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 			{
 				/* Does this continuation overlap our search address? */
 				assert(modulus == 0); // continuation recs have modulus zero
-				assert(object_size_in_this_bucket == 0);
 				
-				// the object starts somewhere in the previous bucket
-				// okay: hop back to the object start
-				struct insert *p_object_start_bucket = p_bucket - 1;
-				// walk the object start bucket looking for the *last* object i.e. biggest modulus
+				void *object_start;
+				size_t object_size;
 				struct insert *object_ins;
-				struct insert *biggest_modulus_pos = NULL;
-				for (struct insert *i_layer = p_object_start_bucket;
-						i_layer->alloc_site;
-						i_layer += INSERTS_PER_LAYER(p_rec))
-				{
-					if (IS_CONTINUATION_REC(i_layer)) continue;
-					unsigned char modulus = p_object_start_bucket->un.bits & 0xff;
-					if (!biggest_modulus_pos || 
-							modulus > (biggest_modulus_pos->un.bits & 0xff))
-					{
-						biggest_modulus_pos = p_object_start_bucket;
-					}
-				}
-				// we must have seen the last object
-				assert(biggest_modulus_pos);
-				object_ins = biggest_modulus_pos;
-				char *object_start = (char*)(BUCKET_RANGE_BASE(p_object_start_bucket, p_rec)) 
-						+ modulus;
-				uintptr_t object_size = p_ins->alloc_site;
+				_Bool success = get_start_from_continuation(p_ins, p_bucket, p_rec,
+						&object_start, &object_size, &object_ins);
 				
-				if (object_start + object_size > (char*) ptr)
+				if ((char*) object_start + object_size > (char*) ptr)
 				{
 					// hit! 
 					if (out_object_start) *out_object_start = object_start;
@@ -1391,21 +1611,74 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 					return p_ins;
 				}
 			}
-
-			// advance to the next layer
-			p_ins += INSERTS_PER_LAYER(p_rec);
-			++layer_num;
-			// we should never need to go beyond the last layer
-			assert(layer_num < NLAYERS(p_rec));
 		} // end for each layer
 		
 		must_see_continuation = 1;
 		
-	} while (p_bucket-- >= &p_rec->metadata_recs[0]);
+	} while (p_bucket-- >= &p_rec->metadata_recs[0]
+			&& (char*) BUCKET_RANGE_END(p_bucket, p_rec) > earliest_possible_start);
 fail:
 	// failed!
 	return NULL;
 }
+
+static void remove_one_insert(struct insert *p_ins, struct insert *p_bucket, struct suballocated_chunk_rec *p_rec)
+{
+	struct insert *replaced_ins = p_ins;
+	do
+	{
+		struct insert *p_next_layer = replaced_ins + INSERTS_PER_LAYER(p_rec);
+		/* Invalidate it from the cache. */
+		invalidate_cache_entry(NULL, NULL, replaced_ins);
+		/* Copy the next layer's insert over ours. */
+		*replaced_ins = *p_next_layer;
+		/* Point us at the next layer to replace (i.e. if it's not null). */
+		replaced_ins = p_next_layer;
+	} while (replaced_ins->alloc_site);
+}
+
+static void unindex_deep_alloc_internal(void *ptr, struct insert *existing_ins, 
+		struct suballocated_chunk_rec *p_rec)
+{
+	assert(existing_ins);
+	assert(p_rec);
+	
+	struct insert *p_bucket = BUCKET_PTR_FROM_INSERT_PTR(existing_ins, p_rec);
+	check_bucket_sanity(p_bucket, p_rec);
+	
+	unsigned short our_modulus = MODULUS_OF_INSERT(existing_ins);
+	_Bool we_are_biggest_modulus = 1;
+	for (struct insert *i_layer = p_bucket;
+			we_are_biggest_modulus && i_layer->alloc_site;
+			i_layer += INSERTS_PER_LAYER(p_rec))
+	{
+		we_are_biggest_modulus &= (our_modulus >= MODULUS_OF_INSERT(i_layer));
+	}
+	
+	/* Delete this insert and "shift left" any later in the bucket, also
+	 * invalidating them. */
+	remove_one_insert(existing_ins, p_bucket, p_rec);
+	check_bucket_sanity(p_bucket, p_rec);
+	
+	/* If we were the biggest modulus, delete any continuation record in the next bucket. */
+	if (we_are_biggest_modulus)
+	{
+		for (struct insert *i_layer = p_bucket + 1;
+				i_layer->alloc_site;
+				i_layer += INSERTS_PER_LAYER(p_rec))
+		{
+			if (IS_CONTINUATION_REC(i_layer))
+			{
+				remove_one_insert(i_layer, p_bucket + 1, p_rec);
+				check_bucket_sanity(p_bucket + 1, p_rec);
+				break;
+			}
+		}
+	}
+	
+	check_bucket_sanity(p_bucket, p_rec);
+}
+
 void __unindex_deep_alloc(void *ptr, int level) 
 {
 	/* We *must* have been initialized to continue. So initialize now.
@@ -1420,33 +1693,8 @@ void __unindex_deep_alloc(void *ptr, int level)
 	struct suballocated_chunk_rec *p_rec = NULL;
 	struct insert *found_ins = lookup_object_info(ptr, &existing_object_start, NULL, &p_rec);
 	assert(found_ins);
-	assert(p_rec);
+	assert(p_rec); 
 	
-	/* Delete this insert. */
-	*found_ins = (struct insert) {
-		.alloc_site = 0,
-		.alloc_site_flag = 0,
-		.un = { bits: 0 }
-	};
-	
-	struct insert *p_bucket = BUCKET_PTR_FROM_INSERT_PTR(found_ins, p_rec);
-	/* Delete any continuation record in the next bucket. */
-	++p_bucket;
-	// can we find a continuation record at this layer?
-
-	struct insert *p_ins = p_bucket;
-	while (p_ins->alloc_site)
-	{
-		if (IS_CONTINUATION_REC(p_ins))
-		{
-			*p_ins = (struct insert) {
-				.alloc_site = 0,
-				.alloc_site_flag = 0,
-				.un = { bits: 0 }
-			};
-			
-			break;
-		}
-	}
+	unindex_deep_alloc_internal(ptr, found_ins, p_rec);
 }
 
