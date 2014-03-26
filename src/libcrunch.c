@@ -679,6 +679,21 @@ static void print_exit_summary(void)
 	fprintf(stderr, "checks failed inside allocation functions:% 9ld\n", __libcrunch_failed_in_alloc);
 	fprintf(stderr, "checks failed otherwise:                  % 9ld\n", __libcrunch_failed);
 	fprintf(stderr, "checks nontrivially passed:               % 9ld\n", __libcrunch_succeeded);
+
+	if (getenv("LIBCRUNCH_DUMP_SMAPS_AT_EXIT"))
+	{
+		char buffer[4096];
+		size_t bytes;
+		FILE *smaps = fopen("/proc/self/smaps", "r");
+		if (smaps)
+		{
+			while (0 < (bytes = fread(buffer, 1, sizeof(buffer), smaps)))
+			{
+				fwrite(buffer, 1, bytes, stderr);
+			}
+		}
+		else fprintf(stderr, "Couldn't read from smaps!\n");
+	}
 }
 
 /* This is *not* a constructor. We don't want to be called too early,

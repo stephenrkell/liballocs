@@ -37,6 +37,9 @@ vpath %.c $(PMIRROR)/src
 libcrunch_preload.so: libcrunch.o preload.o l0index.o maps.o addrmap.o $(PMIRROR)/lib/lib$(HEAP_INDEX_HOOKS).a
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` -Wl,--whole-archive -Wl,-Bstatic -l$(HEAP_INDEX_HOOKS) -Wl,--no-whole-archive -Wl,-Bdynamic 
 
+libdumpsmaps.so: libdumpsmaps.o
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
+
 libcrunch_nomemtable_preload.so: libcrunch_nomemtable.o preload.o l0index.o maps.o addrmap.o dummy_thread_locals.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl -lunwind -lunwind-`uname -m` 
 
