@@ -9,7 +9,7 @@ LDLIBS += -lallocs -lcxxgen -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -
 
 CPP_SRC := $(wildcard *.cpp)
 
-default: lower-typenames base-types-translation
+default: base-types-translation #lower-typenames 
 
 .PHONY: clean
 clean:
