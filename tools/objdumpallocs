@@ -133,7 +133,7 @@ suballoc_descriptors="${LIBCRUNCH_SUBALLOC_FNS:-}"
 allocsz_descriptors="${LIBCRUNCH_ALLOCSZ_FNS:-}"
 all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}${allocsz_descriptors:+ ${allocsz_descriptors}}"
 echo "all_alloc_descriptors is: $all_alloc_descriptors" 1>&2
-alloc_site_regexp="${line_regexp}.*call.*(<($( 
+alloc_site_regexp="${line_regexp}.*(call|jmp).*(<($( 
     echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc' | \
     make_match_any_line_floating_eregexp )|$( 
     echo -n "${all_alloc_descriptors}" | \
