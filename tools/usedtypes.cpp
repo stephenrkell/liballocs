@@ -218,7 +218,7 @@ int main(int argc, char **argv)
 			default: 
 				cerr << "Found multiple matches (" << found_count << ") for " << key << ": " << endl;
 				auto first_found = found_pair.first;
-				multimap<unsigned, decltype(found_pair.first)> by_code;
+				multimap<opt<uint32_t>, decltype(found_pair.first)> by_code;
 				while (found_pair.first != found_pair.second)
 				{
 					auto code = type_summary_code(found_pair.first->second);
@@ -229,7 +229,8 @@ int main(int argc, char **argv)
 				}
 				/* Do they all seem to be identical? */
 				auto range_equal_to_first = by_code.equal_range(type_summary_code(first_found->second));
-				if (srk31::count(range_equal_to_first.first, range_equal_to_first.second))
+				if (srk31::count(range_equal_to_first.first, range_equal_to_first.second)
+				 == found_count)
 				{
 					cerr << "They all seem to be identical (code " << type_summary_code(first_found->second) 
 						<< ") so proceeding." << endl;

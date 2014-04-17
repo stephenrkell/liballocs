@@ -38,6 +38,8 @@ using dwarf::core::iterator_df;
 using dwarf::core::iterator_sibs;
 using dwarf::core::type_die;
 using dwarf::core::subprogram_die;
+using dwarf::core::type_describing_subprogram_die;
+using dwarf::core::program_element_die;
 using dwarf::core::compile_unit_die;
 using dwarf::core::member_die;
 using dwarf::core::with_data_members_die;
@@ -162,68 +164,51 @@ pair<bool, uniqued_name> add_concrete_type_if_absent(iterator_df<type_die> t, ma
 	return make_pair(!already_present, n);
 }
 
-pair<bool, uniqued_name> transitively_add_type(iterator_df<type_die> t, master_relation_t& r)
+pair<bool, uniqued_name> transitively_add_type(iterator_df<type_die> toplevel_t, master_relation_t& r)
 {
-	auto result = add_type_if_absent(t, r);
-	/* Now recurse on referenced type, IFF the concrete type was newly added. 
-	 * We don't care about adding any more aliases at this point: the purpose of
-	 * being transitive here is so that we can generate all the other uniqtypes
-	 * on which this one depends. (If you want all the aliases, you need to build
-	 * an exhaustive relation.) */
-	if (!result.first) return result;
-	t = t->get_concrete_type();
-	if (t.is_a<with_data_members_die>()) 
-	{
-		auto member_children = t.as_a<with_data_members_die>().children().subseq_of<member_die>();
-		for (auto i_child = member_children.first;
-			i_child != member_children.second; ++i_child)
-		{
-			// skip "declared", "external" members, i.e. static member vars
-			if (i_child->get_declaration() && *i_child->get_declaration()
-			 && i_child->get_external() && *i_child->get_external())
-			{
-				continue;
-			}
+	pair<bool, uniqued_name> result;
+	
+	walk_type(toplevel_t, iterator_base::END, 
+		[&r, &result, toplevel_t](iterator_df<type_die> t, iterator_df<program_element_die> reason) -> bool {
+		/* NOTE: we will get called for every type, including void. 
+		 * Our job is to decide whether we need to add_type_if_absent, 
+		 * and whether we need to recurse. */
 
-			assert(i_child->get_type() != iterator_base::END);
-			if (i_child->get_type()->get_concrete_type() == t) 
+		if (reason.is_a<member_die>())
+		{
+			auto memb = reason.as_a<member_die>();
+			if (memb->get_declaration() && *memb->get_declaration()
+				 && memb->get_external() && *memb->get_external())
+			{
+				// static member vars don't get added nor recursed on
+				return false;
+			}
+			
+			assert(memb->get_type() != iterator_base::END);
+			if (memb->get_type()->get_concrete_type() == t.parent().as_a<type_die>()) 
 			{
 				cout << "Found directly recursive data type: "
 					<< t
 					<< " contains member "
-					<< i_child.base().base()
+					<< memb
 					<< " of type "
-					<< i_child->get_type()->get_concrete_type()
+					<< memb->get_type()->get_concrete_type()
 					<< " which equals " 
-					<< t
+					<< t.parent()
 					<< endl;
 				assert(false);
 			}
-			transitively_add_type(i_child->get_type()->get_concrete_type(), r);
 		}
-	}
-	else if (t.is_a<array_type_die>())
-	{
-		auto opt_el_t = t.as_a<array_type_die>()->ultimate_element_type();
-		if (opt_el_t) transitively_add_type(opt_el_t->get_concrete_type(), r);
-	}
-	else if (t.is_a<subroutine_type_die>()
-	|| t.is_a<subprogram_die>())
-	{
-		auto opt_ret_t = RETURN_TYPE(t); 
-		if (opt_ret_t) transitively_add_type(opt_ret_t, r);
 		
-		auto member_fps = t.children().subseq_of<formal_parameter_die>();
-		for (auto i_fp = member_fps.first; i_fp != member_fps.second; ++i_fp)
-		{
-			transitively_add_type(i_fp->find_type(), r);
-		}
-	}
-	else if (t.is_a<address_holding_type_die>())
-	{
-		auto opt_target_t = t.as_a<address_holding_type_die>()->get_type();
-		if (opt_target_t) transitively_add_type(opt_target_t, r);
-	}
+		if (t != t->get_concrete_type()) return true; // don't add anything, but keep going
+		auto p = add_type_if_absent(t, r);
+		if (!p.first) return false; // we've already added it; stop now
+		
+		// the result of the calling function is the toplevel case of the walk
+		if (t == toplevel_t) result = p;
+		
+		return true; // keep going
+	});
 	
 	return make_pair(true, result.second);
 }
@@ -344,7 +329,14 @@ struct uniqtype \n\
 			}
 		}
 		
-		out << "extern struct uniqtype " << s << ";" << endl;
+		out << "extern struct uniqtype " << s;
+		// incompletes are weak-ref'd
+		if (i_pair->first.first == "")
+		{
+			out << " __attribute__((weak))";
+		}
+		out << ";" << endl;
+
 	}
 	/* Declare any signedness-complement base types that we didn't see. 
 	 * We will emit these specially. */
@@ -396,14 +388,6 @@ struct uniqtype \n\
 	/* Output the canonical definitions. */
 	for (auto i_vert = r.begin(); i_vert != r.end(); ++i_vert)
 	{
-		auto opt_sz = i_vert->second->calculate_byte_size();
-		if (!opt_sz)
-		{
-			// we have an incomplete type
-			err << "Warning: type " 
-				<< i_vert->first.second
-				<< " is incomplete, treated as zero-size." << endl;
-		}
 		if (i_vert->first.second == string("void"))
 		{
 			err << "Warning: skipping explicitly declared void type from CU "
@@ -411,6 +395,8 @@ struct uniqtype \n\
 				<< endl;
 			continue;
 		}
+		auto opt_sz = i_vert->second->calculate_byte_size();
+
 		
 		out << "\n/* uniqtype for \"" << i_vert->first.second 
 			<< "\" with summary code " << i_vert->first.first << " */\n";
@@ -459,6 +445,17 @@ struct uniqtype \n\
 			array_len = /* MAGIC_LENGTH_POINTER */(1u << 19) - 1u;
 		} else array_len = 0;
 		string mangled_name = mangle_typename(i_vert->first);
+		
+		/* Our last chance to skip things we don't want to emit. */
+		if (i_vert->second.is_a<with_data_members_die>() && !opt_sz)
+		{
+			// we have an incomplete type -- skip it!
+			err << "Warning: with-data-members type " 
+				<< i_vert->first.second
+				<< " is incomplete, skipping." << endl;
+			continue;
+		}
+		
 		out << "struct uniqtype " << mangled_name
 			<< " __attribute__((section (\"" << ".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
 			<< " = {\n\t" 
@@ -702,13 +699,16 @@ struct uniqtype \n\
 		{
 			if (i_by_name_pair->second.size() == 1)
 			{
-				/* This name only denotes one type, so we can alias it. */
+				/* This name only denotes one type, so we can alias it if it's complete. */
 				auto full_name_pair = *i_by_name_pair->second.begin();
-				string full_name = mangle_typename(full_name_pair);
-				pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
-				string abbrev_name = mangle_typename(abbrev_name_pair);
-				out << "extern struct uniqtype " << abbrev_name << " __attribute__((weak, alias(\""
-					<< cxxgen::escape(full_name) << "\")));" << endl;
+				if (full_name_pair.first != "")
+				{
+					string full_name = mangle_typename(full_name_pair);
+					pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
+					string abbrev_name = mangle_typename(abbrev_name_pair);
+					out << "extern struct uniqtype " << abbrev_name << " __attribute__((weak, alias(\""
+						<< cxxgen::escape(full_name) << "\")));" << endl;
+				}
 			}
 			else
 			{

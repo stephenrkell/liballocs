@@ -42,7 +42,7 @@ name_for_type_die(core::iterator_df<core::type_die> t)
 	 * If it's a CIL name like __anon(struct|union)_BLAH_nn, we erase the nn. 
 	 * This is so that we don't generate nominally distinct types 
 	 * in different compilation units. */
-	if (t.name_here() && (t.name_here()->find("__anonstruct_") == 0
+	/*if (t.name_here() && (t.name_here()->find("__anonstruct_") == 0
 					|| t.name_here()->find("__anonunion_") == 0
 					|| t.name_here()->find("__anonenum_") == 0))
 	{
@@ -53,7 +53,7 @@ name_for_type_die(core::iterator_df<core::type_die> t)
 			replacement_name.length() - last_underscore_pos, "_1");
 		return replacement_name;
 	}
-	else if (t.is_a<dwarf::core::subprogram_die>())
+	else*/ if (t.is_a<dwarf::core::subprogram_die>())
 	{
 		/* When interpreted as types, subprograms don't have names. */
 		return opt<string>();
@@ -98,7 +98,7 @@ string
 name_for_complement_base_type(core::iterator_df<core::base_type_die> base_t);
 
 string 
-summary_code_to_string(uint32_t code);
+summary_code_to_string(opt<uint32_t> code);
 
 // core::iterator_df<core::type_die>
 // find_type_in_cu(core::iterator_df<core::compile_unit_die> cu, const string& name);
@@ -150,8 +150,8 @@ inline string mangle_typename(const pair<string, string>& p)
 	return "__uniqtype_" + first_mangled + "_" + second_mangled;
 }
 
-uint32_t type_summary_code(core::iterator_df<core::type_die> t);
-uint32_t signedness_complement_type_summary_code(core::iterator_df<core::base_type_die> base_t);
+opt<uint32_t> type_summary_code(core::iterator_df<core::type_die> t);
+opt<uint32_t> signedness_complement_type_summary_code(core::iterator_df<core::base_type_die> base_t);
 
 inline std::string offset_to_string(lib::Dwarf_Off o)
 {

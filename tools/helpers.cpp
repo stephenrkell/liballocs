@@ -14,8 +14,10 @@ using std::deque;
 using namespace dwarf::core;
 using dwarf::tool::abstract_c_compiler;
 
-string summary_code_to_string(uint32_t code)
+string summary_code_to_string(opt<uint32_t> maybe_code)
 {
+	if (!maybe_code) return "";
+	uint32_t code = *maybe_code;
 	ostringstream summary_string_str;
 	summary_string_str << std::hex << std::setfill('0') << std::setw(2 * sizeof code) << code 
 		<< std::dec;
@@ -277,9 +279,13 @@ canonical_key_from_type(iterator_df<type_die> t)
 
 	/* we no longer use the defining_header -- use instead
 	 * the type summary code */
-	uint32_t code = type_summary_code(t);
-	string summary_string = summary_code_to_string(code);
-	assert(summary_string.size() == 2 * sizeof code);
+	opt<uint32_t> code = type_summary_code(t);
+	string summary_string;
+	if (code)
+	{
+		summary_string = summary_code_to_string(*code);
+		assert(summary_string.size() == 2 * sizeof *code);
+	} else summary_string = "";
 	
 	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>()
 		&& !t.is_a<subprogram_die>())
@@ -454,277 +460,16 @@ canonical_key_from_type(iterator_df<type_die> t)
 // 	return iterator_df<type_die>(cu.named_child(name)); //shared_ptr<type_die>();
 // }
 
-struct output_word_t
+opt<uint32_t> type_summary_code(core::iterator_df<core::type_die> t)
 {
-	unsigned val;
-
-	void zero_check()
-	{
-		if (val == 0)
-		{
-			cerr << "Warning: output_word value hit zero again." << endl;
-			val = (unsigned) -1;
-		}
-	}
-
-	output_word_t& operator<<(unsigned arg) 
-	{
-		val = rotate_left(val, 8) ^ arg;
-		zero_check();
-		return *this;
-	}
-	output_word_t& operator<<(const string& s) 
-	{
-		for (auto i = s.begin(); i != s.end(); ++i)
-		{
-			*this << static_cast<unsigned>(*i);
-		}
-		zero_check();
-		return *this;
-	}
-	output_word_t() : val(0) {}
-};
-
-uint32_t type_summary_code(core::iterator_df<core::type_die> t)
-{
-	/* Here we compute a 4-byte hash-esque summary of a data type's 
-	 * definition. The intentions here are that 
-	 *
-	 * binary-incompatible definitions of two types will always
-	   compare different, even if the incompatibility occurs 
-	   
-	   - in compiler decisions (e.g. bitfield positions, pointer
-	     encoding, padding, etc..)
-	
-	   - in a child (nested) object.
-	   
-	 * structurally distinct definitions will always compare different, 
-	   even if at the leaf level, they are physically compatible.
-	 
-	 * binary compatible, structurally compatible definitions will compare 
-	   alike iff they are nominally identical at the top-level. It doesn't
-	   matter if field names differ. HMM: so what about nested structures' 
-	   type names? Answer: not sure yet, but easiest is to require that they
-	   match, so our implementation can just use recursion.
-	 
-	 * WHAT about prefixes? e.g. I define struct FILE with some padding, 
-	   and you define it with some implementation-private fields? We handle
-	   this at the libcrunch level; here we just want to record that there
-	   are two different definitions out there.
-	 
-	 *
-	 * Consequences: 
-	 * 
-	 * - encode all base type properties
-	 * - encode pointer encoding
-	 * - encode byte- and bit-offsets of every field
-	 */
-	using lib::Dwarf_Unsigned;
-	using lib::Dwarf_Half;
-	using namespace dwarf::core;
-	
-	if (!t)
-	{
-		// we got void
-		return 0;
-	}
-	
-	auto concrete_t = t->get_concrete_type();
-	if (!concrete_t)
-	{
-		// we got a typedef of void
-		return 0;
-	}
-	
-	output_word_t output_word;
-	Dwarf_Half tag = concrete_t.tag_here();
-	if (concrete_t.is_a<base_type_die>())
-	{
-		auto base_t = concrete_t.as_a<core::base_type_die>();
-		unsigned encoding = base_t->get_encoding();
-		assert(base_t->get_byte_size());
-		unsigned byte_size = *base_t->get_byte_size();
-		unsigned bit_size = base_t->get_bit_size() ? *base_t->get_bit_size() : byte_size * 8;
-		unsigned bit_offset = base_t->get_bit_offset() ? *base_t->get_bit_offset() : 0;
-		output_word << DW_TAG_base_type << encoding << byte_size << bit_size << bit_offset;
-	} 
-	else if (concrete_t.is_a<enumeration_type_die>())
-	{
-		// shift in the enumeration name
-		if (concrete_t.name_here())
-		{
-			output_word << *name_for_type_die(concrete_t);
-		} else output_word << concrete_t.offset_here();
-		
-		// shift in the names and values of each enumerator
-		auto enum_t = concrete_t.as_a<enumeration_type_die>();
-		auto enumerators = enum_t.children().subseq_of<enumerator_die>();
-		int last_enum_value = -1;
-		for (auto i_enum = enumerators.first; i_enum != enumerators.second; ++i_enum)
-		{
-			output_word << *i_enum->get_name();
-			if (i_enum->get_const_value())
-			{
-				last_enum_value = *i_enum->get_const_value();
-				output_word << last_enum_value;
-			} else output_word << last_enum_value++;
-		}
-		
-		// then shift in the base type's summary code
-		if (!enum_t->get_type())
-		{
-			// cerr << "Warning: saw enum with no type" << endl;
-			auto implicit_t = enum_t.enclosing_cu()->implicit_enum_base_type();
-			if (!implicit_t)
-			{
-				cerr << "Warning: saw enum with no type" << endl;
-			} else output_word << type_summary_code(implicit_t);
-		}
-		else
-		{
-			output_word << type_summary_code(enum_t->get_type());
-		}
-	} 
-	else if (concrete_t.is_a<subrange_type_die>())
-	{
-		auto subrange_t = concrete_t.as_a<subrange_type_die>();
-		
-		// shift in the name, if any
-		if (concrete_t.name_here())
-		{
-			output_word << *name_for_type_die(concrete_t);
-		} else output_word << concrete_t.offset_here();
-		
-		// then shift in the base type's summary code
-		if (!subrange_t->get_type())
-		{
-			cerr << "Warning: saw subrange with no type" << endl;
-		}
-		else
-		{
-			output_word << type_summary_code(subrange_t->get_type());
-		}
-		
-		/* Then shift in the upper bound and lower bound, if present
-		 * NOTE: this means unnamed boundless subrange types have the 
-		 * same code as their underlying type. This is probably what we want. */
-		if (subrange_t->get_upper_bound())
-		{
-			output_word << *subrange_t->get_upper_bound();
-		}
-		if (subrange_t->get_lower_bound())
-		{
-			output_word << *subrange_t->get_lower_bound();
-		}
-	} 
-	else if (concrete_t.is_a<subroutine_type_die>()
-		|| concrete_t.is_a<subprogram_die>())
-	{
-		// shift in the argument and return types
-		if (RETURN_TYPE(concrete_t)) output_word << type_summary_code(RETURN_TYPE(concrete_t));
-		
-		// shift in something to distinguish void(void) from void
-		output_word << "()";
-		
-		auto fps = concrete_t.children().subseq_of<formal_parameter_die>();
-		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp)
-		{
-			output_word << type_summary_code(i_fp->find_type());
-		}
-		
-		if (IS_VARIADIC(concrete_t))
-		{
-			output_word << "...";
-		}
-	}
-	else if (concrete_t.is_a<address_holding_type_die>())
-	{
-		/* NOTE: actually, we *do* want to pay attention to what the pointer points to, 
-		 * i.e. its contract. BUT there's a problem: recursive data types! For now, we
-		 * use a giant HACK: if we're a pointer-to-member, use only the name. */
-		auto ptr_t = concrete_t.as_a<core::address_holding_type_die>();
-		unsigned ptr_size = *ptr_t->calculate_byte_size();
-		unsigned addr_class = ptr_t->get_address_class() ? *ptr_t->get_address_class() : 0;
-		if (addr_class != 0)
-		{
-			switch(addr_class) 
-			{
-				default:
-					assert(false); // nobody seems to use this feature so far
-				/* NOTE: There is also something called DWARF Pointer-Encoding (PEs).
-				   This is a DWARF representation issue, used in frame info, and is not 
-				   something we care about. */
-			}
-		}
-		auto target_t = ptr_t->get_type();
-		if (target_t.is_real_die_position()) target_t = target_t->get_concrete_type();
-		unsigned target_code;
-		if (target_t.is_real_die_position() && target_t.is_a<with_data_members_die>())
-		{
-			output_word_t tmp_output_word;
-			// add in the name only
-			if (target_t.name_here())
-			{
-				tmp_output_word << *name_for_type_die(target_t);
-			} else tmp_output_word << target_t.offset_here();
-
-			target_code = tmp_output_word.val;
-		} else target_code = type_summary_code(target_t);
-		output_word << tag << ptr_size << addr_class << target_code;
-	}
-	else if (concrete_t.is_a<with_data_members_die>())
-	{
-		// add in the name
-		if (concrete_t.name_here())
-		{
-			output_word << *name_for_type_die(concrete_t);
-		} else output_word << concrete_t.offset_here();
-
-		// for each member 
-		auto members = concrete_t.children().subseq_of<core::with_dynamic_location_die>();
-		for (auto i_member = members.first; i_member != members.second; ++i_member)
-		{
-			// skip members that are mere declarations 
-			if (i_member->get_declaration() && *i_member->get_declaration()) continue;
-			
-			// calculate its offset
-			opt<Dwarf_Unsigned> opt_offset = i_member->byte_offset_in_enclosing_type();
-			if (!opt_offset)
-			{
-				cerr << "Warning: saw member " << *i_member << " with no apparent offset." << endl;
-				continue;
-			}
-			assert(i_member->get_type());
-
-			output_word << (opt_offset ? *opt_offset : 0);
-			// FIXME: also its bit offset!
-
-			output_word << type_summary_code(i_member->get_type());
-		}
-	}
-	else if (concrete_t.is_a<array_type_die>())
-	{
-		// if we're a member of something, we should be bounded in all dimensions
-		auto opt_el_type = concrete_t.as_a<array_type_die>()->ultimate_element_type();
-		auto opt_el_count = concrete_t.as_a<array_type_die>()->ultimate_element_count();
-		output_word << (opt_el_type ? type_summary_code(opt_el_type) : 0)
-			<< (opt_el_count ? *opt_el_count : 0);
-			// FIXME: also the factoring into dimensions needs to be taken into account
-	} else 
-	{
-		cerr << "Warning: didn't understand type " << concrete_t;
-	}
-	
-	assert (!concrete_t || output_word.val != 0);
-	
-	return output_word.val;
-	// return std::numeric_limits<uint32_t>::max();
+	if (!t) return opt<uint32_t>(0);
+	else return t->summary_code();
 }
-uint32_t signedness_complement_type_summary_code(core::iterator_df<core::base_type_die> base_t)
+opt<uint32_t> signedness_complement_type_summary_code(core::iterator_df<core::base_type_die> base_t)
 {
 	unsigned encoding = base_t->get_encoding();
 	assert(encoding == DW_ATE_signed || encoding == DW_ATE_unsigned);
-	output_word_t output_word;
+	summary_code_word_t output_word;
 	assert(base_t->get_byte_size());
 	unsigned byte_size = *base_t->get_byte_size();
 	unsigned bit_size = base_t->get_bit_size() ? *base_t->get_bit_size() : byte_size * 8;
@@ -777,6 +522,7 @@ void get_types_by_codeless_uniqtype_name(
 			 * type! We will see references in terms of C-canonicalised base type names, 
 			 * but we will be trying to match them against language-independent names. 
 			 * It seems that we need to do a separate "C fix up" pass first.
+			 * This is now done in link-used-types (and will be 
 			 * */
 			
 			string canonical_or_base_typename = uniqtype_name_pair.second;
