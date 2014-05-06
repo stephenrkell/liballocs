@@ -70,7 +70,7 @@ uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 }
 pair<bool, uniqued_name> add_type_if_absent(iterator_df<type_die> t, master_relation_t& r)
 {
-	if (t != t->get_concrete_type())
+	if (t && t != t->get_concrete_type())
 	{
 		// add the concrete
 		auto concrete_t = t->get_concrete_type();
@@ -200,7 +200,7 @@ pair<bool, uniqued_name> transitively_add_type(iterator_df<type_die> toplevel_t,
 			}
 		}
 		
-		if (t != t->get_concrete_type()) return true; // don't add anything, but keep going
+		if (t && t != t->get_concrete_type()) return true; // don't add anything, but keep going
 		auto p = add_type_if_absent(t, r);
 		if (!p.first) return false; // we've already added it; stop now
 		

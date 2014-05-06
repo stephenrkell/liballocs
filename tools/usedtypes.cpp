@@ -232,7 +232,9 @@ int main(int argc, char **argv)
 				if (srk31::count(range_equal_to_first.first, range_equal_to_first.second)
 				 == found_count)
 				{
-					cerr << "They all seem to be identical (code " << type_summary_code(first_found->second) 
+					auto code = type_summary_code(first_found->second);
+					cerr << "They all seem to be identical (code " 
+						<< (code ? *code : -1)
 						<< ") so proceeding." << endl;
 					transitively_add_type(first_found->second, master_relation);
 				}
