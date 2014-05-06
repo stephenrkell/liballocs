@@ -43,7 +43,6 @@ size_t malloc_usable_size(void *ptr);
 #include MALLOC_HOOKS_INCLUDE
 
 #include "heap_index.h"
-#define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
 
 /* For now, inserts increase memory usage.  
  * Ideally, we want to make headers/trailers which fit in reclaimed space. 
@@ -88,11 +87,16 @@ void *index_end_addr;
 
 struct lookup_cache_entry;
 static void install_cache_entry(void *object_start,
-	size_t usable_size,
+	size_t usable_size, unsigned short depth, _Bool is_deepest,
 	struct suballocated_chunk_rec *containing_chunk,
 	struct insert *insert);
-static void invalidate_cache_entry(void *object_start,
-	struct suballocated_chunk_rec *sub, struct insert *ins);
+static void invalidate_cache_entries(void *object_start,
+	unsigned short depths_mask,
+	struct suballocated_chunk_rec *sub, struct insert *ins, signed nentries);
+static int cache_clear_deepest_flag_and_update_ins(void *object_start,
+	unsigned short depths_mask,
+	struct suballocated_chunk_rec *sub, struct insert *ins, signed nentries,
+	struct insert *new_ins);
 
 /* "Distance" is a right-shifted offset within a memory region. */
 static inline ptrdiff_t entry_to_offset(struct entry e) 
@@ -697,7 +701,12 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		userptr, index_entry);
 #endif
 	
-	struct insert saved_ins = *insert_for_chunk(userptr);
+	unsigned suballocated_region_number = 0;
+	struct insert *ins = insert_for_chunk(userptr);
+	if (ALLOC_IS_SUBALLOCATED(userptr, ins)) 
+	{
+		suballocated_region_number = (uintptr_t) ins->alloc_site;
+	}
 
 	list_sanity_check(index_entry, userptr);
 	INSERT_SANITY_CHECK(insert_for_chunk/*_with_usable_size*/(userptr/*, freed_usable_size*/));
@@ -752,11 +761,11 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	 * modulo concurrent reallocs. */
 out:
 	/* If there were suballocated chunks under here, delete the whole lot. */
-	if (ALLOC_IS_SUBALLOCATED(&saved_ins))
+	if (suballocated_region_number != 0)
 	{
-		delete_suballocated_chunk(&suballocated_chunks[(unsigned) saved_ins.alloc_site]);
+		delete_suballocated_chunk(&suballocated_chunks[suballocated_region_number]);
 	}
-	invalidate_cache_entry(userptr, NULL, NULL);
+	invalidate_cache_entries(userptr, (unsigned short) -1, NULL, NULL, -1);
 	list_sanity_check(index_entry, NULL);
 }
 
@@ -805,10 +814,18 @@ static inline _Bool find_next_nonempty_bin(struct entry **p_cur,
 		)
 {
 	// first version: just what the old loop did
-	--(*p_cur);
-	*p_object_minimum_size += entry_coverage_in_bytes;
-	
-	return *p_object_minimum_size <= BIGGEST_SENSIBLE_OBJECT && *p_cur > limit;
+	do
+	{
+		--(*p_cur);
+		*p_object_minimum_size += entry_coverage_in_bytes;
+		
+		// if we've gone too far, give up
+		if (*p_object_minimum_size > BIGGEST_SENSIBLE_OBJECT || *p_cur <= limit) return 0;
+		
+		// if we've hit a nonempty, stop
+		if (!IS_EMPTY_ENTRY(*p_cur)) return 1;
+		
+	} while (1);
 
 	// FIXME: adapt http://www.int80h.org/strlen/ 
 	// or memrchr.S from eglibc
@@ -821,7 +838,9 @@ static inline _Bool find_next_nonempty_bin(struct entry **p_cur,
 struct lookup_cache_entry
 {
 	void *object_start;
-	size_t usable_size;
+	size_t usable_size:60;
+	unsigned short depth:3;
+	unsigned short is_deepest:1;
 	struct suballocated_chunk_rec *containing_chunk;
 	struct insert *insert;
 } lookup_cache[LOOKUP_CACHE_SIZE];
@@ -829,25 +848,32 @@ static struct lookup_cache_entry *next_to_evict = &lookup_cache[0];
 
 static void check_cache_sanity(void)
 {
+	// the cache alrways 
 #ifndef NDEBUG
 	for (int i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
-		assert(!lookup_cache[i].object_start || 
-				!ALLOC_IS_SUBALLOCATED(lookup_cache[i].insert));
+		assert(!lookup_cache[i].object_start 
+				|| (INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert)
+					&& lookup_cache[i].depth <= 2));
 	}
 #endif
 }
 
 static void install_cache_entry(void *object_start,
 	size_t object_size,
+	unsigned short depth, 
+	_Bool is_deepest,
 	struct suballocated_chunk_rec *containing_chunk,
 	struct insert *insert)
 {
 	check_cache_sanity();
+	/* our "insert" should always be the insert that describes the object,
+	 * NOT one that chains into the suballocs table. */
+	assert(INSERT_DESCRIBES_OBJECT(insert));
 	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
 	assert((char*)(uintptr_t) insert->alloc_site >= MINIMUM_USER_ADDRESS);
 	*next_to_evict = (struct lookup_cache_entry) {
-		object_start, object_size, containing_chunk, insert
+		object_start, object_size, depth, is_deepest, containing_chunk, insert
 	}; // FIXME: thread safety
 	// don't immediately evict the entry we just created
 	next_to_evict = &lookup_cache[(next_to_evict + 1 - &lookup_cache[0]) % LOOKUP_CACHE_SIZE];
@@ -855,30 +881,75 @@ static void install_cache_entry(void *object_start,
 	check_cache_sanity();
 }
 
-static void invalidate_cache_entry(void *object_start,
+static void invalidate_cache_entries(void *object_start,
+	unsigned short depths_mask,
 	struct suballocated_chunk_rec *containing,
-	struct insert *ins)
+	struct insert *ins,
+	signed nentries)
 {
+	unsigned ninvalidated = 0;
 	check_cache_sanity();
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
 		if ((!object_start || object_start == lookup_cache[i].object_start)
 				&& (!containing || containing == lookup_cache[i].containing_chunk)
-				&& (!ins || ins == lookup_cache[i].insert)) 
+				&& (!ins || ins == lookup_cache[i].insert)
+				&& (0 != (1<<lookup_cache[i].depth & depths_mask))) 
 		{
 			lookup_cache[i] = (struct lookup_cache_entry) {
-				NULL, 0, NULL, NULL
+				NULL, 0, 0, 0, NULL, NULL
 			};
 			next_to_evict = &lookup_cache[i];
 			check_cache_sanity();
-			return;
+			++ninvalidated;
+			if (nentries > 0 && ninvalidated >= nentries) return;
 		}
 	}
 	check_cache_sanity();
 }
 
+static int cache_clear_deepest_flag_and_update_ins(void *object_start,
+	unsigned short depths_mask,
+	struct suballocated_chunk_rec *containing,
+	struct insert *ins,
+	signed nentries,
+	struct insert *new_ins)
+{
+	unsigned ncleared = 0;
+	check_cache_sanity();
+	assert(ins);
+	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
+	{
+		if ((!object_start || object_start == lookup_cache[i].object_start)
+				&& (!containing || containing == lookup_cache[i].containing_chunk)
+				&& (ins == lookup_cache[i].insert)
+				&& (0 != (1<<lookup_cache[i].depth & depths_mask))) 
+		{
+			lookup_cache[i].is_deepest = 0;
+			lookup_cache[i].insert = new_ins;
+			check_cache_sanity();
+			++ncleared;
+			if (nentries > 0 && ncleared >= nentries) return ncleared;
+		}
+	}
+	check_cache_sanity();
+	return ncleared;
+}
+
 static
 struct insert *lookup_l01_object_info(const void *mem, void **out_object_start);
+
+static 
+struct insert *object_insert(const void *obj, struct insert *ins)
+{
+	if (__builtin_expect(!INSERT_DESCRIBES_OBJECT(ins), 0))
+	{
+		struct suballocated_chunk_rec *p_rec = &suballocated_chunks[(unsigned) ins->alloc_site];
+		assert(p_rec);
+		return &p_rec->higherlevel_ins; // FIXME: generalise to depth > 2
+	}
+	return ins;
+}
 
 static
 struct insert *lookup_deep_alloc(const void *ptr, int max_levels, 
@@ -898,14 +969,16 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 	if (!index_region) return NULL;
 	
 	/* Try matching in the cache. NOTE: how does this impact l0 and deep-indexed 
-	 * entries? In all cases, we cache them here. Invalidate if we deep-index
-	 * an existing allocation. Never cache non-leaf allocations. */
+	 * entries? In all cases, we cache them here. We also keep a "is_deepest" flag
+	 * which tells us (conservatively) whether it's known to be the deepest entry
+	 * indexing that storage. We *only* return a cache hit if the flag is set. */
 	check_cache_sanity();
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
 		if (lookup_cache[i].object_start && 
-				(char*) mem >= (char*) lookup_cache[i].object_start 
-				&& (char*) mem < (char*) lookup_cache[i].object_start + lookup_cache[i].usable_size)
+				lookup_cache[i].is_deepest && 
+				(char*) mem >= (char*) lookup_cache[i].object_start && 
+				(char*) mem < (char*) lookup_cache[i].object_start + lookup_cache[i].usable_size)
 		{
 			// HIT!
 			assert(lookup_cache[i].object_start);
@@ -924,11 +997,13 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 				next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
 				assert(next_to_evict - &lookup_cache[0] < LOOKUP_CACHE_SIZE);
 			}
+			assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
 			return lookup_cache[i].insert;
 		}
 	}
 	void *l01_object_start;
 	struct insert *found = lookup_l01_object_info(mem, &l01_object_start);
+	unsigned short depth = 1;
 	size_t size;
 	struct suballocated_chunk_rec *containing_chunk_rec = NULL; // initialized shortly...
 	void *object_start;
@@ -938,8 +1013,12 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 		size = usersize(l01_object_start);
 		object_start = l01_object_start;
 		containing_chunk_rec = NULL;
+		_Bool is_deepest = INSERT_DESCRIBES_OBJECT(found);
 		
-		if (ALLOC_IS_SUBALLOCATED(found))
+		// cache the l01 entry
+		install_cache_entry(object_start, size, 1, is_deepest, NULL, object_insert(l01_object_start, found));
+		
+		if (!is_deepest)
 		{
 			assert(l01_object_start);
 			/* deep case */
@@ -949,20 +1028,22 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 					&deep_object_size, &containing_chunk_rec);
 			if (found_deeper)
 			{
+				// override the values we assigned just now
 				object_start = deep_object_start;
 				found = found_deeper;
 				size = deep_object_size;
+				// cache this too
+				install_cache_entry(object_start, size, 2 /* FIXME */, 1 /* FIXME */, 
+					containing_chunk_rec, found);
 			}
 			else
 			{
 				// we still have to point the metadata at the *sub*indexed copy
 				assert((char*)(uintptr_t) found->alloc_site < MINIMUM_USER_ADDRESS);
-				found = &suballocated_chunks[(unsigned) found->alloc_site].higherlevel_ins;
+				found = object_insert(mem, found);
 			}
-			
 		}
 
-		install_cache_entry(object_start, size, containing_chunk_rec, found);
 
 		if (out_object_start) *out_object_start = object_start;
 		if (out_object_size) *out_object_size = size;
@@ -976,6 +1057,37 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 static
 struct insert *lookup_l01_object_info(const void *mem, void **out_object_start) 
 {
+	// first, try the cache
+	check_cache_sanity();
+	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
+	{
+		if (lookup_cache[i].object_start && 
+				lookup_cache[i].depth <= 1 && 
+				(char*) mem >= (char*) lookup_cache[i].object_start && 
+				(char*) mem < (char*) lookup_cache[i].object_start + lookup_cache[i].usable_size)
+		{
+			// HIT!
+			struct insert *real_ins = object_insert(lookup_cache[i].object_start, lookup_cache[i].insert);
+#if defined(TRACE_DEEP_HEAP_INDEX) || defined(TRACE_HEAP_INDEX)
+			fprintf(stderr, "Cache[l01] hit at pos %d (%p) with alloc site %p\n", i, 
+					lookup_cache[i].object_start, (void*) (uintptr_t) real_ins->alloc_site);
+			fflush(stderr);
+#endif
+			assert((char*)(uintptr_t)(real_ins->alloc_site) >= MINIMUM_USER_ADDRESS);
+			
+			if (out_object_start) *out_object_start = lookup_cache[i].object_start;
+
+			// ... so ensure we're not about to evict this guy
+			if (next_to_evict - &lookup_cache[0] == i)
+			{
+				next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
+				assert(next_to_evict - &lookup_cache[0] < LOOKUP_CACHE_SIZE);
+			}
+			// return the possibly-SUBALLOC insert -- not the one from the cache
+			return insert_for_chunk(lookup_cache[i].object_start);
+		}
+	}
+	
 	struct entry *first_head = INDEX_LOC_FOR_ADDR(mem);
 	struct entry *cur_head = first_head;
 	size_t object_minimum_size = 0;
@@ -1050,7 +1162,6 @@ struct insert *lookup_l01_object_info(const void *mem, void **out_object_start)
 					userptr_to_allocptr(cur_userchunk));
 			}	
 #endif
-			// we've already handled the deep case (above), so install a non-deep cache entry
 			if (mem >= cur_userchunk
 				&& mem < cur_userchunk + malloc_usable_size(userptr_to_allocptr(cur_userchunk))) 
 			{
@@ -1148,6 +1259,7 @@ static struct suballocated_chunk_rec *make_suballocated_chunk(void *chunk_base, 
 	*p_bitmap_word |= test_bit;
 	// write the corresponding structure
 	struct suballocated_chunk_rec *p_rec = &suballocated_chunks[free_index];
+	assert(!ALLOC_IS_SUBALLOCATED(chunk_base, chunk_existing_ins));
 	*p_rec = (struct suballocated_chunk_rec) {
 		.higherlevel_ins = *chunk_existing_ins,
 		.parent = NULL, // FIXME: level > 2 cases
@@ -1258,7 +1370,10 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	struct suballocated_chunk_rec *containing_deep_chunk = NULL;
 	char *end_addr = (char*) ptr + size_bytes;
 	
-	// HACK: just l01 for now
+	// HACK: just l01 for now; 
+	// WHY? 1. we *want* the containing chunk; 
+	//      2. we might point at an already suballoc'd region; don't want this chunk!
+	//      3. "never cache non-leaf allocations" simplifies cache lookup
 	struct insert *found_ins = lookup_l01_object_info(ptr, &existing_object_start
 			/*, NULL, &containing_deep_chunk*/);
 	assert(found_ins);
@@ -1268,19 +1383,22 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	// FIXME: we don't support level>2 for now
 	assert(!containing_deep_chunk);
 
-	// invalidate any cache entry for the l1 entry
-	invalidate_cache_entry(existing_object_start, NULL, NULL);
-	
 	/* Do we already have a deep region covering this? Put differently, is the containing
-	 * chunk already deep-allocated? If not, we have to make a new deep record for it. */
+	 * chunk already suballocated-*from*? If not, we have to make a new deep record for it
+	 * AND update the cache. */
 	struct suballocated_chunk_rec *p_rec;
-	if (__builtin_expect(!ALLOC_IS_SUBALLOCATED(found_ins), 0))
+	if (__builtin_expect(!ALLOC_IS_SUBALLOCATED(ptr, found_ins), 0))
 	{
 		p_rec = make_suballocated_chunk(existing_object_start, 
 				// FIXME: here we assume we're contained in an l1 chunk
 				usersize(existing_object_start) - sizeof (struct insert), 
 				found_ins, /* guessed_average_size */ size_bytes);
+		// invalidate any cache entry for the l01 entry. NO. just mark it as "not the deepest"
+		// invalidate_cache_entry(existing_object_start, (1u<<0)|(1u<<1), NULL, NULL);
+		cache_clear_deepest_flag_and_update_ins(existing_object_start, (1u<<0)|(1u<<1), NULL, found_ins, 1,
+			&p_rec->higherlevel_ins);
 	} else p_rec = &suballocated_chunks[(uintptr_t) found_ins->alloc_site];
+
 
 	/* Get the relevant bucket. */
 	unsigned long bucket_num = NBUCKET_OF(ptr, p_rec);
@@ -1538,6 +1656,7 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 	assert(start);
 	assert((char*)(uintptr_t) start->alloc_site < MINIMUM_USER_ADDRESS);
 	
+	assert(ALLOC_IS_SUBALLOCATED(ptr, start));
 	struct suballocated_chunk_rec *p_rec = &suballocated_chunks[(unsigned) start->alloc_site];
 	
 	/* We've been given the containing (l1) chunk info. */
@@ -1629,7 +1748,7 @@ static void remove_one_insert(struct insert *p_ins, struct insert *p_bucket, str
 	{
 		struct insert *p_next_layer = replaced_ins + INSERTS_PER_LAYER(p_rec);
 		/* Invalidate it from the cache. */
-		invalidate_cache_entry(NULL, NULL, replaced_ins);
+		invalidate_cache_entries(NULL, (unsigned short) -1, NULL, replaced_ins, 1);
 		/* Copy the next layer's insert over ours. */
 		*replaced_ins = *p_next_layer;
 		/* Point us at the next layer to replace (i.e. if it's not null). */
