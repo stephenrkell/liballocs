@@ -14,9 +14,29 @@
 #include <link.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#ifndef USE_FAKE_LIBUNWIND
 #include <libunwind.h>
+#endif
 #include "libcrunch.h"
 #include "libcrunch_private.h"
+
+#ifdef USE_FAKE_LIBUNWIND
+#include "pmirror/fake-libunwind.h"
+int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp)
+{
+	assert(!offp);
+	dlerror();
+	Dl_info info;
+	int success = dladdr((void*) p_cursor->frame_ip, &info);
+	if (!success) return 1;
+	if (!info.dli_sname) return 2;
+	else 
+	{
+		strncpy(buf, info.dli_sname, n);
+		return 0;
+	}
+}
+#endif
 
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
@@ -1022,6 +1042,10 @@ _Bool
 			int unw_ret;
 			unw_context_t unw_context;
 
+			unw_ret = unw_getcontext(&unw_context);
+			unw_init_local(&cursor, /*this->unw_as,*/ &unw_context);
+
+			unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp);
 #ifndef NDEBUG
 			unw_word_t check_higherframe_sp;
 			// sanity check
@@ -1030,13 +1054,6 @@ _Bool
 #else // assume X86_64 for now
 			__asm__("movq %%rsp, %0\n" : "=r"(check_higherframe_sp));
 #endif
-#endif
-			unw_ret = unw_getcontext(&unw_context);
-			unw_init_local(&cursor, /*this->unw_as,*/ &unw_context);
-
-			unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp);
-// redundant #ifdef, but for clarity
-#ifndef NDEBUG 
 			assert(check_higherframe_sp == higherframe_sp);
 #endif
 			unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
