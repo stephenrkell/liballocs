@@ -808,24 +808,103 @@ static void post_nonnull_nonzero_realloc(void *userptr,
 	} 
 }
 
+// same but zero bytes, not bits
+static int nlzb1(unsigned long x) {
+	int n;
+
+	if (x == 0) return 8;
+	n = 0;
+
+	if (x <= 0x00000000FFFFFFFFL) { n += 4; x <<= 32; }
+	if (x <= 0x0000FFFFFFFFFFFFL) { n += 2; x <<= 16; }
+	if (x <= 0x00FFFFFFFFFFFFFFL) { n += 1;  x <<= 8; }
+	
+	return n;
+}
+
+static inline unsigned char *rfind_nonzero_byte(unsigned char *one_beyond_start, unsigned char *last_good_byte)
+{
+#define SIZE (sizeof (unsigned long))
+#define IS_ALIGNED(p) (((uintptr_t)(p)) % (SIZE) == 0)
+
+	unsigned char *p = one_beyond_start;
+	/* Do the unaligned part */
+	while (!IS_ALIGNED(p-SIZE))
+	{
+		if (p-1 < last_good_byte) return NULL;
+		
+		if (*--p != 0) return p;
+	}
+	
+	/* Do the aligned part */
+	while (p-SIZE >= last_good_byte)
+	{
+		unsigned long v = *((unsigned long *)(p-SIZE));
+		if (v != 0ul)
+		{
+			// HIT -- but what is the highest nonzero byte?
+			int nlzb = nlzb1(v); // in range 0..7
+			return p - 1 - nlzb;
+		}
+		p -= SIZE;
+	}
+	
+	assert((p-SIZE) - last_good_byte < SIZE);
+	assert((p-SIZE) - last_good_byte >= 0);
+	
+	/* Do the unaligned part */
+	while ((p-SIZE) - last_good_byte > 0)
+	{
+		if (p-1 < last_good_byte) return NULL;
+		
+		if (*--p != 0) return p;
+	}
+	
+	return NULL;
+#undef IS_ALIGNED
+#undef SIZE
+}
+
 static inline _Bool find_next_nonempty_bin(struct entry **p_cur, 
 		struct entry *limit,
 		size_t *p_object_minimum_size
 		)
 {
-	// first version: just what the old loop did
-	do
-	{
-		--(*p_cur);
-		*p_object_minimum_size += entry_coverage_in_bytes;
-		
-		// if we've gone too far, give up
-		if (*p_object_minimum_size > BIGGEST_SENSIBLE_OBJECT || *p_cur <= limit) return 0;
-		
-		// if we've hit a nonempty, stop
-		if (!IS_EMPTY_ENTRY(*p_cur)) return 1;
-		
-	} while (1);
+	size_t max_nbytes_coverage_to_scan = BIGGEST_SENSIBLE_OBJECT - *p_object_minimum_size;
+	size_t max_nbuckets_to_scan = 
+			(max_nbytes_coverage_to_scan % entry_coverage_in_bytes) == 0 
+		?    max_nbytes_coverage_to_scan / entry_coverage_in_bytes
+		:    (max_nbytes_coverage_to_scan / entry_coverage_in_bytes) + 1;
+	unsigned char *limit_by_size = (unsigned char *) *p_cur - max_nbuckets_to_scan;
+	unsigned char *limit_to_pass = (limit_by_size > (unsigned char *) index_region)
+			 ? limit_by_size : (unsigned char *) index_region;
+	unsigned char *found = rfind_nonzero_byte((unsigned char *) *p_cur, limit_to_pass);
+	if (!found) 
+	{ 
+		*p_object_minimum_size += (((unsigned char *) *p_cur) - limit_to_pass) * entry_coverage_in_bytes; 
+		*p_cur = (struct entry *) limit_to_pass;
+		return 0;
+	}
+	else
+	{ 
+		*p_object_minimum_size += (((unsigned char *) *p_cur) - found) * entry_coverage_in_bytes; 
+		*p_cur = (struct entry *) found; 
+		return 1;
+	}
+	
+//	// first version: just what the old loop did
+//	do
+//	{
+//		--(*p_cur);
+//		*p_object_minimum_size += entry_coverage_in_bytes;
+//		
+//		// if we've gone too far, give up
+//		if (*p_object_minimum_size > BIGGEST_SENSIBLE_OBJECT || *p_cur <= limit) return 0;
+//		
+//		// if we've hit a nonempty, stop
+//		if (!IS_EMPTY_ENTRY(*p_cur)) return 1;
+//		
+//	} while (1);
 
 	// FIXME: adapt http://www.int80h.org/strlen/ 
 	// or memrchr.S from eglibc
