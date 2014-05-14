@@ -239,7 +239,7 @@ def main():
     # into the executable,
     # and for each allocation function, we link a generated stub.
     
-    allocsccCustomArgs = ["--dotrumptr","--dodumpallocs"] \
+    allocsccCustomArgs = ["--dodumpallocs"] \
     + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", \
     "-fno-omit-frame-pointer", "-ffunction-sections"] \
     + saveTempsArgs
