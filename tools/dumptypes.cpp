@@ -668,7 +668,7 @@ int main(int argc, char **argv)
 	//		>
 	//	>
 	
-	/* NOTE: our allocsite chaining trick in libcrunch requires that our allocsites 
+	/* NOTE: our allocsite chaining trick in liballcs requires that our allocsites 
 	 * are sorted in vaddr order, so that adjacent allocsites in the memtable buckets
 	 * are adjacent in the table. So we sort them here. */
 	set< pair< boost::icl::discrete_interval<Dwarf_Addr>, iterator_df<subprogram_die> > > sorted_intervals;

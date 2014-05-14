@@ -1,5 +1,5 @@
-#ifndef LIBCRUNCH_ALLOCSMT_H_
-#define LIBCRUNCH_ALLOCSMT_H_
+#ifndef LIBALLOCS_ALLOCSMT_H_
+#define LIBALLOCS_ALLOCSMT_H_
 
 struct uniqtype;
 struct allocsite_entry
@@ -42,8 +42,8 @@ struct allocsite_entry
 
 #define allocsmt_entry_type          struct allocsite_entry *
 #define allocsmt_entry_coverage      256
-extern allocsmt_entry_type *__libcrunch_allocsmt;
-#define ALLOCSMT_FUN(op, ...)    (MEMTABLE_ ## op ## _WITH_TYPE(__libcrunch_allocsmt, allocsmt_entry_type, \
+extern allocsmt_entry_type *__liballocs_allocsmt;
+#define ALLOCSMT_FUN(op, ...)    (MEMTABLE_ ## op ## _WITH_TYPE(__liballocs_allocsmt, allocsmt_entry_type, \
     allocsmt_entry_coverage, (void*)0, (void*)(STACK_BEGIN << 2), ## __VA_ARGS__ ))
 
 #endif

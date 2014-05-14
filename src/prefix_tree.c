@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
-#include "libcrunch_private.h"
+#include "liballocs_private.h"
 
 struct prefix_tree_node {
 	struct prefix_tree_node *next/*, prev*/;
@@ -19,7 +19,7 @@ struct prefix_tree_node {
 		const void *data_ptr;
 	//};
 };
-struct prefix_tree_node *__libcrunch_prefix_tree_head;
+struct prefix_tree_node *__liballocs_prefix_tree_head;
 
 struct prefix_tree_add_args
 {
@@ -40,7 +40,7 @@ void init_prefix_tree_from_maps(void);
 void prefix_tree_check_against_maps(void);
 
 // HACK for debugging startup -- call from functions, not during constructor.
-void __libcrunch_preload_init(void);
+void __liballocs_preload_init(void);
 
 #define BOTTOM_N_BITS_SET(n)  ( ( (n)==0 ) ? 0 : ((n) == 8*sizeof(uintptr_t) ) ? (~((uintptr_t)0)) : ((((uintptr_t)1u) << ((n))) - 1))
 #define BOTTOM_N_BITS_CLEAR(n) (~(BOTTOM_N_BITS_SET((n))))
@@ -62,10 +62,10 @@ prefix_tree_deepest_matching(void *base, struct prefix_tree_node *start,
 	assert(!start || NODE_MATCHES(start, base));
 	
 	// if we have a non-head start and its prevptr is the head's address, the caller is confused
-	assert(!start || start == __libcrunch_prefix_tree_head || prev_ptr != &__libcrunch_prefix_tree_head);
+	assert(!start || start == __liballocs_prefix_tree_head || prev_ptr != &__liballocs_prefix_tree_head);
 
 	// descend if any of the children (i.e. siblings under start) have their bits in common...
-	struct prefix_tree_node **first_child_prevptr = start ? &start->first_child : &__libcrunch_prefix_tree_head;
+	struct prefix_tree_node **first_child_prevptr = start ? &start->first_child : &__liballocs_prefix_tree_head;
 	struct prefix_tree_node *first_child = *first_child_prevptr;
 	for (struct prefix_tree_node *child = first_child, *prev_child = NULL;
 		child != NULL;
@@ -83,7 +83,7 @@ prefix_tree_deepest_matching(void *base, struct prefix_tree_node *start,
 	}
 	
 	// if we got here, we're the best match
-	if (out_prev_ptr) *out_prev_ptr = (start == NULL ? &__libcrunch_prefix_tree_head : (assert(prev_ptr), prev_ptr));
+	if (out_prev_ptr) *out_prev_ptr = (start == NULL ? &__liballocs_prefix_tree_head : (assert(prev_ptr), prev_ptr));
 	return start;
 }
 
@@ -232,7 +232,7 @@ void prefix_tree_add_prefix(uintptr_t base, int nbits, const struct prefix_tree_
 	uintptr_t sib_to_pull_down_bits_in_common = 0ul;
 
 	// walk the sequence of children
-	struct prefix_tree_node **sib_prevptr = parent ? &parent->first_child : &__libcrunch_prefix_tree_head;
+	struct prefix_tree_node **sib_prevptr = parent ? &parent->first_child : &__liballocs_prefix_tree_head;
 	unsigned sibling_sequence_length = 0;
 	for (struct prefix_tree_node *sib = *sib_prevptr; 
 		sib != NULL;
@@ -319,12 +319,12 @@ void prefix_tree_add_prefix(uintptr_t base, int nbits, const struct prefix_tree_
 		 * So this only happens when we have zero children, i.e. 
 		 * parent_prevptr points at a null pointer (zero-length sibling sequence),
 		 * or at the root. */
-		assert(!*parent_prevptr || parent_prevptr == &__libcrunch_prefix_tree_head
+		assert(!*parent_prevptr || parent_prevptr == &__liballocs_prefix_tree_head
 			|| !parent->first_child);
 		
 		/* HMM. So we want to add a child of our deepest matching node. */
 
-		new_leaf_prevptr = &__libcrunch_prefix_tree_head;
+		new_leaf_prevptr = &__liballocs_prefix_tree_head;
 		new_leaf_parent = NULL;
 	}
 
@@ -385,7 +385,7 @@ prefix_tree_print_to_stderr(struct prefix_tree_node *start, int indent_level)
 	{
 		// start from root
 		fprintf(stderr, "{implicit root node}\n");
-		first_child = __libcrunch_prefix_tree_head;
+		first_child = __liballocs_prefix_tree_head;
 	}
 	else 
 	{
@@ -458,7 +458,7 @@ prefix_tree_del_prefix(uintptr_t base, int nbits, const void* arg)
 	// and because we can't walk backwards, we can't tell if it
 	// points to a singleton child sequence. HMM. So maybe the 
 	// answer is to doubly-link the lists? 
-	lift_singleton_children(__libcrunch_prefix_tree_head, &__libcrunch_prefix_tree_head); // FIXME: ideally we'd not have to scan the tree here
+	lift_singleton_children(__liballocs_prefix_tree_head, &__liballocs_prefix_tree_head); // FIXME: ideally we'd not have to scan the tree here
 }
 
 void prefix_tree_del(void *base, size_t s)
@@ -467,7 +467,7 @@ void prefix_tree_del(void *base, size_t s)
 	assert(s != 0);
 	
 	// we should have a tree already
-	assert(__libcrunch_prefix_tree_head);
+	assert(__liballocs_prefix_tree_head);
 
 	/* Find *all* nodes in the interval [base, base+s).
 	 * What's an efficient way to do this? 

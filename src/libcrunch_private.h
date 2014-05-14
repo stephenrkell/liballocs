@@ -1,5 +1,5 @@
-#ifndef LIBCRUNCH_PRIVATE_H_
-#define LIBCRUNCH_PRIVATE_H_
+#ifndef LIBALLOCS_PRIVATE_H_
+#define LIBALLOCS_PRIVATE_H_
 
 /* x86_64 only, for now */
 #if !defined(__x86_64__) && !defined(X86_64)
@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include "addrmap.h"
 
-#include "libcrunch.h"
+#include "liballocs.h"
 
 extern uintptr_t page_size __attribute__((visibility("protected")));
 extern uintptr_t log_page_size __attribute__((visibility("protected")));
@@ -70,10 +70,9 @@ struct prefix_tree_node *
 prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr);
 struct prefix_tree_node *
 prefix_tree_bounds(const void *ptr, const void **begin, const void **end);
-void __libcrunch_scan_lazy_typenames(void *handle);
-int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data);
+int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data);
 #define debug_printf(lvl, ...) do { \
-    if ((lvl) <= __libcrunch_debug_level) { \
+    if ((lvl) <= __liballocs_debug_level) { \
       warnx( __VA_ARGS__ );  \
     } \
   } while (0)
@@ -111,7 +110,7 @@ struct uniqtype
 #define MAGIC_LENGTH_POINTER ((1u << 19) - 1u)
 static inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite)
 {
-	assert(__libcrunch_allocsmt != NULL);
+	assert(__liballocs_allocsmt != NULL);
 	struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, allocsite);
 	struct allocsite_entry *bucket = *bucketpos;
 	for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
@@ -127,7 +126,7 @@ static inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite)
 #define maximum_vaddr_range_size (4*1024) // HACK
 static inline struct uniqtype *vaddr_to_uniqtype(const void *vaddr)
 {
-	assert(__libcrunch_allocsmt != NULL);
+	assert(__liballocs_allocsmt != NULL);
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)vaddr | STACK_BEGIN));
 	struct allocsite_entry **bucketpos = initial_bucketpos;
 	_Bool might_start_in_lower_bucket = 1;
@@ -160,7 +159,7 @@ static inline struct uniqtype *vaddr_to_uniqtype(const void *vaddr)
 #define maximum_static_obj_size (256*1024) // HACK
 static inline struct uniqtype *static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 {
-	assert(__libcrunch_allocsmt != NULL);
+	assert(__liballocs_allocsmt != NULL);
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)static_addr | (STACK_BEGIN<<1)));
 	struct allocsite_entry **bucketpos = initial_bucketpos;
 	_Bool might_start_in_lower_bucket = 1;
@@ -198,23 +197,14 @@ void warnx(const char *fmt, ...);
 unsigned long malloc_usable_size (void *ptr);
 
 /* counters */
-extern unsigned long __libcrunch_begun;
-#ifdef LIBCRUNCH_EXTENDED_COUNTS
-extern unsigned long __libcrunch_aborted_init;
-extern unsigned long __libcrunch_trivially_succeeded_null;
-#endif
-extern unsigned long __libcrunch_aborted_stack;
-extern unsigned long __libcrunch_aborted_static;
-extern unsigned long __libcrunch_aborted_typestr;
-extern unsigned long __libcrunch_aborted_unknown_storage;
-extern unsigned long __libcrunch_hit_heap_case;
-extern unsigned long __libcrunch_hit_stack_case;
-extern unsigned long __libcrunch_hit_static_case;
-extern unsigned long __libcrunch_aborted_unindexed_heap;
-extern unsigned long __libcrunch_lazy_heap_type_assignment;
-extern unsigned long __libcrunch_aborted_unrecognised_allocsite;
-extern unsigned long __libcrunch_failed;
-extern unsigned long __libcrunch_failed_in_alloc;
-extern unsigned long __libcrunch_succeeded;
+extern unsigned long __liballocs_aborted_stack;
+extern unsigned long __liballocs_aborted_static;
+extern unsigned long __liballocs_aborted_typestr;
+extern unsigned long __liballocs_aborted_unknown_storage;
+extern unsigned long __liballocs_hit_heap_case;
+extern unsigned long __liballocs_hit_stack_case;
+extern unsigned long __liballocs_hit_static_case;
+extern unsigned long __liballocs_aborted_unindexed_heap;
+extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 #endif

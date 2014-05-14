@@ -11,32 +11,32 @@ ALLOCSITES_BASE ?= /usr/lib/allocsites
 export UNIQTYPES_BASE
 export ALLOCSITES_BASE
 
-export CC := $(realpath $(dir $(THIS_MAKEFILE))/../frontend/c/bin/crunchcc)
+export CC := $(realpath $(dir $(THIS_MAKEFILE))/../frontend/c/bin/allocscc)
 export CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
 
 ifeq ($(CC),)
-$(error Could not find crunchcc)
+$(error Could not find allocscc)
 endif
 
 cases := $(wildcard [-a-z]*)
 
-ifneq ($(LIBCRUNCH_USE_PRELOAD),no)
-LIBCRUNCH := $(realpath $(dir $(THIS_MAKEFILE))/../lib/libcrunch_preload.so)
+ifneq ($(LIBALLOCS_USE_PRELOAD),no)
+LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_preload.so)
 else
-LIBCRUNCH := $(realpath $(dir $(THIS_MAKEFILE))/../lib/libcrunch.so)
+LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs.so)
 endif
 ifneq ($(MAKECMDGOALS),clean)
-ifeq ($(wildcard $(LIBCRUNCH)),)
-        $(error You must first build libcrunch{.so,_preload.so} and link them from ../lib)
+ifeq ($(wildcard $(LIBALLOCS)),)
+        $(error You must first build liballocs{.so,_preload.so} and link them from ../lib)
 endif
 endif
 
-ifneq ($(LIBCRUNCH_USE_PRELOAD),no)
-export PRELOAD := "$(LIBCRUNCH)"
+ifneq ($(LIBALLOCS_USE_PRELOAD),no)
+export PRELOAD := "$(LIBALLOCS)"
 else
 LIBHEAP_INDEX_HOOKS ?= $(realpath $(dir $(THIS_MAKEFILE))/../../libpmirror.hg/lib/libheap_index_fast_hooks.so)
-# FIXME: do we really need to preload libcrunch in this case?
-export PRELOAD := "$(LIBHEAP_INDEX_HOOKS) $(LIBCRUNCH)"
+# FIXME: do we really need to preload liballocs in this case?
+export PRELOAD := "$(LIBHEAP_INDEX_HOOKS) $(LIBALLOCS)"
 endif
 
 INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then /bin/echo -f mk.inc; else true; fi`
@@ -55,7 +55,7 @@ checkrun-fail-%:
 		grep ' 0.* 0.* 0.* 0\+.* [1-9][0-9]*.* 0\+$$' >/dev/null || \
 		(tail -n20 $$err; false)
 
-# Most test cases should output a libcrunch summary in which 
+# Most test cases should output a liballocs summary in which 
 # -- zero or more checks passed (trivially or by lazy typing)
 # -- zero checks aborted
 # -- zero checks failed

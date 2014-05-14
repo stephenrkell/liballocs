@@ -18,7 +18,7 @@ extern "C" {
  */
 extern int end;   // man page just uses "extern end", meaning "int"
 extern int edata; // ditto
-// this is what we use instead -- defined only in libcrunch (for now!)
+// this is what we use instead -- defined only in liballocs (for now!)
 extern void *__addrmap_executable_end_addr __attribute__((weak));
 // use for fast "is it our stack?" check
 extern unsigned long __addrmap_max_stack_size __attribute__((weak));
@@ -96,7 +96,7 @@ enum object_memory_kind
 	 * startup_sbrk. ALSO, we want the executable's 'end', so to get
 	 * this under dynamic linking, we need to dlsym() it in our own. We
 	 * don't do that here, but assume the host library does so by the time
-	 * we're called (e.g. libcrunch does it in its initialization).
+	 * we're called (e.g. liballocs does it in its initialization).
 	 */
 #ifndef USE_STARTUP_BRK 
 	// ... try to use the simpler "end" approach

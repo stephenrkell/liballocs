@@ -242,7 +242,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name,
 	bool emit_codeless_aliases)
 {
-	/* Keep in sync with libcrunch_private.h! */
+	/* Keep in sync with liballocs_private.h! */
 	if (emit_struct_def) cout << "struct uniqtype_cache_word \n\
 {\n\
 	unsigned long addr:47;\n\
@@ -639,7 +639,7 @@ struct uniqtype \n\
 			 * these aliases? Is it only our sloppy-dumptypes test case, i.e. typename-
 			 * -based client code that expects C-style names? 
 			 * 
-			 * In general we want to factor this into a pair of extra phases in crunchcc:
+			 * In general we want to factor this into a pair of extra phases in allocscc:
 			 * one which "lowers" trumptr-generated typenames into canonical
 			 * language-independent ones, 
 			 * and one which "re-aliases them" in language-dependent form. We could use

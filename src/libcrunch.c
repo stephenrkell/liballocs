@@ -1,6 +1,3 @@
-/* Libcrunch contains all the non-inline code that we need for doing run-time 
- * type checks on C code. */
-
 #define _GNU_SOURCE
 
 #include <string.h>
@@ -17,11 +14,11 @@
 #ifndef USE_FAKE_LIBUNWIND
 #include <libunwind.h>
 #endif
-#include "libcrunch.h"
-#include "libcrunch_private.h"
+#include "liballocs.h"
+#include "liballocs_private.h"
 
 #ifdef USE_FAKE_LIBUNWIND
-#include "pmirror/fake-libunwind.h"
+#include "fake-libunwind.h"
 int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp)
 {
 	assert(!offp);
@@ -45,9 +42,9 @@ uintptr_t page_size __attribute__((visibility("protected")));
 uintptr_t log_page_size __attribute__((visibility("protected")));
 uintptr_t page_mask __attribute__((visibility("protected")));
 
-int __libcrunch_debug_level;
-_Bool __libcrunch_is_initialized;
-allocsmt_entry_type *__libcrunch_allocsmt;
+int __liballocs_debug_level;
+_Bool __liballocs_is_initialized;
+allocsmt_entry_type *__liballocs_allocsmt;
 
 // these two are defined in addrmap.h as weak
 void *__addrmap_executable_end_addr;
@@ -57,7 +54,7 @@ unsigned long __addrmap_max_stack_size;
 static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typestr);
 
 // HACK
-void __libcrunch_preload_init(void);
+void __liballocs_preload_init(void);
 
 #define BLACKLIST_SIZE 8
 struct blacklist_ent 
@@ -70,15 +67,6 @@ struct blacklist_ent
 static _Bool check_blacklist(const void *obj);
 static void consider_blacklisting(const void *obj);
 
-/* Some data types like void* and sockaddr appear to be used to size a malloc(), 
- * but are only used because they have the same size as the actual thing being
- * allocated (say a different type of pointer, or a family-specific sockaddr). 
- * We keep a list of these. The user can use the LIBCRUNCH_LAZY_HEAP_TYPES 
- * environment variable to add these. */
-static unsigned lazy_heap_types_count;
-static const char **lazy_heap_typenames;
-static struct uniqtype **lazy_heap_types;
-
 static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg);
 
 static int print_type_cb(struct uniqtype *t, void *ignored)
@@ -87,39 +75,6 @@ static int print_type_cb(struct uniqtype *t, void *ignored)
 		t, t->name, t->pos_maxoff);
 	fflush(stderr);
 	return 0;
-}
-
-static int match_typename_cb(struct uniqtype *t, void *ignored)
-{
-	for (unsigned i = 0; i < lazy_heap_types_count; ++i)
-	{
-		if (!lazy_heap_types[i] && 
-			0 == strcmp(t->name, lazy_heap_typenames[i]))
-		{
-			// install this type in the lazy_heap_type slot
-			lazy_heap_types[i] = t;
-			
-			// keep going -- we might have more to match
-			return 0;
-		}
-	}
-	return 0; // keep going
-}
-
-void __libcrunch_scan_lazy_typenames(void *typelib_handle)
-{
-	iterate_types(typelib_handle, match_typename_cb, NULL);
-
-	// for (unsigned i = 0; i < lazy_heap_types_count; ++i)
-	// {
-	// 	if (lazy_heap_typenames[i] && !lazy_heap_types[i])
-	// 	{
-	// 		// look up 
-	// 		const void *u = typestr_to_uniqtype_from_lib(typelib_handle, lazy_heap_typenames[i]);
-	// 		// if we found it, install it
-	// 		if (u) lazy_heap_types[i] = (struct uniqtype *) u;
-	//	}
-	// }
 }
 
 static ElfW(Dyn) *get_dynamic_section(void *handle)
@@ -186,19 +141,10 @@ static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, voi
 	return cb_ret;
 }
 
-static _Bool is_lazy_uniqtype(const void *u)
-{
-	for (unsigned i = 0; i < lazy_heap_types_count; ++i)
-	{
-		if (lazy_heap_types[i] == u) return 1;
-	}
-	return 0;
-}
-
 static _Bool done_init;
-void __libcrunch_main_init(void) __attribute__((constructor(101)));
+void __liballocs_main_init(void) __attribute__((constructor(101)));
 // NOTE: runs *before* the constructor in preload.c
-void __libcrunch_main_init(void)
+void __liballocs_main_init(void)
 {
 	assert(!done_init);
 	
@@ -307,7 +253,7 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 		return 0;
 	}
 
-	// fprintf(stderr, "libcrunch: trying to open %s\n", libfile_name);
+	// fprintf(stderr, "liballocs: trying to open %s\n", libfile_name);
 
 	dlerror();
 	void *handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL);
@@ -318,14 +264,11 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 	}
 	
 	// if we want maximum output, print it
-	if (__libcrunch_debug_level >= 5)
+	if (__liballocs_debug_level >= 5)
 	{
 		iterate_types(handle, print_type_cb, NULL);
 	}
-	
-	// scan it for lazy-heap-alloc types
-	__libcrunch_scan_lazy_typenames(handle);
-	
+
 	// always continue with further objects
 	return 0;
 }
@@ -393,7 +336,7 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 		return 0;
 	}
 
-	// fprintf(stderr, "libcrunch: trying to open %s\n", libfile_name);
+	// fprintf(stderr, "liballocs: trying to open %s\n", libfile_name);
 	dlerror();
 	void *allocsites_handle = dlopen(libfile_name, RTLD_NOW);
 	if (!allocsites_handle)
@@ -618,89 +561,45 @@ static void consider_blacklisting(const void *obj)
 
 static void *main_bp; // beginning of main's stack frame
 
-const struct uniqtype *__libcrunch_uniqtype_void; // remember the location of the void uniqtype
-const struct uniqtype *__libcrunch_uniqtype_signed_char;
-const struct uniqtype *__libcrunch_uniqtype_unsigned_char;
+const struct uniqtype *__liballocs_uniqtype_void; // remember the location of the void uniqtype
+const struct uniqtype *__liballocs_uniqtype_signed_char;
+const struct uniqtype *__liballocs_uniqtype_unsigned_char;
 #define LOOKUP_CALLER_TYPE(frag, caller) /* FIXME: use caller not RTLD_DEFAULT -- use interval tree? */ \
     ( \
-		(__libcrunch_uniqtype_ ## frag) ? __libcrunch_uniqtype_ ## frag : \
-		(__libcrunch_uniqtype_ ## frag = dlsym(RTLD_DEFAULT, "__uniqtype__" #frag), \
-			assert(__libcrunch_uniqtype_ ## frag), \
-			__libcrunch_uniqtype_ ## frag \
+		(__liballocs_uniqtype_ ## frag) ? __liballocs_uniqtype_ ## frag : \
+		(__liballocs_uniqtype_ ## frag = dlsym(RTLD_DEFAULT, "__uniqtype__" #frag), \
+			assert(__liballocs_uniqtype_ ## frag), \
+			__liballocs_uniqtype_ ## frag \
 		) \
 	)
 
 /* counters */
-unsigned long __libcrunch_begun;
-#ifdef LIBCRUNCH_EXTENDED_COUNTS
-unsigned long __libcrunch_aborted_init;
-unsigned long __libcrunch_trivially_succeeded;
-#endif
-unsigned long __libcrunch_aborted_stack;
-unsigned long __libcrunch_aborted_static;
-unsigned long __libcrunch_aborted_typestr;
-unsigned long __libcrunch_aborted_unknown_storage;
-unsigned long __libcrunch_hit_heap_case;
-unsigned long __libcrunch_hit_stack_case;
-unsigned long __libcrunch_hit_static_case;
-unsigned long __libcrunch_lazy_heap_type_assignment;
-unsigned long __libcrunch_aborted_unindexed_heap;
-unsigned long __libcrunch_aborted_unrecognised_allocsite;
-unsigned long __libcrunch_failed;
-unsigned long __libcrunch_failed_in_alloc;
-unsigned long __libcrunch_succeeded;
-
-static unsigned long suppression_count;
-enum check
-{
-	IS_A,
-	LIKE_A
-};
-static enum check last_suppressed_check_kind;
+unsigned long __liballocs_aborted_stack;
+unsigned long __liballocs_aborted_static;
+unsigned long __liballocs_aborted_typestr;
+unsigned long __liballocs_aborted_unknown_storage;
+unsigned long __liballocs_hit_heap_case;
+unsigned long __liballocs_hit_stack_case;
+unsigned long __liballocs_hit_static_case;
+unsigned long __liballocs_aborted_unindexed_heap;
+unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 static void print_exit_summary(void)
 {
-	if (__libcrunch_begun == 0) return;
+	fprintf(stderr, "liballocs summary: \n");
+	fprintf(stderr, "---------------------------------------------------\n");
+	fprintf(stderr, "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
+#ifdef LIBALLOCS_EXTENDED_COUNTS
+	fprintf(stderr, "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
+	fprintf(stderr, "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
+	fprintf(stderr, "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);
+	fprintf(stderr, "---------------------------------------------------\n");
+	fprintf(stderr, "queries aborted for unindexed heap:        % 9ld\n", __liballocs_aborted_unindexed_heap);
+	fprintf(stderr, "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
+	fprintf(stderr, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
+	fprintf(stderr, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
 	
-	if (suppression_count > 0)
-	{
-		debug_printf(0, "Suppressed %d further occurrences of the previous error\n", 
-				suppression_count);
-	}
-	
-	fprintf(stderr, "libcrunch summary: \n");
-	fprintf(stderr, "checks begun:                             % 9ld\n", __libcrunch_begun);
-	fprintf(stderr, "---------------------------------------------------\n");
-#ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks aborted due to init failure:       % 9ld\n", __libcrunch_aborted_init);
-#endif
-	fprintf(stderr, "checks aborted for bad typename:          % 9ld\n", __libcrunch_aborted_typestr);
-	fprintf(stderr, "checks aborted for unknown storage:       % 9ld\n", __libcrunch_aborted_unknown_storage);
-#ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks trivially passed:                  % 9ld\n", __libcrunch_trivially_succeeded);
-#endif
-	fprintf(stderr, "===================================================\n");
-#ifdef LIBCRUNCH_EXTENDED_COUNTS
-	fprintf(stderr, "checks remaining                          % 9ld\n", __libcrunch_begun - (__libcrunch_trivially_succeeded + __libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr + __libcrunch_aborted_init));
-#else
-	fprintf(stderr, "checks remaining                          % 9ld\n", __libcrunch_begun - (__libcrunch_aborted_unknown_storage + __libcrunch_aborted_typestr));
-#endif	
-	fprintf(stderr, "---------------------------------------------------\n");
-	fprintf(stderr, "checks handled by static case:            % 9ld\n", __libcrunch_hit_static_case);
-	fprintf(stderr, "checks handled by stack case:             % 9ld\n", __libcrunch_hit_stack_case);
-	fprintf(stderr, "checks handled by heap case:              % 9ld\n", __libcrunch_hit_heap_case);
-	fprintf(stderr, "---------------------------------------------------\n");
-	fprintf(stderr, "   of which did lazy heap type assignment:% 9ld\n", __libcrunch_lazy_heap_type_assignment);
-	fprintf(stderr, "---------------------------------------------------\n");
-	fprintf(stderr, "checks aborted for unindexed heap:        % 9ld\n", __libcrunch_aborted_unindexed_heap);
-	fprintf(stderr, "checks aborted for unknown heap allocsite:% 9ld\n", __libcrunch_aborted_unrecognised_allocsite);
-	fprintf(stderr, "checks aborted for unknown stackframes:   % 9ld\n", __libcrunch_aborted_stack);
-	fprintf(stderr, "checks aborted for unknown static obj:    % 9ld\n", __libcrunch_aborted_static);
-	fprintf(stderr, "checks failed inside allocation functions:% 9ld\n", __libcrunch_failed_in_alloc);
-	fprintf(stderr, "checks failed otherwise:                  % 9ld\n", __libcrunch_failed);
-	fprintf(stderr, "checks nontrivially passed:               % 9ld\n", __libcrunch_succeeded);
-
-	if (getenv("LIBCRUNCH_DUMP_SMAPS_AT_EXIT"))
+	if (getenv("LIBALLOCS_DUMP_SMAPS_AT_EXIT"))
 	{
 		char buffer[4096];
 		size_t bytes;
@@ -719,9 +618,9 @@ static void print_exit_summary(void)
 /* This is *not* a constructor. We don't want to be called too early,
  * because it might not be safe to open the -uniqtypes.so handle yet.
  * So, initialize on demand. */
-int __libcrunch_global_init(void)
+int __liballocs_global_init(void)
 {
-	if (__libcrunch_is_initialized) return 0; // we are okay
+	if (__liballocs_is_initialized) return 0; // we are okay
 
 	// don't try more than once to initialize
 	static _Bool tried_to_initialize;
@@ -736,7 +635,7 @@ int __libcrunch_global_init(void)
 	atexit(print_exit_summary);
 	
 	// delay start-up here if the user asked for it
-	if (getenv("LIBCRUNCH_DELAY_STARTUP"))
+	if (getenv("LIBALLOCS_DELAY_STARTUP"))
 	{
 		sleep(10);
 	}
@@ -746,44 +645,8 @@ int __libcrunch_global_init(void)
 	if (!allocsites_base) allocsites_base = "/usr/lib/allocsites";
 	allocsites_base_len = strlen(allocsites_base);
 	
-	const char *debug_level_str = getenv("LIBCRUNCH_DEBUG_LEVEL");
-	if (debug_level_str) __libcrunch_debug_level = atoi(debug_level_str);
-
-	/* We always include "signed char" in the lazy heap types (FIXME: this is a 
-	 * C-specificity we'd rather not have here, but live with it for now.) 
-	 * We count the other ones. */
-	const char *lazy_heap_types_str = getenv("LIBCRUNCH_LAZY_HEAP_TYPES");
-	unsigned upper_bound = 2; // signed char plus one string with zero spaces
-	if (lazy_heap_types_str)
-	{
-		/* Count the lazy heap types */
-		const char *pos = lazy_heap_types_str;
-		while ((pos = strrchr(pos, ' ')) != NULL) { ++upper_bound; ++pos; }
-	}
-	/* Allocate and populate. */
-	lazy_heap_typenames = calloc(upper_bound, sizeof (const char *));
-	lazy_heap_types = calloc(upper_bound, sizeof (struct uniqtype *));
-
-	// the first entry is always signed char
-	lazy_heap_typenames[0] = "signed char";
-	lazy_heap_types_count = 1;
-	if (lazy_heap_types_str)
-	{
-		const char *pos = lazy_heap_types_str;
-		const char *spacepos;
-		do 
-		{
-			spacepos = strchrnul(pos, ' ');
-			if (spacepos - pos > 0) 
-			{
-				assert(lazy_heap_types_count < upper_bound);
-				lazy_heap_typenames[lazy_heap_types_count++] = strndup(pos, spacepos - pos);
-			}
-
-			pos = spacepos;
-			while (*pos == ' ') ++pos;
-		} while (*pos != '\0');
-	}
+	const char *debug_level_str = getenv("LIBALLOCS_DEBUG_LEVEL");
+	if (debug_level_str) __liballocs_debug_level = atoi(debug_level_str);
 	
 	// grab the executable's end address
 	dlerror();
@@ -792,22 +655,6 @@ int __libcrunch_global_init(void)
 	__addrmap_executable_end_addr = dlsym(executable_handle, "_end");
 	assert(__addrmap_executable_end_addr != 0);
 	
-	/* We have to scan for lazy heap types *in link order*, so that we see
-	 * the first linked definition of any type that is multiply-defined.
-	 * Do a scan now; we also scan when loading a types object, and when loading
-	 * a user-dlopen()'d object. 
-	 * 
-	 * We don't use dl_iterate_phdr because it doesn't give us the link_map * itself. 
-	 * Instead, walk the link map directly, like a debugger would
-	 *                                           (like I always knew somebody should). */
-	void *exec_dynamic = ((struct link_map *) executable_handle)->l_ld;
-	assert(exec_dynamic != NULL);
-	ElfW(Dyn) *dt_debug = get_dynamic_entry_from_section(exec_dynamic, DT_DEBUG);
-	struct r_debug *r_debug = (struct r_debug *) dt_debug->d_un.d_ptr;
-	for (struct link_map *l = r_debug->r_map; l; l = l->l_next)
-	{
-		__libcrunch_scan_lazy_typenames(l);
-	}
 	
 	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
 	assert(ret_types == 0);
@@ -820,9 +667,9 @@ int __libcrunch_global_init(void)
 	 * And we store static objects' addres in the same table, with addresses ORed
 	 * with STACK_BEGIN<<1. 
 	 * So quadruple up the size of the table accordingly. */
-	__libcrunch_allocsmt = MEMTABLE_NEW_WITH_TYPE(allocsmt_entry_type, allocsmt_entry_coverage, 
+	__liballocs_allocsmt = MEMTABLE_NEW_WITH_TYPE(allocsmt_entry_type, allocsmt_entry_coverage, 
 		(void*) 0, (void*) (STACK_BEGIN << 2));
-	assert(__libcrunch_allocsmt != MAP_FAILED);
+	assert(__liballocs_allocsmt != MAP_FAILED);
 	
 	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_cb, NULL);
 	assert(ret_allocsites == 0);
@@ -908,9 +755,9 @@ int __libcrunch_global_init(void)
 	// also init the prefix tree
 	init_prefix_tree_from_maps();
 
-	__libcrunch_is_initialized = 1;
+	__liballocs_is_initialized = 1;
 
-	debug_printf(1, "libcrunch successfully initialized\n");
+	debug_printf(1, "liballocs successfully initialized\n");
 	
 	return 0;
 }
@@ -929,9 +776,9 @@ static void *typeobj_handle_for_addr(void *caller)
 	return dlopen(types_libname, RTLD_NOW | RTLD_NOLOAD);
 }
 
-void *__libcrunch_my_typeobj(void)
+void *__liballocs_my_typeobj(void)
 {
-	__libcrunch_ensure_init();
+	__liballocs_ensure_init();
 	return typeobj_handle_for_addr(__builtin_return_address(0));
 }
 
@@ -940,7 +787,7 @@ void *__libcrunch_my_typeobj(void)
 
 
 /* This is left out-of-line because it's inherently a slow path. */
-const void *__libcrunch_typestr_to_uniqtype(const char *typestr)
+const void *__liballocs_typestr_to_uniqtype(const char *typestr)
 {
 	if (!typestr) return NULL;
 	
@@ -1013,7 +860,7 @@ _Bool
 				{
 					prefix_tree_print_all_to_stderr();
 					// completely wild pointer or kernel pointer
-					debug_printf(1, "libcrunch saw wild pointer %p from caller %p\n", obj,
+					debug_printf(1, "liballocs saw wild pointer %p from caller %p\n", obj,
 						__builtin_return_address(0));
 					consider_blacklisting(obj);
 				}
@@ -1026,7 +873,7 @@ _Bool
 	{
 		case STACK:
 		{
-			++__libcrunch_hit_stack_case;
+			++__liballocs_hit_stack_case;
 #define BEGINNING_OF_STACK (STACK_BEGIN - 1)
 			// we want to walk a sequence of vaddrs!
 			// how do we know which is the one we want?
@@ -1158,7 +1005,7 @@ _Bool
 				if (!frame_desc)
 				{
 					// no frame descriptor for this frame; that's okay!
-					// e.g. our libcrunch frames should (normally) have no descriptor
+					// e.g. our liballocs frames should (normally) have no descriptor
 					continue;
 				}
 				// 2. what's the frame base? it's the higherframe stack pointer
@@ -1197,12 +1044,12 @@ _Bool
 		abort_stack:
 			if (!*out_reason) *out_reason = "stack object";
 			*out_reason_ptr = obj;
-			++__libcrunch_aborted_stack;
+			++__liballocs_aborted_stack;
 			return 1;
 		} // end case STACK
 		case HEAP:
 		{
-			++__libcrunch_hit_heap_case;
+			++__liballocs_hit_heap_case;
 			/* For heap allocations, we look up the allocation site.
 			 * (This also yields an offset within a toplevel object.)
 			 * Then we translate the allocation site to a uniqtypes rec location.
@@ -1220,7 +1067,7 @@ _Bool
 			{
 				*out_reason = "unindexed heap object";
 				*out_reason_ptr = obj;
-				++__libcrunch_aborted_unindexed_heap;
+				++__liballocs_aborted_unindexed_heap;
 				return 1;
 			}
 			assert(get_object_memory_kind(heap_info) == HEAP
@@ -1241,10 +1088,7 @@ _Bool
 			else
 			{
 				/* Look up the allocsite's uniqtype, and install it in the heap info 
-				 * (on NDEBUG builds only, because it reduces debuggability a bit).
-				 * 
-				 * AND UNLESS it's a lazy uniqtype, in which case the target type of the 
-				 * cast we're checking is the one we assign to the . */
+				 * (on NDEBUG builds only, because it reduces debuggability a bit). */
 				void *alloc_site = (void*)(uintptr_t)heap_info->alloc_site;
 				*out_alloc_site = alloc_site;
 				struct uniqtype *alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
@@ -1253,24 +1097,24 @@ _Bool
 				{
 					*out_reason = "unrecognised allocsite";
 					*out_reason_ptr = alloc_site;
-					++__libcrunch_aborted_unrecognised_allocsite;
+					++__liballocs_aborted_unrecognised_allocsite;
 					return 1;
 				}
-				/* Don't do lazy heap type assignment within an alloc fn, or other
-				 * alloc machinery. (NOTE that in the case of a size-only outer function, 
-				 * we might have already reset the __current_allocfn by the point we do a 
-				 * cast that is still logically during allocation. That's why we need the
-				 * extra flag.) */
-				if (__builtin_expect(is_lazy_uniqtype(alloc_uniqtype)
-						&& !__currently_allocating, 0))
-				{
-					++__libcrunch_lazy_heap_type_assignment;
-					heap_info->alloc_site_flag = 1;
-					heap_info->alloc_site = (uintptr_t) test_uniqtype;
-					*out_alloc_site = 0;
-					*out_alloc_uniqtype = (struct uniqtype *) test_uniqtype;
-					goto out_success; // FIXME: we'd rather return from __is_a early right here
-				}
+// 				/* Don't do lazy heap type assignment within an alloc fn, or other
+// 				 * alloc machinery. (NOTE that in the case of a size-only outer function, 
+// 				 * we might have already reset the __current_allocfn by the point we do a 
+// 				 * cast that is still logically during allocation. That's why we need the
+// 				 * extra flag.) */
+// 				if (__builtin_expect(is_lazy_uniqtype(alloc_uniqtype)
+// 						&& !__currently_allocating, 0))
+// 				{
+// 					++__liballocs_lazy_heap_type_assignment;
+// 					heap_info->alloc_site_flag = 1;
+// 					heap_info->alloc_site = (uintptr_t) test_uniqtype;
+// 					*out_alloc_site = 0;
+// 					*out_alloc_uniqtype = (struct uniqtype *) test_uniqtype;
+// 					goto out_success; // FIXME: we'd rather return from __is_a early right here
+// 				}
 				
 #ifdef NDEBUG
 				// FIXME: make this atomic using a union
@@ -1286,13 +1130,13 @@ _Bool
 			 
 			unsigned header_size = sizeof (struct insert);
 			*out_block_element_count = (alloc_chunksize - header_size) / (*out_alloc_uniqtype)->pos_maxoff;
-			//__libcrunch_private_assert(chunk_size % alloc_uniqtype->pos_maxoff == 0,
+			//__liballocs_private_assert(chunk_size % alloc_uniqtype->pos_maxoff == 0,
 			//	"chunk size should be multiple of element size", __FILE__, __LINE__, __func__);
 			break;
 		}
 		case STATIC:
 		{
-			++__libcrunch_hit_static_case;
+			++__liballocs_hit_static_case;
 //			/* We use a blacklist to rule out static addrs that map to things like 
 //			 * mmap()'d regions (which we never have typeinfo for)
 //			 * or uninstrumented libraries (which we happen not to have typeinfo for). */
@@ -1302,7 +1146,7 @@ _Bool
 //				// FIXME: record blacklist hits separately
 //				reason = "unrecognised static object";
 //				reason_ptr = obj;
-//				++__libcrunch_aborted_static;
+//				++__liballocs_aborted_static;
 //				goto abort;
 //			}
 			*out_alloc_uniqtype = static_addr_to_uniqtype(obj, (void**) out_object_start);
@@ -1310,7 +1154,7 @@ _Bool
 			{
 				*out_reason = "unrecognised static object";
 				*out_reason_ptr = obj;
-				++__libcrunch_aborted_static;
+				++__liballocs_aborted_static;
 //				consider_blacklisting(obj);
 				return 1;
 			}
@@ -1324,7 +1168,7 @@ _Bool
 		{
 			*out_reason = "object of unknown storage";
 			*out_reason_ptr = obj;
-			++__libcrunch_aborted_unknown_storage;
+			++__liballocs_aborted_unknown_storage;
 			return 1;
 		}
 	}
@@ -1383,7 +1227,7 @@ static inline _Bool descend_to_first_subobject_spanning(
 		{
 			/* Bisect the interval */
 			int bisect_ind = (upper_ind + lower_ind) / 2;
-			__libcrunch_private_assert(bisect_ind > lower_ind, "bisection progress", 
+			__liballocs_private_assert(bisect_ind > lower_ind, "bisection progress", 
 				__FILE__, __LINE__, __func__);
 			if (cur_obj_uniqtype->contained[bisect_ind].offset > target_offset_within_uniqtype)
 			{
@@ -1395,7 +1239,7 @@ static inline _Bool descend_to_first_subobject_spanning(
 		if (lower_ind + 1 == upper_ind)
 		{
 			/* We found one offset */
-			__libcrunch_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset_within_uniqtype,
+			__liballocs_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset_within_uniqtype,
 				"offset underapproximates", __FILE__, __LINE__, __func__);
 
 			/* ... but we might not have found the *lowest* index, in the 
@@ -1422,7 +1266,7 @@ static inline _Bool descend_to_first_subobject_spanning(
 		else /* lower_ind >= upper_ind */
 		{
 			// this should mean num_contained == 0
-			__libcrunch_private_assert(num_contained == 0,
+			__liballocs_private_assert(num_contained == 0,
 				"no contained objects", __FILE__, __LINE__, __func__);
 			return 0;
 		}
@@ -1485,330 +1329,4 @@ static inline _Bool recursively_test_subobjects(signed target_offset_within_uniq
 		
 		assert(0);
 	}
-}
-
-/* Optimised version, for when you already know the uniqtype address. */
-int __is_a_internal(const void *obj, const void *arg)
-{
-	/* We might not be initialized yet (recall that __libcrunch_global_init is 
-	 * not a constructor, because it's not safe to call super-early). */
-	__libcrunch_check_init();
-	
-	const struct uniqtype *test_uniqtype = (const struct uniqtype *) arg;
-	const char *reason = NULL; // if we abort, set this to a string lit
-	const void *reason_ptr = NULL; // if we abort, set this to a useful address
-	memory_kind k;
-	const void *object_start;
-	unsigned block_element_count = 1;
-	struct uniqtype *alloc_uniqtype = (struct uniqtype *)0;
-	const void *alloc_site;
-	signed target_offset_within_uniqtype;
-	
-	_Bool abort = get_alloc_info(obj, 
-		arg, 
-		&reason,
-		&reason_ptr,
-		&k,
-		&object_start,
-		&block_element_count,
-		&alloc_uniqtype,
-		&alloc_site,
-		&target_offset_within_uniqtype);
-	
-	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
-	
-	struct uniqtype *cur_obj_uniqtype = alloc_uniqtype;
-	struct uniqtype *cur_containing_uniqtype = NULL;
-	struct contained *cur_contained_pos = NULL;
-// 	do
-// 	{
-// 		/* If we have offset == 0, we can check at this uniqtype.
-// 		 * We also pass if our current object is an array of the test uniqtype
-// 		 * and the offset is a multiple of the array element size. 
-// 		 * FIXME: we don't check the bounds of the array, but I think we 
-// 		 * don't have to. */
-// 		if (target_offset_within_uniqtype == 0
-// 					&& cur_obj_uniqtype == test_uniqtype) 
-// 		{
-// 			++__libcrunch_succeeded;
-// 			return 1;
-// 		}
-// 	} while (descend_to_first_subobject_spanning(&target_offset_within_uniqtype, &cur_obj_uniqtype,
-// 			&cur_containing_uniqtype, &cur_contained_pos));
-	signed cumulative_offset_searched = 0;
-	_Bool success = recursively_test_subobjects(target_offset_within_uniqtype, 
-			cur_obj_uniqtype, (struct uniqtype *) test_uniqtype, &cur_obj_uniqtype, 
-			&target_offset_within_uniqtype, &cumulative_offset_searched);
-	if (__builtin_expect(success, 1))
-	{
-			++__libcrunch_succeeded;
-			return 1;
-	}
-	
-	// if we got here, the check failed
-	if (__currently_allocating || __currently_freeing)
-	{
-		++__libcrunch_failed_in_alloc;
-		// suppress warning
-	}
-	else
-	{
-		++__libcrunch_failed;
-		
-		static const void *last_failed_site;
-		static const void *last_failed_object_start;
-		static const struct uniqtype *last_failed_test_type;
-		
-		if (last_failed_site == __builtin_return_address(0)
-				&& last_failed_object_start == object_start
-				&& last_failed_test_type == test_uniqtype
-				&& last_suppressed_check_kind == IS_A)
-		{
-			++suppression_count;
-		}
-		else
-		{
-			if (suppression_count > 0)
-			{
-				debug_printf(0, "Suppressed %d further occurrences of the previous error\n", 
-						suppression_count);
-			}
-			
-			debug_printf(0, "Failed check __is_a_internal(%p, %p a.k.a. \"%s\") at %p, "
-					"%d bytes into an allocation of a %s%s%s "
-					"(deepest subobject: %s at offset %d) "
-					"originating at %p\n", 
-				obj, test_uniqtype, test_uniqtype->name,
-				__builtin_return_address(0), // make sure our *caller*, if any, is inlined
-				(char*) obj - (char*) object_start,
-				name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
-				alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
-				(cur_obj_uniqtype ? cur_obj_uniqtype->name : "(none)"), 
-					cumulative_offset_searched, 
-				alloc_site);
-			last_failed_site = __builtin_return_address(0);
-			last_failed_object_start = object_start;
-			last_failed_test_type = test_uniqtype;
-			suppression_count = 0;
-		}
-	}
-	return 1; // HACK: so that the program will continue
-}
-
-/* Optimised version, for when you already know the uniqtype address. */
-int __like_a_internal(const void *obj, const void *arg)
-{
-	// FIXME: use our recursive subobject search here? HMM -- semantics are non-obvious.
-	
-	/* We might not be initialized yet (recall that __libcrunch_global_init is 
-	 * not a constructor, because it's not safe to call super-early). */
-	__libcrunch_check_init();
-	
-	const struct uniqtype *test_uniqtype = (const struct uniqtype *) arg;
-	const char *reason = NULL; // if we abort, set this to a string lit
-	const void *reason_ptr = NULL; // if we abort, set this to a useful address
-	memory_kind k;
-	const void *object_start;
-	unsigned block_element_count = 1;
-	struct uniqtype *alloc_uniqtype = (struct uniqtype *)0;
-	const void *alloc_site;
-	signed target_offset_within_uniqtype;
-	void *caller_address = __builtin_return_address(0);
-	
-	_Bool abort = get_alloc_info(obj, 
-		arg, 
-		&reason,
-		&reason_ptr,
-		&k,
-		&object_start,
-		&block_element_count,
-		&alloc_uniqtype, 
-		&alloc_site,
-		&target_offset_within_uniqtype);
-	
-	if (__builtin_expect(abort, 0)) return 1; // we've already counted it
-	struct uniqtype *cur_obj_uniqtype = alloc_uniqtype;
-	struct uniqtype *cur_containing_uniqtype = NULL;
-	struct contained *cur_contained_pos = NULL;
-	
-	/* Descend the subobject hierarchy until our target offset is zero, i.e. we 
-	 * find the outermost thing in the subobject tree that starts at the address
-	 * we were passed (obj). */
-	while (target_offset_within_uniqtype != 0)
-	{
-		_Bool success = descend_to_first_subobject_spanning(
-				&target_offset_within_uniqtype, &cur_obj_uniqtype, &cur_containing_uniqtype,
-				&cur_contained_pos);
-		if (!success) goto like_a_failed;
-	}
-	
-	// trivially, identical types are like one another
-	if (test_uniqtype == cur_obj_uniqtype) goto like_a_succeeded;
-	
-	// arrays are special
-	_Bool matches;
-	if (__builtin_expect((cur_obj_uniqtype->is_array || test_uniqtype->is_array), 0))
-	{
-		matches = 
-			test_uniqtype == cur_obj_uniqtype
-		||  (test_uniqtype->is_array && test_uniqtype->array_len == 1 
-				&& test_uniqtype->contained[0].ptr == cur_obj_uniqtype)
-		||  (cur_obj_uniqtype->is_array && cur_obj_uniqtype->array_len == 1
-				&& cur_obj_uniqtype->contained[0].ptr == test_uniqtype);
-		/* We don't need to allow an array of one blah to be like a different
-		 * array of one blah, because they should be the same type. 
-		 * FIXME: there's a difficult case: an array of statically unknown length, 
-		 * which happens to have length 1. */
-		if (matches) goto like_a_succeeded; else goto like_a_failed;
-	}
-	
-	/* If we're not an array and nmemb is zero, we might have base types with
-	 * signedness complements. */
-	if (!cur_obj_uniqtype->is_array && !test_uniqtype->is_array
-			&&  cur_obj_uniqtype->nmemb == 0 && test_uniqtype->nmemb == 0)
-	{
-		/* Does the cur obj type have a signedness complement matching the test type? */
-		if (cur_obj_uniqtype->contained[0].ptr == test_uniqtype) goto like_a_succeeded;
-		/* Does the test type have a signedness complement matching the cur obj type? */
-		if (test_uniqtype->contained[0].ptr == cur_obj_uniqtype) goto like_a_succeeded;
-	}
-			
-	
-	/* Okay, we can start the like-a test: for each element in the test type, 
-	 * do we have a type-equivalent in the object type?
-	 * 
-	 * We make an exception for arrays of char (signed or unsigned): if an
-	 * element in the test type is such an array, we skip over any number of
-	 * fields in the object type, until we reach the offset of the end element.  */
-	unsigned i_obj_subobj = 0, i_test_subobj = 0;
-	for (; 
-		i_obj_subobj < cur_obj_uniqtype->nmemb && i_test_subobj < test_uniqtype->nmemb; 
-		++i_test_subobj, ++i_obj_subobj)
-	{
-		if (__builtin_expect(test_uniqtype->contained[i_test_subobj].ptr->is_array
-			&& (test_uniqtype->contained[i_test_subobj].ptr->contained[0].ptr
-					== LOOKUP_CALLER_TYPE(signed_char, caller_address)
-			|| test_uniqtype->contained[i_test_subobj].ptr->contained[0].ptr
-					== LOOKUP_CALLER_TYPE(unsigned_char, caller_address)), 0))
-		{
-			// we will skip this field in the test type
-			signed target_off =
-				test_uniqtype->nmemb > i_test_subobj + 1
-			 ?  test_uniqtype->contained[i_test_subobj + 1].offset
-			 :  test_uniqtype->contained[i_test_subobj].offset
-			      + test_uniqtype->contained[i_test_subobj].ptr->pos_maxoff;
-			
-			// ... if there's more in the test type, advance i_obj_subobj
-			while (i_obj_subobj + 1 < cur_obj_uniqtype->nmemb &&
-				cur_obj_uniqtype->contained[i_obj_subobj + 1].offset < target_off) ++i_obj_subobj;
-			/* We fail if we ran out of stuff in the target object type
-			 * AND there is more to go in the test type. */
-			if (i_obj_subobj + 1 >= cur_obj_uniqtype->nmemb
-			 && test_uniqtype->nmemb > i_test_subobj + 1) goto like_a_failed;
-				
-			continue;
-		}
-		matches = 
-				test_uniqtype->contained[i_test_subobj].offset == cur_obj_uniqtype->contained[i_obj_subobj].offset
-		 && 	test_uniqtype->contained[i_test_subobj].ptr == cur_obj_uniqtype->contained[i_obj_subobj].ptr;
-		if (!matches) goto like_a_failed;
-	}
-	// if we terminated because we ran out of fields in the target type, fail
-	if (i_test_subobj < test_uniqtype->nmemb) goto like_a_failed;
-	
-like_a_succeeded:
-	++__libcrunch_succeeded;
-	return 1;
-	
-	// if we got here, we've failed
-	// if we got here, the check failed
-like_a_failed:
-	if (__currently_allocating || __currently_freeing) 
-	{
-		++__libcrunch_failed_in_alloc;
-		// suppress warning
-	}
-	else
-	{
-		++__libcrunch_failed;
-		debug_printf(0, "Failed check __like_a_internal(%p, %p a.k.a. \"%s\") at %p, allocation was a %s%s%s originating at %p\n", 
-			obj, test_uniqtype, test_uniqtype->name,
-			__builtin_return_address(0), // make sure our *caller*, if any, is inlined
-			name_for_memory_kind(k), (k == HEAP && block_element_count > 1) ? " block of " : " ", 
-			alloc_uniqtype ? (alloc_uniqtype->name ?: "(unnamed type)") : "(unknown type)", 
-			alloc_site);
-	}
-	return 1; // HACK: so that the program will continue
-}
-
-int 
-__check_args_internal(const void *obj, int nargs, ...)
-{
-	/* We might not be initialized yet (recall that __libcrunch_global_init is 
-	 * not a constructor, because it's not safe to call super-early). */
-	__libcrunch_check_init();
-
-	const char *reason = NULL; // if we abort, set this to a string lit
-	const void *reason_ptr = NULL; // if we abort, set this to a useful address
-	memory_kind k;
-	const void *object_start;
-	unsigned block_element_count = 1;
-	struct uniqtype *alloc_uniqtype = (struct uniqtype *)0;
-	const void *alloc_site;
-	signed target_offset_within_uniqtype;
-
-	struct uniqtype *fun_uniqtype = NULL;
-	
-	_Bool abort = get_alloc_info(obj, 
-		NULL, 
-		&reason,
-		&reason_ptr,
-		&k,
-		&object_start,
-		&block_element_count,
-		&fun_uniqtype,
-		&alloc_site,
-		&target_offset_within_uniqtype);
-	
-	assert(fun_uniqtype);
-	assert(object_start == obj);
-	assert(UNIQTYPE_IS_SUBPROGRAM(fun_uniqtype));
-	
-	/* Walk the arguments that the function expects. Simultaneously, 
-	 * walk our arguments. */
-	va_list ap;
-	va_start(ap, nargs);
-	
-	// FIXME: this function screws with the __libcrunch_begun count somehow
-	// -- try hello-funptr
-	
-	_Bool success = 1;
-	int i;
-	for (i = 0; i < nargs && i < fun_uniqtype->array_len; ++i)
-	{
-		void *argval = va_arg(ap, void*);
-		/* contained[0] is the return type */
-		struct uniqtype *expected_arg = fun_uniqtype->contained[i+1].ptr;
-		/* We only check casts that are to pointer targets types.
-		 * How to test this? */
-		if (!expected_arg->is_array && expected_arg->array_len == MAGIC_LENGTH_POINTER)
-		{
-			struct uniqtype *expected_arg_pointee_type = expected_arg->contained[0].ptr;
-			success &= __is_aU(argval, expected_arg_pointee_type);
-		}
-		if (!success) break;
-	}
-	if (i == nargs && i < fun_uniqtype->array_len)
-	{
-		/* This means we exhausted nargs before we got to the end of the array. */
-	}
-	if (i < nargs && i == fun_uniqtype->array_len)
-	{
-		/* This means we passed more args than the uniqtype told us about. 
-		 * FIXME: check for its varargs-ness. */
-	}
-	
-	va_end(ap);
-	
-	return success ? 0 : i; // 0 means success here
 }

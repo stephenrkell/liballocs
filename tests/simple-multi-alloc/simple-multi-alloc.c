@@ -9,7 +9,7 @@
 
 static _Bool initialized;
 
-extern _Bool __libcrunch_is_initialized __attribute__((weak));
+extern _Bool __liballocs_is_initialized __attribute__((weak));
 
 static void (__attribute__((constructor)) init)(void)
 {
@@ -63,6 +63,7 @@ int main(void)
 	
 	void *fake = blah;
 
+	// FIXME: actually check liballocs works here!
 	int *recovered = (int *) fake;
 
 	printf("It says: %d\n", recovered[0]);

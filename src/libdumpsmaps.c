@@ -1,6 +1,3 @@
-/* Libcrunch contains all the non-inline code that we need for doing run-time 
- * type checks on C code. */
-
 #define _GNU_SOURCE
 #include <string.h>
 #include <unistd.h>
@@ -12,7 +9,7 @@
 
 static void print_exit_summary(void)
 {
-	if (getenv("LIBCRUNCH_DUMP_SMAPS_AT_EXIT"))
+	if (getenv("LIBALLOCS_DUMP_SMAPS_AT_EXIT"))
 	{
 		char buffer[4096];
 		size_t bytes;

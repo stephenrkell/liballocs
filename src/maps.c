@@ -8,7 +8,7 @@
 #include <string.h>
 #include <dlfcn.h>
 #include <link.h>
-#include "libcrunch_private.h"
+#include "liballocs_private.h"
 
 _Bool initialized_maps __attribute__((visibility("protected")));
 
@@ -19,7 +19,7 @@ void init_prefix_tree_from_maps(void)
 		/* First use dl_iterate_phdr to check that all library mappings are in the tree 
 		 * with a STATIC kind. Since we hook dlopen(), at least from the point where we're
 		 * initialized, we should only have to do this on startup.  */
-		dl_iterate_phdr(__libcrunch_add_all_mappings_cb, NULL);
+		dl_iterate_phdr(__liballocs_add_all_mappings_cb, NULL);
 
 		/* Now fill in the rest from /proc. */
 		prefix_tree_add_missing_maps();

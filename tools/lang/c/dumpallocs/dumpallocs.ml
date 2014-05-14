@@ -174,12 +174,12 @@ let rec warnIfLikelyAllocFn (i: instr) (maybeFunName: string option) (arglist: e
        (* Some(f.vname, *)
           if try_match funName "calloc" && (length arglist) > 1
              then (* getSizeExpr (nth arglist 1) *)
-             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_{SUB,}ALLOC_FNS\n")
+             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
           else if try_match funName "realloc" && (length arglist) > 1
              then (* getSizeExpr (nth arglist 1) *)
-             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_{SUB,}ALLOC_FNS\n")
+             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
              else (* getSizeExpr (nth arglist 0) *)
-                output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_{SUB,}ALLOC_FNS\n")
+                output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
       else () (*  ) 
       else (* takes no arguments, so we output a "(none)" line. *)
          Some(f.vname, None) (* We eliminate these lines in merge-allocs, rather than
@@ -251,15 +251,15 @@ let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env c
 
 let userAllocFunctions () : string list = 
   let wrappers = try begin 
-    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOC_FNS"))
+    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBALLOCS_ALLOC_FNS"))
   end with Not_found -> []
   in
   let suballocs = try begin
-    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_SUBALLOC_FNS")) 
+    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBALLOCS_SUBALLOC_FNS")) 
   end with Not_found -> []
   in
   let sizeOnlyAllocs = try begin
-    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOCSZ_FNS")) 
+    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBALLOCS_ALLOCSZ_FNS")) 
   end with Not_found -> []
   in
   wrappers @ suballocs @ sizeOnlyAllocs

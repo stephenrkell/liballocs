@@ -16,8 +16,8 @@ int __currently_freeing __attribute__((weak)); // defined by heap_index_hooks
 int __currently_allocating __attribute__((weak)); // defined by heap_index_hooks
 #endif
 
-int  __index_deep_alloc(void *ptr, int level, unsigned size_bytes); // defined by heap_index_hooks (and libcrunch_noop)
-void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks (and libcrunch_noop)
+int  __index_deep_alloc(void *ptr, int level, unsigned size_bytes); // defined by heap_index_hooks
+void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
 
 /* these are our per-allocfn wrappers */
 

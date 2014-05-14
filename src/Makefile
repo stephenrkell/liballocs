@@ -7,13 +7,13 @@ CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
 C_SRC := $(wildcard *.c)
 CC_SRC := $(wildcard *.cc)
 
-# Don't use crunchcc to compile libcrunch!
-# if CC is crunchcc, unset it
-ifeq ($(notdir $(CC)),crunchcc)
+# Don't use allocscc to compile liballocs!
+# if CC is allocscc, unset it
+ifeq ($(notdir $(CC)),allocscc)
 export CC := cc
 endif
 
-default: libcrunch_preload.so libcrunch_noop.so libcrunch_noop.o
+default: liballocs_preload.so liballocs_noop.so liballocs_noop.o
 
 # for addrmap.c and fake-libunwind.c
 vpath %.c $(PMIRROR)/src
@@ -41,30 +41,30 @@ $(CC_DEPS): .%.d : %.cc
 
 # FIXME: in preload case, can be clever with stubs? 
 # HMM. We still have to --wrap the allocation funcs, but we could put the wrappers in the preload lib...
-# BUT since they're generated per-build from the LIBCRUNCH_ALLOC_FNS content, this doesn't work --
+# BUT since they're generated per-build from the LIBALLOCS_ALLOC_FNS content, this doesn't work --
 # stick with stubs!
-libcrunch_preload.so: libcrunch.o preload.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ) $(PMIRROR)/lib/lib$(HEAP_INDEX_HOOKS).a
+liballocs_preload.so: liballocs.o preload.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ) $(PMIRROR)/lib/lib$(HEAP_INDEX_HOOKS).a
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS) -Wl,--whole-archive -Wl,-Bstatic -l$(HEAP_INDEX_HOOKS) -Wl,--no-whole-archive -Wl,-Bdynamic 
 
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
 
-libcrunch_nomemtable_preload.so: libcrunch_nomemtable.o preload.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ) dummy_thread_locals.o
+liballocs_nomemtable_preload.so: liballocs_nomemtable.o preload.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ) dummy_thread_locals.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
 # this version lacks preload stuff
-libcrunch.so: libcrunch.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ)
+liballocs.so: liballocs.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ)
 	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS) #-lheap_index_hooks
 
 noop.o: CFLAGS += -fPIC 
 
-libcrunch_nomemtable.o: libcrunch.c
+liballocs_nomemtable.o: liballocs.c
 	$(CC) $(CFLAGS) -DNO_MEMTABLE -c -o "$@" "$<" 
 
-libcrunch_noop.so: noop.o
+liballocs_noop.so: noop.o
 	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
 
-libcrunch_noop.o: noop.o
+liballocs_noop.o: noop.o
 	ln -s "$<" "$@"
 
 # have to preload the hooks yourself if you want them to hook!

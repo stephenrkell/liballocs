@@ -128,9 +128,9 @@ case "$filetype" in
 esac
 
 line_regexp='^([0-9a-f]*) <([^>]*)>'
-alloc_descriptors="${LIBCRUNCH_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p"
-suballoc_descriptors="${LIBCRUNCH_SUBALLOC_FNS:-}"
-allocsz_descriptors="${LIBCRUNCH_ALLOCSZ_FNS:-}"
+alloc_descriptors="${LIBALLOCS_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p"
+suballoc_descriptors="${LIBALLOCS_SUBALLOC_FNS:-}"
+allocsz_descriptors="${LIBALLOCS_ALLOCSZ_FNS:-}"
 all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}${allocsz_descriptors:+ ${allocsz_descriptors}}"
 echo "all_alloc_descriptors is: $all_alloc_descriptors" 1>&2
 alloc_site_regexp="${line_regexp}.*(call|jmp).*(<($( 
@@ -139,7 +139,7 @@ alloc_site_regexp="${line_regexp}.*(call|jmp).*(<($(
     echo -n "${all_alloc_descriptors}" | \
         sed -r 's/([a-zA-Z0-9_]+)\([^\)]*\)[a-zA-Z]?( +|$)/\1\n__wrap_\1\n/g' | \
     make_match_any_line_floating_eregexp ))|.*\*)"
-# HACK: if libcrunch_alloc_fns is unset, use "malloc" a second time
+# HACK: if liballocs_alloc_fns is unset, use "malloc" a second time
 # (leaving this out will make the regexp end "|)" so match all calls)
 
 echo "alloc_site_regexp is: $alloc_site_regexp" 1>&2

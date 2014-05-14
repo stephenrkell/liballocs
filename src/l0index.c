@@ -5,7 +5,7 @@
 #include <link.h>
 #include <string.h>
 #include <wchar.h>
-#include "libcrunch_private.h"
+#include "liballocs_private.h"
 
 #define MAPPING_IN_USE(m) ((m)->begin && (m)->end)
 struct mapping
@@ -682,7 +682,7 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 	 * page size. Check whether it fills (more-or-less) the alloc'd region, and if so,  
 	 * install its trailer into the maps. We will fish it out in get_alloc_info. */
 	
-	__libcrunch_check_init();
+	__liballocs_check_init();
 	
 	assert(page_size);
 

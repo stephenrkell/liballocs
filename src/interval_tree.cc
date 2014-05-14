@@ -16,7 +16,7 @@ typedef bool _Bool;
 /* We use this prefix trie to map the address space. */
 extern "C"
 {
-	#include "libcrunch_private.h"
+	#include "liballocs_private.h"
 }
 
 std::ostream& operator<<(std::ostream& s, const prefix_tree_node& n);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Compiler wrapper for libcrunch.
+# Compiler wrapper for liballocs.
 # We identify the input source file in the commandline,
 # and export it as an environment variable.
 # We then delegate to cilly,
@@ -34,20 +34,20 @@ def defaultL1AllocFns():
     return ["malloc(Z)p", "calloc(zZ)p", "realloc(pZ)p", "memalign(zZ)p"]
 
 def allL1OrWrapperAllocFns():
-    if "LIBCRUNCH_ALLOC_FNS" in os.environ:
-        return defaultL1AllocFns() + [s for s in os.environ["LIBCRUNCH_ALLOC_FNS"].split(' ') if s != '']
+    if "LIBALLOCS_ALLOC_FNS" in os.environ:
+        return defaultL1AllocFns() + [s for s in os.environ["LIBALLOCS_ALLOC_FNS"].split(' ') if s != '']
     else:
         return defaultL1AllocFns()
 
 def allSubAllocFns():
-    if "LIBCRUNCH_SUBALLOC_FNS" in os.environ:
-        return [s for s in os.environ["LIBCRUNCH_SUBALLOC_FNS"].split(' ') if s != '']
+    if "LIBALLOCS_SUBALLOC_FNS" in os.environ:
+        return [s for s in os.environ["LIBALLOCS_SUBALLOC_FNS"].split(' ') if s != '']
     else:
         return []
 
 def allAllocSzFns():
-    if "LIBCRUNCH_ALLOCSZ_FNS" in os.environ:
-        return [s for s in os.environ["LIBCRUNCH_ALLOCSZ_FNS"].split(' ') if s != '']
+    if "LIBALLOCS_ALLOCSZ_FNS" in os.environ:
+        return [s for s in os.environ["LIBALLOCS_ALLOCSZ_FNS"].split(' ') if s != '']
     else:
         return []
 
@@ -58,14 +58,14 @@ def defaultFreeFns():
     return ["free(P)"]
 
 def allL1FreeFns():
-    if "LIBCRUNCH_FREE_FNS" in os.environ:
-        return defaultFreeFns() + [s for s in os.environ["LIBCRUNCH_FREE_FNS"].split(' ') if s != '']
+    if "LIBALLOCS_FREE_FNS" in os.environ:
+        return defaultFreeFns() + [s for s in os.environ["LIBALLOCS_FREE_FNS"].split(' ') if s != '']
     else:
         return defaultFreeFns()
 
 def allSubFreeFns():
-    if "LIBCRUNCH_SUBFREE_FNS" in os.environ:
-        return [s for s in os.environ["LIBCRUNCH_SUBFREE_FNS"].split(' ') if s != '']
+    if "LIBALLOCS_SUBFREE_FNS" in os.environ:
+        return [s for s in os.environ["LIBALLOCS_SUBFREE_FNS"].split(' ') if s != '']
     else:
         return []
 
@@ -195,7 +195,7 @@ def findFirstUpperCase(s):
     return -1
 
 def main():
-    sys.stderr.write("crunchcc called with args  " + " ".join(sys.argv) + "\n")
+    sys.stderr.write("allocscc called with args  " + " ".join(sys.argv) + "\n")
     # change "-V" to some other undefined option
     skipNext = False
     outputFile = None
@@ -214,7 +214,7 @@ def main():
         if sys.argv[num].startswith('-'):
             continue
         if num == 0:
-            continue # this means we have "crunchcc" as the arg
+            continue # this means we have "allocscc" as the arg
         if sys.argv[num].endswith('.o'):
             oInputFiles += [sys.argv[num]]
         if sys.argv[num].endswith('.a') or sys.argv[num].endswith('.o') or \
@@ -235,11 +235,11 @@ def main():
     # with dangling references to __wrap_xmalloc,
     # and an unused implementation of __real_xmalloc.
     # If we're outputting an executable, 
-    # then we link a thread-local variable "__libcrunch_current_allocsite"
+    # then we link a thread-local variable "__liballocs_current_allocsite"
     # into the executable,
     # and for each allocation function, we link a generated stub.
     
-    crunchccCustomArgs = ["--dotrumptr","--dodumpallocs"] \
+    allocsccCustomArgs = ["--dotrumptr","--dodumpallocs"] \
     + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", \
     "-fno-omit-frame-pointer", "-ffunction-sections"] \
     + saveTempsArgs
@@ -254,7 +254,7 @@ def main():
     for sym in allWrappedSymNames():
         mallocWrapArgs += ["-Wl,--wrap," + sym]
     
-    # un-export CC from the env if it's set to crunchcc, because 
+    # un-export CC from the env if it's set to allocscc, because 
     # we don't want to recursively cruchcc the -uniqtypes.c files
     # that this make invocation will be compiling for us.
     if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
@@ -267,14 +267,14 @@ def main():
         # then resume linking these .o files
         if len(cInputFiles) > 0:
             sys.stderr.write("Making .o files first from " + " ".join(cInputFiles) + "\n")
-            passedThroughArgs = makeDotOAndPassThrough(sys.argv, crunchccCustomArgs, cInputFiles)
+            passedThroughArgs = makeDotOAndPassThrough(sys.argv, allocsccCustomArgs, cInputFiles)
         else:
             passedThroughArgs = sys.argv[1:]
         
         # we need to wrap each allocation function
-        sys.stderr.write("crunchcc doing linking\n")
+        sys.stderr.write("allocscc doing linking\n")
         passedThroughArgs += mallocWrapArgs
-        # we need to export-dynamic, s.t. __is_a is linked from libcrunch
+        # we need to export-dynamic, s.t. __is_a is linked from liballocs
         linkArgs += ["-Wl,--export-dynamic"]
         # if we're building an executable, append the magic objects
         # -- and link with the noop *shared* library, to be interposable
@@ -381,7 +381,7 @@ def main():
                 exit(1)
             # now erase the '# ... file ' lines that refer to our stubs file,
             # and add some line breaks
-            stubs_sed_cmd = ["sed", "-r", "-i", "s^#.*crunch.*/stubgen\\.h\" *[0-9]* *$^^\n " \
+            stubs_sed_cmd = ["sed", "-r", "-i", "s^#.*allocs.*/stubgen\\.h\" *[0-9]* *$^^\n " \
             + "/__real_|__wrap_|__current_/ s^[;\\{\\}]^&\\n^g", stubs_pp]
             ret_stubs_sed = subprocess.call(stubs_sed_cmd)
             if ret_stubs_sed != 0:
@@ -403,20 +403,20 @@ def main():
             linkArgs += [stubs_bin]
             linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
             linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
-            if "LIBCRUNCH_USE_PRELOAD" in os.environ and os.environ["LIBCRUNCH_USE_PRELOAD"] == "no":
-                linkArgs += ["-lcrunch"]
+            if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
+                linkArgs += ["-lallocs"]
             else: # FIXME: weak linkage one day
-                linkArgs += ["-lcrunch_noop"]
+                linkArgs += ["-lallocs_noop"]
         else:
-            # We're building a shared library, so simply add libcrunch_noop.o; 
+            # We're building a shared library, so simply add liballocs_noop.o; 
             # only link directly if we're disabling the preload approach
-            if "LIBCRUNCH_USE_PRELOAD" in os.environ and os.environ["LIBCRUNCH_USE_PRELOAD"] == "no":
+            if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                 linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
                 linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
-                if "LIBCRUNCH_USE_PRELOAD" in os.environ and os.environ["LIBCRUNCH_USE_PRELOAD"] == "no":
-                    linkArgs += ["-lcrunch"]
+                if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
+                    linkArgs += ["-lallocs"]
             else: # FIXME: weak linkage one day....
-                linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../lib/libcrunch_noop.o"]
+                linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../lib/liballocs_noop.o"]
             # note: we leave the shared library with 
             # dangling dependencies on __wrap_
             # and unused __real_
@@ -429,12 +429,12 @@ def main():
 #    + ["-Wno-attributes"] \
 
     
-    argsToExec = ["--verbose"] + crunchccCustomArgs \
+    argsToExec = ["--verbose"] + allocsccCustomArgs \
     + linkArgs \
     + passedThroughArgs
     sys.stderr.write("about to run cilly with args: " + " ".join(argsToExec) + "\n")
     sys.stderr.write("passedThroughArgs is: " + " ".join(passedThroughArgs) + "\n")
-    sys.stderr.write("crunchccCustomArgs is: " + " ".join(crunchccCustomArgs) + "\n")
+    sys.stderr.write("allocsccCustomArgs is: " + " ".join(allocsccCustomArgs) + "\n")
     sys.stderr.write("linkArgs is: " + " ".join(linkArgs) + "\n")
     
     ret1 = subprocess.call(["cilly"] + argsToExec)

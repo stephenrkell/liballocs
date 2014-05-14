@@ -16,10 +16,10 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
-#include "libcrunch_private.h"
+#include "liballocs_private.h"
 
 /* We should be safe to use it once malloc is initialized. */
-// #define safe_to_use_prefix_tree (__libcrunch_is_initialized)
+// #define safe_to_use_prefix_tree (__liballocs_is_initialized)
 #define safe_to_use_prefix_tree (l0index)
 #define safe_to_call_dlsym (safe_to_call_malloc)
 
@@ -157,7 +157,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 }
 
 
-int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
+int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
 	const char *filename = (const char *) data;
 	if (filename == NULL || 0 == strcmp(filename, info->dlpi_name))
@@ -194,6 +194,9 @@ int __libcrunch_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 	
 }
 
+// HACK: call out to libcrunch if it's linked in
+extern void (*__libcrunch_scan_lazy_typenames)(void*) __attribute__((weak));
+
 void *dlopen(const char *filename, int flag)
 {
 	static void *(*orig_dlopen)(const char *, int);
@@ -203,17 +206,17 @@ void *dlopen(const char *filename, int flag)
 		assert(orig_dlopen);
 	}
 	
-	if (!__libcrunch_is_initialized) return orig_dlopen(filename, flag);
+	if (!__liballocs_is_initialized) return orig_dlopen(filename, flag);
 	else
 	{
 		void *ret = orig_dlopen(filename, flag);
 		if (ret != NULL && !(flag & RTLD_NOLOAD))
 		{
-			__libcrunch_scan_lazy_typenames(ret);
+			if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(ret);
 		
 			/* Note that in general we will get one mapping for every 
 			 * LOAD phdr. So we use dl_iterate_phdr. */
-			int dlpi_ret = dl_iterate_phdr(__libcrunch_add_all_mappings_cb, 
+			int dlpi_ret = dl_iterate_phdr(__liballocs_add_all_mappings_cb, 
 				((struct link_map *) ret)->l_name);
 			assert(dlpi_ret != 0);
 		}

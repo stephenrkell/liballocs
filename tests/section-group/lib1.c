@@ -1,6 +1,6 @@
 #include <dlfcn.h>
 #include <assert.h>
-#include "libcrunch.h"
+#include "liballocs.h"
 
 struct uniqtype_cache_word
 {
@@ -33,7 +33,7 @@ extern struct uniqtype *l1a(void);
 void *l1(int arg)
 {
 	/* Get our __uniqtype__s1. */
-	struct uniqtype *resolved = dlsym(__libcrunch_my_typeobj(), "__uniqtype__s1");
+	struct uniqtype *resolved = dlsym(__liballocs_my_typeobj(), "__uniqtype__s1");
 	struct uniqtype *int32 = resolved->contained[0].ptr;
 	
 	/* Check that we're using the same "__uniqtype_int$32" as l1a is. */

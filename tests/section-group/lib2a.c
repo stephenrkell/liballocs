@@ -1,5 +1,5 @@
 #include <dlfcn.h>
-#include "libcrunch.h"
+#include "liballocs.h"
 
 struct uniqtype_cache_word
 {
@@ -30,7 +30,7 @@ struct s2a
 void *l2a(void)
 {
 	/* Get our __uniqtype__s2a. */
-	struct uniqtype *resolved = dlsym(__libcrunch_my_typeobj(), "__uniqtype__s2a");
+	struct uniqtype *resolved = dlsym(__liballocs_my_typeobj(), "__uniqtype__s2a");
 	/* Return our __uniqtype__int$32. */
 	return resolved->contained[0].ptr;
 }

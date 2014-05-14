@@ -1,27 +1,22 @@
-default: src lib frontend test
+default: src lib tools test
 
 .PHONY: src
-src: | allocsites
+src: | tools
 	$(MAKE) -C src
 
-.PHONY: allocsites
-allocsites:
-	$(MAKE) -C allocsites
-
-.PHONY: frontend
-frontend: | allocsites
-	$(MAKE) -C frontend
+.PHONY: tools
+tools:
+	$(MAKE) -C tools
 
 .PHONY: lib
 lib: src
 	mkdir -p lib && cd lib && \
-    ln -sf ../src/libcrunch.so ../src/libcrunch_noop.so ../src/libcrunch_preload.so . && \
-    ln -sf ../src/noop.o libcrunch_noop.o
+    ln -sf ../src/liballocs.so ../src/liballocs_noop.so ../src/liballocs_preload.so . && \
+    ln -sf ../src/noop.o liballocs_noop.o
 
 .PHONY: clean
 clean:
 	$(MAKE) -C src clean
-	$(MAKE) -C allocsites clean
+	$(MAKE) -C tools clean
 	rm -f lib/*.so lib/*.o lib/.??*
-	$(MAKE) -C frontend clean
-	$(MAKE) -C test clean
+	$(MAKE) -C tests clean
