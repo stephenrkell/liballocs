@@ -589,7 +589,6 @@ static void print_exit_summary(void)
 	fprintf(stderr, "liballocs summary: \n");
 	fprintf(stderr, "---------------------------------------------------\n");
 	fprintf(stderr, "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
-#ifdef LIBALLOCS_EXTENDED_COUNTS
 	fprintf(stderr, "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
 	fprintf(stderr, "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
 	fprintf(stderr, "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);

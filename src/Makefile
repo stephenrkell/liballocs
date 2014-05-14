@@ -45,7 +45,7 @@ $(CC_DEPS): .%.d : %.cc
 # BUT since they're generated per-build from the LIBALLOCS_ALLOC_FNS content, this doesn't work --
 # stick with stubs!
 liballocs_preload.so: liballocs.o preload.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ) lib$(HEAP_INDEX_HOOKS).a
-	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS) -Wl,--whole-archive -Wl,-Bstatic -l$(HEAP_INDEX_HOOKS) -Wl,--no-whole-archive -Wl,-Bdynamic 
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS) -Wl,--whole-archive -Wl,-Bstatic -L. -l$(HEAP_INDEX_HOOKS) -Wl,--no-whole-archive -Wl,-Bdynamic 
 
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 

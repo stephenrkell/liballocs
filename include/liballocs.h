@@ -1,7 +1,7 @@
 #ifndef LIBALLOCS_H_
 #define LIBALLOCS_H_
 
-xtern void warnx(const char *fmt, ...); // avoid repeating proto
+extern void warnx(const char *fmt, ...); // avoid repeating proto
 
 /* Copied from dumptypes.cpp */
 struct uniqtype; // opaque
@@ -9,6 +9,7 @@ struct uniqtype; // opaque
 extern int __liballocs_debug_level;
 extern _Bool __liballocs_is_initialized __attribute__((weak));
 
+int __liballocs_check_init(void) __attribute__((weak));
 int __liballocs_global_init(void) __attribute__((weak));
 // declare as const void *-returning, to simplify trumptr
 const void *__liballocs_typestr_to_uniqtype(const char *typestr) __attribute__((weak));
