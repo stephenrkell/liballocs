@@ -1,0 +1,15 @@
+signed char, char, char signed
+unsigned char, char unsigned
+short int, short, int short
+short unsigned int, unsigned short, short unsigned, unsigned short int, int unsigned short, int short unsigned, unsigned int short, short int unsigned
+int, signed, signed int, int signed
+unsigned int, unsigned, int unsigned
+long int, long, int long, signed long int, int signed long, int long signed, long signed int, signed int long, 	long signed, signed long
+unsigned long int, int unsigned long, int long unsigned, long unsigned int, unsigned int long, long unsigned, unsigned long
+long long int, long long, long int long, int long long, long long signed, long signed long, signed long long, long long int signed, long long signed int, long signed long int, signed long long int, long int long signed, long int signed long,long signed int long,signed long int long, int long long signed, int long signed long, int signed long long, signed int long long
+long long unsigned int, long long unsigned, long unsigned long, unsigned long long, long long int unsigned, long unsigned long int, unsigned long long int, long int long unsigned, long int unsigned long, long unsigned int long, unsigned long int long, int long long unsigned, int long unsigned long, int unsigned long long, unsigned int long long
+float
+double
+long double, double long
+bool
+wchar_t

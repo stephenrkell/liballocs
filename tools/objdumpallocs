@@ -1,0 +1,290 @@
+#!/bin/bash
+
+. ~/lib/bash/util
+
+# Build a list of allocation sites with the power of objdump.
+# We record them as the string inside the < >
+# i.e. <symname+0xoffset>, without the < >.
+
+# HACK 1: to make this work for llvm, we just use gold to generate
+# a native file with DWARF info, 
+
+# HACK 2: to handle synonymy, 
+# for each allocation site's output line,
+# we append a list of the synonyms. (FIXME: not impl'd yet)
+
+# HACK 3: we really ought to deal with qualifiers like const. FIXME.
+
+case $(basename "$0") in
+    (*dumpallocs)
+        outputstyle="tab"
+        ;;
+    (*)
+        outputstyle="punc"
+        ;;
+esac
+
+# some stock definitions
+# FIXME: this doesn't escape some metacharacters, notably '[' and ']',
+# -- including the latter seemed to mess up the sed expression
+# but I could do it using alternation and bare characters, i.e. \|\[\|\]
+escape_shell () {
+     sed 's/[\$()"'"'"'{}\*?]/\\&/g'
+}
+
+escape_regexp () {
+    # filter which reads a string on input, and yields a plain grep-style regexp
+    # which matches the string literally, by escaping the metacharacters
+    sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\\)/\\\1/g'
+}
+
+escape_eregexp () {
+    # filter which reads a string on input, and yields a plain grep-style regexp
+    # which matches the string literally, by escaping the metacharacters
+    sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)/\\\1/g'
+}
+
+escape_regexp_awk_lit () {
+    echo -n '/'
+    sed -r 's#(/|\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)#\\\1#g' | tr -d '\n'
+    echo -n '/'
+}
+
+escapefn_shell () {
+    echo "$1" | escape_shell
+}
+escapefn_regexp () {
+    echo "$1" | escape_regexp
+}
+escapefn_eregexp () {
+    echo "$1" | escape_eregexp
+}
+escapefn_regexp_awk_lit () {
+    echo "$1" | escape_regexp_awk_lit
+}
+
+make_match_any_line_regexp () {
+    # makes a giant regexp which matches any of a set of lines, read from stdin
+	# If we don't read any lines from stdin, we return a regexp that doesn't match
+	# anything! (At least I hope that's what $^ does.)lank lines.
+    escape_regexp | sed 's/\(.*\)/^\\(\1\\)$/' | tr '\n' '\f' | \
+    	sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\$\^/'
+}
+
+make_match_any_line_floating_regexp () {
+    # makes a giant regexp which matches any of a set of lines, read from stdin
+	# If we don't read any lines from stdin, we return a regexp that matches only
+	# blank lines. Ideally we would return a regexp which doesn't match anything,
+	# but it turns out that there is no such grep regexp (I think!) and the
+	# alternative suffices for our purposes (below)
+    escape_regexp | sed 's/\(.*\)/\\(\1\\)/' | tr '\n' '\f' | \
+    	sed 's/\f$/\n/' | sed 's/\f/\\|/g' |  sed 's/^$/\$\^/'
+}
+
+make_match_any_line_floating_eregexp () {
+	# as above, but makes an eregexp
+    escape_eregexp | sed 's/\(.*\)/(\1)/' | tr '\n' '\f' | \
+    	sed 's/\f$/\n/' | sed 's/\f/|/g' |  sed 's/^$/\$\^/'
+}
+
+pad_numbers () {
+    tr '\n' '\f' | \
+    sed 's/\f/\f\n/g' | \
+    tr '\t' '\n' | \
+    sed -r "s/^[[:space:]]*[0-9]+[[:space:]]*\$/printf '%06d' '&'/e" | \
+    tr '\n' '\t' | \
+    sed 's/\f\t/\n/g'
+}
+
+. $(dirname "$0")/../lib/debug-funcs.sh
+
+filetype="$( file -bi "$1" )"
+case "$filetype" in
+    (application/x-object*)
+        inputfile="$1"
+    ;;
+    (application/x-executable*)
+        inputfile="$1"
+    ;;
+    (application/x-sharedlib*)
+        inputfile="$1"
+    ;;
+    (application/octet-stream*|application/x-archive*)
+        # probably an LLVM bitcode file
+        llvm_nm_output="$( llvm-nm "$1" 2>/dev/null )"
+        if [[ -n "$llvm_nm_output" ]]; then
+            # yes, bitcode. So make a temporary file
+            inputfile="$(mktemp)"
+            echo "Using temporary object file: $inputfile" 1>&2
+            ld.gold -r --plugin LLVMgold.so -o "$inputfile" toy.o || \
+            (echo "Error converting LLVM bitcode to native object." 1>&2; false) || exit 1
+        else
+            # actually, not bitcode; roll with it
+            inputfile="$1"
+        fi
+    ;;
+    (*) echo "Error: unrecognised file type $filetype" 1>&2; exit 1
+    ;;
+esac
+
+line_regexp='^([0-9a-f]*) <([^>]*)>'
+alloc_descriptors="${LIBCRUNCH_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p"
+suballoc_descriptors="${LIBCRUNCH_SUBALLOC_FNS:-}"
+allocsz_descriptors="${LIBCRUNCH_ALLOCSZ_FNS:-}"
+all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}${allocsz_descriptors:+ ${allocsz_descriptors}}"
+echo "all_alloc_descriptors is: $all_alloc_descriptors" 1>&2
+alloc_site_regexp="${line_regexp}.*(call|jmp).*(<($( 
+    echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc' | \
+    make_match_any_line_floating_eregexp )|$( 
+    echo -n "${all_alloc_descriptors}" | \
+        sed -r 's/([a-zA-Z0-9_]+)\([^\)]*\)[a-zA-Z]?( +|$)/\1\n__wrap_\1\n/g' | \
+    make_match_any_line_floating_eregexp ))|.*\*)"
+# HACK: if libcrunch_alloc_fns is unset, use "malloc" a second time
+# (leaving this out will make the regexp end "|)" so match all calls)
+
+echo "alloc_site_regexp is: $alloc_site_regexp" 1>&2
+
+case "$( file "$inputfile" | grep reloc )" in
+    ('')
+        # not relocatable
+        disassembly_opts="-Rd"
+        ;;
+    (*)
+        # relocatable
+        disassembly_opts="-rd"
+        ;;
+esac
+
+apply_relocs () {
+    # This is a filter for objdump output that 
+    # for each disassembly line,
+    # if it is followed by one or more relocs,
+    # will merge that reloc info into the line. 
+    # We do it in the most stupid way possible: 
+    # delete newlines preceding reloc info
+    tr '\n' '\f' | sed 's/\f\([[:blank:]]*[0-9a-f]\+: R\)/\1/g' | tr '\f' '\n'
+}
+
+# get allocation sites in "address sym offset" form
+allocsites_tmpfile="$(mktemp)"
+objdump --prefix-addresses ${disassembly_opts} "$inputfile" | \
+apply_relocs | \
+egrep "$alloc_site_regexp" | \
+sed -r "s/${alloc_site_regexp}.*/\1\t\2/" | \
+sed -r 's/([-\+]0x[0-9a-f]*) *$/ \1/' > "$allocsites_tmpfile"
+echo "Written allocsites output to $allocsites_tmpfile" 1>&2
+
+# read the whole objdump to a temporary file, to avoid re-disassembling
+tmpfile="$(mktemp)"
+objdump --line-numbers --prefix-addresses ${disassembly_opts} -S "$inputfile" | \
+   apply_relocs > "$tmpfile"
+echo "Written objdump output to $tmpfile" 1>&2
+
+echo "Found allocation sites: " 1>&2
+cat "$allocsites_tmpfile" 1>&2
+
+# HACK: sometimes our gnu_debuglink section is wrong, i.e. does not reflect
+# the location of the debug info, e.g. according to Debian policy where
+# the debug info is moved into /usr/lib/debug but the debuglink is stuck
+# with the same-directory path (i.e. plain filename) that was correct when
+# stripping occurred during the build process. 
+
+bytes_consumed=0
+
+while read address sym offset; do
+    # 0. skip blank lines
+    if [[ -z "${address}${sym}${offset}" ]]; then
+        continue
+    fi
+
+    # Now use the power of objdump -S to get the source line for that alloc.
+    # 1, Build a regexp that will re-locate the current alloc site.
+    
+    #regexp="^[0-9a-f]+[[:blank:]]*<$( escapefn_eregexp "$sym" )\+$( escapefn_eregexp "$offset")>"
+    regexp="^${address}[[:blank:]]*<"
+    
+    echo "regexp: $regexp" 1>&2
+    # 2. Grab that and some lines of pre-context, 
+    # which hopefully will include the allocating source line
+    # FIXME: to optimise, chomp forward from previous match
+    # ... using a temporary file and tail -c+k
+    
+    #context="$( echo "$objdump_output" | egrep -B30 "$regexp" )" #"
+    #echo "context the slow way: $context" 1>&2
+    # instead of this, use sed
+    next_chunk="$( tail -c+$(( $bytes_consumed + 1 )) "$tmpfile" 2>/dev/null | sed -r "/$regexp/ q" )"
+    #echo "fast way, next chunk: $next_chunk" 1>&2
+    bytes_consumed=$(( $bytes_consumed + $( echo "$next_chunk" | wc -c ) ))
+    #echo "bytes_consumed is now $bytes_consumed" 1>&2
+    context="$( echo "$next_chunk" | tail -n31 )"
+    #echo "fast way, context: $context" 1>&2
+    
+    #echo "context: $context" 1>&2
+    # 2a. Narrow that context to the last objdump-printed source line.
+    # Remember the file/line pair.
+    with_file_line_header="$( echo "$context" | tac | sed -r '/^\/.*:[0-9]+( \(discriminator [0-9]*\))?$/ q' | tac )"
+    # If we didn't hit a source header line,
+    # what we read next will be garbage, so grep for something that matches the pattern
+    file_line_header="$( echo "$with_file_line_header" | egrep '^/.*:[0-9]+( \(discriminator [0-9]*\))?$' | head -n1 )"
+    if [[ -z "$file_line_header" ]]; then 
+        echo "Warning: could not find source line for ${sym}${offset}, skipping" 1>&2
+        echo "Context attempt was:"$'\n'"$with_file_line_header" 1>&2
+        continue
+    fi
+    filename="$( echo "$file_line_header" | sed -r 's/:[0-9]+( \(discriminator [0-9]*\))?$//' )"
+    line_number="$( echo "$file_line_header" | sed -r 's/.*:([0-9]+)( \(discriminator [0-9]*\))?$/\1/' )"
+    # How many source lines are in the chunk?
+    # We grep -v out the header and anything that looks like an instruction disassembly line
+    source_lines="$( echo "$with_file_line_header" | egrep -v '^/.*:[0-9]+( \(discriminator [0-9]*\))?$' | egrep -v \
+        '^[0-9a-f]+[[:blank:]]*<.+(\+0x[0-9a-f]+)?>.*' )"
+    source_lines_count="$( echo "$source_lines" | wc -l )"
+    # HACK: if we didn't get anything, make sure we output a 1-line interval anyway
+    if [[ $source_lines_count -eq 0 ]]; then
+        echo "Warning: context for ${sym}${offset} appears to contain zero source lines. Context follows." 1>&2
+        echo "$source_lines" 1>&2
+        source_lines_count=1
+    fi
+    context_min="$( echo "$with_file_line_header" | tail -n+2 )"
+    #echo "context_min: $context_min" 1>&2
+    # 3. Filter out non-source lines., and collapse to a single line
+    source="$( echo "$context_min" | egrep -v "$line_regexp" | tr '\n' ' ' )" #"
+    #echo "source: $source" 1>&2
+    # 3a. collapse to a single line
+    source_oneline="$( echo "$source" | tr '\n' ' ' )"
+    #echo "source_oneline: $source_oneline" 1>&2
+    # 4. Get the first ident following the last occurrence of "new" or "sizeof"
+    token="$( echo "$source_oneline" | \
+    egrep '(new|sizeof)([^0-9a-z_]|$)' | \
+    sed -r 's/.*(new|sizeof)([^0-9a-zA-Z_]|$)/\2/' | \
+    sed -r 's/[^0-9a-zA-Z_]*([a-zA-Z0-9_ \*]+).*/\1/' | tr -s '[:blank:]' ' ' )" #"
+    #echo "token: $token" 1>&2
+    # 4a. We want the *return address*, not the site of the call per se. Fix this up.
+    instr_line_regexp='([0-9a-f]+)[[:blank:]]*<([^-\+]+)([-\+](0x[0-9a-f]+))?>.*'
+    next_line="$( tail -c+$(( $bytes_consumed + 1 )) "$tmpfile" 2>/dev/null | sed -rn "/^${instr_line_regexp}/ { s/$instr_line_regexp/\1\t\2\t\4/ ; p; q }" )"
+    read return_addr return_addr_sym return_addr_offset <<<"$next_line"
+    #return_addr_sym="$sym"
+    #return_addr_offset="$offset"
+    echo "return_addr is $return_addr" 1>&2
+    echo "return_addr_sym is $return_addr_sym" 1>&2
+    echo "return_addr_offset is $return_addr_offset" 1>&2
+    if [[ "$return_addr_sym" != "$sym" ]]; then
+        echo "Warning: return address for alloc site ${sym}+${offset} does not appear to be in same function, but at ${return_addr_sym}+${return_addr_offset}." 1>&2
+        # we continue
+    fi
+    # 5. Print the token and the site
+    #echo "Guessed that site <${sym}+${offset}> allocated: ${token}" 1>&2
+    case "$outputstyle" in
+        (tab)
+            echo "${return_addr_sym}"$'\t'"0x${return_addr}"$'\t'"${filename}"$'\t'"${line_number}"$'\t'$(( $line_number + $source_lines_count ))$'\t'"${token:-\$FAILED\$}"$'\t'"${source_oneline}"
+            ;;
+        (punc)
+            echo "<${return_addr_sym}+${return_addr_offset}> @${filename}:${line_number}"$'\t'"${token:-\$FAILED\$}"
+            ;;
+        (*)
+            echo "<${return_addr_sym}+${return_addr_offset}> @${filename}:${line_number}"$'\t'"${token:-\$FAILED\$}"
+            ;;
+    esac
+done <"$allocsites_tmpfile" | \
+   pad_numbers | sort -t$'\t' -k3 -k4
+
+# rm -f "$tmpfile"

@@ -1,0 +1,21 @@
+#!/bin/bash
+
+TEMP=`getopt -q -l alloc-fn -n $(basename $0) -- "$@"`
+eval set -- "$TEMP"
+
+declare -a alloc_fns
+ctr=0
+
+while true; do case "$1" in
+        (--alloc-fn)
+            alloc_fns[$ctr]="$2"
+            ctr=$(( $ctr + 1 ))
+        ;;
+        esac
+        shift || break
+done
+
+
+# load the program with gdb
+
+gdb --args 

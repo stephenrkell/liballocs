@@ -1,0 +1,82 @@
+# This Makefile maintains a repository of allocation site
+# metadata, shadowing libraries and executables in the system,
+# similar to the /usr/lib/debug hierarchy. 
+
+# HACK! for spaces
+nullstring :=
+space := $(nullstring) # end
+
+THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
+
+#ALLOCSITES_BASE ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/allocsites
+ALLOCSITES_BASE ?= /usr/lib/allocsites
+$(warning ALLOCSITES_BASE is $(ALLOCSITES_BASE))
+
+#CALLER_RELATIVE_ALLOCSITES_BASE := $(shell find -follow -samefile "$(ALLOCSITES_BASE)" | head -n1 | sed 's|^./||')
+#$(warning CALLER_RELATIVE_ALLOCSITES_BASE is $(CALLER_RELATIVE_ALLOCSITES_BASE))
+
+OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
+UNIQTYPES ?= $(dir $(THIS_MAKEFILE))/uniqtypes
+DUMPTYPES ?= $(dir $(THIS_MAKEFILE))/dumptypes
+DUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/allocsites
+LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
+MERGE_ALLOCS ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh
+GATHER_OBJALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-objallocs.sh
+GATHER_SRCALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-srcallocs.sh
+
+# By default, remake everything we have already made,
+# but don't make new .allocsites files.
+default: $(shell find $(ALLOCSITES_BASE) -type f -name '*.allocsites*' ! -name 'Makefile.allocsites' )
+
+# Remaking a .allocsites file from the analogous file 
+# in the system.
+prefix_exactly_one_slash = $(shell echo "$1" | sed 's|^/*\(.*\)|/\1|' )
+$(ALLOCSITES_BASE)/%.objallocs: $(call prefix_exactly_one_slash,%)
+	mkdir -p $$(dirname "$@")
+	$(OBJDUMPALLOCS) "$<" | sed "s|.*|$<\t&|" > "$@" || (rm -f "$@"; false)
+
+# We also know how to build a lib%-uniqtypes.so for each executable.
+# Which allocsites files does an executable's uniqtypes depend on?
+# depend = $(shell $(OBJDEPS) "$1" 2>/dev/null | cut -f1 | while read line; do readlink -f "$$line"; done )
+
+# # Note that $1 is always '/'-prefixed here, so we don't insert another L-- here
+# # allocsites_from_obj = $(patsubst %,$(ALLOCSITES_BASE)%.allocsites,$1)
+# # all_allocsites_for_obj = $(foreach f,$1 $(call depend,$1),$(call allocsites_from_obj,$(f)))
+
+# don't build /usr/lib/allocsites/usr/lib/allocsites/anything... 
+# and it's a bug if we try
+$(ALLOCSITES_BASE)$(ALLOCSITES_BASE)/%:
+	false
+
+$(ALLOCSITES_BASE)/%.srcallocs: $(ALLOCSITES_BASE)/%.objallocs
+	mkdir -p $$(dirname "$@")
+	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
+	test -e "$@"
+
+$(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%.srcallocs
+	mkdir -p $$(dirname "$@")
+	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
+	test -e "$@"
+
+$(ALLOCSITES_BASE)/%-types.c: /%  # pipe err through zip, so need to swap stdout and stderr
+	( ( $(DUMPTYPES) "$<"  3>&2 2>&1 1>&3 ) 2>"$@" || ( rm -f "$@"; false ) ) | gzip >"$@".log.gz 
+	test -e "$@"
+
+$(ALLOCSITES_BASE)/%-allocsites.c: /$(ALLOCSITES_BASE)/%.allocs
+	$(DUMPALLOCS) < "$<" > "$@" || (rm -f "$@"; false)
+
+# no need for a .o rule -- we just use the builtin one
+
+# Generate the .so with the necessary base-type aliases
+# NOTE: aliases, including both typedefs and base types, 
+# are now handled by dumptypes... so we no longer add them here
+$(ALLOCSITES_BASE)/%-types.so: $(ALLOCSITES_BASE)/%-types.o
+	# use ld --defsym to define alias symbols for any C base types
+	# FIXME: need a prefix to indicate "built-ins for a given C impl", cf. Java or non-GNU C....
+	$(CC) -shared \
+	-o "$@" "$<"
+	#`nm -fposix "$<" | $(dir $(THIS_MAKEFILE))/alias-linker-opts-for-base-types.sh)` "$<"
+
+# Generate the .so with the necessary base-type aliases
+$(ALLOCSITES_BASE)/%-allocsites.so: $(ALLOCSITES_BASE)/%-allocsites.c
+	$(CC) -shared -o "$@" "$<"

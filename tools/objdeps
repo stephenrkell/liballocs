@@ -1,0 +1,13 @@
+#!/bin/bash
+
+INPUTFILE="$1"
+
+test -n "$INPUTFILE" && test -x "$INPUTFILE" || ( \
+	echo "You must specify an executable file as input." 1>&2; false) || exit 1
+
+( file "$INPUTFILE" | grep 'ELF.*exec.*dynamic' >/dev/null ) || \
+	( echo "Not a dynamically linked executable." 1>&2; exit 0)
+
+source "$(dirname $0)"/ldd-funcs.sh
+
+obj_load_addrs "$1" 

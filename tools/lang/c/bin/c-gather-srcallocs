@@ -1,0 +1,18 @@
+#!/bin/bash
+
+. $(dirname $0)/../lib/symname-funcs.sh
+
+cu_sourcepath="$1"
+obj="$2"
+cu_fname="$3"
+cu_compdir="$4"
+
+test -n "$cu_compdir" || (echo "args: <sourcepath> <obj> <cu_fname> <cu_compdir>" 1>&2; false) || exit 1
+
+cu_allocspath="$( echo "$cu_sourcepath" | grep '\.cil\.c$' | sed 's/\.cil\.c/.i.allocs/' )"
+if [[ ! -r "$cu_allocspath" ]]; then
+    echo "Warning: missing expected allocs file ($cu_allocspath) for source file: $cu_sourcepath" 1>&2
+else
+    # we need to sed its symnames
+    cat "$cu_allocspath" | translate_symnames "$obj" "$cu_fname" "$cu_compdir"
+fi
