@@ -135,7 +135,7 @@ int main(int argc, char **argv)
 
 	// FIXME: escape single quotes
 	FILE *in = popen((string("nm -fposix -u '") + argv[1]
-	 + "' | sed -r 's/[[:blank:]]*U[[:blank:]]*$//' | grep __uniqtype").c_str(), "r");
+	 + "' | sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype").c_str(), "r");
 	assert(in);
 	
 	int ret;

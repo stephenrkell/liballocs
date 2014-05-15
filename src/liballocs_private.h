@@ -82,6 +82,21 @@ extern __thread void *__current_allocsite __attribute__((weak)); // defined by h
 extern void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 #endif
 
+// our main API!
+_Bool 
+//(__attribute__((always_inline,gnu_inline)) 
+get_alloc_info
+	(const void *obj, 
+	const void *test_uniqtype, 
+	const char **out_reason,
+	const void **out_reason_ptr,
+	memory_kind *out_memory_kind,
+	const void **out_object_start,
+	unsigned *out_block_element_count,
+	struct uniqtype **out_alloc_uniqtype, 
+	const void **out_alloc_site,
+	signed *out_target_offset_within_uniqtype);
+
 struct uniqtype_cache_word 
 {
 	unsigned long addr:47;

@@ -76,24 +76,52 @@ let maybeDecayArrayTypesig maybeTs = match maybeTs with
     Some(ts) -> Some(decayArrayInTypesig ts)
   | None -> None
 
+type sz = 
+    Undet
+  | Existing of typsig
+  | Synthetic of typsig list
+
 let rec getSizeExpr (ex: exp) (env : (int * typsig) list) = 
   output_string Pervasives.stderr ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ")\n");  flush Pervasives.stderr; 
   match ex with
    |  BinOp(Mult, e1, e2, t) -> begin
-         match (getSizeExpr e1 env) with
-           | Some(s1) -> begin match (getSizeExpr e2 env) with
-                 None -> Some(s1)
-              |  Some(s2) -> 
+         let sz1 = getSizeExpr e1 env in
+         let sz2 = getSizeExpr e2 env in
+         match (sz1, sz2) with
+             (Undet, Undet) -> Undet
+           | (Undet, _) -> sz2
+           | (_, Undet) -> sz1
+           | (_, _)     ->  
                     (* Multiplying two sizeofnesses together is weird. Just 
                        go with the first one. *)
-                    Some(s1)
-             end
-           | None -> begin match (getSizeExpr e2 env) with
-              | Some(s2) -> Some(s2)
-              | None -> None
-              end
+                    sz1
          end
    |  BinOp(PlusA, e1, e2, t) -> begin
+         let sz1 = getSizeExpr e1 env in
+         let sz2 = getSizeExpr e2 env in
+         match (sz1, sz2) with
+             (Undet, Undet) -> Undet
+           | (Undet, _) -> sz2 (* a bit weird, pre-padding but okay *) 
+           | (_, Undet) -> sz1 (* character padding *)
+           | (Existing(s1), Existing(s2)) ->
+                 (* If we're adding Xs to Xs, OR array of Xs to some more sizeof X, the whole
+                    expr has sizeofness X *)
+                 let decayedS1 = decayArrayInTypesig s1 in 
+                 let decayedS2 = decayArrayInTypesig s2 in 
+                 if decayedS1 = decayedS2 then Existing(decayedS1)
+                 else 
+                    (* GAH. Arrays! we often do 
+                           
+                           sizeof S + n * sizeof T
+                           
+                       in which case our last element is a variable-length thing.
+                       Is it enough to interpret 
+                    *)
+                    Synthetic([sz1; sz2])
+           | (Synthetic(l1), Existing(s2)) -> Synthetic(l1 @ [s2])
+           | (Existing(s1), Synthetic(l2)) -> Synthetic(s1 :: l2)
+           | (Synthetic(l1), Synthetic(l2)) -> Synthetic(l1 @ l2)
+                 
          match (getSizeExpr e1 env) with
            | Some(s1) -> begin match (getSizeExpr e2 env) with
                  None -> (* okay, adding character padding to a single size *)
@@ -174,12 +202,12 @@ let rec warnIfLikelyAllocFn (i: instr) (maybeFunName: string option) (arglist: e
        (* Some(f.vname, *)
           if try_match funName "calloc" && (length arglist) > 1
              then (* getSizeExpr (nth arglist 1) *)
-             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
+             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_{SUB,}ALLOC_FNS\n")
           else if try_match funName "realloc" && (length arglist) > 1
              then (* getSizeExpr (nth arglist 1) *)
-             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
+             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_{SUB,}ALLOC_FNS\n")
              else (* getSizeExpr (nth arglist 0) *)
-                output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
+                output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBCRUNCH_{SUB,}ALLOC_FNS\n")
       else () (*  ) 
       else (* takes no arguments, so we output a "(none)" line. *)
          Some(f.vname, None) (* We eliminate these lines in merge-allocs, rather than
@@ -251,15 +279,15 @@ let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env c
 
 let userAllocFunctions () : string list = 
   let wrappers = try begin 
-    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBALLOCS_ALLOC_FNS"))
+    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOC_FNS"))
   end with Not_found -> []
   in
   let suballocs = try begin
-    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBALLOCS_SUBALLOC_FNS")) 
+    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_SUBALLOC_FNS")) 
   end with Not_found -> []
   in
   let sizeOnlyAllocs = try begin
-    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBALLOCS_ALLOCSZ_FNS")) 
+    (Str.split (regexp "[ \t]+") (Sys.getenv "LIBCRUNCH_ALLOCSZ_FNS")) 
   end with Not_found -> []
   in
   wrappers @ suballocs @ sizeOnlyAllocs
