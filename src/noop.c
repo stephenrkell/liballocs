@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-static const int __liballocs_is_initialized = 1;
+const int __liballocs_is_initialized = 1;
 
 int __liballocs_global_init(void)
 {

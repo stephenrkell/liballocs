@@ -92,12 +92,13 @@ def allWrappedSymNames():
     return syms
 
 def fixupDotO(filename):
+    # NOT NECESSARY for allocscc!
     # also link the file with the uniqtypes it references
-    cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
-    sys.stderr.write("Calling " + " ".join(cmd) + "\n")
-    ret = subprocess.call(cmd)
-    if ret != 0:
-        return ret  # give up now
+    # cmd = [os.path.dirname(sys.argv[0]) + "/./link-used-types", filename]
+    # sys.stderr.write("Calling " + " ".join(cmd) + "\n")
+    # ret = subprocess.call(cmd)
+    # if ret != 0:
+    #    return ret  # give up now
     # do we need to unbind? 
     # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
     # This is needed e.g. for SPEC benchmark bzip2
@@ -314,7 +315,7 @@ def main():
                     # one containing the "real" allocator function. Call a helper
                     # to do this.
                     size_find_command = [os.path.dirname(sys.argv[0]) + \
-                        "/../../../allocsites/find-allocated-type-size", fnName] + [ \
+                        "/../../../../tools/find-allocated-type-size", fnName] + [ \
                         objfile for objfile in passedThroughArgs if objfile.endswith(".o")]
                     sys.stderr.write("Calling " + " ".join(size_find_command) + "\n")
                     outp = subprocess.Popen(size_find_command, stdout=subprocess.PIPE).communicate()[0]
@@ -369,7 +370,7 @@ def main():
             # most of the user's options, 
             # then compile with a more tightly controlled set
             stubs_pp_cmd = ["cc", "-E", "-o", stubs_pp, \
-                "-I" + os.path.dirname(sys.argv[0]) + "/../../../allocsites"] \
+                "-I" + os.path.dirname(sys.argv[0]) + "/../../../../tools"] \
                 + [arg for arg in passedThroughArgs if arg.startswith("-D")] \
                 + [stubsfile.name]
             sys.stderr.write("Preprocessing stubs file %s to %s with command %s\n" \
@@ -389,7 +390,7 @@ def main():
                     % (stubs_pp, ret_stubs_sed))
                 exit(1)
             stubs_cc_cmd = ["cc", "-g", "-c", "-o", stubs_bin, \
-                "-I" + os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
+                "-I" + os.path.dirname(sys.argv[0]) + "/../../../../tools", \
                 stubs_pp]
             sys.stderr.write("Compiling stubs file %s to %s with command %s\n" \
                 % (stubs_pp, stubs_bin, " ".join(stubs_cc_cmd)))
@@ -401,8 +402,8 @@ def main():
            
             # HACK: fix this once I sort out linking
             linkArgs += [stubs_bin]
-            linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
-            linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
+            linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../../lib"]
+            linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../../lib"]
             if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                 linkArgs += ["-lallocs"]
             else: # FIXME: weak linkage one day
@@ -411,12 +412,12 @@ def main():
             # We're building a shared library, so simply add liballocs_noop.o; 
             # only link directly if we're disabling the preload approach
             if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
-                linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../lib"]
+                linkArgs += ["-L" + os.path.dirname(sys.argv[0]) + "/../../../../lib"]
+                linkArgs += ["-Wl,-R" + os.path.dirname(sys.argv[0]) + "/../../../../lib"]
                 if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                     linkArgs += ["-lallocs"]
             else: # FIXME: weak linkage one day....
-                linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../lib/liballocs_noop.o"]
+                linkArgs += [os.path.dirname(sys.argv[0]) + "/../../../../lib/liballocs_noop.o"]
             # note: we leave the shared library with 
             # dangling dependencies on __wrap_
             # and unused __real_
@@ -467,7 +468,7 @@ def main():
             baseDir = "/usr/lib/allocsites"
         targetNames = [baseDir + os.path.realpath(outputFile) + ext for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
 
-        ret2 = subprocess.call(["make", "-C", os.path.dirname(sys.argv[0]) + "/../../../allocsites", \
+        ret2 = subprocess.call(["make", "-C", os.path.dirname(sys.argv[0]) + "/../../../../tools", \
             "-f", "Makefile.allocsites"] +  targetNames)
         return ret2
 

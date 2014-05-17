@@ -42,3 +42,16 @@ tools/find-allocated-type-size
 test/simple-multi-alloc/simple-multi-alloc
 src/libdumpsmaps.so
 tests/heap-index/multi-level
+lib/liballocs.a
+lib/liballocs_preload.a
+src/liballocs.a
+src/liballocs_preload.a
+tests/section-group/lib1.so
+tests/section-group/lib2.so
+tests/section-group/section-group
+tests/simple-multi-alloc/simple-multi-alloc
+tests/sloppy-dumptypes/sloppy-dumptypes
+tools/allocsites
+tools/dumptypes
+tools/liballocstool.a
+tools/usedtypes

@@ -7,7 +7,7 @@ LDLIBS += -lallocstool -lcxxgen -ldwarfpp -ldwarf -lboost_regex -lboost_filesyst
 
 CPP_SRC := $(wildcard *.cpp)
 
-default: liballocstool.a dumptypes allocsites usedtypes
+default: liballocstool.a dumptypes allocsites usedtypes find-allocated-type-size
 
 .PHONY: clean
 clean:

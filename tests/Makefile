@@ -11,7 +11,7 @@ ALLOCSITES_BASE ?= /usr/lib/allocsites
 export UNIQTYPES_BASE
 export ALLOCSITES_BASE
 
-export CC := $(realpath $(dir $(THIS_MAKEFILE))/../frontend/c/bin/allocscc)
+export CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
 export CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
 
 ifeq ($(CC),)
@@ -69,18 +69,12 @@ checkrun-%:
 		(tail -n20 $$err; false)
 
 # Some cases are special and require only an exit status of zero
-checkrun-hello: 
-	$(MAKE) cleanrun-hello >/dev/null 2>&1
-checkrun-hello-errno: 
-	$(MAKE) cleanrun-hello-errno >/dev/null 2>&1
-checkrun-hello-qualified-char:
-	$(MAKE) cleanrun-hello-qualified-char >/dev/null 2>&1
-checkrun-random:
-	$(MAKE) cleanrun-random >/dev/null 2>&1
 checkrun-sloppy-dumptypes:
 	$(MAKE) cleanrun-sloppy-dumptypes >/dev/null 2>&1
 checkrun-section-group:
 	$(MAKE) cleanrun-section-group >/dev/null 2>&1
+checkrun-simple-multi-alloc:
+	$(MAKE) cleanrun-simple-multi-alloc >/dev/null 2>&1
 
 _onlyrun-%:
 	LD_PRELOAD=$(PRELOAD) ./$*

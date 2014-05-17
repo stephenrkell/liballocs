@@ -2,7 +2,7 @@ THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 SRCROOT := $(dir $(THIS_MAKEFILE))/..
 MALLOC_HOOKS ?= ../../libmallochooks.hg
 
-CFLAGS += -std=gnu99 -g -O3 -fPIC -DNDEBUG -I../include
+CFLAGS += -std=gnu99 -g -O4 -flto -fPIC -DNDEBUG -I../include
 HEAP_INDEX_HOOKS := heap_index_fast_hooks
 #HEAP_INDEX_HOOKS := heap_index_hooks
 
@@ -45,11 +45,11 @@ $(CC_DEPS): .%.d : %.cc
 # BUT since they're generated per-build from the LIBALLOCS_ALLOC_FNS content, this doesn't work --
 # stick with stubs!
 liballocs_preload.so: liballocs_preload.a
-	$(CC) $(CFLAGS) -shared -o "$@" $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS) -Wl,--whole-archive -Wl,-Bstatic -L. "$<" -Wl,--no-whole-archive -Wl,-Bdynamic 
+	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive -Wl,-Bstatic -L. "$<" -Wl,--no-whole-archive -Wl,-Bdynamic $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
 liballocs_preload.a: liballocs.o preload.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ) $(HEAP_INDEX_HOOKS).o
 	ar r "$@" $+ 
-	
+
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
 
@@ -98,4 +98,4 @@ liballocs_noop.o: noop.o
 # have to preload the hooks yourself if you want them to hook!
 
 clean: 
-	rm -f *.o *.so .*.d
+	rm -f *.o *.so .*.d *.a

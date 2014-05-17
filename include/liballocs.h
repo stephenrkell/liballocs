@@ -42,7 +42,7 @@ static inline void (__attribute__((always_inline,gnu_inline)) __liballocs_ensure
 	{
 		/* This means that we're not linked with libcrunch. 
 		 * There's nothing we can do! */
-		__liballocs_private_assert(0, "liballocs init", 
+		__liballocs_private_assert(0, "liballocs presence", 
 			__FILE__, __LINE__, __func__);
 	}
 	if (__builtin_expect(!__liballocs_is_initialized, 0))

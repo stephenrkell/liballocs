@@ -195,7 +195,7 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 }
 
 // HACK: call out to libcrunch if it's linked in
-extern void (*__libcrunch_scan_lazy_typenames)(void*) __attribute__((weak));
+extern void  __attribute__((weak)) __libcrunch_scan_lazy_typenames(void*);
 
 void *dlopen(const char *filename, int flag)
 {

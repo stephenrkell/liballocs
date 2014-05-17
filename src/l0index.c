@@ -675,14 +675,13 @@ prefix_tree_bounds(const void *ptr, const void **out_begin, const void **out_end
 	}
 }
 
-
 void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 {
 	/* We get called from heap_index when the malloc'd address is a multiple of the 
 	 * page size. Check whether it fills (more-or-less) the alloc'd region, and if so,  
 	 * install its trailer into the maps. We will fish it out in get_alloc_info. */
 	
-	__liballocs_check_init();
+	__liballocs_ensure_init();
 	
 	assert(page_size);
 

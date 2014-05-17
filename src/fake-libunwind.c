@@ -1,5 +1,5 @@
 #include <assert.h>
-#include "pmirror/fake-libunwind.h"
+#include "fake-libunwind.h"
 
 long local_addr_space;
 unw_addr_space_t unw_local_addr_space = &local_addr_space;
@@ -30,7 +30,7 @@ int unw_init_local(unw_cursor_t *cursor, unw_context_t *context)
 	return 0;
 }
 
-int unw_getcontext(unw_context_t *ucp)
+int __attribute__((noinline)) unw_getcontext(unw_context_t *ucp)
 {
 	/* The initial state of the cursor should be such that 
 	 * if the caller does 

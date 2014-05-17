@@ -19,7 +19,7 @@ lib: src
 clean:
 	$(MAKE) -C src clean
 	$(MAKE) -C tools clean
-	rm -f lib/*.so lib/*.o lib/.??*
+	rm -f lib/*.so lib/*.o lib/.??* lib/*.a
 	$(MAKE) -C tests clean
 
 .PHONY: tests
