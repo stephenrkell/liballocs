@@ -1,9 +1,17 @@
 #ifndef LIBALLOCS_H_
 #define LIBALLOCS_H_
 
+#ifdef __cplusplus
+extern "C" {
+typedef bool _Bool;
+#endif
+
 #include "addrmap.h"
 
 extern void warnx(const char *fmt, ...); // avoid repeating proto
+#ifndef NDEBUG
+#include <assert.h>
+#endif
 
 /* Copied from dumptypes.cpp */
 struct uniqtype_cache_word 
@@ -12,6 +20,11 @@ struct uniqtype_cache_word
 	unsigned flag:1;
 	unsigned bits:16;
 };
+
+struct contained {
+	signed offset;
+	struct uniqtype *ptr;
+} contained;
 
 struct uniqtype
 {
@@ -22,10 +35,7 @@ struct uniqtype
 	unsigned nmemb:12;         // 12 bits -- number of `contained's (always 1 if array)
 	unsigned is_array:1;       // 1 bit
 	unsigned array_len:19;     // 19 bits; 0 means undetermined length
-	struct contained {         // there's always at least one of these, even if nmemb == 0
-		signed offset;
-		struct uniqtype *ptr;
-	} contained[];
+	struct contained contained[]; // there's always at least one of these, even if nmemb == 0
 };
 #define UNIQTYPE_IS_SUBPROGRAM(u) \
 (((u) != (struct uniqtype *) &__uniqtype__void) && \
@@ -47,9 +57,10 @@ void *__liballocs_my_typeobj(void) __attribute__((weak));
 /* Uniqtypes for signed_char and unsigned_char -- we declare them as int 
  * to avoid the need to define struct uniqtype in this header file. */
 
-extern int __uniqtype__signed_char __attribute__((weak));
-extern int __uniqtype__unsigned_char __attribute__((weak));
-extern int __uniqtype__void __attribute__((weak));
+extern struct uniqtype __uniqtype__signed_char __attribute__((weak));
+extern struct uniqtype __uniqtype__unsigned_char __attribute__((weak));
+extern struct uniqtype __uniqtype__void __attribute__((weak));
+extern struct uniqtype __uniqtype__int __attribute__((weak));
 
 /* Iterate over all uniqtypes in a given shared object. */
 int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg);
@@ -177,5 +188,9 @@ static inline _Bool __liballocs_first_subobject_spanning(
 		}
 	}
 }
+
+#ifdef __cplusplus
+} // end extern "C"
+#endif
 
 #endif
