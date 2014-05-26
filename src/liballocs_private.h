@@ -10,7 +10,6 @@
 #include "heap_index.h"
 #include "allocsmt.h"
 #include <stdint.h>
-#include "addrmap.h"
 
 #include "liballocs.h"
 
@@ -82,47 +81,6 @@ extern __thread void *__current_allocsite __attribute__((weak)); // defined by h
 extern void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 #endif
 
-// our main API!
-_Bool 
-//(__attribute__((always_inline,gnu_inline)) 
-get_alloc_info
-	(const void *obj, 
-	const void *test_uniqtype, 
-	const char **out_reason,
-	const void **out_reason_ptr,
-	memory_kind *out_memory_kind,
-	const void **out_object_start,
-	unsigned *out_block_element_count,
-	struct uniqtype **out_alloc_uniqtype, 
-	const void **out_alloc_site,
-	signed *out_target_offset_within_uniqtype);
-
-struct uniqtype_cache_word 
-{
-	unsigned long addr:47;
-	unsigned flag:1;
-	unsigned bits:16;
-};
-
-struct uniqtype
-{
-	struct uniqtype_cache_word cache_word;
-	const char *name;
-	unsigned short pos_maxoff; // 16 bits
-	unsigned short neg_maxoff; // 16 bits
-	unsigned nmemb:12;         // 12 bits -- number of `contained's (always 1 if array)
-	unsigned is_array:1;       // 1 bit
-	unsigned array_len:19;     // 19 bits; 0 means undetermined length
-	struct contained {         // there's always at least one of these, even if nmemb == 0
-		signed offset;
-		struct uniqtype *ptr;
-	} contained[];
-};
-#define UNIQTYPE_IS_SUBPROGRAM(u) \
-(((u) != (struct uniqtype *) &__uniqtype__void) && \
-((u)->pos_maxoff == 0) && \
-((u)->neg_maxoff == 0) && !(u)->is_array)
-#define MAGIC_LENGTH_POINTER ((1u << 19) - 1u)
 static inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite)
 {
 	assert(__liballocs_allocsmt != NULL);
