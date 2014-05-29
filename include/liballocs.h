@@ -24,7 +24,7 @@ struct uniqtype_cache_word
 struct contained {
 	signed offset;
 	struct uniqtype *ptr;
-} contained;
+};
 
 struct uniqtype
 {
