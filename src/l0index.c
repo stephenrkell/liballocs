@@ -15,6 +15,22 @@ struct mapping
 	struct prefix_tree_node n;
 };
 
+#ifndef NO_PTHREADS
+#include <pthread.h>
+#define BIG_LOCK \
+	lock_ret = pthread_mutex_lock(&mutex); \
+	assert(lock_ret == 0);
+#define BIG_UNLOCK \
+	lock_ret = pthread_mutex_unlock(&mutex); \
+	assert(lock_ret == 0);
+static pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+
+#else
+#define BIG_LOCK
+#define BIG_UNLOCK
+#endif
+
+
 static struct mapping *get_mapping_from_node(struct prefix_tree_node *n)
 {
 	/* HACK: FIXME: please get rid of this stupid node-based interface. */
@@ -373,6 +389,9 @@ struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, co
 
 void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *data_ptr)
 {
+	int lock_ret;
+	BIG_LOCK
+			
 	if (!l0index) init();
 
 	/* What's the biggest mapping you can think of? 
@@ -382,11 +401,13 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 	if (__builtin_expect(s >= BIGGEST_MAPPING, 0))
 	{
 		debug_printf(3, "Warning: not indexing huge mapping (size %lu) at %p\n", (unsigned long) s, base);
+		BIG_UNLOCK
 		return;
 	}
 	if (__builtin_expect((uintptr_t) base + s > STACK_BEGIN, 0))
 	{
 		debug_printf(3, "Warning: not indexing high-in-VAS mapping (size %lu) at %p\n", (unsigned long) s, base);
+		BIG_UNLOCK
 		return;
 	}
 	
@@ -414,17 +435,26 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 		// skip over any indexed bits so we're pointing at the next unindexed bit
 		while (l0index[current_pagenum] && ++current_pagenum < end_pagenum);
 	}
+	
+	BIG_UNLOCK
 }
 
 int 
 prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end)
 {
+	int lock_ret;
+	BIG_LOCK
 	struct mapping *m = get_mapping_from_node(n);
-	return m->begin == begin && m->end == end;
+	_Bool ret = m->begin == begin && m->end == end;
+	BIG_UNLOCK
+	return ret;
 }
 
 struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *p_arg)
 {
+	int lock_ret;
+	BIG_LOCK
+	
 	if (!l0index) init();
 
 	assert((uintptr_t) base % PAGE_SIZE == 0);
@@ -437,11 +467,13 @@ struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kin
 	if (s >= BIGGEST_MAPPING)
 	{
 		debug_printf(3, "Warning: not indexing huge mapping (size %lu) at %p\n", (unsigned long) s, base);
+		BIG_UNLOCK
 		return NULL;
 	}
 	if (__builtin_expect((uintptr_t) base + s > STACK_BEGIN, 0))
 	{
 		debug_printf(3, "Warning: not indexing high-in-VAS mapping (size %lu) at %p\n", (unsigned long) s, base);
+		BIG_UNLOCK
 		return NULL;
 	}
 	
@@ -450,7 +482,10 @@ struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kin
 
 	struct mapping *m = create_or_extend_mapping(base, s, kind, p_arg);
 	SANITY_CHECK_MAPPING(m);
-	return &m->n;
+	struct prefix_tree_node *ret = &m->n;
+
+	BIG_UNLOCK
+	return ret;
 }
 
 static struct mapping *split_mapping(struct mapping *m, void *split_addr)
@@ -484,6 +519,9 @@ static struct mapping *split_mapping(struct mapping *m, void *split_addr)
 
 void prefix_tree_del_node(struct prefix_tree_node *n)
 {
+	int lock_ret;
+	BIG_LOCK
+			
 	/* HACK: FIXME: please get rid of this stupid node-based interface. */
 	struct mapping *m = get_mapping_from_node(n);
 	
@@ -491,10 +529,15 @@ void prefix_tree_del_node(struct prefix_tree_node *n)
 	assert(l0index[pagenum(m->begin)] == m - &mappings[0]);
 	
 	prefix_tree_del(m->begin, (char*) m->end - (char*) m->begin);
+	
+	BIG_UNLOCK
 }
 
 void prefix_tree_del(void *base, size_t s)
 {
+	int lock_ret;
+	BIG_LOCK
+			
 	if (!l0index) init();
 	
 	assert(s % PAGE_SIZE == 0);
@@ -503,6 +546,7 @@ void prefix_tree_del(void *base, size_t s)
 	if (s >= BIGGEST_MAPPING)
 	{
 		debug_printf(3, "Warning: not unindexing huge mapping (size %lu) at %p\n", (unsigned long) s, base);
+		BIG_UNLOCK
 		return;
 	}
 	
@@ -519,7 +563,23 @@ void prefix_tree_del(void *base, size_t s)
 
 	do
 	{
+		// if we see some zero mapping nums, skip forward
+		unsigned long initial_cur_pagenum = cur_pagenum;
+		if (__builtin_expect(cur_pagenum < end_pagenum && l0index[cur_pagenum] == 0, 0))
+		{
+			while (cur_pagenum < end_pagenum)
+			{
+				if (l0index[cur_pagenum]) break;
+				++cur_pagenum;
+			}
+			if (cur_pagenum == end_pagenum) break;
+			debug_printf(3, "Warning: l0-unindexing a partially unmapped region %p-%p\n",
+				addr_of_pagenum(initial_cur_pagenum), addr_of_pagenum(cur_pagenum));
+		}
 		mapping_num = l0index[cur_pagenum];
+		/* If mapping num is 0 when we get here, it means there's no mapping here. 
+		 * This might happen because users are allowed to call munmap() on unmapped
+		 * regions. */
 		assert(mapping_num != 0);
 		struct mapping *m = &mappings[mapping_num];
 		SANITY_CHECK_MAPPING(m);
@@ -591,20 +651,10 @@ void prefix_tree_del(void *base, size_t s)
 		assert(next_addr);
 		cur_pagenum = pagenum(next_addr);
 		
-		// FIXME: if we see some zero mapping nums, skip forward
-		if (__builtin_expect(cur_pagenum < end_pagenum && l0index[cur_pagenum] == 0, 0))
-		{
-			while (cur_pagenum < end_pagenum)
-			{
-				if (l0index[cur_pagenum]) break;
-				++cur_pagenum;
-			}
-			debug_printf(3, "Warning: l0-unindexing a partially unmapped region %p-%p\n",
-				next_addr, addr_of_pagenum(cur_pagenum));
-		}
 	} while (cur_pagenum < end_pagenum);
 	
 	assert(is_unindexed(base, (char*) base + s));
+	BIG_UNLOCK
 }
 
 enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
@@ -618,6 +668,9 @@ enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
 
 void prefix_tree_print_all_to_stderr(void)
 {
+	int lock_ret;
+	BIG_LOCK
+			
 	if (!l0index) init();
 	for (struct mapping *m = &mappings[1]; m < &mappings[NMAPPINGS]; ++m)
 	{
@@ -626,21 +679,33 @@ void prefix_tree_print_all_to_stderr(void)
 				m->n.info.what == DATA_PTR ? "(data ptr) " : "(insert + bits) ", 
 				m->n.info.what == DATA_PTR ? m->n.info.un.data_ptr : (void*)(uintptr_t) m->n.info.un.ins_and_bits.ins.alloc_site);
 	}
+	
+	BIG_UNLOCK
 }
 struct prefix_tree_node *
 prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr)
 {
+	int lock_ret;
+	BIG_LOCK
+	struct prefix_tree_node *ret;
+	
 	if (!l0index) init();
 	if (out_prev_ptr) *out_prev_ptr = NULL;
 	mapping_num_t mapping_num = l0index[pagenum(base)];
-	if (mapping_num == 0) return NULL;
-	else return &mappings[mapping_num].n;
+	if (mapping_num == 0) { ret = NULL; }
+	else { ret = &mappings[mapping_num].n; }
+	
+	BIG_UNLOCK
+	return ret;
 }
 
 size_t
 prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
 		size_t out_size, void *begin, void *end)
 {
+	int lock_ret;
+	BIG_LOCK
+	
 	struct prefix_tree_node **out = out_begin;
 	uintptr_t end_pagenum = pagenum(end);
 	uintptr_t begin_pagenum = pagenum(begin);
@@ -658,21 +723,30 @@ prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin,
 		// advance begin_pagenum to one past the end of this mapping
 		begin_pagenum = pagenum(mappings[num].end);
 	}
+	
+	BIG_UNLOCK
 	return out - out_begin;
 }
 
 struct prefix_tree_node *
 prefix_tree_bounds(const void *ptr, const void **out_begin, const void **out_end)
 {
+	int lock_ret;
+	BIG_LOCK
+	
+	struct prefix_tree_node *ret;
 	if (!l0index) init();
 	mapping_num_t mapping_num = l0index[pagenum(ptr)];
-	if (mapping_num == 0) return NULL;
+	if (mapping_num == 0) { ret = NULL; }
 	else 
 	{
 		if (out_begin) *out_begin = mappings[mapping_num].begin;
 		if (out_end) *out_end = mappings[mapping_num].end;
-		return &mappings[mapping_num].n;
+		ret = &mappings[mapping_num].n;
 	}
+	
+	BIG_UNLOCK
+	return ret;
 }
 
 void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
@@ -680,6 +754,8 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 	/* We get called from heap_index when the malloc'd address is a multiple of the 
 	 * page size. Check whether it fills (more-or-less) the alloc'd region, and if so,  
 	 * install its trailer into the maps. We will fish it out in get_alloc_info. */
+	int lock_ret;
+	BIG_LOCK
 	
 	__liballocs_ensure_init();
 	
@@ -800,6 +876,7 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 				assert(new_m == m);
 			}
 
+			BIG_UNLOCK
 			return &m->n.info.un.ins_and_bits.ins;
 		}
 		else
@@ -816,6 +893,7 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 			"on page boundary\n", ptr, modified_size);
 	}
 
+	BIG_UNLOCK
 	return NULL;
 }
 
@@ -827,6 +905,9 @@ static unsigned unindex_l0_one_mapping(struct prefix_tree_node *n, const void *l
 
 unsigned __unindex_l0(const void *mem)
 {
+	int lock_ret;
+	BIG_LOCK
+	
 	const void *lower;
 	const void *upper;
 	struct prefix_tree_node *n = prefix_tree_bounds(mem, &lower, &upper);
@@ -848,11 +929,15 @@ unsigned __unindex_l0(const void *mem)
 		}
 	} while (total_size_unindexed < total_size_to_unindex);
 	
+	BIG_UNLOCK
 	return total_size_unindexed;
 }
 
 struct insert *__lookup_l0(const void *mem, void **out_object_start)
 {
+	int lock_ret;
+	BIG_LOCK
+	
 	struct prefix_tree_node *n = prefix_tree_deepest_match_from_root((void*) mem, NULL);
 	if (n && n->info.what)
 	{
@@ -870,7 +955,12 @@ struct insert *__lookup_l0(const void *mem, void **out_object_start)
 		assert(n);
 		
 		*out_object_start = (char*) lower + n->info.un.ins_and_bits.obj_offset;
+		BIG_UNLOCK
 		return &n->info.un.ins_and_bits.ins;
 	}
-	else return NULL;
+	else 
+	{
+		BIG_UNLOCK
+		return NULL;
+	}
 }
