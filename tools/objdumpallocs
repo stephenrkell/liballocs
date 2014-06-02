@@ -9,12 +9,6 @@
 # HACK 1: to make this work for llvm, we just use gold to generate
 # a native file with DWARF info, 
 
-# HACK 2: to handle synonymy, 
-# for each allocation site's output line,
-# we append a list of the synonyms. (FIXME: not impl'd yet)
-
-# HACK 3: we really ought to deal with qualifiers like const. FIXME.
-
 case $(basename "$0") in
     (*dumpallocs)
         outputstyle="tab"
