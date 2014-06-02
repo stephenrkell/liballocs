@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <errno.h>
 #include <assert.h>
+#include <pthread.h>
 #ifdef MALLOC_USABLE_SIZE_HACK
 #include <dlfcn.h>
 extern "C" {
@@ -43,6 +44,21 @@ size_t malloc_usable_size(void *ptr);
 #include MALLOC_HOOKS_INCLUDE
 
 #include "heap_index.h"
+
+#ifndef NO_PTHREADS
+#define BIG_LOCK \
+	lock_ret = pthread_mutex_lock(&mutex); \
+	assert(lock_ret == 0);
+#define BIG_UNLOCK \
+	lock_ret = pthread_mutex_unlock(&mutex); \
+	assert(lock_ret == 0);
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+#else
+#define BIG_LOCK
+#define BIG_UNLOCK
+#endif
+
 
 /* For now, inserts increase memory usage.  
  * Ideally, we want to make headers/trailers which fit in reclaimed space. 
@@ -68,7 +84,18 @@ int __currently_allocating;
 
 #ifdef MALLOC_USABLE_SIZE_HACK
 #include "malloc_usable_size_hack.h"
-#endif 
+#endif
+
+#ifdef TRACE_HEAP_INDEX
+/* Size the circular buffer of recently freed chunks */
+#define RECENTLY_FREED_SIZE 100
+#endif
+
+#ifdef TRACE_HEAP_INDEX
+/* Keep a circular buffer of recently freed chunks */
+static void *recently_freed[RECENTLY_FREED_SIZE];
+static void **next_recently_freed_to_replace = &recently_freed[0];
+#endif
 
 struct entry *index_region;
 int safe_to_call_malloc;
@@ -325,6 +352,9 @@ static uintptr_t nbytes_in_index_for_l0_entry(void *userchunk_base)
 static void 
 index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 {
+	int lock_ret;
+	BIG_LOCK
+	
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
 	if (!index_region) init_hook();
@@ -332,6 +362,18 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	
 	/* The address *must* be in our tracked range. Assert this. */
 	assert(new_userchunkaddr <= (index_end_addr ? index_end_addr : MAP_FAILED));
+	
+#ifdef TRACE_HEAP_INDEX
+	/* Check the recently freed list for this pointer. Delete it if we find it. */
+	for (int i = 0; i < RECENTLY_FREED_SIZE; ++i)
+	{
+		if (recently_freed[i] == new_userchunkaddr)
+		{ 
+			recently_freed[i] = NULL;
+			next_recently_freed_to_replace = &recently_freed[i];
+		}
+	}
+#endif
 	
 	/* If we're entirely within a mmap()'d region, 
 	 * and if we cover all of it, 
@@ -353,6 +395,8 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 				nbytes_in_index_for_l0_entry(new_userchunkaddr));
 			assert(IS_L0_ENTRY(INDEX_LOC_FOR_ADDR(new_userchunkaddr)));
 			assert(IS_L0_ENTRY(INDEX_LOC_FOR_ADDR((char*) new_userchunkaddr + modified_size - 1)));
+			
+			BIG_UNLOCK
 			return;
 		}
 	}
@@ -410,6 +454,8 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	if (p_insert->un.ptrs.prev.present) INSERT_SANITY_CHECK(
 		insert_for_chunk(entry_to_same_range_addr(p_insert->un.ptrs.prev, new_userchunkaddr)));
 	list_sanity_check(e, new_userchunkaddr);
+	
+	BIG_UNLOCK
 }
 
 /* "headers" versions */
@@ -638,6 +684,7 @@ static void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 	*p_size = size_to_allocate;
 }
 
+
 static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 {
 	/* The freed_usable_size is not strictly necessary. It was added
@@ -650,6 +697,23 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	 */
 	
 	if (userptr == NULL) return; // HACK: shouldn't be necessary; a BUG somewhere
+	
+	int lock_ret;
+	BIG_LOCK
+	
+#ifdef TRACE_HEAP_INDEX
+	/* Check the recently-freed list for this pointer. We will warn about
+	 * a double-free if we hit it. */
+	for (int i = 0; i < RECENTLY_FREED_SIZE; ++i)
+	{
+		if (recently_freed[i] == userptr)
+		{
+			fprintf(stderr, "*** Double free detected for alloc chunk %p\n", 
+				userptr);
+			return;
+		}
+	}
+#endif
 	
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(userptr);
 	/* unindex the l0 maps */
@@ -672,18 +736,29 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		if (size_unindexed > expected_pagewise_size)
 		{
 			fprintf(stderr, "*** ERROR: unindexed too much unindexing %p: %ld not %ld\n", 
-				allocptr, size_unindexed, expected_pagewise_size);
+				allocptr, (long int) size_unindexed, (long int) expected_pagewise_size);
 		}
 		if (size_unindexed < expected_pagewise_size)
 		{
 			fprintf(stderr, "*** ERROR: unindexed too little unindexing %p: %ld not %ld\n", 
-				allocptr, size_unindexed, expected_pagewise_size);
+				allocptr, (long int) size_unindexed, (long int) expected_pagewise_size);
 		}
 #endif
 		// memset the covered entries with the empty value
 		struct entry empty_value = { 0, 0, 0 };
 		assert(IS_EMPTY_ENTRY(&empty_value));
 		memset(index_entry, *(char*) &empty_value, nbytes_in_index_for_l0_entry(userptr));
+		
+#ifdef TRACE_HEAP_INDEX
+		*next_recently_freed_to_replace = userptr;
+		++next_recently_freed_to_replace;
+		if (next_recently_freed_to_replace == &recently_freed[RECENTLY_FREED_SIZE])
+		{
+			next_recently_freed_to_replace = &recently_freed[0];
+		}
+#endif
+		
+		BIG_UNLOCK
 		return;
 	}
 
@@ -760,6 +835,14 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	/* Now that we have deleted the record, our bin should be sane,
 	 * modulo concurrent reallocs. */
 out:
+#ifdef TRACE_HEAP_INDEX
+	*next_recently_freed_to_replace = userptr;
+	++next_recently_freed_to_replace;
+	if (next_recently_freed_to_replace == &recently_freed[RECENTLY_FREED_SIZE])
+	{
+		next_recently_freed_to_replace = &recently_freed[0];
+	}
+#endif
 	/* If there were suballocated chunks under here, delete the whole lot. */
 	if (suballocated_region_number != 0)
 	{
@@ -767,6 +850,8 @@ out:
 	}
 	invalidate_cache_entries(userptr, (unsigned short) -1, NULL, NULL, -1);
 	list_sanity_check(index_entry, NULL);
+	
+	BIG_UNLOCK
 }
 
 static void pre_nonnull_free(void *userptr, size_t freed_usable_size)
@@ -1432,6 +1517,9 @@ static void delete_suballocated_chunk(struct suballocated_chunk_rec *p_rec)
 
 int __index_deep_alloc(void *ptr, int level, unsigned size_bytes) 
 {
+	int lock_ret;
+	BIG_LOCK
+			
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
 	if (!index_region) init_hook();
@@ -1624,6 +1712,9 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	assert(p_found_ins2 == p_ins);
 #endif
 	check_cache_sanity();
+	
+	BIG_UNLOCK
+	
 	return 2; // FIXME
 }
 
@@ -1879,6 +1970,8 @@ static void unindex_deep_alloc_internal(void *ptr, struct insert *existing_ins,
 
 void __unindex_deep_alloc(void *ptr, int level) 
 {
+	int lock_ret;
+	BIG_LOCK
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
 	if (!index_region) init_hook();
@@ -1894,5 +1987,6 @@ void __unindex_deep_alloc(void *ptr, int level)
 	assert(p_rec); 
 	
 	unindex_deep_alloc_internal(ptr, found_ins, p_rec);
+	
+	BIG_UNLOCK
 }
-
