@@ -5,7 +5,7 @@ CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) -name '*.ml')
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 CIL_EXTRASRC := $(addprefix $(realpath $(dir $(THIS_MAKEFILE)))/,$(CIL_TOOLS))
 
-default: src $(CIL)/bin/cilly 
+default: src bin $(CIL)/bin/cilly 
 
 %.cil.o: %.c $(CIL)/bin/cilly
 	cd "$(dir $<)" && $(CIL)/bin/cilly --do$$( echo $(dir $<) | tr -d '/' ) --save-temps -c -o "$(notdir $@)" "$(notdir $<)"
@@ -24,3 +24,7 @@ $(CIL)/bin/cilly: $(CIL_TOOLS_SRC)
 .PHONY: src
 src:
 	$(MAKE) -C src
+
+.PHONY: bin
+bin: src
+	cd bin && ln -s ../src/base-types-translation .
