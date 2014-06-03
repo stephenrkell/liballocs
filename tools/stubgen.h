@@ -122,9 +122,12 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
 			} \
 			name ## _alloclevel = 0/*__current_alloclevel*/; \
 		} \
-		int seen_alloclevel = __index_deep_alloc(retval, /* name ## _alloclevel */ -1, __current_allocsz); \
-		assert(name ## _alloclevel == 0 || seen_alloclevel == name ## _alloclevel); \
-		if (name ## _alloclevel == 0) name ## _alloclevel = seen_alloclevel; \
+		if (&__index_deep_alloc) \
+		{ \
+			int seen_alloclevel = __index_deep_alloc(retval, /* name ## _alloclevel */ -1, __current_allocsz); \
+			assert(name ## _alloclevel == 0 || seen_alloclevel == name ## _alloclevel); \
+			if (name ## _alloclevel == 0) name ## _alloclevel = seen_alloclevel; \
+		} \
 		if (!have_caller_allocfn) \
 		{ \
 			/* __current_alloclevel = 0; */ \
