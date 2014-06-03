@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include "fake-libunwind.h"
 
 long local_addr_space;
@@ -19,7 +20,11 @@ int unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest)
 	switch (reg)
 	{
 		case UNW_REG_SP: *(void**)dest = (void*) cursor->frame_sp; return 0;
-		case UNW_TDEP_BP: *(void**)dest = (void*) cursor->frame_bp; return 0;
+		case UNW_TDEP_BP: 
+			if (cursor->frame_bp)
+			{
+				*(void**)dest = (void*) cursor->frame_bp; return 0;
+			} else return -EINVAL;
 		case UNW_REG_IP: *(void**)dest = (void*) cursor->frame_ip; return 0;
 		default: return 1;
 	}
@@ -29,6 +34,11 @@ int unw_init_local(unw_cursor_t *cursor, unw_context_t *context)
 	*cursor = *context;
 	return 0;
 }
+// sanity-check bp: it should be higher, but not loads higher
+#define SANE_BP_OR_NULL(bp, sp) \
+	(((char*) (bp) > (char*) (sp) && ((char*) (bp) - (char*) (sp)) < 0x10000)  \
+		? (unw_word_t) (bp) \
+		: 0)
 
 int __attribute__((noinline)) unw_getcontext(unw_context_t *ucp)
 {
@@ -40,21 +50,10 @@ int __attribute__((noinline)) unw_getcontext(unw_context_t *ucp)
 	 * unw_get_reg(UNW_REG_SP )
 	 * 
 	 * they get their own stack pointer. */
-	unw_word_t caller_sp_minus_two_words;
+	unw_word_t caller_sp_minus_two_words = (unw_word_t) __builtin_frame_address(0);
 	unw_word_t caller_bp, caller_sp;
 	unw_word_t current_return_addr;
-#if defined(__i386__) || defined(__x86__)
-	__asm__ ("movl %%ebp, %0\n" :"=r"(caller_sp_minus_two_words));
-#elif defined(__x86_64__) || defined(X86_64)
-	/* PROBLEM: sometimes our mov of bp 
-	 * happens *before* the current rsp is saved into bp! 
-	 * To get around this, we actually move *rsp* and make sure
-	 * we are the first instruction after the prologue.
-	 * */
-	__asm__ ("movq %%rsp, %0\n" :"=r"(caller_sp_minus_two_words));
-#else 
-#error "Unsupported architecture"
-#endif
+
 	assert(caller_sp_minus_two_words != 0);
 	current_return_addr = (unw_word_t)
 		/*__builtin_extract_return_address( */
@@ -68,7 +67,7 @@ int __attribute__((noinline)) unw_getcontext(unw_context_t *ucp)
 	caller_sp = (unw_word_t) (((void**)caller_sp_minus_two_words) + 2);
 	*ucp = (unw_context_t){ 
 		/* context sp = */ caller_sp, 
-		/* context bp = */ caller_bp, 
+		/* context bp = */ SANE_BP_OR_NULL(caller_bp, caller_sp), 
 		/* context ip = */ current_return_addr
 	};
 	return 0;
@@ -85,12 +84,8 @@ int __attribute__((noinline)) unw_getcontext(unw_context_t *ucp)
 
 int unw_step(unw_cursor_t *cp)
 {
-	/*
-       On successful completion, unw_step() returns a positive  value  if  the
-       updated  cursor  refers  to  a  valid stack frame, or 0 if the previous
-       stack frame was the last frame in the chain.  On  error,  the  negative
-       value of one of the error-codes below is returned.
-	*/
+	/* Return >0 if we have stepped to a valid frame, or 0 if we were already
+	 * at the end of the chain, or <0 on error. */
 	
 	unw_context_t ctxt = *cp;
 	// can't step if we don't have a bp
@@ -99,9 +94,12 @@ int unw_step(unw_cursor_t *cp)
 	// the next-higher ip is the return addr of the frame, i.e. 4(%eip)
 	void *return_addr = *(((void**)ctxt.frame_bp) + 1);
 	
+	void *sp = (((void**)ctxt.frame_bp) + 2);
+	void *candidate_bp = *((void**)ctxt.frame_bp);
+	
 	unw_context_t new_ctxt = (unw_context_t) { 
-		/* context sp = */ (unw_word_t) (((void**)ctxt.frame_bp) + 2),
-		/* context bp = */ (unw_word_t) *((void**)ctxt.frame_bp),
+		/* context sp = */ (unw_word_t) sp,
+		/* context bp = */ SANE_BP_OR_NULL(candidate_bp, sp),
 		/* context ip = */ (unw_word_t) return_addr
 	};
 		
