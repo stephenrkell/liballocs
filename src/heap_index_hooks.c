@@ -36,13 +36,13 @@ static inline size_t malloc_usable_size(void *ptr);
 size_t malloc_usable_size(void *ptr);
 #endif
 
-/* This defines core hooks, and static prototypes for our hooks. */
-#ifndef MALLOC_HOOKS_INCLUDE
-#define MALLOC_HOOKS_INCLUDE "malloc_hooks.c" 
-#endif
-/* This defines core hooks, and static prototypes for our hooks. */
-#include MALLOC_HOOKS_INCLUDE
+static void *allocptr_to_userptr(void *allocptr);
+static void *userptr_to_allocptr(void *allocptr);
 
+#define ALLOCPTR_TO_USERPTR(p) (allocptr_to_userptr(p))
+#define USERPTR_TO_ALLOCPTR(p) (userptr_to_allocptr(p))
+
+#include "alloc_events.h"
 #include "heap_index.h"
 
 #ifndef NO_PTHREADS
@@ -52,7 +52,9 @@ size_t malloc_usable_size(void *ptr);
 #define BIG_UNLOCK \
 	lock_ret = pthread_mutex_unlock(&mutex); \
 	assert(lock_ret == 0);
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+/* We're recursive only because assertion failures sometimes want to do 
+ * asprintf, so try to re-acquire our mutex. */
+static pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 #else
 #define BIG_LOCK
@@ -202,7 +204,7 @@ static void check_impl_sanity(void)
 #pragma GCC diagnostic pop
 #pragma GCC diagnostic warning "-Wpragmas"
 
-static void
+void
 init_hook(void)
 {
 	/* Optionally delay, for attaching a debugger. */
@@ -558,7 +560,8 @@ static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, siz
 {
 	return (struct insert*) ((char*) userptr + usable_size) - 1;
 }
-static void 
+
+void 
 post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
 		size_t requested_size, size_t requested_alignment, const void *caller)
 {
@@ -650,7 +653,7 @@ post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alig
 	index_insert(allocptr /* == userptr */, modified_size, __current_allocsite ? __current_allocsite : caller);
 }
 
-static void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
+void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 {
 	/* We increase the size by the amount of extra data we store, 
 	 * and possibly a bit more to allow for alignment.  */
@@ -854,14 +857,14 @@ out:
 	BIG_UNLOCK
 }
 
-static void pre_nonnull_free(void *userptr, size_t freed_usable_size)
+void pre_nonnull_free(void *userptr, size_t freed_usable_size)
 {
 	index_delete(userptr/*, freed_usable_size*/);
 }
 
-static void post_nonnull_free(void *userptr) {}
+void post_nonnull_free(void *userptr) {}
 
-static void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller)
+void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller)
 {
 	/* When this happens, we *may or may not be freeing an area*
 	 * -- i.e. if the realloc fails, we will not actually free anything.
@@ -872,7 +875,7 @@ static void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *
 	 * then recreate it later, as it may not survive the realloc() uncorrupted. */
 	index_delete(userptr/*, malloc_usable_size(ptr)*/);
 }
-static void post_nonnull_nonzero_realloc(void *userptr, 
+void post_nonnull_nonzero_realloc(void *userptr, 
 	size_t modified_size, 
 	size_t old_usable_size,
 	const void *caller, void *__new_allocptr)
@@ -914,35 +917,38 @@ static inline unsigned char *rfind_nonzero_byte(unsigned char *one_beyond_start,
 
 	unsigned char *p = one_beyond_start;
 	/* Do the unaligned part */
-	while (!IS_ALIGNED(p-SIZE))
+	while (!IS_ALIGNED(p))
 	{
-		if (p-1 < last_good_byte) return NULL;
-		
-		if (*--p != 0) return p;
+		--p;
+		if (p < last_good_byte) return NULL;
+		if (*p != 0) return p;
 	}
-	
-	/* Do the aligned part */
+	// now p is aligned and any address >=p is not the one we want
+	// (if we had an aligned pointer come in, we don't want it -- it's one_beyond_start)
+
+	/* Do the aligned part. */
 	while (p-SIZE >= last_good_byte)
 	{
-		unsigned long v = *((unsigned long *)(p-SIZE));
+		p -= SIZE;
+		unsigned long v = *((unsigned long *) p);
 		if (v != 0ul)
 		{
 			// HIT -- but what is the highest nonzero byte?
 			int nlzb = nlzb1(v); // in range 0..7
-			return p - 1 - nlzb;
+			return p + SIZE - 1 - nlzb;
 		}
-		p -= SIZE;
 	}
-	
-	assert((p-SIZE) - last_good_byte < SIZE);
-	assert((p-SIZE) - last_good_byte >= 0);
+	// now we have tested all bytes from p upwards
+	// and p-SIZE < last_good_byte
+	long nbytes_remaining = p - last_good_byte;
+	assert(nbytes_remaining < SIZE);
+	assert(nbytes_remaining >= 0);
 	
 	/* Do the unaligned part */
-	while ((p-SIZE) - last_good_byte > 0)
+	while (p > last_good_byte)
 	{
-		if (p-1 < last_good_byte) return NULL;
-		
-		if (*--p != 0) return p;
+		--p;
+		if (*p != 0) return p;
 	}
 	
 	return NULL;

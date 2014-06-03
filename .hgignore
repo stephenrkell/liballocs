@@ -55,3 +55,4 @@ tools/allocsites
 tools/dumptypes
 tools/liballocstool.a
 tools/usedtypes
+*.pyc

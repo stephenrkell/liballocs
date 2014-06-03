@@ -2,9 +2,18 @@ THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 SRCROOT := $(dir $(THIS_MAKEFILE))/..
 MALLOC_HOOKS ?= ../../libmallochooks.hg
 
-CFLAGS += -std=gnu99 -g -O4 -flto -fPIC -DNDEBUG -I../include
-HEAP_INDEX_HOOKS := heap_index_fast_hooks
-#HEAP_INDEX_HOOKS := heap_index_hooks
+CFLAGS += -std=gnu99 -g -I../include
+CFLAGS += -I$(SRCROOT)/include
+
+default: liballocs_preload.so liballocs_noop.so liballocs_noop.o liballocs.a
+
+NON_FAST_CFLAGS += -DTRACE_DEEP_HEAP_INDEX -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX -fPIC
+FAST_CFLAGS += -DNDEBUG -fpic -flto -O4
+
+BUILD_MALLOC_HOOKS := event
+MALLOC_HOOKS_METHOD := preload
+$(warning CFLAGS is $(CFLAGS))
+include $(MALLOC_HOOKS)/Makerules
 
 CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
 
@@ -16,8 +25,6 @@ CC_SRC := $(wildcard *.cc)
 ifeq ($(notdir $(CC)),allocscc)
 export CC := cc
 endif
-
-default: liballocs_preload.so liballocs_noop.so liballocs_noop.o liballocs.a
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
 C_SRC += fake-libunwind.c
@@ -40,6 +47,21 @@ $(CC_DEPS): .%.d : %.cc
 
 -include $(DEPS)
 
+UTIL_OBJS := l0index.o maps.o addrmap.o
+MAIN_OBJS := liballocs.o $(UTIL_OBJS)
+MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS)
+PRELOAD_OBJS := preload.o
+#MALLOC_HOOKS_OBJ := malloc_hooks_preload_fast.o 
+MALLOC_HOOKS_OBJ := malloc_hooks_preload.o 
+HOOKS_OBJS := $(MALLOC_HOOKS_OBJ) heap_index_hooks.o
+
+$(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC # hooks have either fpic or fPIC
+heap_index_hooks.o: CFLAGS += -fpic
+
+# HACK override the rule for *.c -> *.o as a possible fix for debug info non-findy (does it work?)
+%.o: %.c
+	$(CC) -o "$@" $(CFLAGS) -c $(realpath $<)
+
 # FIXME: in preload case, can be clever with stubs? 
 # HMM. We still have to --wrap the allocation funcs, but we could put the wrappers in the preload lib...
 # BUT since they're generated per-build from the LIBALLOCS_ALLOC_FNS content, this doesn't work --
@@ -47,40 +69,19 @@ $(CC_DEPS): .%.d : %.cc
 liballocs_preload.so: liballocs_preload.a
 	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive -Wl,-Bstatic -L. "$<" -Wl,--no-whole-archive -Wl,-Bdynamic $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
-liballocs_preload.a: liballocs.o preload.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ) $(HEAP_INDEX_HOOKS).o
+liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_OBJS)
 	ar r "$@" $+ 
 
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
 
-liballocs_nomemtable_preload.so: liballocs_nomemtable.o preload.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ) dummy_thread_locals.o
+liballocs_nomemtable_preload.so: $(MAIN_OBJS_NOMEMTABLE) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) dummy_thread_locals.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
-CFLAGS += -I$(SRCROOT)/include
-CFLAGS += -I$(MALLOC_HOOKS)
-NON_FAST_CFLAGS += -DTRACE_DEEP_HEAP_INDEX -DTRACE_MALLOC_HOOKS #-DTRACE_HEAP_INDEX
-vpath %.c $(MALLOC_HOOKS)
-
-heap_index_hooks.o: heap_index_hooks.c
-	gcc $(LDFLAGS) -c $(CFLAGS) $(NON_FAST_CFLAGS) -I$(SRCROOT)/include -I$(MALLOC_HOOKS) "$<"
-libheap_index_hooks.a: heap_index_hooks.o
-	ar r "$@" heap_index_hooks.o 
-
-libheap_index_fast_hooks.so: heap_index_hooks.c #$(MALLOC_HOOKS)/malloc_hooks.c 
-	gcc $(LDFLAGS) -shared -o "$@" -DNDEBUG=1 -O3 -flto -std=gnu99 -fpic -g \
-	    -I$(MALLOC_HOOKS) $(filter-out -O%,$(CFLAGS)) "$<"
-
-#vpath $(MALLOC_HOOKS)/malloc_hooks.c 
-heap_index_fast_hooks.o: heap_index_hooks.c #malloc_hooks.c 
-	gcc $(LDFLAGS) -o "$@" -c -DNDEBUG=1 -O3 -flto -std=gnu99 -fpic -g \
-	    -I$(MALLOC_HOOKS) $(filter-out -O%,$(CFLAGS)) $(realpath $<) # HACK to work around oprofile+LTO comp_dir bug
-libheap_index_fast_hooks.a: heap_index_fast_hooks.o
-	ar r "$@" heap_index_hooks.o
-
 # this version lacks preload stuff
-liballocs.a: liballocs.o l0index.o maps.o addrmap.o $(FAKE_LIBUNWIND_OBJ)
+liballocs.a: $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ)
 	ar r "$@" $+
-	
+
 liballocs.so: liballocs.a
 	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS) #-lheap_index_hooks
 
