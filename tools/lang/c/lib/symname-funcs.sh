@@ -25,7 +25,7 @@ translate_symnames() {
     echo "sed program is $sed_program" 1>&2
     if [[ -n "$( echo "$sed_program" | tr -d '[:blank:]' )" ]]; then
 
-        # apply the substitutions to this symname, til a fixed point
+        # apply the substitutions to this symname, "til a fixed point"
                 sed -r "$sed_program" | \
                 sed -r "$sed_program" | \
                 sed -r "$sed_program" | \
