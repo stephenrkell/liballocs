@@ -467,7 +467,7 @@ class AllocsCC:
         if not self.isLinkCommand():
             if outputFile:
                 # we have a single named output file
-                ret2 = fixupDotO(outputFile)
+                ret2 = self.fixupDotO(outputFile)
                 return ret2
             else:
                 # no explicit output file; the compiler output >=1 .o files, one for each input

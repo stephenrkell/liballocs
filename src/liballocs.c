@@ -582,7 +582,6 @@ const struct uniqtype *__liballocs_uniqtype_unsigned_char;
 /* counters */
 unsigned long __liballocs_aborted_stack;
 unsigned long __liballocs_aborted_static;
-unsigned long __liballocs_aborted_typestr;
 unsigned long __liballocs_aborted_unknown_storage;
 unsigned long __liballocs_hit_heap_case;
 unsigned long __liballocs_hit_stack_case;
@@ -592,6 +591,7 @@ unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 static void print_exit_summary(void)
 {
+	fprintf(stderr, "====================================================\n");
 	fprintf(stderr, "liballocs summary: \n");
 	fprintf(stderr, "----------------------------------------------------\n");
 	fprintf(stderr, "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
@@ -603,7 +603,7 @@ static void print_exit_summary(void)
 	fprintf(stderr, "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
 	fprintf(stderr, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
 	fprintf(stderr, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
-	fprintf(stderr, "----------------------------------------------------\n");
+	fprintf(stderr, "====================================================\n");
 	
 	if (getenv("LIBALLOCS_DUMP_SMAPS_AT_EXIT"))
 	{

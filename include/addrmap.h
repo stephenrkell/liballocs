@@ -7,6 +7,7 @@
 #endif
 
 #include <stdio.h> // hACK
+#include <stdint.h>
 #include <dlfcn.h>
 
 #ifdef __cplusplus

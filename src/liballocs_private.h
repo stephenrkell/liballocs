@@ -172,7 +172,6 @@ unsigned long malloc_usable_size (void *ptr);
 /* counters */
 extern unsigned long __liballocs_aborted_stack;
 extern unsigned long __liballocs_aborted_static;
-extern unsigned long __liballocs_aborted_typestr;
 extern unsigned long __liballocs_aborted_unknown_storage;
 extern unsigned long __liballocs_hit_heap_case;
 extern unsigned long __liballocs_hit_stack_case;

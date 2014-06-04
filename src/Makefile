@@ -5,7 +5,7 @@ MALLOC_HOOKS ?= ../../libmallochooks.hg
 CFLAGS += -std=gnu99 -g -I../include
 CFLAGS += -I$(SRCROOT)/include
 
-default: liballocs_preload.so liballocs_noop.so liballocs_noop.o liballocs.a
+default: liballocs_preload.so liballocs_preload.a liballocs_noop.so liballocs_noop.o liballocs.a
 
 NON_FAST_CFLAGS += -DTRACE_DEEP_HEAP_INDEX -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX -fPIC
 FAST_CFLAGS += -DNDEBUG -fpic -flto -O4
@@ -56,7 +56,11 @@ MALLOC_HOOKS_OBJ := malloc_hooks_preload.o
 HOOKS_OBJS := $(MALLOC_HOOKS_OBJ) heap_index_hooks.o
 
 $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC # hooks have either fpic or fPIC
-heap_index_hooks.o: CFLAGS += -fpic
+ifeq ($(MALLOC_HOOKS_OBJ),malloc_hooks_preload_fast.o)
+heap_index_hooks.o: CFLAGS += $(FAST_CFLAGS)
+else
+heap_index_hooks.o: CFLAGS += $(NON_FAST_CFLAGS)
+endif
 
 # HACK override the rule for *.c -> *.o as a possible fix for debug info non-findy (does it work?)
 %.o: %.c

@@ -46,7 +46,7 @@ cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
         cu_language_num="$( echo "$cu_language_fullstr" | tr -s '[[:blank:]]' '\t' | cut -f1 )"
         case "$cu_language_num" in
             (1|2) # DW_LANG_C89, DW_LANG_C
-                $(dirname "$0")/../frontend/c/bin/c-gather-srcallocs "$cu_sourcepath" "$obj" "$cu_fname" "$cu_compdir"
+                $(dirname "$0")/lang/c/bin/c-gather-srcallocs "$cu_sourcepath" "$obj" "$cu_fname" "$cu_compdir"
             ;;
             (*) # unknown
                 echo "Warning: could not gather source-level allocs for unknown language: $cu_language_fullstr ($cu_language_num, $( echo -n "$cu_language_fullstr" | hd ))" 1>&2
