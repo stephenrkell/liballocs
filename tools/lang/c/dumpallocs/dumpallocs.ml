@@ -72,14 +72,14 @@ let rec decayArrayInTypesig ts = match ts with
    TSArray(tsig, optSz, attrs) -> decayArrayInTypesig tsig (* recurse for multidim arrays *)
  | _ -> ts
 
-let maybeDecayArrayTypesig maybeTs = match maybeTs with
-    Some(ts) -> Some(decayArrayInTypesig ts)
-  | None -> None
-
 type sz = 
     Undet
   | Existing of typsig
   | Synthetic of typsig list
+
+let maybeDecayArrayTypesig maybeTs = match maybeTs with
+    Existing(ts) -> Existing(decayArrayInTypesig ts)
+  | _ -> Undet
 
 let rec getSizeExpr (ex: exp) (env : (int * typsig) list) = 
   output_string Pervasives.stderr ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ")\n");  flush Pervasives.stderr; 
@@ -117,32 +117,11 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
                        in which case our last element is a variable-length thing.
                        Is it enough to interpret 
                     *)
-                    Synthetic([sz1; sz2])
+                    Synthetic([s1; s2])
            | (Synthetic(l1), Existing(s2)) -> Synthetic(l1 @ [s2])
            | (Existing(s1), Synthetic(l2)) -> Synthetic(s1 :: l2)
            | (Synthetic(l1), Synthetic(l2)) -> Synthetic(l1 @ l2)
-                 
-         match (getSizeExpr e1 env) with
-           | Some(s1) -> begin match (getSizeExpr e2 env) with
-                 None -> (* okay, adding character padding to a single size *)
-                    Some(s1)
-              |  Some(s2) -> begin (* If we're adding Xs to Xs, OR array of Xs to some more sizeof X, the whole
-                                expr has sizeofness X *)
-                     let decayedS1 = decayArrayInTypesig s1
-                     in 
-                     let decayedS2 = decayArrayInTypesig s2
-                     in 
-                     if decayedS1 = decayedS2 then Some(decayedS1)
-                     else
-                         (* "True composite" case. Not yet supported... *)
-                         None
-                  end
-             end
-           | None -> begin match (getSizeExpr e2 env) with
-              | Some(s2) -> Some(s2)
-              | None -> None
-              end
-         end
+        end
    |  BinOp(Div, e1, e2, t) -> begin
          (* We can "divide away" sizeofness e.g. by dividing sizeof (array_of_X) / (sizeof (X)) *)
          let maybeDecayedS1 = (maybeDecayArrayTypesig (getSizeExpr e1 env))
@@ -150,29 +129,29 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
          let maybeDecayedS2 = (maybeDecayArrayTypesig (getSizeExpr e2 env))
          in
          match (maybeDecayedS1, maybeDecayedS2) with 
-             (Some(decayed1), Some(decayed2)) -> if decayed1 = decayed2 then None (* divided away *)
-              else (* dimensionally incompatible division -- what to do? *) Some(decayed1)
-            | (Some(s), None) -> Some(s)
-            | _ -> None
+             (Existing(decayed1), Existing(decayed2)) -> if decayed1 = decayed2 then Undet (* divided away *)
+              else (* dimensionally incompatible division -- what to do? *) Existing(decayed1)
+            | (Existing(s), Undet) -> Existing(s)
+            | _ -> Undet (* this includes the Synthetic cases*)
          
       end
-   |  SizeOf(t) -> Some(typeSig t)
-   |  SizeOfE(e) -> Some(typeSig (typeOf e))
-   |  SizeOfStr(s) -> Some(typeSig charType)
+   |  SizeOf(t) -> Existing(typeSig t)
+   |  SizeOfE(e) -> Existing(typeSig (typeOf e))
+   |  SizeOfStr(s) -> Existing(typeSig charType)
    |  Lval(lhost, offset) -> begin
         (* output_string Pervasives.stderr ("Hello from Lval case in getSizeExpr\n");  flush Pervasives.stderr; *) 
         match lhost with 
            Var(v) -> begin
-             if v.vglob then None else try 
-               let found = Some(assoc v.vid env) in 
+             if v.vglob then Undet else try 
+               let found = Existing(assoc v.vid env) in 
                (* output_string Pervasives.stderr ("environment tells us that vid " ^ (string_of_int v.vid) ^ " has a sizeofness\n"); *)
                found 
-             with Not_found -> None
+             with Not_found -> Undet
            end
-        |  Mem(_) -> None
+        |  Mem(_) -> Undet
       end
    | CastE(t, e) -> (getSizeExpr e env)
-   | _ -> None
+   | _ -> Undet
    
 (* FIXME: split this into a "toplevel" that does the HasNoSizeof check,
    and a recursive part which recurses *without* recursively doing the
@@ -181,8 +160,9 @@ let getSizeExprElseDefault (e: exp) (env : (int * typsig) list) =
   (* output_string Pervasives.stderr ("Hello from getSizeExprElseDefault\n");  flush Pervasives.stderr;  *)
   let explicitSizeExpr = getSizeExpr e env in
   match explicitSizeExpr with
-    None -> Some(typeSig voidType)
-  | Some(t) -> Some(t)
+    Undet -> Some(typeSig voidType)
+  | Existing(t) -> Some(t)
+  | Synthetic(ts) -> (* FIXME *) None
 
 (*   |  SizeOf(t) -> Some(Pretty.sprint 80 (d_typsig () (typeSig t)))
    |  SizeOfE(e) -> Some(Pretty.sprint 80 (d_typsig () (typeSig (typeOf e))))
@@ -241,9 +221,10 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctio
           getSizeExpr (nth arglist s) env 
        in 
        match szEx with
-         Some(szType) -> (output_string Pervasives.stderr ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
-               szEx
-       | None -> output_string Pervasives.stderr ("Could not infer what we are allocating\n"); flush Pervasives.stderr; None
+         Existing(szType) -> (output_string Pervasives.stderr ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
+               Some(szType)
+       | Undet -> output_string Pervasives.stderr ("Could not infer what we are allocating\n"); flush Pervasives.stderr; None
+       | Synthetic(_) -> output_string Pervasives.stderr ("We are allocating a composite: FIXME\n"); flush Pervasives.stderr; None
      else (match maybeFunNameToPrint with 
          Some(fnname) -> 
                ((output_string Pervasives.stderr ("Warning: signature " ^ signature 
@@ -507,10 +488,10 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
            match host with
             Var(v) -> if v.vglob then acc else begin
                match getSizeExpr e acc with
-                 Some(t) -> (
+                 Existing(t) -> (
                  (* output_string Pervasives.stderr ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofTypsig " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig t)) ^  ")\n")
                  ; flush Pervasives.stderr; *) (v.vid, t) :: (remove_assoc v.vid acc))
-              |  None -> acc
+              |  _ -> acc
             end
           | Mem(e) -> acc
          end 
