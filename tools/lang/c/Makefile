@@ -14,6 +14,10 @@ clean:
 	for dir in $(CIL_TOOLS); do (cd $$dir && rm -f *.o *.cil.c *.i ); done
 	$(MAKE) -C src clean
 
+# HACK HACK HACK
+print_cilly_path:
+	@echo $(CIL)/bin/cilly
+
 $(CIL)/bin/cilly: $(CIL_TOOLS_SRC)
 	cd $(CIL) && \
 	(grep '$(firstword $(CIL_TOOLS))' config.log || \
@@ -27,4 +31,4 @@ src:
 
 .PHONY: bin
 bin: src
-	cd bin && ln -s ../src/base-types-translation .
+	cd bin && ln -sf ../src/base-types-translation .
