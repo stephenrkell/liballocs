@@ -56,3 +56,5 @@ tools/dumptypes
 tools/liballocstool.a
 tools/usedtypes
 *.pyc
+tools/lang/c/cil*
+tools/lang/c/bin/base-types-translation
