@@ -63,7 +63,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 
 	if (!safe_to_use_prefix_tree || !safe_to_call_dlsym)
 	{
-		// call via syscall
+		// call via syscall and skip hooking logic
 		return (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
 	}
 
