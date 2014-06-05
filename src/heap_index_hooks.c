@@ -204,6 +204,8 @@ static void check_impl_sanity(void)
 #pragma GCC diagnostic pop
 #pragma GCC diagnostic warning "-Wpragmas"
 
+static _Bool tried_to_init;
+
 void
 init_hook(void)
 {
@@ -213,6 +215,11 @@ init_hook(void)
 	/* Check we got the shift logic correct in entry_to_offset, and other compile-time logic. */
 	check_impl_sanity();
 
+	/* If we're already trying to initialize, or have already
+	 * tried, don't try recursively/again. */
+	if (tried_to_init) return;
+	tried_to_init = 1;
+	
 	if (index_region) return; /* already done */
 	
 	index_begin_addr = (void*) 0U;
@@ -633,24 +640,8 @@ post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alig
 // 	
 // 	index_insert(userptr, modified_size, __current_allocsite ? __current_allocsite : caller);
 	
-	/* Detect the case where malloc is using mmap(). We can optimise this 
-	 * as follows.
-	 * 
-	 * - In our interval tree, record the area as being homogeneously of the same type.
-	 * 
-	 * - If we convert any of the region to a deep alloc region, we won't need to seek
-	 *   backwards a long way in the memtable to discover this (cf. finding a trailer)
-	 *   because all the memtable entries will be set to point to the deep region. 
-	 * 
-	 * - Note that large sub-allocated regions are still not handled very well. 
-	 *   We can argue that that's a less common case. If you want large objects,
-	 *   you're better off calling to a l0 or l1-level allocator; in practice 
-	 *   malloc, at l1, degenerates itself to the l0 mmap() case for precisely
-	 *   this reason. */
-	 
-	safe_to_call_malloc = 1; // if somebody succeeded, anyone should succeed
-	
 	index_insert(allocptr /* == userptr */, modified_size, __current_allocsite ? __current_allocsite : caller);
+	safe_to_call_malloc = 1; // if somebody succeeded, anyone should succeed
 }
 
 void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
