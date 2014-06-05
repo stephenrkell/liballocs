@@ -1169,23 +1169,6 @@ __liballocs_get_alloc_info
 					++__liballocs_aborted_unrecognised_allocsite;
 					return 1;
 				}
-// 				/* Don't do lazy heap type assignment within an alloc fn, or other
-// 				 * alloc machinery. (NOTE that in the case of a size-only outer function, 
-// 				 * we might have already reset the __current_allocfn by the point we do a 
-// 				 * cast that is still logically during allocation. That's why we need the
-// 				 * extra flag.) */
-// 				if (__builtin_expect(is_lazy_uniqtype(alloc_uniqtype)
-// 						&& !__currently_allocating, 0))
-// 				{
-// 					++__liballocs_lazy_heap_type_assignment;
-// 					heap_info->alloc_site_flag = 1;
-// 					heap_info->alloc_site = (uintptr_t) test_uniqtype;
-// 					*out_alloc_site = 0;
-// 					alloc_uniqtype = (struct uniqtype *) test_uniqtype;
-// 					*out_alloc_uniqtype = alloc_uniqtype;
-// 					*out_block_element_count = (alloc_chunksize - sizeof (struct insert)) / alloc_uniqtype->pos_maxoff;
-// 					goto out_success; // FIXME: we'd rather return from __is_a early right here
-// 				}
 				// else it's the "normal case
 				*out_block_element_count = (alloc_chunksize - sizeof (struct insert)) / alloc_uniqtype->pos_maxoff;
 #ifdef NDEBUG
