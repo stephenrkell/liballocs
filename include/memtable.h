@@ -26,7 +26,13 @@ extern "C" {
 #include <stdio.h> /* for stats printing */
 #include <unistd.h> /* for stats printing */
 
-static inline int is_power_of_two(size_t i)
+/* We want the various inline functions in here to behave like 
+ * macros: always inline. Use some macros to */
+#define INLINE_DECL extern inline
+#define INLINE_ATTRS __attribute__((always_inline,gnu_inline))
+
+INLINE_DECL int is_power_of_two(size_t i) INLINE_ATTRS;
+INLINE_DECL int INLINE_ATTRS is_power_of_two(size_t i)
 {
 	/* If we are a power of two, then one less than us 
 	 * has a run of low-order bits set and no others set,
@@ -35,11 +41,13 @@ static inline int is_power_of_two(size_t i)
 	 * cases except zero, not all lower-order bits will
 	 * roll over between i-1 and i, so there will be a nonzero
 	 * AND. */
-  	return (i != 0) && !(i & (i - 1));
+	return (i != 0) && !(i & (i - 1));
 }
 
 // stolen from Hacker's Delight, then updated for 64 bits
-static inline int nlz1(unsigned long x) {
+INLINE_DECL int nlz1(unsigned long x) INLINE_ATTRS;
+INLINE_DECL int INLINE_ATTRS nlz1(unsigned long x)
+{
 	int n;
 
 	if (x == 0) return 64;
@@ -65,7 +73,8 @@ static inline int nlz1(unsigned long x) {
 #define TOP_N_BITS_CLEAR(n)    (BOTTOM_N_BITS_SET(8*(sizeof(uintptr_t))-((n))))
 #define NBITS(t) ((sizeof (t))<<3)
 
-static inline int next_power_of_two_ge(size_t i)
+INLINE_DECL int next_power_of_two_ge(size_t i) INLINE_ATTRS;
+INLINE_DECL int INLINE_ATTRS next_power_of_two_ge(size_t i)
 {
 	if (is_power_of_two(i)) return i;
 	else 
@@ -78,7 +87,8 @@ static inline int next_power_of_two_ge(size_t i)
 
 /* The integer log 2 of a power of two is the number of trailing zeroes.
  * FIXME: use Hacker's Delight code here. */
-static inline unsigned integer_log2(size_t i)
+INLINE_DECL unsigned integer_log2(size_t i) INLINE_ATTRS;
+INLINE_DECL unsigned INLINE_ATTRS integer_log2(size_t i)
 {
 	unsigned count = 0;
 	assert(i != 0);
@@ -87,7 +97,11 @@ static inline unsigned integer_log2(size_t i)
 	return count;
 }
 
-static inline size_t memtable_mapping_size(
+INLINE_DECL size_t memtable_mapping_size(
+	unsigned entry_size_in_bytes,
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
+INLINE_DECL size_t INLINE_ATTRS memtable_mapping_size(
 	unsigned entry_size_in_bytes,
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -119,7 +133,11 @@ static inline size_t memtable_mapping_size(
 	memtable_mapping_size(sizeof(t), (range), (addr_begin), (addr_end))
 
 /* Allocate a memtable. */
-static inline void *memtable_new(
+INLINE_DECL void *memtable_new(
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
+INLINE_DECL void *INLINE_ATTRS memtable_new(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -147,7 +165,11 @@ static inline void *memtable_new(
  * so that we can automatically maintain the bitmaps. */
 
 /* Allocate a "page bitmap" for a memtable. */
-static inline char *memtable_new_l1_page_bitmap(
+INLINE_DECL char *memtable_new_l1_page_bitmap(
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
+INLINE_DECL char *INLINE_ATTRS memtable_new_l1_page_bitmap(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -172,7 +194,11 @@ static inline char *memtable_new_l1_page_bitmap(
 	memtable_new_l1_page_bitmap(sizeof(t), (range), (addr_begin), (addr_end))
 
 /* Allocate a "second-order page bitmap" for a memtable. */
-static inline char *memtable_new_l2_page_bitmap(
+INLINE_DECL char *memtable_new_l2_page_bitmap(
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
+INLINE_DECL char *INLINE_ATTRS memtable_new_l2_page_bitmap(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -197,7 +223,11 @@ static inline char *memtable_new_l2_page_bitmap(
 
 /* The "third-order page bitmap" case: don't allocate, just return the size.
  * Will return zero for all but the biggest memtables. */
-static inline size_t memtable_l3_page_bitmap_size(
+INLINE_DECL size_t memtable_l3_page_bitmap_size(
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
+INLINE_DECL size_t INLINE_ATTRS memtable_l3_page_bitmap_size(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -219,7 +249,14 @@ static inline size_t memtable_l3_page_bitmap_size(
 	memtable_l3_page_bitmap_size(sizeof(t), (range), (addr_begin), (addr_end))
 
 /* Get a pointer to the index-th entry. */
-static inline void *memtable_index(
+INLINE_DECL void *memtable_index(
+	void *memtable,
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end,
+	unsigned long index
+	) INLINE_ATTRS;
+INLINE_DECL void *INLINE_ATTRS memtable_index(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -233,7 +270,14 @@ static inline void *memtable_index(
 	((t*) memtable_index((m), sizeof(t), (range), (addr_begin), (addr_end), (index)))
 
 /* Get a pointer to the entry for address addr. */
-static inline void *memtable_addr(
+INLINE_DECL void *memtable_addr(
+	void *memtable,
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end,
+	const void *addr
+	) INLINE_ATTRS;
+INLINE_DECL void *INLINE_ATTRS memtable_addr(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -250,7 +294,14 @@ static inline void *memtable_addr(
 
 /* The inverse of memtable_addr: given a pointer into the table, get the pointer
  * to the base of the region to which the pointed-at entry corresponds. */
-static inline void *memtable_entry_range_base(
+INLINE_DECL void *memtable_entry_range_base(
+	void *memtable,
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end, 
+	const void *memtable_entry_ptr
+) INLINE_ATTRS;
+INLINE_DECL void *INLINE_ATTRS memtable_entry_range_base(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -273,7 +324,14 @@ static inline void *memtable_entry_range_base(
 
 /* For an address, get the base address of the region that it belongs to,
  * where a region is the memory covered by exactly one memtable entry. */
-static inline void *memtable_addr_range_base(
+INLINE_DECL void *memtable_addr_range_base(
+	void *memtable,
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end, 
+	const void *addr
+) INLINE_ATTRS;
+INLINE_DECL void *INLINE_ATTRS memtable_addr_range_base(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -281,8 +339,7 @@ static inline void *memtable_addr_range_base(
 	const void *addr
 )
 {
-	/* For robustness / testing, express in terms of previous two functions. 
-	 * Should compile with -O2 or -O3 to get good code! */
+	/* For robustness / testing, express in terms of previous two functions. */
 	return memtable_entry_range_base(
 			memtable, entry_size_in_bytes, entry_coverage_in_bytes,
 			addr_begin, addr_end,
@@ -297,7 +354,13 @@ static inline void *memtable_addr_range_base(
 		(addr))
 
 /* Like above, but get the offset. */
-static inline ptrdiff_t memtable_addr_range_offset(
+INLINE_DECL ptrdiff_t memtable_addr_range_offset(
+	void *memtable,
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end, 
+	const void *addr) INLINE_ATTRS;
+INLINE_DECL ptrdiff_t INLINE_ATTRS memtable_addr_range_offset(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -313,7 +376,11 @@ static inline ptrdiff_t memtable_addr_range_offset(
 		(addr))
 
 /* Delete a memtable. */
-static inline int memtable_free(void *memtable, 
+INLINE_DECL int memtable_free(void *memtable, 
+ 	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
+INLINE_DECL int INLINE_ATTRS memtable_free(void *memtable, 
  	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -327,7 +394,11 @@ static inline int memtable_free(void *memtable,
 
 /* Print memory usage statistics for this memtable. We get 
  * these by reading from /proc/$PID/smaps */
-static inline void print_memtable_stats(void *memtable, 
+INLINE_DECL void print_memtable_stats(void *memtable, 
+ 	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
+INLINE_DECL void INLINE_ATTRS print_memtable_stats(void *memtable, 
  	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -360,5 +431,8 @@ static inline void print_memtable_stats(void *memtable,
 #if defined(__cplusplus) || defined(c_plusplus)
 } /* end extern "C" */
 #endif
+
+#undef INLINE_DECL
+#undef INLINE_ATTRS
 
 #endif

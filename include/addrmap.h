@@ -80,7 +80,7 @@ void *sbrk(intptr_t incr);
 extern void *__curbrk;
 #define CUR_BRK __curbrk
 // #define CUR_BRK (sbrk(0))
-static inline 
+extern inline 
 enum object_memory_kind 
 (__attribute__((always_inline,gnu_inline)) get_object_memory_kind)(const void *obj)
 {

@@ -38,17 +38,17 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
 // keep these close, keep them fast
-uintptr_t page_size __attribute__((visibility("protected")));
-uintptr_t log_page_size __attribute__((visibility("protected")));
-uintptr_t page_mask __attribute__((visibility("protected")));
+uintptr_t page_size __attribute__((visibility("hidden")));
+uintptr_t log_page_size __attribute__((visibility("hidden")));
+uintptr_t page_mask __attribute__((visibility("hidden")));
 
-int __liballocs_debug_level;
-_Bool __liballocs_is_initialized;
-allocsmt_entry_type *__liballocs_allocsmt;
+int __liballocs_debug_level __attribute__((visibility("hidden")));
+_Bool __liballocs_is_initialized __attribute__((visibility("protected")));
+allocsmt_entry_type *__liballocs_allocsmt __attribute__((visibility("hidden")));
 
 // these two are defined in addrmap.h as weak
-void *__addrmap_executable_end_addr;
-unsigned long __addrmap_max_stack_size;
+void *__addrmap_executable_end_addr __attribute__((visibility("protected")));;
+unsigned long __addrmap_max_stack_size __attribute__((visibility("protected")));;
 
 // helper
 static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typestr);
@@ -565,7 +565,7 @@ static void consider_blacklisting(const void *obj)
 #endif
 }
 
-static void *main_bp; // beginning of main's stack frame
+void *main_bp __attribute__((visibility("hidden"))); // beginning of main's stack frame
 
 const struct uniqtype *__liballocs_uniqtype_void; // remember the location of the void uniqtype
 const struct uniqtype *__liballocs_uniqtype_signed_char;
@@ -591,19 +591,23 @@ unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 static void print_exit_summary(void)
 {
-	fprintf(stderr, "====================================================\n");
-	fprintf(stderr, "liballocs summary: \n");
-	fprintf(stderr, "----------------------------------------------------\n");
-	fprintf(stderr, "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
-	fprintf(stderr, "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
-	fprintf(stderr, "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
-	fprintf(stderr, "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);
-	fprintf(stderr, "----------------------------------------------------\n");
-	fprintf(stderr, "queries aborted for unindexed heap:        % 9ld\n", __liballocs_aborted_unindexed_heap);
-	fprintf(stderr, "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
-	fprintf(stderr, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
-	fprintf(stderr, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
-	fprintf(stderr, "====================================================\n");
+	if (__liballocs_aborted_unknown_storage + __liballocs_hit_static_case + __liballocs_hit_stack_case
+			 + __liballocs_hit_heap_case > 0)
+	{
+		fprintf(stderr, "====================================================\n");
+		fprintf(stderr, "liballocs summary: \n");
+		fprintf(stderr, "----------------------------------------------------\n");
+		fprintf(stderr, "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
+		fprintf(stderr, "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
+		fprintf(stderr, "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
+		fprintf(stderr, "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);
+		fprintf(stderr, "----------------------------------------------------\n");
+		fprintf(stderr, "queries aborted for unindexed heap:        % 9ld\n", __liballocs_aborted_unindexed_heap);
+		fprintf(stderr, "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
+		fprintf(stderr, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
+		fprintf(stderr, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
+		fprintf(stderr, "====================================================\n");
+	}
 	
 	if (getenv("LIBALLOCS_DUMP_SMAPS_AT_EXIT"))
 	{
@@ -892,358 +896,3 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 }
 
 //static inline 
-_Bool 
-//(__attribute__((always_inline,gnu_inline)) 
-__liballocs_get_alloc_info
-	(const void *obj, 
-	const void *test_uniqtype, 
-	const char **out_reason,
-	const void **out_reason_ptr,
-	memory_kind *out_memory_kind,
-	const void **out_object_start,
-	unsigned *out_block_element_count,
-	struct uniqtype **out_alloc_uniqtype, 
-	const void **out_alloc_site,
-	signed *out_target_offset_within_uniqtype)
-{
-	int modulo; 
-	signed target_offset_wholeblock;
-	signed target_offset_within_uniqtype;
-
-	memory_kind k = get_object_memory_kind(obj);
-	if (__builtin_expect(k == UNKNOWN, 0))
-	{
-		k = prefix_tree_get_memory_kind(obj);
-		if (__builtin_expect(k == UNKNOWN, 0))
-		{
-			// still unknown? we have one last trick, if not blacklisted
-			_Bool blacklisted = check_blacklist(obj);
-			if (!blacklisted)
-			{
-				prefix_tree_add_missing_maps();
-				k = prefix_tree_get_memory_kind(obj);
-				if (k == UNKNOWN)
-				{
-					prefix_tree_print_all_to_stderr();
-					// completely wild pointer or kernel pointer
-					debug_printf(1, "liballocs saw wild pointer %p from caller %p\n", obj,
-						__builtin_return_address(0));
-					consider_blacklisting(obj);
-				}
-			}
-		}
-	}
-	*out_alloc_site = 0; // will likely get updated later
-	*out_memory_kind = k;
-	switch(k)
-	{
-		case STACK:
-		{
-			++__liballocs_hit_stack_case;
-#define BEGINNING_OF_STACK (STACK_BEGIN - 1)
-			// we want to walk a sequence of vaddrs!
-			// how do we know which is the one we want?
-			// we can get a uniqtype for each one, including maximum posoff and negoff
-			// -- yes, use those
-			// begin pasted-then-edited from stack.cpp in pmirror
-			/* We declare all our variables up front, in the hope that we can rely on
-			 * the stack pointer not moving between getcontext and the sanity check.
-			 * FIXME: better would be to write this function in C90 and compile with
-			 * special flags. */
-			unw_cursor_t cursor, saved_cursor, prev_saved_cursor;
-			unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0, callee_ip;
-			int unw_ret;
-			unw_context_t unw_context;
-
-			unw_ret = unw_getcontext(&unw_context);
-			unw_init_local(&cursor, /*this->unw_as,*/ &unw_context);
-
-			unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp);
-#ifndef NDEBUG
-			unw_word_t check_higherframe_sp;
-			// sanity check
-#ifdef UNW_TARGET_X86
-			__asm__ ("movl %%esp, %0\n" :"=r"(check_higherframe_sp));
-#else // assume X86_64 for now
-			__asm__("movq %%rsp, %0\n" : "=r"(check_higherframe_sp));
-#endif
-			assert(check_higherframe_sp == higherframe_sp);
-#endif
-			unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
-
-			int step_ret;
-			_Bool at_or_above_main = 0;
-			do
-			{
-				callee_ip = ip;
-				prev_saved_cursor = saved_cursor;	// prev_saved_cursor is the cursor into the callee's frame 
-													// FIXME: will be garbage if callee_ip == 0
-				saved_cursor = cursor; // saved_cursor is the *current* frame's cursor
-					// and cursor, later, becomes the *next* (i.e. caller) frame's cursor
-
-				/* First get the ip, sp and symname of the current stack frame. */
-				unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(unw_ret == 0);
-				unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(unw_ret == 0); // sp = higherframe_sp
-				// try to get the bp, but no problem if we don't
-				unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); 
-				_Bool got_bp = (unw_ret == 0);
-				_Bool got_higherframe_bp = 0;
-				/* Also do a test about whether we're in main, above which we want to
-				 * tolerate unwind failures more gracefully.
-				 */
-				char proc_name_buf[100];
-				unw_word_t byte_offset_from_proc_start;
-				at_or_above_main |= 
-					(
-						(got_bp && bp >= (intptr_t) main_bp)
-					 || (sp >= (intptr_t) main_bp) // NOTE: this misses the in-main case
-					);
-
-				/* Now get the sp of the next higher stack frame, 
-				 * i.e. the bp of the current frame. NOTE: we're still
-				 * processing the stack frame ending at sp, but we
-				 * hoist the unw_step call to here so that we can get
-				 * the *bp* of the current frame a.k.a. the caller's bp 
-				 * (without demanding that libunwind provides bp, e.g. 
-				 * for code compiled with -fomit-frame-pointer). 
-				 * This means "cursor" is no longer current -- use 
-				 * saved_cursor for the remainder of this iteration!
-				 * saved_cursor points to the deeper stack frame. */
-				int step_ret = unw_step(&cursor);
-				if (step_ret > 0)
-				{
-					unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp); assert(unw_ret == 0);
-					// assert that for non-top-end frames, BP --> saved-SP relation holds
-					// FIXME: hard-codes calling convention info
-					if (got_bp && !at_or_above_main && higherframe_sp != bp + 2 * sizeof (void*))
-					{
-						// debug_printf(2, "Saw frame boundary with unusual sp/bp relation (higherframe_sp=%p, bp=%p != higherframe_sp + 2*sizeof(void*))", 
-						// 	higherframe_sp, bp);
-					}
-					unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
-					// try to get the bp, but no problem if we don't
-					unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &higherframe_bp); 
-					got_higherframe_bp = (unw_ret == 0) && higherframe_bp != 0;
-				}
-				/* NOTE that -UNW_EBADREG happens near the top of the stack where 
-				 * unwind info gets patchy, so we should handle it mostly like the 
-				 * BEGINNING_OF_STACK case if so... but only if we're at or above main
-				 * (and anyway, we *should* have that unwind info, damnit!).
-				 */
-				else if (step_ret == 0 || (at_or_above_main && step_ret == -UNW_EBADREG))
-				{
-					higherframe_sp = BEGINNING_OF_STACK;
-					higherframe_bp = BEGINNING_OF_STACK;
-					got_higherframe_bp = 1;
-					higherframe_ip = 0x0;
-				}
-				else
-				{
-					// return value <1 means error
-
-					*out_reason = "stack walk step failure";
-					goto abort_stack;
-					break;
-				}
-				
-				// useful variables at this point: sp, ip, got_bp && bp, 
-				// higherframe_sp, higherframe_ip, 
-				// callee_ip
-
-				// now do the stuff
-				
-				/* NOTE: here we are doing one vaddr_to_uniqtype per frame.
-				 * Can we optimise this, by ruling out some frames just by
-				 * their bounding sps? YES, I'm sure we can. FIXME: do this!
-				 * The difficulty is in the fact that frame offsets can be
-				 * negative, i.e. arguments exist somewhere in the parent
-				 * frame. */
-				// 0. if our target address is greater than higherframe_bp, continue
-				if (got_higherframe_bp && (uintptr_t) obj > higherframe_bp)
-				{
-					continue;
-				}
-				
-				// (if our target address is *lower* than sp, we'll abandon the walk, below)
-				
-				// 1. get the frame uniqtype for frame_ip
-				struct uniqtype *frame_desc = vaddr_to_uniqtype((void *) ip);
-				if (!frame_desc)
-				{
-					// no frame descriptor for this frame; that's okay!
-					// e.g. our liballocs frames should (normally) have no descriptor
-					continue;
-				}
-				// 2. what's the frame base? it's the higherframe stack pointer
-				unsigned char *frame_base = (unsigned char *) higherframe_sp;
-				// 3. is our candidate addr between frame-base - negoff and frame_base + posoff?
-				if ((unsigned char *) obj >= frame_base - frame_desc->neg_maxoff  // is unsigned, so subtract
-					&& (unsigned char *) obj < frame_base + frame_desc->pos_maxoff)
-				{
-					*out_object_start = frame_base;
-					*out_alloc_uniqtype = frame_desc;
-					*out_alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
-					goto out_success;
-				}
-				else
-				{
-					// have we gone too far? we are going upwards in memory...
-					// ... so if our lowest addr is still too high
-					if (frame_base - frame_desc->neg_maxoff > (unsigned char *) obj)
-					{
-						*out_reason = "stack walk reached higher frame";
-						goto abort_stack;
-					}
-				}
-
-				assert(step_ret > 0 || higherframe_sp == BEGINNING_OF_STACK);
-			} while (higherframe_sp != BEGINNING_OF_STACK);
-			// if we hit the termination condition, we've failed
-			if (higherframe_sp == BEGINNING_OF_STACK)
-			{
-				*out_reason = "stack walk reached top-of-stack";
-				goto abort_stack;
-			}
-		#undef BEGINNING_OF_STACK
-		// end pasted from pmirror stack.cpp
-		break; // end case STACK
-		abort_stack:
-			if (!*out_reason) *out_reason = "stack object";
-			*out_reason_ptr = obj;
-			++__liballocs_aborted_stack;
-			return 1;
-		} // end case STACK
-		case HEAP:
-		{
-			++__liballocs_hit_heap_case;
-			/* For heap allocations, we look up the allocation site.
-			 * (This also yields an offset within a toplevel object.)
-			 * Then we translate the allocation site to a uniqtypes rec location.
-			 * (For direct calls in eagerly-loaded code, we can cache this information
-			 * within uniqtypes itself. How? Make uniqtypes include a hash table with
-			 * initial contents mapping allocsites to uniqtype recs. This hash table
-			 * is initialized during load, but can be extended as new allocsites
-			 * are discovered, e.g. indirect ones.)
-			 */
-			struct suballocated_chunk_rec *containing_suballoc = NULL;
-			size_t alloc_chunksize;
-			struct insert *heap_info = lookup_object_info(obj, (void**) out_object_start, 
-					&alloc_chunksize, &containing_suballoc);
-			if (!heap_info)
-			{
-				*out_reason = "unindexed heap object";
-				*out_reason_ptr = obj;
-				++__liballocs_aborted_unindexed_heap;
-				return 1;
-			}
-			assert(get_object_memory_kind(heap_info) == HEAP
-				|| get_object_memory_kind(heap_info) == UNKNOWN); // might not have seen that maps yet
-			assert(
-				prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC
-				|| (prefix_tree_add_missing_maps(),
-					 prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC));
-
-			/* Now we have a uniqtype or an allocsite. For long-lived objects 
-			 * the uniqtype will have been installed in the heap header already.
-			 */
-			struct uniqtype *alloc_uniqtype;
-			if (__builtin_expect(heap_info->alloc_site_flag, 1))
-			{
-				*out_alloc_site = NULL;
-				alloc_uniqtype = (void*)(uintptr_t)heap_info->alloc_site;
-				*out_alloc_uniqtype = alloc_uniqtype;
-				*out_block_element_count = (alloc_chunksize - sizeof (struct insert)) / alloc_uniqtype->pos_maxoff;
-			}
-			else
-			{
-				/* Look up the allocsite's uniqtype, and install it in the heap info 
-				 * (on NDEBUG builds only, because it reduces debuggability a bit). */
-				void *alloc_site = (void*)(uintptr_t)heap_info->alloc_site;
-				*out_alloc_site = alloc_site;
-				alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
-				*out_alloc_uniqtype = alloc_uniqtype;
-				if (!alloc_uniqtype) 
-				{
-					*out_reason = "unrecognised allocsite";
-					*out_reason_ptr = alloc_site;
-					++__liballocs_aborted_unrecognised_allocsite;
-					return 1;
-				}
-				// else it's the "normal case
-				*out_block_element_count = (alloc_chunksize - sizeof (struct insert)) / alloc_uniqtype->pos_maxoff;
-#ifdef NDEBUG
-				// install it for future lookups
-				// FIXME: make this atomic using a union
-				heap_info->alloc_site_flag = 1;
-				heap_info->alloc_site = (uintptr_t) *out_alloc_uniqtype;
-#endif
-			}
-
-			/* FIXME: scrounge in-heap header bits for next/prev and allocsite as follows:
-			 *    on 32-bit x86, exploit that code is not loaded in top half of AS;
-			 *    on 64-bit x86, exploit that certain bits of an addr are always 0. 
-			 */
-			 
-			unsigned header_size = sizeof (struct insert);
-			*out_block_element_count = (alloc_chunksize - header_size) / (*out_alloc_uniqtype)->pos_maxoff;
-			//__liballocs_private_assert(chunk_size % alloc_uniqtype->pos_maxoff == 0,
-			//	"chunk size should be multiple of element size", __FILE__, __LINE__, __func__);
-			break;
-		}
-		case STATIC:
-		{
-			++__liballocs_hit_static_case;
-//			/* We use a blacklist to rule out static addrs that map to things like 
-//			 * mmap()'d regions (which we never have typeinfo for)
-//			 * or uninstrumented libraries (which we happen not to have typeinfo for). */
-//			_Bool blacklisted = check_blacklist(obj);
-//			if (blacklisted)
-//			{
-//				// FIXME: record blacklist hits separately
-//				reason = "unrecognised static object";
-//				reason_ptr = obj;
-//				++__liballocs_aborted_static;
-//				goto abort;
-//			}
-			*out_alloc_uniqtype = static_addr_to_uniqtype(obj, (void**) out_object_start);
-			if (!*out_alloc_uniqtype)
-			{
-				*out_reason = "unrecognised static object";
-				*out_reason_ptr = obj;
-				++__liballocs_aborted_static;
-//				consider_blacklisting(obj);
-				return 1;
-			}
-			// else we can go ahead
-			*out_alloc_site = *out_object_start;
-			break;
-		}
-		case UNKNOWN:
-		case MAPPED_FILE:
-		default:
-		{
-			*out_reason = "object of unknown storage";
-			*out_reason_ptr = obj;
-			++__liballocs_aborted_unknown_storage;
-			return 1;
-		}
-	}
-	
-out_success:
-	target_offset_wholeblock = (char*) obj - (char*) *out_object_start;
-	/* If we're searching in a heap array, we need to take the offset modulo the 
-	 * element size. Otherwise just take the whole-block offset. */
-	if (k == HEAP && 
-			(*out_alloc_uniqtype)->pos_maxoff != 0 
-			&& (*out_alloc_uniqtype)->neg_maxoff == 0)
-	{
-		target_offset_within_uniqtype = target_offset_wholeblock % (*out_alloc_uniqtype)->pos_maxoff;
-	} else target_offset_within_uniqtype = target_offset_wholeblock;
-	// assert that the signs are the same
-	assert(target_offset_wholeblock < 0 
-		? target_offset_within_uniqtype < 0 
-		: target_offset_within_uniqtype >= 0);
-	*out_target_offset_within_uniqtype = target_offset_within_uniqtype;
-	
-	return 0;
-}

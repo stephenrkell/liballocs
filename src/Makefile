@@ -2,23 +2,41 @@ THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 SRCROOT := $(dir $(THIS_MAKEFILE))/..
 MALLOC_HOOKS ?= ../../libmallochooks.hg
 
-CFLAGS += -std=gnu99 -g -I../include
-CFLAGS += -I$(SRCROOT)/include
+#HOOKS_OBJS :=  malloc_hooks_preload.o heap_index_hooks.o
+#HOOKS_OBJS :=  malloc_hooks_preload_fast.o heap_index_hooks_fast.o
+# HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
+# object. It complains about __next_malloc_hook et al being undefined, even though
+# we --defsym'd them and they are clearly defined in the .o file.
+# So don't use that rule. We use the preprocessor (above) to define __next_hook_*.
+
+HOOKS_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_preload_fast.o event_hooks_fast.o
+#HOOKS_OBJS := heap_index_hooks.o malloc_hook_stubs_preload.o event_hooks.o
+
+CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include
+#DEFAULT_EXTRA_CFLAGS := -fPIC -flto -O4 #-DNDEBUG
+DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -finline-functions
 
 default: liballocs_preload.so liballocs_preload.a liballocs_noop.so liballocs_noop.o liballocs.a
 
-NON_FAST_CFLAGS += -DTRACE_DEEP_HEAP_INDEX -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX -fPIC
-FAST_CFLAGS += -DNDEBUG -fpic -flto -O4
+NON_FAST_CFLAGS += -fPIC #-DTRACE_DEEP_HEAP_INDEX -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX
+FAST_CFLAGS += -fpic -flto -O4 #-DNDEBUG
+
+# regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
+LDFLAGS += -Wl,-O2 -flto -fPIC
 
 BUILD_MALLOC_HOOKS := event
 MALLOC_HOOKS_METHOD := preload
+event_hooks.o event_hooks_fast.o: CFLAGS += -D__next_hook_init=__terminal_hook_init \
+-D__next_hook_malloc=__terminal_hook_malloc \
+-D__next_hook_free=__terminal_hook_free \
+-D__next_hook_realloc=__terminal_hook_realloc \
+-D__next_hook_memalign=__terminal_hook_memalign 
 $(warning CFLAGS is $(CFLAGS))
 include $(MALLOC_HOOKS)/Makerules
 
 CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
 
 C_SRC := $(wildcard *.c)
-CC_SRC := $(wildcard *.cc)
 
 # Don't use allocscc to compile liballocs!
 # if CC is allocscc, unset it
@@ -27,18 +45,25 @@ export CC := cc
 endif
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
-C_SRC += fake-libunwind.c
 FAKE_LIBUNWIND_OBJ := fake-libunwind.o
 CFLAGS += -DUSE_FAKE_LIBUNWIND -fno-omit-frame-pointer
 LIBUNWIND_LDLIBS :=
 else
+FAKE_UNWIND_OBJ :=
 LIBUNWIND_LDLIBS := -lunwind -lunwind-`uname -m` 
 endif
 
-C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
-CC_DEPS := $(patsubst %.cc,.%.d,$(CC_SRC))
+UTIL_OBJS := l0index.o maps.o addrmap.o
+MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ)
+MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS)
+PRELOAD_OBJS := preload.o
+# HOOKS_OBJS is defined at the top
 
-DEPS := $(C_DEPS) $(CC_DEPS)
+# build src backwards 
+C_SRC := $(patsubst %.o,%.c,$(MAIN_OBJS) $(PRELOAD_OBJS) $(HOOKS_OBJS) liballocs_nomemtable.o)
+C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
+
+DEPS := $(C_DEPS)
 
 $(C_DEPS): .%.d : %.c
 	$(CC) -MM $(CFLAGS) "$<"  > "$@"
@@ -47,20 +72,13 @@ $(CC_DEPS): .%.d : %.cc
 
 -include $(DEPS)
 
-UTIL_OBJS := l0index.o maps.o addrmap.o
-MAIN_OBJS := liballocs.o $(UTIL_OBJS)
-MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS)
-PRELOAD_OBJS := preload.o
-#MALLOC_HOOKS_OBJ := malloc_hooks_preload_fast.o 
-MALLOC_HOOKS_OBJ := malloc_hooks_preload.o 
-HOOKS_OBJS := $(MALLOC_HOOKS_OBJ) heap_index_hooks.o
+%_fast.c: %.c
+	cp "$<" "$@"
 
-$(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC # hooks have either fpic or fPIC
-ifeq ($(MALLOC_HOOKS_OBJ),malloc_hooks_preload_fast.o)
-heap_index_hooks.o: CFLAGS += $(FAST_CFLAGS)
-else
+$(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += $(DEFAULT_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+.SECONDARY: heap_index_hooks_fast.c
+heap_index_hooks_fast.o: CFLAGS += $(FAST_CFLAGS)
 heap_index_hooks.o: CFLAGS += $(NON_FAST_CFLAGS)
-endif
 
 # HACK override the rule for *.c -> *.o as a possible fix for debug info non-findy (does it work?)
 %.o: %.c

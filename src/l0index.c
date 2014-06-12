@@ -57,7 +57,7 @@ struct mapping mappings[NMAPPINGS]; // NOTE: we *don't* use mappings[0]; the 0 b
 		} \
 	} while (0)
 	
-mapping_num_t *l0index __attribute__((visibility("protected")));
+mapping_num_t *l0index __attribute__((visibility("hidden")));
 
 static void memset_mapping(mapping_num_t *begin, mapping_num_t num, size_t n)
 {
@@ -103,13 +103,13 @@ static const void *addr_of_pagenum(uintptr_t pagenum)
 	return (const void *) (pagenum << LOG_PAGE_SIZE);
 }
 
-_Bool insert_equal(struct insert *p_ins1, struct insert *p_ins2)
+_Bool __attribute__((visibility("hidden"))) insert_equal(struct insert *p_ins1, struct insert *p_ins2)
 {
 	return p_ins1->alloc_site_flag == p_ins2->alloc_site_flag &&
 		p_ins1->alloc_site == p_ins2->alloc_site;
 		// don't compare prev/next, at least not for now
 }
-_Bool node_info_equal(struct node_info *p_info1, struct node_info *p_info2)
+_Bool __attribute__((visibility("hidden"))) node_info_equal(struct node_info *p_info1, struct node_info *p_info2)
 {
 	return p_info1->what == p_info2->what && 
 	(p_info1->what == DATA_PTR ? p_info1->un.data_ptr == p_info2->un.data_ptr
@@ -376,6 +376,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	return NULL;
 }
 
+struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr) __attribute__((visibility("hidden")));
 struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr)
 {
 	if (!l0index) init();
@@ -387,6 +388,7 @@ struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, co
 	return prefix_tree_add_full(base, s, kind, &info);
 }
 
+void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *data_ptr) __attribute__((visibility("hidden")));
 void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *data_ptr)
 {
 	int lock_ret;
@@ -439,8 +441,8 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 	BIG_UNLOCK
 }
 
-int 
-prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end)
+int prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end)__attribute__((visibility("hidden")));
+int prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -450,6 +452,7 @@ prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end)
 	return ret;
 }
 
+struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *p_arg) __attribute__((visibility("hidden")));
 struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *p_arg)
 {
 	int lock_ret;
@@ -517,6 +520,7 @@ static struct mapping *split_mapping(struct mapping *m, void *split_addr)
 	return new_m;
 }
 
+void prefix_tree_del_node(struct prefix_tree_node *n) __attribute__((visibility("hidden")));
 void prefix_tree_del_node(struct prefix_tree_node *n)
 {
 	int lock_ret;
@@ -533,6 +537,7 @@ void prefix_tree_del_node(struct prefix_tree_node *n)
 	BIG_UNLOCK
 }
 
+void prefix_tree_del(void *base, size_t s) __attribute__((visibility("hidden")));
 void prefix_tree_del(void *base, size_t s)
 {
 	int lock_ret;
@@ -657,6 +662,7 @@ void prefix_tree_del(void *base, size_t s)
 	BIG_UNLOCK
 }
 
+enum object_memory_kind prefix_tree_get_memory_kind(const void *obj) __attribute__((visibility("hidden")));
 enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
 {
 	if (!l0index) init();
@@ -666,6 +672,7 @@ enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
 	else return mappings[mapping_num].n.kind;
 }
 
+void prefix_tree_print_all_to_stderr(void) __attribute__((visibility("hidden")));
 void prefix_tree_print_all_to_stderr(void)
 {
 	int lock_ret;
@@ -683,6 +690,8 @@ void prefix_tree_print_all_to_stderr(void)
 	BIG_UNLOCK
 }
 struct prefix_tree_node *
+prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr) __attribute__((visibility("hidden")));
+struct prefix_tree_node * 
 prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr)
 {
 	int lock_ret;
@@ -701,6 +710,8 @@ prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_p
 
 size_t
 prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
+		size_t out_size, void *begin, void *end) __attribute__((visibility("hidden")));
+size_t prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
 		size_t out_size, void *begin, void *end)
 {
 	int lock_ret;
@@ -729,6 +740,8 @@ prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin,
 }
 
 struct prefix_tree_node *
+prefix_tree_bounds(const void *ptr, const void **out_begin, const void **out_end) __attribute__((visibility("hidden")));
+struct prefix_tree_node *
 prefix_tree_bounds(const void *ptr, const void **out_begin, const void **out_end)
 {
 	int lock_ret;
@@ -749,6 +762,7 @@ prefix_tree_bounds(const void *ptr, const void **out_begin, const void **out_end
 	return ret;
 }
 
+void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller) __attribute__((visibility("hidden")));
 void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 {
 	/* We get called from heap_index when the malloc'd address is a multiple of the 
@@ -903,6 +917,7 @@ static unsigned unindex_l0_one_mapping(struct prefix_tree_node *n, const void *l
 	return (char*) upper - (char*) lower;
 }
 
+unsigned __unindex_l0(const void *mem) __attribute__((visibility("hidden")));
 unsigned __unindex_l0(const void *mem)
 {
 	int lock_ret;
@@ -933,6 +948,7 @@ unsigned __unindex_l0(const void *mem)
 	return total_size_unindexed;
 }
 
+struct insert *__lookup_l0(const void *mem, void **out_object_start) __attribute__((visibility("hidden")));
 struct insert *__lookup_l0(const void *mem, void **out_object_start)
 {
 	int lock_ret;

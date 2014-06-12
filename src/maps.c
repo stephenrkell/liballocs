@@ -10,7 +10,7 @@
 #include <link.h>
 #include "liballocs_private.h"
 
-_Bool initialized_maps __attribute__((visibility("protected")));
+_Bool initialized_maps __attribute__((visibility("hidden")));
 
 void init_prefix_tree_from_maps(void)
 {
