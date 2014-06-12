@@ -19,18 +19,26 @@ struct insert;
 #define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
 #define MINIMUM_USER_ADDRESS  ((char*)0x400000) /* FIXME: less {x86-64,GNU/Linux}-specific please */
 #define MAX_SUBALLOCATED_CHUNKS ((unsigned long) MINIMUM_USER_ADDRESS)
+/* Inserts describing objects have user addresses. They may have the flag set or unset. */
 #define INSERT_DESCRIBES_OBJECT(ins) \
-	((char*)((uintptr_t)(ins)->alloc_site) >= MINIMUM_USER_ADDRESS)
+	(!((ins)->alloc_site) || (char*)((uintptr_t)(ins)->alloc_site) >= MINIMUM_USER_ADDRESS)
+/* Inserts describing chained suballocated regions have non-user addresses
+ * and the flag *unset*. (If they have the flag set, they're continuation records.) */
 #define INSERT_IS_SUBALLOC_CHAIN(ins) \
-	(!(INSERT_DESCRIBES_OBJECT(ins)))
+	(!(INSERT_DESCRIBES_OBJECT(ins)) && !(ins)->alloc_site_flag)
 /* For ALLOC_IS_SUBALLOCATED, we try to check that `ptr' and `ins' are 
  * well-matched, i.e. ins is the physical l0 or l1 insert for the chunk
  * overlapping ptr. This is easy in the l1 case, but hard in the l0 case
  * since we don't implement the l0 index here. We have to call out to
  * __lookup_l0 to test this. */
 static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins);
+/* Terminators must have the alloc_site and the flag both unset. */
+#define INSERT_IS_TERMINATOR(p_ins) (!(p_ins)->alloc_site && !(p_ins)->alloc_site_flag)
 
-#define IS_CONTINUATION_REC(ins) ((char*)((uintptr_t)(ins)->alloc_site) < MINIMUM_USER_ADDRESS && (ins)->alloc_site_flag)
+/* Continuation records have the flag set and a non-user-address (actually the object
+ * size) in the alloc_site. */
+#define IS_CONTINUATION_REC(ins) \
+	(!(INSERT_DESCRIBES_OBJECT(ins)) && (ins)->alloc_site_flag)
 #define MODULUS_OF_INSERT(ins) ((ins)->un.bits & 0xff)
 #define THISBUCKET_SIZE_OF_INSERT(ins) (((ins)->un.bits >> 8) == 0 ? 256 : ((ins)->un.bits >> 8))
 
@@ -87,7 +95,9 @@ struct suballocated_chunk_rec
 int  __index_deep_alloc(void *ptr, int level, unsigned size_bytes) __attribute__((weak));
 void __unindex_deep_alloc(void *ptr, int level) __attribute__((weak));
 
-struct insert *lookup_object_info(const void *mem, void **out_object_start, size_t *out_object_size, struct suballocated_chunk_rec **out_containing_chunk) __attribute__((weak));
+struct insert *lookup_object_info(const void *mem, 
+		void **out_object_start, size_t *out_object_size, 
+		struct suballocated_chunk_rec **out_containing_chunk) __attribute__((weak));
 
 void *__try_index_l0(const void *, size_t modified_size, const void *caller) __attribute__((weak));
 struct insert *__lookup_l0(const void *mem, void **out_object_start) __attribute__((weak));
@@ -97,7 +107,7 @@ static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins)
 	bool is_l0 = __lookup_l0 && __lookup_l0(ptr, NULL) == ins;
 	bool is_sane_l01 = is_l0 || ((char*)(ins) - (char*)(ptr) >= 0
 			&& (char*)(ins) - (char*)(ptr) < BIGGEST_SENSIBLE_OBJECT);
-	return is_sane_l01 && ((char*)((uintptr_t)(ins)->alloc_site)) < MINIMUM_USER_ADDRESS;
+	return is_sane_l01 && INSERT_IS_SUBALLOC_CHAIN(ins);
 }
 
 /* A thread-local variable to override the "caller" arguments. 

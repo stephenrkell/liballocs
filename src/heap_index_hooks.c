@@ -42,6 +42,7 @@ static void *userptr_to_allocptr(void *allocptr);
 #define ALLOCPTR_TO_USERPTR(p) (allocptr_to_userptr(p))
 #define USERPTR_TO_ALLOCPTR(p) (userptr_to_allocptr(p))
 
+#define ALLOC_EVENT_QUALIFIERS __attribute__((visibility("hidden")))
 #include "alloc_events.h"
 #include "heap_index.h"
 
@@ -206,8 +207,8 @@ static void check_impl_sanity(void)
 
 static _Bool tried_to_init;
 
-void
-init_hook(void)
+static void
+do_init(void)
 {
 	/* Optionally delay, for attaching a debugger. */
 	if (getenv("HEAP_INDEX_DELAY_INIT")) sleep(8);
@@ -255,6 +256,11 @@ init_hook(void)
 		entry_coverage_in_bytes, index_begin_addr, index_end_addr);
 	
 	assert(index_region != MAP_FAILED);
+}
+
+void post_init(void)
+{
+	do_init();
 }
 
 static inline struct insert *insert_for_chunk(void *userptr);
@@ -366,7 +372,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
-	if (!index_region) init_hook();
+	if (!index_region) do_init();
 	assert(index_region);
 	
 	/* The address *must* be in our tracked range. Assert this. */
@@ -1032,7 +1038,6 @@ static void install_cache_entry(void *object_start,
 	 * NOT one that chains into the suballocs table. */
 	assert(INSERT_DESCRIBES_OBJECT(insert));
 	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
-	assert((char*)(uintptr_t) insert->alloc_site >= MINIMUM_USER_ADDRESS);
 	*next_to_evict = (struct lookup_cache_entry) {
 		object_start, object_size, depth, is_deepest, containing_chunk, insert
 	}; // FIXME: thread safety
@@ -1148,7 +1153,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 					lookup_cache[i].object_start, (void*) (uintptr_t) lookup_cache[i].insert->alloc_site);
 			fflush(stderr);
 #endif
-			assert((char*)(uintptr_t)(lookup_cache[i].insert->alloc_site) >= MINIMUM_USER_ADDRESS);
+			assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
 			
 			if (out_object_start) *out_object_start = lookup_cache[i].object_start;
 			if (out_containing_chunk) *out_containing_chunk = lookup_cache[i].containing_chunk;
@@ -1200,7 +1205,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 			else
 			{
 				// we still have to point the metadata at the *sub*indexed copy
-				assert((char*)(uintptr_t) found->alloc_site < MINIMUM_USER_ADDRESS);
+				assert(!INSERT_DESCRIBES_OBJECT(found));
 				found = object_insert(mem, found);
 			}
 		}
@@ -1211,7 +1216,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 		if (out_containing_chunk) *out_containing_chunk = containing_chunk_rec;
 	}
 	
-	assert(!found || (char*)(uintptr_t) found->alloc_site >= MINIMUM_USER_ADDRESS);
+	assert(!found || INSERT_DESCRIBES_OBJECT(found));
 	return found;
 }
 
@@ -1234,7 +1239,7 @@ struct insert *lookup_l01_object_info(const void *mem, void **out_object_start)
 					lookup_cache[i].object_start, (void*) (uintptr_t) real_ins->alloc_site);
 			fflush(stderr);
 #endif
-			assert((char*)(uintptr_t)(real_ins->alloc_site) >= MINIMUM_USER_ADDRESS);
+			assert(INSERT_DESCRIBES_OBJECT(real_ins));
 			
 			if (out_object_start) *out_object_start = lookup_cache[i].object_start;
 
@@ -1519,7 +1524,7 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 			
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
-	if (!index_region) init_hook();
+	if (!index_region) do_init();
 	if (!suballocated_chunks) init_suballocs();
 	
 	/* The caller will not know (currently) what level the suballoc is going in at. 
@@ -1561,7 +1566,12 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 		// invalidate_cache_entry(existing_object_start, (1u<<0)|(1u<<1), NULL, NULL);
 		cache_clear_deepest_flag_and_update_ins(existing_object_start, (1u<<0)|(1u<<1), NULL, found_ins, 1,
 			&p_rec->higherlevel_ins);
-	} else p_rec = &suballocated_chunks[(uintptr_t) found_ins->alloc_site];
+	}
+	else
+	{
+		/* This chunk already records a suballocated region. */
+		p_rec = &suballocated_chunks[(uintptr_t) found_ins->alloc_site];
+	}
 
 
 	/* Get the relevant bucket. */
@@ -1601,7 +1611,7 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 			++p_search_bucket)
 	{
 		for (struct insert *i_layer = p_search_bucket; 
-				i_layer->alloc_site; 
+				!INSERT_IS_TERMINATOR(i_layer); 
 				i_layer += INSERTS_PER_LAYER(p_rec))
 		{
 			/* Does this object overlap our allocation? */
@@ -1635,7 +1645,7 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	/* What's the first layer that's free? */
 	struct insert *p_ins = p_bucket;
 	unsigned layer_num = 0;
-	while (p_ins->alloc_site)
+	while (!INSERT_IS_TERMINATOR(p_ins))
 	{
 		p_ins += INSERTS_PER_LAYER(p_rec);
 		++layer_num;
@@ -1671,10 +1681,11 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	{
 		struct insert *p_continuation_bucket = p_bucket + 1;
 		assert(p_continuation_bucket - &p_rec->metadata_recs[0] < (uintptr_t) MINIMUM_USER_ADDRESS);
+		check_bucket_sanity(p_continuation_bucket, p_rec);
 		struct insert *p_continuation_ins = p_continuation_bucket;
 		/* Find a free slot */
 		unsigned layer_num = 0;
-		while (p_continuation_ins->alloc_site) 
+		while (!INSERT_IS_TERMINATOR(p_continuation_ins))
 		{ p_continuation_ins += INSERTS_PER_LAYER(p_rec); ++layer_num; }
 		assert(layer_num < NLAYERS(p_rec));
 		
@@ -1687,9 +1698,12 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 		assert(size_after_first_bucket != 0);
 		unsigned long size_in_continuation_bucket 
 		 = (size_after_first_bucket > BUCKET_PITCH(p_rec)) ? 0 : size_after_first_bucket;
-		
+
+		// install the continuation record
+		assert(size_bytes > 0);
+		assert(size_bytes < (uintptr_t) MINIMUM_USER_ADDRESS);
 		*p_continuation_ins = (struct insert) {
-			.alloc_site = size_bytes, // NOTE what we're doing here!
+			.alloc_site = size_bytes, // NOTE what we're doing here! the object size goes into the alloc_site field
 			.alloc_site_flag = 1,     // ditto
 			.un = { bits: (unsigned short) (size_in_continuation_bucket << 8) }  // ditto: modulus is zero, BUT size is included
 		};
@@ -1730,7 +1744,7 @@ get_start_from_continuation(struct insert *p_ins, struct insert *p_bucket, struc
 	struct insert *object_ins;
 	struct insert *biggest_modulus_pos = NULL;
 	for (struct insert *i_layer = p_object_start_bucket;
-			i_layer->alloc_site;
+			!INSERT_IS_TERMINATOR(i_layer);
 			i_layer += INSERTS_PER_LAYER(p_rec))
 	{
 		if (IS_CONTINUATION_REC(i_layer)) continue;
@@ -1764,7 +1778,7 @@ check_bucket_sanity(struct insert *p_bucket, struct suballocated_chunk_rec *p_re
 	/* Walk the bucket */
 	unsigned layer_num = 0;
 	for (struct insert *i_layer = p_bucket;
-			i_layer->alloc_site;
+			!INSERT_IS_TERMINATOR(i_layer);
 			i_layer += INSERTS_PER_LAYER(p_rec), ++layer_num)
 	{
 		// we should never need to go beyond the last layer
@@ -1816,12 +1830,12 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 {
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
-	if (!index_region) init_hook();
+	if (!index_region) do_init();
 	if (!suballocated_chunks) init_suballocs();
 	
 	assert(max_levels == 1);// i.e. we go down to l2 only
 	assert(start);
-	assert((char*)(uintptr_t) start->alloc_site < MINIMUM_USER_ADDRESS);
+	assert(INSERT_IS_SUBALLOC_CHAIN(start));
 	
 	assert(ALLOC_IS_SUBALLOCATED(ptr, start));
 	struct suballocated_chunk_rec *p_rec = &suballocated_chunks[(unsigned) start->alloc_site];
@@ -1846,7 +1860,7 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 		
 		unsigned layer_num = 0;
 		for (struct insert *p_ins = p_bucket;
-			p_ins->alloc_site;
+			!INSERT_IS_TERMINATOR(p_ins);
 			p_ins += INSERTS_PER_LAYER(p_rec), ++layer_num)
 		{
 			// we should never need to go beyond the last layer
@@ -1920,7 +1934,7 @@ static void remove_one_insert(struct insert *p_ins, struct insert *p_bucket, str
 		*replaced_ins = *p_next_layer;
 		/* Point us at the next layer to replace (i.e. if it's not null). */
 		replaced_ins = p_next_layer;
-	} while (replaced_ins->alloc_site);
+	} while (!INSERT_IS_TERMINATOR(replaced_ins));
 }
 
 static void unindex_deep_alloc_internal(void *ptr, struct insert *existing_ins, 
@@ -1935,7 +1949,7 @@ static void unindex_deep_alloc_internal(void *ptr, struct insert *existing_ins,
 	unsigned short our_modulus = MODULUS_OF_INSERT(existing_ins);
 	_Bool we_are_biggest_modulus = 1;
 	for (struct insert *i_layer = p_bucket;
-			we_are_biggest_modulus && i_layer->alloc_site;
+			we_are_biggest_modulus && !INSERT_IS_TERMINATOR(i_layer);
 			i_layer += INSERTS_PER_LAYER(p_rec))
 	{
 		we_are_biggest_modulus &= (our_modulus >= MODULUS_OF_INSERT(i_layer));
@@ -1950,7 +1964,7 @@ static void unindex_deep_alloc_internal(void *ptr, struct insert *existing_ins,
 	if (we_are_biggest_modulus)
 	{
 		for (struct insert *i_layer = p_bucket + 1;
-				i_layer->alloc_site;
+				!INSERT_IS_TERMINATOR(i_layer);
 				i_layer += INSERTS_PER_LAYER(p_rec))
 		{
 			if (IS_CONTINUATION_REC(i_layer))
@@ -1971,7 +1985,7 @@ void __unindex_deep_alloc(void *ptr, int level)
 	BIG_LOCK
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
-	if (!index_region) init_hook();
+	if (!index_region) do_init();
 	if (!suballocated_chunks) init_suballocs();
 	
 	/* Support cases where level>2. */
