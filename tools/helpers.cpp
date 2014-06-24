@@ -484,7 +484,6 @@ void get_types_by_codeless_uniqtype_name(
 	std::multimap<string, iterator_df<type_die> >& m, 
 	iterator_df<> begin, iterator_df<> end)
 {	
-		
 	/* First we look through the whole file and index its types by their *codeless*
 	 * *canonical* uniqtype name, i.e. we blank out the first element of the name pair. */
 	for (iterator_df<> i = begin; i != end; ++i)
