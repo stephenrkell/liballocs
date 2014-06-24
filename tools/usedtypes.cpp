@@ -219,11 +219,13 @@ int main(int argc, char **argv)
 				cerr << "Found multiple matches (" << found_count << ") for " << key << ": " << endl;
 				auto first_found = found_pair.first;
 				multimap<opt<uint32_t>, decltype(found_pair.first)> by_code;
-				while (found_pair.first != found_pair.second)
+				for (auto i_print = found_pair.first; i_print != found_pair.second; ++i_print)
 				{
-					auto code = type_summary_code(found_pair.first->second);
-					by_code.insert(make_pair(code, found_pair.first));
-					cerr << "\t" << (found_pair.first++)->second << " (code: " 
+					auto code = type_summary_code(i_print->second);
+					by_code.insert(make_pair(code, i_print));
+					cerr << "\t" 
+						<< i_print->second
+						<< " (code: " 
 						<< summary_code_to_string(code) 
 						<< ")" << endl;
 				}
