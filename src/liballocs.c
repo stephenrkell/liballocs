@@ -71,9 +71,9 @@ static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, voi
 
 static int print_type_cb(struct uniqtype *t, void *ignored)
 {
-	fprintf(stderr, "uniqtype addr %p, name %s, size %d bytes\n", 
+	fprintf(stream_err, "uniqtype addr %p, name %s, size %d bytes\n", 
 		t, t->name, t->pos_maxoff);
-	fflush(stderr);
+	fflush(stream_err);
 	return 0;
 }
 
@@ -256,7 +256,7 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 		return 0;
 	}
 
-	// fprintf(stderr, "liballocs: trying to open %s\n", libfile_name);
+	// fprintf(stream_err, "liballocs: trying to open %s\n", libfile_name);
 
 	dlerror();
 	void *handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL);
@@ -289,7 +289,7 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 	*((unsigned char **) &cur_ent->allocsite) += load_addr;
 
 	// debugging: print out entry
-	/* fprintf(stderr, "allocsite entry: %p, to uniqtype at %p\n", 
+	/* fprintf(stream_err, "allocsite entry: %p, to uniqtype at %p\n", 
 		cur_ent->allocsite, cur_ent->uniqtype); */
 
 	// if we've moved to a different bucket, point the table entry at us
@@ -342,7 +342,7 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 		return 0;
 	}
 
-	// fprintf(stderr, "liballocs: trying to open %s\n", libfile_name);
+	// fprintf(stream_err, "liballocs: trying to open %s\n", libfile_name);
 	dlerror();
 	void *allocsites_handle = dlopen(libfile_name, RTLD_NOW);
 	if (!allocsites_handle)
@@ -594,19 +594,19 @@ static void print_exit_summary(void)
 	if (__liballocs_aborted_unknown_storage + __liballocs_hit_static_case + __liballocs_hit_stack_case
 			 + __liballocs_hit_heap_case > 0)
 	{
-		fprintf(stderr, "====================================================\n");
-		fprintf(stderr, "liballocs summary: \n");
-		fprintf(stderr, "----------------------------------------------------\n");
-		fprintf(stderr, "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
-		fprintf(stderr, "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
-		fprintf(stderr, "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
-		fprintf(stderr, "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);
-		fprintf(stderr, "----------------------------------------------------\n");
-		fprintf(stderr, "queries aborted for unindexed heap:        % 9ld\n", __liballocs_aborted_unindexed_heap);
-		fprintf(stderr, "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
-		fprintf(stderr, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
-		fprintf(stderr, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
-		fprintf(stderr, "====================================================\n");
+		fprintf(stream_err, "====================================================\n");
+		fprintf(stream_err, "liballocs summary: \n");
+		fprintf(stream_err, "----------------------------------------------------\n");
+		fprintf(stream_err, "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
+		fprintf(stream_err, "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
+		fprintf(stream_err, "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
+		fprintf(stream_err, "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);
+		fprintf(stream_err, "----------------------------------------------------\n");
+		fprintf(stream_err, "queries aborted for unindexed heap:        % 9ld\n", __liballocs_aborted_unindexed_heap);
+		fprintf(stream_err, "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
+		fprintf(stream_err, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
+		fprintf(stream_err, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
+		fprintf(stream_err, "====================================================\n");
 	}
 	
 	if (getenv("LIBALLOCS_DUMP_SMAPS_AT_EXIT"))
@@ -618,10 +618,10 @@ static void print_exit_summary(void)
 		{
 			while (0 < (bytes = fread(buffer, 1, sizeof(buffer), smaps)))
 			{
-				fwrite(buffer, 1, bytes, stderr);
+				fwrite(buffer, 1, bytes, stream_err);
 			}
 		}
-		else fprintf(stderr, "Couldn't read from smaps!\n");
+		else fprintf(stream_err, "Couldn't read from smaps!\n");
 	}
 }
 
@@ -637,6 +637,7 @@ int __liballocs_global_init(void)
 	if (tried_to_initialize) return -1;
 	tried_to_initialize = 1;
 	
+	// grab stuff from sysconf
 	page_size = (uintptr_t) sysconf(_SC_PAGE_SIZE);
 	log_page_size = integer_log2(page_size);
 	page_mask = ~((uintptr_t) sysconf(_SC_PAGE_SIZE) - 1);
@@ -649,6 +650,20 @@ int __liballocs_global_init(void)
 	{
 		sleep(10);
 	}
+	
+	// figure out where our output goes
+	const char *errvar = getenv("LIBALLOCS_ERR");
+	if (errvar)
+	{
+		// try opening it
+		stream_err = fopen("errvar", "w");
+		if (!stream_err)
+		{
+			stream_err = stderr;
+			debug_printf(0, "could not open %s for writing\n", errvar);
+		}
+	} else stream_err = stderr;
+	assert(stream_err);
 
 	// the user can specify where we get our -types.so and -allocsites.so
 	allocsites_base = getenv("ALLOCSITES_BASE");
@@ -665,6 +680,13 @@ int __liballocs_global_init(void)
 	__addrmap_executable_end_addr = dlsym(executable_handle, "_end");
 	assert(__addrmap_executable_end_addr != 0);
 	
+	// grab the executable's basename
+	char exename[4096];
+	ssize_t readlink_ret = readlink("/proc/self/exe", exename, sizeof exename);
+	if (readlink_ret != -1)
+	{
+		exe_basename = basename(exename); // GNU basename
+	}
 	
 	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
 	assert(ret_types == 0);
@@ -713,7 +735,7 @@ int __liballocs_global_init(void)
 		// get bp, sp, ip and proc_name
 		ret = unw_get_proc_name(&cursor, buf, sizeof buf, NULL); have_name = (ret == 0 || ret == -UNW_ENOMEM);
 		buf[sizeof buf - 1] = '\0';
-		// if (have_name) fprintf(stderr, "Saw frame %s\n", buf);
+		// if (have_name) fprintf(stream_err, "Saw frame %s\n", buf);
 
 		ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(ret == 0);
 		ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(ret == 0);
@@ -762,8 +784,8 @@ int __liballocs_global_init(void)
 	}
 	assert(main_bp != 0);
 	
-	// also init the prefix tree
-	init_prefix_tree_from_maps();
+	// also init the l0 index
+	__liballocs_init_l0();
 
 	__liballocs_is_initialized = 1;
 

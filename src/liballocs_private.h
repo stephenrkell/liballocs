@@ -52,6 +52,7 @@ struct prefix_tree_node {
 	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC
 	struct node_info info;
 };
+void __liballocs_init_l0(void) __attribute__((visibility("protected")));
 struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg) __attribute__((visibility("hidden")));
 void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *arg) __attribute__((visibility("hidden")));
 struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *arg) __attribute__((visibility("hidden")));
@@ -61,20 +62,25 @@ int prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *
 size_t
 prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
 		size_t out_size, void *begin, void *end) __attribute__((visibility("hidden")));
-void init_prefix_tree_from_maps(void) __attribute__((visibility("hidden")));
-void prefix_tree_add_missing_maps(void) __attribute__((visibility("hidden")));
-enum object_memory_kind prefix_tree_get_memory_kind(const void *obj) __attribute__((visibility("hidden")));
-void prefix_tree_print_all_to_stderr(void) __attribute__((visibility("hidden")));
+// these ones are public, so use protected visibility
+void __liballocs_add_missing_maps(void) __attribute__((visibility("protected")));
+enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));;
+void __liballocs_print_mappings_to_stream_err(void) __attribute__((visibility("protected")));
+
 struct prefix_tree_node *
 prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr) __attribute__((visibility("hidden")));
 struct prefix_tree_node *
 prefix_tree_bounds(const void *ptr, const void **begin, const void **end) __attribute__((visibility("hidden")));
 int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data) __attribute__((visibility("hidden")));
-#define debug_printf(lvl, ...) do { \
+
+const char *exe_basename __attribute__((visibility("hidden")));
+FILE *stream_err __attribute__((visibility("hidden")));
+#define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \
-      warnx( __VA_ARGS__ );  \
+      fprintf(stream_err, "%s: " fmt, exe_basename, ## __VA_ARGS__ );  \
     } \
   } while (0)
+
 #ifndef NO_TLS
 extern __thread void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 #else

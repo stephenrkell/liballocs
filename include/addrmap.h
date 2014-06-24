@@ -103,7 +103,7 @@ enum object_memory_kind
 	if (__builtin_expect(&__addrmap_executable_end_addr != 0 && __addrmap_executable_end_addr != 0, 1)) 
 	{
 #endif
-		// fprintf(stderr, "obj is %p, __addrmap_executable_end_addr is %p\n", obj, __addrmap_executable_end_addr);
+		// fprintf(stream_err, "obj is %p, __addrmap_executable_end_addr is %p\n", obj, __addrmap_executable_end_addr);
 		if (__builtin_expect(addr <  (uintptr_t) __addrmap_executable_end_addr, 0)) return STATIC;
 		/* expect this to succeed, i.e. brk-delimited heap region is the common case. */
 		if (__builtin_expect(addr >=  (uintptr_t) __addrmap_executable_end_addr && addr 

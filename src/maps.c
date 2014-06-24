@@ -12,7 +12,7 @@
 
 _Bool initialized_maps __attribute__((visibility("hidden")));
 
-void init_prefix_tree_from_maps(void)
+void __liballocs_init_l0(void)
 {
 	if (!initialized_maps)
 	{
@@ -22,12 +22,12 @@ void init_prefix_tree_from_maps(void)
 		dl_iterate_phdr(__liballocs_add_all_mappings_cb, NULL);
 
 		/* Now fill in the rest from /proc. */
-		prefix_tree_add_missing_maps();
+		__liballocs_add_missing_maps();
 		initialized_maps = 1;
 	}
 }
 
-void prefix_tree_add_missing_maps(void)
+void __liballocs_add_missing_maps(void)
 {
 	#define NUM_FIELDS 11
 	unsigned long first, second;
@@ -198,9 +198,9 @@ void prefix_tree_add_missing_maps(void)
 					{
 						debug_printf(0, "a static or mapped-file mapping, kind %d, data_ptr \"%s\", overlapping %p-%p "
 								"seems to have gone away: now covered by kind %d, data_ptr \"%s\"\n",
-							overlapping[i]->kind, existing_data_ptr, 
+							overlapping[i]->kind, (const char *) existing_data_ptr, 
 							obj, (char*) obj + size, 
-							kind, data_ptr);
+							kind, (const char *) data_ptr);
 						prefix_tree_del_node(overlapping[i]);
 						continue;
 					}
@@ -210,7 +210,7 @@ void prefix_tree_add_missing_maps(void)
 					 * when we try to add this it will still cause a problem. */
 					debug_printf(0, "skipping static or mapped-file mapping (\"%s\") "
 						"overlapping %p-%p and apparently already present\n",
-						overlapping[i]->info.un.data_ptr, obj, (char*) obj + size);
+						(const char *) overlapping[i]->info.un.data_ptr, obj, (char*) obj + size);
 					goto continue_loop;
 				}
 			}

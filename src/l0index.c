@@ -558,13 +558,13 @@ void prefix_tree_del(void *base, size_t s)
 	unsigned long cur_pagenum = pagenum(base); 
 	unsigned long end_pagenum = pagenum((char*)base + s);
 	mapping_num_t mapping_num;
-	// if we get mapping num 0 at first, try again after forcing init_prefix_tree_from_maps()
+	// if we get mapping num 0 at first, try again after forcing __liballocs_init_l0()
 	do
 	{
 		/* We might span multiple mappings, because munmap() is like that. */
 		mapping_num = l0index[pagenum(base)];
 	}
-	while (mapping_num == 0 && (!initialized_maps ? (init_prefix_tree_from_maps(), 1) : 0));
+	while (mapping_num == 0 && (!initialized_maps ? (__liballocs_init_l0(), 1) : 0));
 
 	do
 	{
@@ -662,8 +662,8 @@ void prefix_tree_del(void *base, size_t s)
 	BIG_UNLOCK
 }
 
-enum object_memory_kind prefix_tree_get_memory_kind(const void *obj) __attribute__((visibility("hidden")));
-enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
+enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
+enum object_memory_kind __liballocs_get_memory_kind(const void *obj)
 {
 	if (__builtin_expect(!l0index, 0)) init();
 	if (__builtin_expect(obj == 0, 0)) return UNUSABLE;
@@ -674,8 +674,8 @@ enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
 	else return mappings[mapping_num].n.kind;
 }
 
-void prefix_tree_print_all_to_stderr(void) __attribute__((visibility("hidden")));
-void prefix_tree_print_all_to_stderr(void)
+void __liballocs_print_mappigns_to_stream_err(void) __attribute__((visibility("protected")));
+void __liballocs_print_mappings_to_stream_err(void)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -683,7 +683,7 @@ void prefix_tree_print_all_to_stderr(void)
 	if (!l0index) init();
 	for (struct mapping *m = &mappings[1]; m < &mappings[NMAPPINGS]; ++m)
 	{
-		if (MAPPING_IN_USE(m)) fprintf(stderr, "%p-%p %01d %s %s %p\n", 
+		if (MAPPING_IN_USE(m)) fprintf(stream_err, "%p-%p %01d %s %s %p\n", 
 				m->begin, m->end, m->n.kind, name_for_memory_kind(m->n.kind), 
 				m->n.info.what == DATA_PTR ? "(data ptr) " : "(insert + bits) ", 
 				m->n.info.what == DATA_PTR ? m->n.info.un.data_ptr : (void*)(uintptr_t) m->n.info.un.ins_and_bits.ins.alloc_site);
@@ -784,13 +784,13 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 			&& (uintptr_t) ptr - ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) ptr) <= MAXIMUM_MALLOC_HEADER_OVERHEAD)
 	{
 		// ensure we have this in the maps
-		enum object_memory_kind k1 = prefix_tree_get_memory_kind(ptr);
-		enum object_memory_kind k2 = prefix_tree_get_memory_kind((char*) ptr + modified_size);
+		enum object_memory_kind k1 = __liballocs_get_memory_kind(ptr);
+		enum object_memory_kind k2 = __liballocs_get_memory_kind((char*) ptr + modified_size);
 		if (k1 == UNKNOWN || k2 == UNKNOWN) 
 		{
-			prefix_tree_add_missing_maps();
-			assert(prefix_tree_get_memory_kind(ptr) != UNKNOWN);
-			assert(prefix_tree_get_memory_kind((char*) ptr + modified_size) != UNKNOWN);
+			__liballocs_add_missing_maps();
+			assert(__liballocs_get_memory_kind(ptr) != UNKNOWN);
+			assert(__liballocs_get_memory_kind((char*) ptr + modified_size) != UNKNOWN);
 		}
 		
 		/* Collect a contiguous sequence of so-far-without-insert mappings, 
@@ -881,9 +881,9 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 				size_t s = chunk_end - (char*) m->end;
 				prefix_tree_del(m->end, s);
 				debug_printf(3, "node_info is %p\n,",&m->n.info ); 
-				debug_printf(3, "We want to extend our bottom mapping number %d (%p-%p) "
+				debug_printf(3, "We want to extend our bottom mapping number %ld (%p-%p) "
 					"to include %ld bytes from %p\n", 
-					m - &mappings[0], m->begin, m->end, s, m->end); 
+					(long)(m - &mappings[0]), m->begin, m->end, s, m->end); 
 				assert(l0index[pagenum((char*) m->end - 1)] == m - &mappings[0]);
 				SANITY_CHECK_MAPPING(m);
 				struct mapping *new_m = create_or_extend_mapping(

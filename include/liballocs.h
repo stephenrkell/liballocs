@@ -11,7 +11,6 @@ typedef bool _Bool;
 #endif
 
 #include <sys/types.h>
-#include <asm/signal.h> /* HACK */
 #include "addrmap.h"
 #include "heap_index.h"
 
@@ -62,15 +61,12 @@ struct uniqtype
 
 #include "addrmap.h"
 #include "../src/allocsmt.h"
-void init_prefix_tree_from_maps(void);
-void prefix_tree_add_missing_maps(void);
-enum object_memory_kind prefix_tree_get_memory_kind(const void *obj);
-void prefix_tree_print_all_to_stderr(void);
-#define debug_printf(lvl, ...) do { \
-    if ((lvl) <= __liballocs_debug_level) { \
-      warnx( __VA_ARGS__ );  \
-    } \
-  } while (0)
+/* FIXME: these really don't belong here, because we will get included in 
+ * *clients* of liballocs. */
+void __liballocs_add_missing_maps(void);
+enum object_memory_kind __liballocs_get_memory_kind(const void *obj);
+void __liballocs_print_mappings_to_stream_err(void);
+
 extern unsigned long __liballocs_aborted_stack;
 extern unsigned long __liballocs_aborted_static;
 extern unsigned long __liballocs_aborted_unknown_storage;
@@ -442,21 +438,21 @@ __liballocs_get_alloc_info
 	memory_kind k = get_object_memory_kind(obj);
 	if (__builtin_expect(k == UNKNOWN, 0))
 	{
-		k = prefix_tree_get_memory_kind(obj);
+		k = __liballocs_get_memory_kind(obj);
 		if (__builtin_expect(k == UNKNOWN, 0))
 		{
 			// still unknown? we have one last trick, if not blacklisted
 			_Bool blacklisted = 0;//check_blacklist(obj);
 			if (!blacklisted)
 			{
-				prefix_tree_add_missing_maps();
-				k = prefix_tree_get_memory_kind(obj);
+				__liballocs_add_missing_maps();
+				k = __liballocs_get_memory_kind(obj);
 				if (k == UNKNOWN)
 				{
-					prefix_tree_print_all_to_stderr();
+					__liballocs_print_mappings_to_stream_err();
 					// completely wild pointer or kernel pointer
-					debug_printf(1, "liballocs saw wild pointer %p from caller %p\n", obj,
-						__builtin_return_address(0));
+					//debug_printf(1, "liballocs saw wild pointer %p from caller %p\n", obj,
+					//	__builtin_return_address(0));
 					//consider_blacklisting(obj);
 				}
 			}
@@ -668,9 +664,9 @@ __liballocs_get_alloc_info
 			assert(get_object_memory_kind(heap_info) == HEAP
 				|| get_object_memory_kind(heap_info) == UNKNOWN); // might not have seen that maps yet
 			assert(
-				prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC
-				|| (prefix_tree_add_missing_maps(),
-					 prefix_tree_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC));
+				__liballocs_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC
+				|| (__liballocs_add_missing_maps(),
+					 __liballocs_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC));
 
 			/* Now we have a uniqtype or an allocsite. For long-lived objects 
 			 * the uniqtype will have been installed in the heap header already.
