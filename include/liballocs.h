@@ -1,11 +1,17 @@
 #ifndef LIBALLOCS_H_
 #define LIBALLOCS_H_
 
+#ifndef _GNU_SOURCE
+#warning "compilation unit is not _GNU_SOURCE; some features liballocs requires may not be available"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 typedef bool _Bool;
 #endif
 
+#include <sys/types.h>
+#include <asm/signal.h> /* HACK */
 #include "addrmap.h"
 #include "heap_index.h"
 

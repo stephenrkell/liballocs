@@ -6,6 +6,7 @@
 #error Unsupported architecture.
 #endif
 
+#include <sys/types.h>
 #include <stdio.h> // hACK
 #include <stdint.h>
 #include <dlfcn.h>
@@ -33,7 +34,8 @@ enum object_memory_kind
 	STACK,
 	HEAP,
 	ANON,
-	MAPPED_FILE
+	MAPPED_FILE,
+	UNUSABLE
 };
 
 inline
@@ -51,6 +53,7 @@ const char *name_for_memory_kind(enum object_memory_kind k)
 		case HEAP:    return "heap";
 		case ANON:    return "anon";
 		case MAPPED_FILE: return "mapped file";
+		case UNUSABLE: return "unusable";
 	}
 }
 	
@@ -65,16 +68,10 @@ void *sbrk(intptr_t incr);
 #define STACK_BEGIN 0xc0000000UL
 #endif
 
-/* HACK: on my system, shared libraries are always loaded at the top,
- * from 0x7eff00000000....
- * EXCEPT when we run ldd from a Makefile running dash, in which case
- * they show up at 0x2aaaa00000000+delta, which is weird. I should really
- * check the source of ld-linux.so, but for now, go with the lower addr. */
-#if defined (X86_64) || (defined (__x86_64__))
-#define SHARED_LIBRARY_MIN_ADDRESS 0x2aaa00000000UL
-#else
-#define SHARED_LIBRARY_MIN_ADDRESS 0xb0000000
-#endif
+/* By default, we assume that kernel addresses are "unusable" and 
+ * so are addresses in the null area. */
+#define UPPER_UNUSABLE_BEGIN STACK_BEGIN
+#define LOWER_UNUSABLE_END 4096u
 
 // glibc-specific HACK!
 extern void *__curbrk;
@@ -91,6 +88,8 @@ enum object_memory_kind
 	/* We use gcc __builtin_expect to hint that heap is the likely case. */ 
 	
 	uintptr_t addr = (uintptr_t) obj;
+	
+	if (__builtin_expect(addr < LOWER_UNUSABLE_END || addr >= UPPER_UNUSABLE_BEGIN, 0)) return UNUSABLE;
 	
 	/* If the address is below the end of the program BSS, it's static. 
 	 * PROBLEM: on some systems, "&end" is 0, so we approximate it with 
@@ -139,16 +138,8 @@ enum object_memory_kind
 	/* FIXME: other threads' stacks! */
 
 	/* It's between HEAP and STATIC. */
-#ifdef USE_SHARED_LIBRARY_MIN_ADDRESS_HACK
-#error "Please don't USE_SHARED_LIBRARY_MIN_ADDRESS_HACK"
-	/* HACK: on systems where shared libs are loaded far away from heap regions, 
-	 * use a fixed boundary at SHARED_LIBRARY_MIN_ADDRESS. */
-	if (__builtin_expect(addr >= SHARED_LIBRARY_MIN_ADDRESS, 0)) return STATIC;
-	return HEAP;
-#else
 	/* We don't know. The caller has to fall back to some more expensive method. */
 	return UNKNOWN;
-#endif
 }
 
 #ifdef __cplusplus

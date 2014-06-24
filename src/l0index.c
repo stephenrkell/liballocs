@@ -87,7 +87,7 @@ static void memset_mapping(mapping_num_t *begin, mapping_num_t num, size_t n)
 
 static void (__attribute__((constructor)) init)(void)
 {
-	/* Mmap our region. We map one byte for every page. */
+	/* Mmap our region. We map one byte for every page in the user address region. */
 	assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE);
 	l0index = MEMTABLE_NEW_WITH_TYPE(mapping_num_t, PAGE_SIZE, (void*) 0, (void*) STACK_BEGIN);
 	assert(l0index != MAP_FAILED);
@@ -665,7 +665,9 @@ void prefix_tree_del(void *base, size_t s)
 enum object_memory_kind prefix_tree_get_memory_kind(const void *obj) __attribute__((visibility("hidden")));
 enum object_memory_kind prefix_tree_get_memory_kind(const void *obj)
 {
-	if (!l0index) init();
+	if (__builtin_expect(!l0index, 0)) init();
+	if (__builtin_expect(obj == 0, 0)) return UNUSABLE;
+	if (__builtin_expect(obj == (void*) -1, 0)) return UNUSABLE;
 	
 	mapping_num_t mapping_num = l0index[pagenum(obj)];
 	if (mapping_num == 0) return UNKNOWN;
