@@ -4,6 +4,7 @@ open List
 open Str
 open Pretty
 open Cil
+open Feature
 open Dumpallocs
 module E = Errormsg
 module H = Hashtbl

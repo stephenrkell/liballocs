@@ -1,4 +1,4 @@
-(* Copyright (c) 2011,
+(* Copyright (c) 2011--14,
  *  Stephen Kell        <stephen.kell@cs.ox.ac.uk>
  *
  * and based on logwrites.ml, which is 
@@ -43,12 +43,10 @@ open List
 open Str
 open Pretty
 open Cil
+open Feature
+open Cilallocs
 module E = Errormsg
 module H = Hashtbl
-
-(* HACKed realpath for now: *)
-let abspath f =
-   if String.get f 0 = '/' then f else (getcwd ()) ^ "/" ^ f
 
 let rec sizeExprHasNoSizeof (e: exp) =
   match e with 
@@ -115,9 +113,8 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
                            sizeof S + n * sizeof T
                            
                        in which case our last element is a variable-length thing.
-                       Is it enough to interpret 
                     *)
-                    Synthetic([s1; s2])
+                    Synthetic([s1; TSArray(s2, None, [])])
            | (Synthetic(l1), Existing(s2)) -> Synthetic(l1 @ [s2])
            | (Existing(s1), Synthetic(l2)) -> Synthetic(s1 :: l2)
            | (Synthetic(l1), Synthetic(l2)) -> Synthetic(l1 @ l2)
@@ -309,104 +306,6 @@ let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) e
   | None -> None
   in 
   getUserAllocExpr i maybeFunName arglist env (["malloc(Z)p"; "calloc(zZ)p"; "realloc(pZ)p"; "posix_memalign(pzZ)p"] @ (userAllocFunctions ())) calledFunctionType
-
-(* HACK: copied from trumptr *)
-let rec canonicalizeBaseTypeStr s = 
- (* generated from a table maintained in srk's libcxxgen  *)
-if (s = "signed char" or s = "char" or s = "char signed" or  false) then "signed char"
-else if (s = "unsigned char" or s = "char unsigned" or  false) then "unsigned char"
-else if (s = "short int" or s = "short" or s = "int short" or  false) then "short int"
-else if (s = "short unsigned int" or s = "unsigned short" or s = "short unsigned" or s = "unsigned short int" or s = "int unsigned short" or s = "int short unsigned" or s = "unsigned int short" or s = "short int unsigned" or  false) then "short unsigned int"
-else if (s = "int" or s = "signed" or s = "signed int" or s = "int signed" or  false) then "int"
-else if (s = "unsigned int" or s = "unsigned" or s = "int unsigned" or  false) then "unsigned int"
-else if (s = "long int" or s = "long" or s = "int long" or s = "signed long int" or s = "int signed long" or s = "int long signed" or s = "long signed int" or s = "signed int long" or s = "long signed" or s = "signed long" or  false) then "long int"
-else if (s = "unsigned long int" or s = "int unsigned long" or s = "int long unsigned" or s = "long unsigned int" or s = "unsigned int long" or s = "long unsigned" or s = "unsigned long" or  false) then "unsigned long int"
-else if (s = "long long int" or s = "long long" or s = "long int long" or s = "int long long" or s = "long long signed" or s = "long signed long" or s = "signed long long" or s = "long long int signed" or s = "long long signed int" or s = "long signed long int" or s = "signed long long int" or s = "long int long signed" or s = "long int signed long" or s = "long signed int long" or s = "signed long int long" or s = "int long long signed" or s = "int long signed long" or s = "int signed long long" or s = "signed int long long" or  false) then "long long int"
-else if (s = "long long unsigned int" or s = "long long unsigned" or s = "long unsigned long" or s = "unsigned long long" or s = "long long int unsigned" or s = "long unsigned long int" or s = "unsigned long long int" or s = "long int long unsigned" or s = "long int unsigned long" or s = "long unsigned int long" or s = "unsigned long int long" or s = "int long long unsigned" or s = "int long unsigned long" or s = "int unsigned long long" or s = "unsigned int long long" or  false) then "long long unsigned int"
-else if (s = "float" or  false) then "float"
-else if (s = "double" or  false) then "double"
-else if (s = "long double" or s = "double long" or  false) then "long double"
-else if (s = "bool" or  false) then "bool"
-else if (s = "wchar_t" or  false) then "wchar_t"
-  else s
-(* This effectively embodies our "default specification" for C code
- * -- it controls what we assert in "__is_a" tests, and
- * needs to mirror what we record for allocation sites in dumpallocs *)
-let rec getEffectiveType tsig =
- match tsig with
-   TSArray(tsig, optSz, attrs) -> getEffectiveType tsig
- | TSPtr(tsig, attrs) -> TSPtr(getEffectiveType tsig, []) (* stays a pointer, but discard attributes *)
- | TSComp(isSpecial, name, attrs) -> TSComp(isSpecial, name, [])
- | TSFun(returnTs, argsTss, isSpecial, attrs) -> TSFun(returnTs, argsTss, isSpecial, [])
- | TSEnum(enumName, attrs) -> TSEnum(enumName, [])
- | TSBase(TVoid(attrs)) -> TSBase(TVoid([]))
- | TSBase(TInt(kind,attrs)) -> TSBase(TInt(kind, []))
- | TSBase(TFloat(kind,attrs)) -> TSBase(TFloat(kind, []))
- | _ -> tsig
- 
-(* stolen from StackOverflow:  http://stackoverflow.com/questions/1584758/
-   -- eventually want to change to use Ocaml Batteries Included *)
-let trim str =   if str = "" then "" else   let search_pos init p next =
-    let rec search i =
-      if p i then raise(Failure "empty") else
-      match str.[i] with
-      | ' ' | '\n' | '\r' | '\t' -> search (next i)
-      | _ -> i
-    in
-    search init   in   let len = String.length str in   try
-    let left = search_pos 0 (fun i -> i >= len) (succ)
-    and right = search_pos (len - 1) (fun i -> i < 0) (pred)
-    in
-    String.sub str left (right - left + 1)   with   | Failure "empty" -> "" ;;
-
-(* HACK: pasted from trumptr *)
-           (* The string representation needs tweaking to make it a symname:
-               - prepend "__uniqtype_" 
-               - insert the defining header file, with the usual munging for slashes, hyphens, dots, and spaces
-               - FIXME: fix up base types specially!
-               - replace '^' with '__PTR_' 
-               - replace '()=>' with '__FUN_'.
-               NOTE that arrays probably shouldn't come up here.
-
-               We can't get the declaring file/line ("location" in CIL-speak) from a typesig,
-               nor from its type -- we need the global.  *)
-
-(* WORKAROUND for CIL's anonymous structure types: 
-   we undo the numbering (set to 1) and hope for the best. *)
-let hackTypeName s = (*if (string_match (regexp "__anon\\(struct\\|union\\|enum\\)_.*_[0-9]+$") s 0)
-   then Str.global_replace (Str.regexp "_[0-9]+$") "_1" s
-   else *) s
-
-let rec barenameFromSig ts = 
- let rec labelledArgTs ts startAt =
-   match ts with
-     [] -> ""
-  | t :: morets -> 
-      let remainder = (labelledArgTs morets (startAt + 1))
-      in
-      "__ARG" ^ (string_of_int startAt) ^ "_" ^ (barenameFromSig t) ^ remainder
- in
- let baseTypeStr ts = 
-   let rawString = match ts with 
-     TInt(kind,attrs) -> (Pretty.sprint 80 (d_ikind () kind))
-   | TFloat(kind,attrs) -> (Pretty.sprint 80 (d_fkind () kind))
-   | TBuiltin_va_list(attrs) -> "__builtin_va_list"
-   | _ -> raise(Failure ("bad base type: " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_type ts))))
-   in 
-   Str.global_replace (Str.regexp "[. /-]") "_" (canonicalizeBaseTypeStr (trim rawString))
- in
- match ts with
-   TSArray(tNestedSig, optSz, attrs) -> "__ARR" ^ (match optSz with Some(s) -> (string_of_int (i64_to_int s)) | None -> "0") ^ "_" ^ (barenameFromSig tNestedSig)
- | TSPtr(tNestedSig, attrs) -> "__PTR_" ^ (barenameFromSig tNestedSig)
- | TSComp(isSpecial, name, attrs) -> (hackTypeName name)
- | TSFun(returnTs, argsTss, isSpecial, attrs) -> 
-      "__FUN_FROM_" ^ (labelledArgTs argsTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (barenameFromSig returnTs) 
- | TSEnum(enumName, attrs) -> enumName
- | TSBase(TVoid(attrs)) -> "void"
- | TSBase(tbase) -> baseTypeStr tbase
-
-let symnameFromSig ts = "__uniqtype_" ^ "" ^ "_" ^ (barenameFromSig ts)
-
 
 (* I so do not understand Pretty.dprintf *)
 let printAllocFn fileAndLine chan maybeFunvar allocExpr = 
@@ -639,9 +538,9 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
    (* ) *)
 end (* class dumpAllocsVisitor *)
 
-let feature : featureDescr = 
+let feature : Feature.t = 
   { fd_name = "dumpallocs";
-    fd_enabled = ref false;
+    fd_enabled = false;
     fd_description = "print information about allocation sites";
     fd_extraopt = [];
     fd_doit = 
@@ -653,3 +552,4 @@ let feature : featureDescr =
     fd_post_check = true;
   } 
 
+let () = Feature.register feature

@@ -171,7 +171,7 @@ class AllocsCC:
             else:
                 outputFilename = sourceFile + ".o"
                 sys.stderr.write("Making a secret output file (from unknown source) " + outputFilename + "\n")
-            ret1 = subprocess.call([self.getCillyCommand()] + argvWithoutOutputOptions + customArgs \
+            ret1 = subprocess.call(self.getCillyCommand() + argvWithoutOutputOptions + customArgs \
             + ["-c", "-o", outputFilename, sourceFile])
 
             if ret1 != 0:
@@ -197,19 +197,12 @@ class AllocsCC:
         return -1
 
     def getCillyArgs(self):
-        return ["--dodumpallocs"]
+        # allocscc uses this unmodified (we're not an abstract base)
+        return ["--load=%s" % \
+        (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"), "--dodumpallocs"]
     
     def getCillyCommand(self):
-        # HACK
-        cmd = ["make", "--no-print-directory", "-s", "-C", os.path.dirname(sys.argv[0]) + "/..", "print_cilly_path"]
-        sys.stderr.write("Calling " + " ".join(cmd) + "\n")
-        out = subprocess.Popen(cmd, stdout=subprocess.PIPE).communicate()[0]
-        sys.stderr.flush()
-        sys.stderr.write("Got cilly command: " + out)
-        if out != "":
-            return out.strip()
-        else:
-            return "cilly"
+        return ["cilly"] + self.getCillyArgs()
             
     def getLibAllocsBaseDir(self):
         return os.path.dirname(__file__) + "/../../../../"
@@ -268,8 +261,7 @@ class AllocsCC:
         # into the executable,
         # and for each allocation function, we link a generated stub.
 
-        allocsccCustomArgs = self.getCillyArgs() \
-        + ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", \
+        allocsccCustomArgs = ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", \
         "-fno-omit-frame-pointer", "-ffunction-sections"] \
         + saveTempsArgs
         # we add -ffunction-sections to ensure that references to malloc functions 
@@ -466,7 +458,7 @@ class AllocsCC:
         sys.stderr.write("allocsccCustomArgs is: " + " ".join(allocsccCustomArgs) + "\n")
         sys.stderr.write("linkArgs is: " + " ".join(linkArgs) + "\n")
 
-        ret1 = subprocess.call([self.getCillyCommand()] + argsToExec)
+        ret1 = subprocess.call(self.getCillyCommand() + argsToExec)
 
         if ret1 != 0:
             # we didn't succeed, so quit now
