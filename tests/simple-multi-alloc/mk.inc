@@ -1,5 +1,5 @@
 CFLAGS += $(shell pkg-config --cflags glib-2.0)
-LDLIBS += $(shell pkg-config --libs glib-2.0)
+LDLIBS += -Wl,--no-as-needed $(shell pkg-config --libs glib-2.0) -Wl,--as-needed
 
 # FIXME: don't make the user specify these
 export LIBALLOCS_ALLOC_FNS := xmalloc(Z)p xcalloc(zZ)p xrealloc(pZ)p
