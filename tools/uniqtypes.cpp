@@ -174,6 +174,8 @@ pair<bool, uniqued_name> transitively_add_type(iterator_df<type_die> toplevel_t,
 		 * Our job is to decide whether we need to add_type_if_absent, 
 		 * and whether we need to recurse. */
 
+		cerr << "Walking: " << t << endl;
+		
 		if (reason.is_a<member_die>())
 		{
 			auto memb = reason.as_a<member_die>();
