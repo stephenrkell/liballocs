@@ -5,6 +5,7 @@
 extern void *dlsym (void *handle, const char *name);
 extern void __assert_fail (const char *__assertion, const char *__file,
                            unsigned int __line, const char *__function);
+#define _GNU_SOURCE
 #include <liballocs.h>
 
 int main(void)
