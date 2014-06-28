@@ -18,7 +18,7 @@ DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -finline-functions
 
 default: liballocs_preload.so liballocs_preload.a liballocs_noop.so liballocs_noop.o liballocs.a
 
-NON_FAST_CFLAGS += -fPIC #-DTRACE_DEEP_HEAP_INDEX -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX
+NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
 FAST_CFLAGS += -fpic -flto -O4 #-DNDEBUG
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
@@ -121,4 +121,4 @@ liballocs_noop.o: noop.o
 # have to preload the hooks yourself if you want them to hook!
 
 clean: 
-	rm -f *.o *.so .*.d *.a
+	rm -f *.o *.so .*.d *.a *_fast.c

@@ -390,7 +390,7 @@ class AllocsCC:
                 # most of the user's options, 
                 # then compile with a more tightly controlled set
                 stubs_pp_cmd = ["cc", "-E", "-o", stubs_pp, \
-                    "-I" + self.getLibAllocsBaseDir() + "/../../../../tools"] \
+                    "-I" + self.getLibAllocsBaseDir() + "/tools"] \
                     + [arg for arg in passedThroughArgs if arg.startswith("-D")] \
                     + [stubsfile.name]
                 sys.stderr.write("Preprocessing stubs file %s to %s with command %s\n" \
@@ -410,7 +410,7 @@ class AllocsCC:
                         % (stubs_pp, ret_stubs_sed))
                     exit(1)
                 stubs_cc_cmd = ["cc", "-g", "-c", "-o", stubs_bin, \
-                    "-I" + self.getLibAllocsBaseDir() + "/../../../../tools", \
+                    "-I" + self.getLibAllocsBaseDir() + "/tools", \
                     stubs_pp]
                 sys.stderr.write("Compiling stubs file %s to %s with command %s\n" \
                     % (stubs_pp, stubs_bin, " ".join(stubs_cc_cmd)))
@@ -426,8 +426,8 @@ class AllocsCC:
                 linkArgs += ["-Wl,-R" + self.getRunPath()]
                 if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                     linkArgs += [self.getLdLibBase()]
-                else: # FIXME: weak linkage one day
-                    linkArgs += [self.getLdLibBase() + "_noop"]
+                else: # FIXME: weak linkage one day; FIXME: don't clobber as-neededness
+                    linkArgs += ["-Wl,--no-as-needed", self.getLdLibBase() + "_noop"]
             else:
                 # We're building a shared library, so simply add liballocs_noop.o; 
                 # only link directly if we're disabling the preload approach

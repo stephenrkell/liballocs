@@ -35,6 +35,9 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 }
 #endif
 
+const char *exe_basename __attribute__((visibility("hidden")));
+FILE *stream_err __attribute__((visibility("hidden")));
+
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
 // keep these close, keep them fast
@@ -628,6 +631,7 @@ static void print_exit_summary(void)
 /* This is *not* a constructor. We don't want to be called too early,
  * because it might not be safe to open the -uniqtypes.so handle yet.
  * So, initialize on demand. */
+int __liballocs_global_init(void) __attribute__((constructor));
 int __liballocs_global_init(void)
 {
 	if (__liballocs_is_initialized) return 0; // we are okay
@@ -656,7 +660,7 @@ int __liballocs_global_init(void)
 	if (errvar)
 	{
 		// try opening it
-		stream_err = fopen("errvar", "w");
+		stream_err = fopen(errvar, "w");
 		if (!stream_err)
 		{
 			stream_err = stderr;
@@ -672,7 +676,23 @@ int __liballocs_global_init(void)
 	
 	const char *debug_level_str = getenv("LIBALLOCS_DEBUG_LEVEL");
 	if (debug_level_str) __liballocs_debug_level = atoi(debug_level_str);
-	
+
+	/* NOTE that we get called during allocation. So we should avoid 
+	 * doing anything that causes more allocation, or else we should
+	 * handle the reentrancy gracefully. Calling the dynamic linker
+	 * is dangerous. What can we do? Either
+	 * 
+	 * 1. try to make this function run early, i.e. before main() 
+	 *    and during a non-allocation context. 
+	 * 
+	 * or
+	 * 
+	 * 2. get the end address without resort to dlopen()... but then
+	 *    what about the types objects? 
+	 * 
+	 * It seems that option 1 is better. 
+	 */
+
 	// grab the executable's end address
 	dlerror();
 	void *executable_handle = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
@@ -685,7 +705,7 @@ int __liballocs_global_init(void)
 	ssize_t readlink_ret = readlink("/proc/self/exe", exename, sizeof exename);
 	if (readlink_ret != -1)
 	{
-		exe_basename = basename(exename); // GNU basename
+		exe_basename = strdup(basename(exename)); // GNU basename
 	}
 	
 	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
@@ -784,7 +804,7 @@ int __liballocs_global_init(void)
 	}
 	assert(main_bp != 0);
 	
-	// also init the l0 index
+	// also init the l0 index -- danger! avoid allocation here too
 	__liballocs_init_l0();
 
 	__liballocs_is_initialized = 1;

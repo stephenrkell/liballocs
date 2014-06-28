@@ -210,7 +210,12 @@ void *dlopen(const char *filename, int flag)
 	else
 	{
 		void *ret = orig_dlopen(filename, flag);
-		if (ret != NULL && !(flag & RTLD_NOLOAD))
+		/* Have we just opened a new object? If filename was null, 
+		 * we haven't; if ret is null; we haven't; if NOLOAD was passed,
+		 * we haven't. Otherwise we *might* have done, but we still
+		 * can't be sure. We'll have to make __liballocs_add_all_mappings_cb
+		 * tolerant of re-adding. */
+		if (filename != NULL && ret != NULL && !(flag & RTLD_NOLOAD))
 		{
 			if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(ret);
 		

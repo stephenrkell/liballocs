@@ -11,11 +11,13 @@
 #include "liballocs_private.h"
 
 _Bool initialized_maps __attribute__((visibility("hidden")));
+// static _Bool trying_to_initialize;
 
 void __liballocs_init_l0(void)
 {
-	if (!initialized_maps)
+	if (!initialized_maps /* && !trying_to_initialize */)
 	{
+		// trying_to_initialize = 1;
 		/* First use dl_iterate_phdr to check that all library mappings are in the tree 
 		 * with a STATIC kind. Since we hook dlopen(), at least from the point where we're
 		 * initialized, we should only have to do this on startup.  */
@@ -24,6 +26,7 @@ void __liballocs_init_l0(void)
 		/* Now fill in the rest from /proc. */
 		__liballocs_add_missing_maps();
 		initialized_maps = 1;
+		// trying_to_initialize = 0;
 	}
 }
 
@@ -177,12 +180,7 @@ void __liballocs_add_missing_maps(void)
 					)
 					&& (overlapping[i]->info.what != DATA_PTR 
 						|| // we do have a data ptr
-							// -- it should be value-equal for stack and string-equal for static/mapped
-							(kind == STACK && data_ptr == overlapping[i]->info.un.data_ptr)
-							|| 
-						((data_ptr == NULL && overlapping[i]->info.un.data_ptr == NULL)
-							|| (data_ptr != NULL && overlapping[i]->info.un.data_ptr  != NULL && 
-							0 == strcmp(overlapping[i]->info.un.data_ptr, data_ptr))))) continue;
+							node_info_has_data_ptr_equal_to(kind, &overlapping[i]->info, data_ptr))) continue;
 				
 				need_to_add = 1;
 				
@@ -196,7 +194,7 @@ void __liballocs_add_missing_maps(void)
 							|| (data_ptr != NULL && existing_data_ptr != NULL && 
 							0 != strcmp(existing_data_ptr, data_ptr)))
 					{
-						debug_printf(0, "a static or mapped-file mapping, kind %d, data_ptr \"%s\", overlapping %p-%p "
+						debug_printf(2, "a static or mapped-file mapping, kind %d, data_ptr \"%s\", overlapping %p-%p "
 								"seems to have gone away: now covered by kind %d, data_ptr \"%s\"\n",
 							overlapping[i]->kind, (const char *) existing_data_ptr, 
 							obj, (char*) obj + size, 
@@ -208,7 +206,7 @@ void __liballocs_add_missing_maps(void)
 					/* If we got here, it means we have a static mapping which compared 
 					 * equal in content, but might not have the same dimensions. Anyway, 
 					 * when we try to add this it will still cause a problem. */
-					debug_printf(0, "skipping static or mapped-file mapping (\"%s\") "
+					debug_printf(2, "skipping static or mapped-file mapping (\"%s\") "
 						"overlapping %p-%p and apparently already present\n",
 						(const char *) overlapping[i]->info.un.data_ptr, obj, (char*) obj + size);
 					goto continue_loop;

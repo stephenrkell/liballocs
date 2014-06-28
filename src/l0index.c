@@ -87,10 +87,13 @@ static void memset_mapping(mapping_num_t *begin, mapping_num_t num, size_t n)
 
 static void (__attribute__((constructor)) init)(void)
 {
-	/* Mmap our region. We map one byte for every page in the user address region. */
-	assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE);
-	l0index = MEMTABLE_NEW_WITH_TYPE(mapping_num_t, PAGE_SIZE, (void*) 0, (void*) STACK_BEGIN);
-	assert(l0index != MAP_FAILED);
+	if (!l0index)
+	{
+		/* Mmap our region. We map one byte for every page in the user address region. */
+		assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE);
+		l0index = MEMTABLE_NEW_WITH_TYPE(mapping_num_t, PAGE_SIZE, (void*) 0, (void*) STACK_BEGIN);
+		assert(l0index != MAP_FAILED);
+	}
 }
 
 static uintptr_t pagenum(const void *p)
@@ -109,16 +112,27 @@ _Bool __attribute__((visibility("hidden"))) insert_equal(struct insert *p_ins1, 
 		p_ins1->alloc_site == p_ins2->alloc_site;
 		// don't compare prev/next, at least not for now
 }
-_Bool __attribute__((visibility("hidden"))) node_info_equal(struct node_info *p_info1, struct node_info *p_info2)
+_Bool __attribute__((visibility("hidden"))) node_info_equal(unsigned kind, struct node_info *p_info1, struct node_info *p_info2)
 {
 	return p_info1->what == p_info2->what && 
-	(p_info1->what == DATA_PTR ? p_info1->un.data_ptr == p_info2->un.data_ptr
+	(p_info1->what == DATA_PTR ? node_info_has_data_ptr_equal_to(kind, p_info2, p_info1->un.data_ptr)
 	            : (assert(p_info1->what == INS_AND_BITS), 
 					(insert_equal(&p_info1->un.ins_and_bits.ins, &p_info2->un.ins_and_bits.ins)
 						&& p_info1->un.ins_and_bits.npages == p_info2->un.ins_and_bits.npages
 						&& p_info1->un.ins_and_bits.obj_offset == p_info2->un.ins_and_bits.obj_offset)
 					)
 	);
+}
+_Bool  __attribute__((visibility("hidden"))) node_info_has_data_ptr_equal_to(unsigned kind, const struct node_info *p_info, const void *data_ptr)
+{
+	return p_info->what == DATA_PTR
+			&& (
+					// -- it should be value-equal for stack and string-equal for static/mapped
+							(kind == STACK && data_ptr == p_info->un.data_ptr)
+							|| 
+						((data_ptr == NULL && p_info->un.data_ptr == NULL)
+							|| (data_ptr != NULL && p_info->un.data_ptr  != NULL && 
+							0 == strcmp(p_info->un.data_ptr, data_ptr))));
 }
 
 static struct mapping *find_free_mapping(void)
@@ -194,7 +208,6 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 {
 	assert((uintptr_t) base % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	assert(s % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
-
 	
 	debug_printf(3, "%s: creating mapping base %p, size %lu, kind %u, info %p\n", 
 		__func__, base, (unsigned long) s, kind, p_info);
@@ -204,6 +217,24 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	 * We force a deletion if so. */
 	mapping_num_t mapping_num = l0index[pagenum(base)];
 	SANITY_CHECK_MAPPING(&mappings[mapping_num]);
+	
+	/* It's possible that such a mapping already exists, e.g. if we're
+	 * called during re-dlopening a dlopen'd library. To allow for subsequent
+	 * coalescings, we have to test for containment and not an exact match. */
+	if (mapping_num != 0 && mappings[mapping_num].begin <= base
+				&& (char*) mappings[mapping_num].end >= (char*) base + s
+				&& mappings[mapping_num].n.kind == kind 
+				&& node_info_equal(kind, &mappings[mapping_num].n.info, p_info))
+	{
+		debug_printf(3, "%s: mapping already present\n", __func__);
+		// if we're STATIC and have a data pt, we borrow the new data_ptr 
+		// because it's more likely to be up-to-date
+		if (kind == STATIC && p_info->what == DATA_PTR)
+		{
+			mappings[mapping_num].n.info.un.data_ptr = p_info->un.data_ptr;
+		}
+		return &mappings[mapping_num];
+	}
 	
 	if (mapping_num != 0 && mappings[mapping_num].n.kind == 3)
 	{
@@ -316,10 +347,10 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	
 	_Bool can_coalesce_after = abuts_existing_start
 				&& (kind_matches = (mappings[abuts_existing_start].n.kind == kind))
-				&& (node_matches = (node_info_equal(&mappings[abuts_existing_start].n.info, p_info)));
+				&& (node_matches = (node_info_equal(kind, &mappings[abuts_existing_start].n.info, p_info)));
 	_Bool can_coalesce_before = abuts_existing_end
 				&& (kind_matches = (mappings[abuts_existing_end].n.kind == kind))
-				&& (node_matches = (node_info_equal(&mappings[abuts_existing_end].n.info, p_info)));
+				&& (node_matches = (node_info_equal(kind, &mappings[abuts_existing_end].n.info, p_info)));
 	debug_printf(3, "%s: can_coalesce_after: %s, can_coalesce_before: %s, "
 			"kind_matches: %s, node_matches: %s \n",
 			__func__, can_coalesce_after ? "true" : "false", can_coalesce_before ? "true" : "false", 

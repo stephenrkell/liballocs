@@ -66,6 +66,7 @@ prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin,
 void __liballocs_add_missing_maps(void) __attribute__((visibility("protected")));
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));;
 void __liballocs_print_mappings_to_stream_err(void) __attribute__((visibility("protected")));
+_Bool node_info_has_data_ptr_equal_to(unsigned kind, const struct node_info *info, const void *data_ptr) __attribute((visibility("hidden")));
 
 struct prefix_tree_node *
 prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr) __attribute__((visibility("hidden")));
@@ -73,8 +74,8 @@ struct prefix_tree_node *
 prefix_tree_bounds(const void *ptr, const void **begin, const void **end) __attribute__((visibility("hidden")));
 int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data) __attribute__((visibility("hidden")));
 
-const char *exe_basename __attribute__((visibility("hidden")));
-FILE *stream_err __attribute__((visibility("hidden")));
+extern const char *exe_basename __attribute__((visibility("hidden")));
+extern FILE *stream_err __attribute__((visibility("hidden")));
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \
       fprintf(stream_err, "%s: " fmt, exe_basename, ## __VA_ARGS__ );  \
