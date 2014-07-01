@@ -214,35 +214,87 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	
 	/* In the case of heap regions, libc can munmap them without our seeing it. 
 	 * So, we might be surprised to find that our index is out-of-date here. 
-	 * We force a deletion if so. */
-	mapping_num_t mapping_num = l0index[pagenum(base)];
-	SANITY_CHECK_MAPPING(&mappings[mapping_num]);
-	
-	/* It's possible that such a mapping already exists, e.g. if we're
-	 * called during re-dlopening a dlopen'd library. To allow for subsequent
-	 * coalescings, we have to test for containment and not an exact match. */
-	if (mapping_num != 0 && mappings[mapping_num].begin <= base
-				&& (char*) mappings[mapping_num].end >= (char*) base + s
-				&& mappings[mapping_num].n.kind == kind 
-				&& node_info_equal(kind, &mappings[mapping_num].n.info, p_info))
+	 * We force a deletion if so. NOTE that we have to repeat the procedure
+	 * until we've found all overlapping mappings. The best way to do this
+	 * is to linear search all mappings, and short-circuit once we've unmapped
+	 * the whole amount.
+	 * 
+	 * Instead of iterating over all 1024 mappings, can we use the l0index to help us?
+	 * 
+	 * Not directly, because two bytes per page might still be a lot of memory to
+	 * walk over. Suppose we're a 4GB mapping. That's 1M pages, each a 2-byte entry.
+	 * We don't want to walk over 2MB of memory.
+	 
+	 * But we could keep a bitmap of the l0index 
+	 * memtable, possibly over multiple levels (2^47 bits would be 512GB, so a lot
+	 * of memory to walk over; 512GB in page-sized chunks can be bitmapped in 2^27
+	 * bits, so 16MB... so two levels should suffice). Then walking a 4GB mapping
+	 * which is currently unused (l0index all zero) would require us to walk 4M bits
+	 * in the bottom bitmap, i.e. 512KB, which would be covered by only 128 bits in
+	 * the top-level bitmap, i.e. two words. That's nice! Note that the two-word
+	 * comparison only suffices if the memory has been untouched up to this point;
+	 * if it has been touched, we have to scan the bottom-level bitmap. But we only
+	 * scan 512KB of bitmap in the maximal case of a 4GB mapping. For small mappings
+	 * it's still tiny.
+	 * */
+	unsigned long bytes_unmapped = 0;
+	for (int i_map = 1; i_map < NMAPPINGS && bytes_unmapped < s; ++i_map)
 	{
-		debug_printf(3, "%s: mapping already present\n", __func__);
-		// if we're STATIC and have a data pt, we borrow the new data_ptr 
-		// because it's more likely to be up-to-date
-		if (kind == STATIC && p_info->what == DATA_PTR)
+		if ((char*) mappings[i_map].begin < (char*) base + s
+				&& (char*) mappings[i_map].end > (char*) base)
 		{
-			mappings[mapping_num].n.info.un.data_ptr = p_info->un.data_ptr;
-		}
-		return &mappings[mapping_num];
+			/* We have overlap. Unmap the whole thing? Or just the portion we overlap? 
+			 * Since heap regions can shrink as well as grow, it seems safest to unmap
+			 * only the overlapping portion. */
+			if (mappings[i_map].n.kind == 3)
+			{
+				// force an unmapping of the overlapping region
+				char *overlap_begin = MAXPTR((char*) mappings[i_map].begin, (char*) base);
+				char *overlap_end = MINPTR((char*) mappings[i_map].end, (char*) base + s);
+				
+				debug_printf(3, "%s: forcing unmapping of %p-%p (from mapping number %d), overlapping %p-%p\n", 
+					__func__, overlap_begin, overlap_end, i_map,  base, (char*) base + s);
+				prefix_tree_del(overlap_begin, overlap_end - overlap_begin);
+				bytes_unmapped += overlap_end - overlap_begin;
+			}
+			else
+			{
+				/* We found an overlapping mapping that's NOT a heap one.
+				 * 
+				 * It's possible that the mapping we're adding already exists, e.g. if we're
+				 * called during re-dlopening a dlopen'd library. To allow for subsequent
+				 * coalescings, we have to test for containment and not an exact match.
+				 * If we find it, we're okay. */
+				if (mappings[i_map].begin <= base
+							&& (char*) mappings[i_map].end >= (char*) base + s
+							&& mappings[i_map].n.kind == kind 
+							&& node_info_equal(kind, &mappings[i_map].n.info, p_info))
+				{
+					debug_printf(3, "%s: mapping already present\n", __func__);
+					// if we're STATIC and have a data pt, we borrow the new data_ptr 
+					// because it's more likely to be up-to-date
+					if (kind == STATIC && p_info->what == DATA_PTR)
+					{
+						mappings[i_map].n.info.un.data_ptr = p_info->un.data_ptr;
+					}
+					return &mappings[i_map];
+				}
+				else
+				{
+					/* We overlap, it's not heap, and the containment check failed. 
+					 * Something weird is going on. */
+					assert(0);
+				}
+			}
+		} // end if overlaps
+		// else no overlap; continue
 	}
 	
-	if (mapping_num != 0 && mappings[mapping_num].n.kind == 3)
-	{
-		// force an unmapping of this region
-		debug_printf(3, "%s: forcing unmapping of %p-%p, the first part of which is mapped "
-				"at number %d\n", __func__, base, (char*) base + s, mapping_num);
-		prefix_tree_del(base, s);
-	}
+	/* If we got here, we've unmapped anything overlapping us. */
+	
+	mapping_num_t mapping_num = l0index[pagenum(base)];
+	//SANITY_CHECK_MAPPING(&mappings[mapping_num]);
+	assert(mapping_num == 0);
 	
 	// test for nearby mappings to extend
 	mapping_num_t abuts_existing_start = l0index[pagenum((char*) base + s)];
