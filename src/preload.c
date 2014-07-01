@@ -156,6 +156,10 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 #undef orig_call
 }
 
+#define MAPPING_BASE_FROM_PHDR_VADDR(base_addr, vaddr) \
+   (ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr)))
+#define MAPPING_END_FROM_PHDR_VADDR(base_addr, vaddr, memsz) \
+	(ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
 
 int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
@@ -169,10 +173,9 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 			if (info->dlpi_phdr[i].p_type == PT_LOAD)
 			{
 				// adjust start/end to be multiples of the page size
-				uintptr_t actual_base = (uintptr_t) info->dlpi_addr + (uintptr_t) info->dlpi_phdr[i].p_vaddr;
-				uintptr_t rounded_down_base = ROUND_DOWN_TO_PAGE_SIZE(actual_base);
-				uintptr_t rounded_up_end
-					 = ROUND_UP_TO_PAGE_SIZE(actual_base + info->dlpi_phdr[i].p_memsz);
+				uintptr_t rounded_down_base = MAPPING_BASE_FROM_PHDR_VADDR(info->dlpi_addr, info->dlpi_phdr[i].p_vaddr);
+				uintptr_t rounded_up_end = MAPPING_END_FROM_PHDR_VADDR(info->dlpi_addr, 
+						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_memsz);
 				// add it to the tree
 				const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, (void*) info->dlpi_addr);
 				// HACK HACK HACK HACK: memory leak: please don't strdup
@@ -256,10 +259,12 @@ static int gather_mappings_cb(struct dl_phdr_info *info, size_t size, void *data
 			if (info->dlpi_phdr[i].p_type == PT_LOAD)
 			{
 				assert(mappings->nmappings < MAX_MAPPINGS);
-				mappings->mappings[mappings->nmappings++] = (struct mapping) {
-					(unsigned char *) ((struct link_map *) mappings->handle)->l_addr + info->dlpi_phdr[i].p_vaddr, 
-					info->dlpi_phdr[i].p_memsz, 
-				};
+				/* Mappings always get rounded up to page size. */
+				uintptr_t base = MAPPING_BASE_FROM_PHDR_VADDR(((struct link_map *) mappings->handle)->l_addr,
+						info->dlpi_phdr[i].p_vaddr);
+				uintptr_t end = MAPPING_END_FROM_PHDR_VADDR(((struct link_map *) mappings->handle)->l_addr,
+						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_memsz);
+				mappings->mappings[mappings->nmappings++] = (struct mapping) { (void*) base, end - base };
 			}
 		}
 	
