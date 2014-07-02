@@ -42,14 +42,6 @@ void __liballocs_add_missing_maps(void)
 
 	char proc_buf[4096];
 	int ret;
-	//ret = snprintf(proc_buf, sizeof proc_buf, "/proc/%d/exe", getpid());
-	//assert(ret > 0);
-	//char exe_buf[4096];
-	//ssize_t readlink_ret = readlink(proc_buf, exe_buf, sizeof exe_buf);
-	//assert(readlink_ret > 0);
-	//assert(readlink_ret < sizeof exe_buf);
-	//exe_buf[readlink_ret] = '\0';
-	
 	ret = snprintf(proc_buf, sizeof proc_buf, "/proc/%d/maps", getpid());
 	assert(ret > 0);
 	FILE *maps = fopen(proc_buf, "r");
@@ -64,7 +56,7 @@ void __liballocs_add_missing_maps(void)
 	{
 		rest[0] = '\0';
 		int fields_read = sscanf(linebuf, 
-			"%lx-%lx %c%c%c%c %8x %2x:%2x %d %s\n",
+			"%lx-%lx %c%c%c%c %8x %2x:%2x %d %4095[\x01-\x09\x0b-\xff]\n",
 			&first, &second, &r, &w, &x, &p, &offset, &devmaj, &devmin, &inode, rest);
 
 		assert(fields_read >= (NUM_FIELDS-1)); // we might not get a "rest"
@@ -102,11 +94,11 @@ void __liballocs_add_missing_maps(void)
 					 * Further wart: in the case of the executable name, we can't
 					 * dlopen() that. Even if we dlopen(NULL), its l_name is likely
 					 * to be "". So we have to use /proc/getpid()/exe (above).  */
-					assert(execfile_name[0] != '\0');
-					if (0 == strcmp(execfile_name, rest))
+					assert(exe_fullname[0] != '\0');
+					if (0 == strcmp(exe_fullname, rest))
 					{
 						kind = STATIC;
-						data_ptr = execfile_name;
+						data_ptr = exe_fullname;
 					} 
 					else
 					{

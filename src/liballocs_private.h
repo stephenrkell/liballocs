@@ -74,7 +74,8 @@ struct prefix_tree_node *
 prefix_tree_bounds(const void *ptr, const void **begin, const void **end) __attribute__((visibility("hidden")));
 int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data) __attribute__((visibility("hidden")));
 
-extern const char *exe_basename __attribute__((visibility("hidden")));
+extern char exe_fullname[4096] __attribute__((visibility("hidden")));
+extern char exe_basename[4096] __attribute__((visibility("hidden")));
 extern FILE *stream_err __attribute__((visibility("hidden")));
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \

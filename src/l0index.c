@@ -459,13 +459,18 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	return NULL;
 }
 
+static _Bool path_is_realpath(const char *path)
+{
+	const char *rp = realpath_quick(path);
+	return 0 == strcmp(path, rp);
+}
+
 struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr) __attribute__((visibility("hidden")));
 struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr)
 {
 	if (!l0index) init();
 	
-	assert(!data_ptr || kind == STACK || 
-			0 == strcmp(data_ptr, realpath_quick(data_ptr)));
+	assert(!data_ptr || kind == STACK || path_is_realpath((const char *) data_ptr));
 	
 	struct node_info info = { .what = DATA_PTR, .un = { data_ptr: data_ptr } };
 	return prefix_tree_add_full(base, s, kind, &info);

@@ -35,7 +35,8 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 }
 #endif
 
-const char *exe_basename __attribute__((visibility("hidden")));
+char exe_basename[4096] __attribute__((visibility("hidden")));
+char exe_fullname[4096];
 FILE *stream_err __attribute__((visibility("hidden")));
 
 static const char *allocsites_base;
@@ -161,7 +162,6 @@ char *realpath_quick(const char *arg)
 	return realpath(arg, &buf[0]);
 }
 
-char execfile_name[4096];
 const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 {
 	if (strlen(dlpi_name) == 0)
@@ -178,16 +178,9 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 		 */
 		if (dlpi_addr == 0)
 		{
-			if (execfile_name[0] == '\0')
-			{
-				// use /proc to get our executable filename
-				int count = readlink("/proc/self/exe", execfile_name, sizeof execfile_name);
-				assert(count != -1); // nothing we can do
-				execfile_name[count] = '\0';
-			}
-			
+			assert(exe_fullname[0] != '\0');
 			// use this filename now
-			return execfile_name;
+			return exe_fullname;
 		}
 		else
 		{
@@ -701,11 +694,11 @@ int __liballocs_global_init(void)
 	assert(__addrmap_executable_end_addr != 0);
 	
 	// grab the executable's basename
-	char exename[4096];
-	ssize_t readlink_ret = readlink("/proc/self/exe", exename, sizeof exename);
+	ssize_t readlink_ret = readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);
 	if (readlink_ret != -1)
 	{
-		exe_basename = strdup(basename(exename)); // GNU basename
+		strncpy(exe_basename, basename(exe_fullname), sizeof exe_basename); // GNU basename
+		exe_basename[sizeof exe_basename - 1] = '\0';
 	}
 	
 	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
