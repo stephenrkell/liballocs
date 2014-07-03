@@ -15,7 +15,7 @@ class AllocsCxx(AllocsCompilerWrapper):
     def defaultFreeFns(self):
         return ["free(P)"]
     
-    def makeObjectFileName(self, sourceFileName):
+    def makeObjectFileName(self, sourceFile):
             nameStem, nameExtension = os.path.splitext(sourceFile)
             if (nameExtension == ".cpp" or nameExtension == ".cc" or nameExtension == ".C"):
                 outputFilename = nameStem + ".o"
@@ -23,6 +23,7 @@ class AllocsCxx(AllocsCompilerWrapper):
             else:
                 outputFilename = sourceFile + ".o"
                 sys.stderr.write("Making a secret output file (from unknown source) " + outputFilename + "\n")
+            return outputFilename
     
     def getUnderlyingCompilerCommand(self):
         return ["c++"]

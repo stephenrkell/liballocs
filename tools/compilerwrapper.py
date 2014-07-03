@@ -128,10 +128,11 @@ class CompilerWrapper:
         return 0
 
     def makeDotOAndPassThrough(self, argv, customArgs, inputFiles):
-        argvWithoutOutputOptions = [argv[i] for i in range(0, len(argv)) \
-           if argv[i] != '-o' and (i != 0 and argv[i-1] != '-o') and argv[i] != '-shared' and argv[i] != '-c' \
-           and argv[i] != '-static']
         argvToPassThrough = [x for x in argv[1:] if not x in inputFiles]
+        argvWithoutOutputOptions = [argvToPassThrough[i] for i in range(0, len(argvToPassThrough)) \
+           if argvToPassThrough[i] != '-o' and (i != 0 and argvToPassThrough[i-1] != '-o') \
+           and argvToPassThrough[i] != '-shared' and argvToPassThrough[i] != '-c' \
+           and argvToPassThrough[i] != '-static']
 
         sys.stderr.write("Source input files: " + ', '.join(inputFiles) + "\n")
         sys.stderr.write("Custom args: " + ', '.join(customArgs) + "\n")
@@ -141,9 +142,10 @@ class CompilerWrapper:
             # compile to .o with the custom args
             # -- erase -shared etc, and erase "-o blah"
             outputFilename = self.makeObjectFileName(sourceFile)
-            sys.stderr.write("Building " + outputFilename + "\n")
-            ret1 = subprocess.call(self.getUnderlyingCompilerCommand() + argvWithoutOutputOptions + customArgs \
-            + ["-c", "-o", outputFilename, sourceFile])
+            commandAndArgs = self.getUnderlyingCompilerCommand() + argvWithoutOutputOptions + customArgs \
+            + ["-c", "-o", outputFilename, sourceFile]
+            sys.stderr.write("Building " + outputFilename + " using " + " ".join(commandAndArgs) + "\n")
+            ret1 = subprocess.call(commandAndArgs)
 
             if ret1 != 0:
                 # we didn't succeed, so quit now

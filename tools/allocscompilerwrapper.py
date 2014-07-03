@@ -100,8 +100,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # that this make invocation will be compiling for us.
         # NOTE that we really do mean CC and not CXX here, because
         # all the stuff we build ourselves is built from C.
-        if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
-            del os.environ["CC"]
+        #if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
+        if "CC" in os.environ:# and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
+           del os.environ["CC"]
         sys.stderr.write(sys.argv[0] + " called with args  " + " ".join(sys.argv) + "\n")
 
         sourceInputFiles, objectInputFiles, outputFile = self.parseInputAndOutputFiles(sys.argv)
