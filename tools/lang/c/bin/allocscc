@@ -228,8 +228,8 @@ class AllocsCC:
             if skipNext: 
                 skipNext = False
                 continue
-            if sys.argv[num] == "-V":
-                sys.argv[num] = "-0"
+            #if sys.argv[num] == "-V":
+            #    sys.argv[num] = "-0"
             if sys.argv[num] == "-o":
                 outputFile = sys.argv[num + 1]
                 skipNext = True
