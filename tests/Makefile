@@ -3,6 +3,8 @@ CFLAGS += -DUSE_STARTUP_BRK
 
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
+# HMM -- this is causing us to re-add the +='d stuff in each recursive make.
+# can we get away without this?
 export CFLAGS
 
 UNIQTYPES_BASE ?= /usr/lib/allocsites
