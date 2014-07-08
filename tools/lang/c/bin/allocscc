@@ -19,6 +19,16 @@ class AllocsCC(AllocsCompilerWrapper):
 
     def defaultFreeFns(self):
         return ["free(P)"]
+
+    def getCustomCompileArgs(self, sourceInputFiles):
+        saveTempsArgs = ['-save-temps']
+        for sourceFile in sourceInputFiles:
+            dirname = os.path.dirname(sourceFile)
+            # FIXME: support multiple distinct directories here, if cilly can
+            if dirname != "":
+                 saveTempsArgs = ["--save-temps=" + dirname]
+        return AllocsCompilerWrapper.getCustomCompileArgs(self, sourceInputFiles) \
+        + saveTempsArgs
     
     def makeObjectFileName(self, sourceFile):
             nameStem, nameExtension = os.path.splitext(sourceFile)

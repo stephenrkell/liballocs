@@ -84,15 +84,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
         return self.getLinkPath()
     
     def getCustomCompileArgs(self, sourceInputFiles):
-        saveTempsArgs = ['-save-temps']
-        for sourceFile in sourceInputFiles:
-            dirname = os.path.dirname(sourceFile)
-            # FIXME: support multiple distinct directories here, if cilly can
-            if dirname != "":
-                 saveTempsArgs = ["--save-temps=" + dirname]
         return ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", \
-        "-fno-omit-frame-pointer", "-ffunction-sections"] \
-        + saveTempsArgs
+        "-fno-omit-frame-pointer", "-ffunction-sections"]
 
     def main(self):
         # un-export CC from the env if it's set to allocscc, because 
