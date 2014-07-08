@@ -48,7 +48,7 @@ uintptr_t page_mask __attribute__((visibility("hidden")));
 
 int __liballocs_debug_level __attribute__((visibility("hidden")));
 _Bool __liballocs_is_initialized __attribute__((visibility("protected")));
-allocsmt_entry_type *__liballocs_allocsmt __attribute__((visibility("hidden")));
+allocsmt_entry_type *__liballocs_allocsmt __attribute__((visibility("protected")));
 
 // these two are defined in addrmap.h as weak
 void *__addrmap_executable_end_addr __attribute__((visibility("protected")));;
@@ -561,7 +561,7 @@ static void consider_blacklisting(const void *obj)
 #endif
 }
 
-void *main_bp __attribute__((visibility("hidden"))); // beginning of main's stack frame
+void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning of main's stack frame
 
 const struct uniqtype *__liballocs_uniqtype_void; // remember the location of the void uniqtype
 const struct uniqtype *__liballocs_uniqtype_signed_char;
@@ -774,16 +774,16 @@ int __liballocs_global_init(void)
 
 		if (have_bp)
 		{
-			main_bp = (void*) (intptr_t) bp;
+			__liballocs_main_bp = (void*) (intptr_t) bp;
 		}
 		else
 		{
 			// underapproximate bp as the sp
-			main_bp = (void*) (intptr_t) sp;
+			__liballocs_main_bp = (void*) (intptr_t) sp;
 		}
 	}
 	
-	if (main_bp == 0) 
+	if (__liballocs_main_bp == 0) 
 	{
 		// underapproximate bp as our current sp!
 		debug_printf(1, "Warning: using egregious approximation for bp of main().\n");
@@ -793,9 +793,9 @@ int __liballocs_global_init(void)
 	#else // assume X86_64 for now
 		__asm__("movq %%rsp, %0\n" : "=r"(our_sp));
 	#endif
-		main_bp = (void*) (intptr_t) our_sp;
+		__liballocs_main_bp = (void*) (intptr_t) our_sp;
 	}
-	assert(main_bp != 0);
+	assert(__liballocs_main_bp != 0);
 	
 	// also init the l0 index -- danger! avoid allocation here too
 	__liballocs_init_l0();
@@ -930,4 +930,16 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	}
 }
 
-//static inline 
+struct uniqtype * 
+__liballocs_get_alloc_type(void *obj)
+{
+	memory_kind k;
+	const void *object_start;
+	struct uniqtype *out;
+	_Bool abort = __liballocs_get_alloc_info(obj, NULL, NULL, NULL, NULL, 
+		NULL, &out, NULL, NULL);
+	
+	if (abort) return NULL;
+	
+	return out;
+}

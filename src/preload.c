@@ -161,6 +161,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 #define MAPPING_END_FROM_PHDR_VADDR(base_addr, vaddr, memsz) \
 	(ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
 
+__attribute__((visibility("hidden")))
 int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
 	const char *filename = (const char *) data;

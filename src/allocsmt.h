@@ -42,7 +42,7 @@ struct allocsite_entry
 
 #define allocsmt_entry_type          struct allocsite_entry *
 #define allocsmt_entry_coverage      256
-extern allocsmt_entry_type *__liballocs_allocsmt __attribute((visibility("hidden")));
+extern allocsmt_entry_type *__liballocs_allocsmt __attribute((visibility("protected")));
 #define ALLOCSMT_FUN(op, ...)    (MEMTABLE_ ## op ## _WITH_TYPE(__liballocs_allocsmt, allocsmt_entry_type, \
     allocsmt_entry_coverage, (void*)0, (void*)(STACK_BEGIN << 2), ## __VA_ARGS__ ))
 

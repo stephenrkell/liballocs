@@ -76,7 +76,7 @@ extern unsigned long __liballocs_hit_static_case;
 extern unsigned long __liballocs_aborted_unindexed_heap;
 extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
-extern void *main_bp __attribute__((visibility("hidden"))); // beginning of main's stack frame
+extern void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning of main's stack frame
 
 extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
 extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtype(const void *allocsite)
@@ -196,7 +196,7 @@ extern struct uniqtype __uniqtype__int __attribute__((weak));
 int __liballocs_iterate_types(void *typelib_handle, 
 		int (*cb)(struct uniqtype *t, void *arg), void *arg) DEFAULT_ATTRS;
 /* Our main API: query allocation information for a pointer */
-extern inline _Bool __liballocs_get_alloc_info(const void *obj, const void *test_uniqtype, 
+extern inline _Bool __liballocs_get_alloc_info(const void *obj, 
 	const char **out_reason, const void **out_reason_ptr,
 	memory_kind *out_memory_kind, const void **out_object_start,
 	unsigned *out_block_element_count,
@@ -406,7 +406,6 @@ _Bool
 __attribute__((always_inline,gnu_inline)) 
 __liballocs_get_alloc_info
 	(const void *obj, 
-	const void *test_uniqtype, 
 	const char **out_reason,
 	const void **out_reason_ptr,
 	memory_kind *out_memory_kind,
@@ -421,7 +420,6 @@ _Bool
 __attribute__((always_inline,gnu_inline)) 
 __liballocs_get_alloc_info
 	(const void *obj, 
-	const void *test_uniqtype, 
 	const char **out_reason,
 	const void **out_reason_ptr,
 	memory_kind *out_memory_kind,
@@ -458,8 +456,9 @@ __liballocs_get_alloc_info
 			}
 		}
 	}
-	*out_alloc_site = 0; // will likely get updated later
-	*out_memory_kind = k;
+	void *object_start = NULL;
+	if (out_alloc_site) *out_alloc_site = 0; // will likely get updated later
+	if (out_memory_kind) *out_memory_kind = k;
 	switch(k)
 	{
 		case STACK:
@@ -520,8 +519,8 @@ __liballocs_get_alloc_info
 				unw_word_t byte_offset_from_proc_start;
 				at_or_above_main |= 
 					(
-						(got_bp && bp >= (intptr_t) main_bp)
-					 || (sp >= (intptr_t) main_bp) // NOTE: this misses the in-main case
+						(got_bp && bp >= (intptr_t) __liballocs_main_bp)
+					 || (sp >= (intptr_t) __liballocs_main_bp) // NOTE: this misses the in-main case
 					);
 
 				/* Now get the sp of the next higher stack frame, 
@@ -566,7 +565,7 @@ __liballocs_get_alloc_info
 				{
 					// return value <1 means error
 
-					*out_reason = "stack walk step failure";
+					if (out_reason) *out_reason = "stack walk step failure";
 					goto abort_stack;
 					break;
 				}
@@ -605,9 +604,10 @@ __liballocs_get_alloc_info
 				if ((unsigned char *) obj >= frame_base - frame_desc->neg_maxoff  // is unsigned, so subtract
 					&& (unsigned char *) obj < frame_base + frame_desc->pos_maxoff)
 				{
-					*out_object_start = frame_base;
-					*out_alloc_uniqtype = frame_desc;
-					*out_alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
+					object_start = frame_base;
+					if (out_object_start) *out_object_start = object_start;
+					if (out_alloc_uniqtype) *out_alloc_uniqtype = frame_desc;
+					if (out_alloc_site) *out_alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
 					goto out_success;
 				}
 				else
@@ -616,7 +616,7 @@ __liballocs_get_alloc_info
 					// ... so if our lowest addr is still too high
 					if (frame_base - frame_desc->neg_maxoff > (unsigned char *) obj)
 					{
-						*out_reason = "stack walk reached higher frame";
+						if (out_reason) *out_reason = "stack walk reached higher frame";
 						goto abort_stack;
 					}
 				}
@@ -626,15 +626,15 @@ __liballocs_get_alloc_info
 			// if we hit the termination condition, we've failed
 			if (higherframe_sp == BEGINNING_OF_STACK)
 			{
-				*out_reason = "stack walk reached top-of-stack";
+				if (out_reason) *out_reason = "stack walk reached top-of-stack";
 				goto abort_stack;
 			}
 		#undef BEGINNING_OF_STACK
 		// end pasted from pmirror stack.cpp
 		break; // end case STACK
 		abort_stack:
-			if (!*out_reason) *out_reason = "stack object";
-			*out_reason_ptr = obj;
+			if (out_reason && !*out_reason) *out_reason = "stack object";
+			if (out_reason_ptr) *out_reason_ptr = obj;
 			++__liballocs_aborted_stack;
 			return 1;
 		} // end case STACK
@@ -656,8 +656,8 @@ __liballocs_get_alloc_info
 					&alloc_chunksize, &containing_suballoc);
 			if (!heap_info)
 			{
-				*out_reason = "unindexed heap object";
-				*out_reason_ptr = obj;
+				if (out_reason) *out_reason = "unindexed heap object";
+				if (out_reason) *out_reason_ptr = obj;
 				++__liballocs_aborted_unindexed_heap;
 				return 1;
 			}
@@ -696,8 +696,8 @@ __liballocs_get_alloc_info
 			// if we didn't get an alloc uniqtype, we abort
 			if (!alloc_uniqtype) 
 			{
-				*out_reason = "unrecognised allocsite";
-				*out_reason_ptr = out_alloc_site ? *out_alloc_site : NULL;
+				if (out_reason) *out_reason = "unrecognised allocsite";
+				if (out_reason_ptr) *out_reason_ptr = out_alloc_site ? *out_alloc_site : NULL;
 				++__liballocs_aborted_unrecognised_allocsite;
 				return 1;
 			}
@@ -728,32 +728,35 @@ __liballocs_get_alloc_info
 //				++__liballocs_aborted_static;
 //				goto abort;
 //			}
-			*out_alloc_uniqtype = static_addr_to_uniqtype(obj, (void**) out_object_start);
-			if (!*out_alloc_uniqtype)
+			struct uniqtype *alloc_uniqtype = static_addr_to_uniqtype(obj, &object_start);
+			if (out_alloc_uniqtype) *out_alloc_uniqtype = alloc_uniqtype;
+			if (!alloc_uniqtype)
 			{
-				*out_reason = "unrecognised static object";
-				*out_reason_ptr = obj;
+				if (out_reason) *out_reason = "unrecognised static object";
+				if (out_reason_ptr) *out_reason_ptr = obj;
 				++__liballocs_aborted_static;
 //				consider_blacklisting(obj);
 				return 1;
 			}
+			
 			// else we can go ahead
-			*out_alloc_site = *out_object_start;
+			if (out_object_start) *out_object_start = object_start;
+			if (out_alloc_site && out_object_start) *out_alloc_site = *out_object_start;
 			break;
 		}
 		case UNKNOWN:
 		case MAPPED_FILE:
 		default:
 		{
-			*out_reason = "object of unknown storage";
-			*out_reason_ptr = obj;
+			if (out_reason) *out_reason = "object of unknown storage";
+			if (out_reason_ptr) *out_reason_ptr = obj;
 			++__liballocs_aborted_unknown_storage;
 			return 1;
 		}
 	}
 	
 out_success:
-	target_offset_wholeblock = (char*) obj - (char*) *out_object_start;
+	target_offset_wholeblock = (char*) obj - (char*) object_start;
 	/* If we're searching in a heap array, we need to take the offset modulo the 
 	 * element size. Otherwise just take the whole-block offset. */
 	if (k == HEAP 
@@ -767,11 +770,62 @@ out_success:
 	assert(target_offset_wholeblock < 0 
 		? target_offset_within_uniqtype < 0 
 		: target_offset_within_uniqtype >= 0);
-	*out_target_offset_within_uniqtype = target_offset_within_uniqtype;
+	if (out_target_offset_within_uniqtype) *out_target_offset_within_uniqtype = target_offset_within_uniqtype;
 	
 	return 0;
 }
 
+// extern inline 
+// _Bool 
+// __attribute__((always_inline,gnu_inline)) 
+// __liballocs_get_alloc_info
+// 	(const void *obj, 
+// 	const char **out_reason,
+// 	const void **out_reason_ptr,
+// 	memory_kind *out_memory_kind,
+// 	const void **out_object_start,
+// 	unsigned *out_block_element_count,
+// 	struct uniqtype **out_alloc_uniqtype, 
+// 	const void **out_alloc_site,
+// 	signed *out_target_offset_within_uniqtype) __attribute__((always_inline,gnu_inline));
+
+/* We define a more friendly API for simple queries.
+ * NOTE that we don't make these functions inline. They are still fast, internally,
+ * because they make an inlined call to __liballocs_get_alloc_info.
+ * BUT we don't want to make them inline themselves, because this complicates linking
+ * to liballocs quite a bit. Specifically, if we inline them into callers, then 
+ * callers need to link against lots of internals of liballocs which would otherwise
+ * have hidden visibility. We would have to add mocked-up versions of all this stuff
+ * to the noop library if we wanted this to work. Recall also that linking -lallocs does
+ * *not* work! You really need to preload liballocs for it to work. */
+
+// struct bounds {
+// 	void *begin;
+// 	void *end;
+// };
+// 
+// extern inline 
+// __attribute__((always_inline,gnu_inline)) 
+// struct bounds 
+// get_alloc_bounds(void *obj, struct uniqtype *type_bound)
+// {
+// 	/* We consider the pointer */
+// }
+
+struct uniqtype * 
+__liballocs_get_alloc_type(void *obj);
+
+// struct uniqtype * 
+// get_outermost_type(void *obj, struct uniqtype *bound)
+// {
+// 	
+// }
+// 
+// void *
+// get_alloc_site(void *obj)
+// {
+// 	
+// }
 
 #ifdef __cplusplus
 } // end extern "C"

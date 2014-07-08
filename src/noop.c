@@ -38,3 +38,9 @@ __liballocs_get_alloc_info
 {
 	return 1; // abort
 }
+
+struct uniqtype * 
+__liballocs_get_alloc_type(void *obj)
+{
+	return NULL;
+}

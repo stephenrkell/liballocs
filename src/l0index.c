@@ -762,7 +762,7 @@ enum object_memory_kind __liballocs_get_memory_kind(const void *obj)
 	else return mappings[mapping_num].n.kind;
 }
 
-void __liballocs_print_mappigns_to_stream_err(void) __attribute__((visibility("protected")));
+void __liballocs_print_mappings_to_stream_err(void) __attribute__((visibility("protected")));
 void __liballocs_print_mappings_to_stream_err(void)
 {
 	int lock_ret;
