@@ -1,6 +1,10 @@
 CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -O2
 CFLAGS += -DUSE_STARTUP_BRK
 
+ifneq ($(USE_FAKE_LIBUNWIND),)
+CFLAGS += -DUSE_FAKE_LIBUNWIND=1
+endif
+
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 # HMM -- this is causing us to re-add the +='d stuff in each recursive make.
