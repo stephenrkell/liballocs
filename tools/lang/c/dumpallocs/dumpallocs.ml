@@ -50,14 +50,10 @@ module H = Hashtbl
 
 let rec sizeExprHasNoSizeof (e: exp) =
   match e with 
- | Const(c) -> true
- | Lval((Var(v),o)) -> true
- | Lval((Mem(ex),o)) -> sizeExprHasNoSizeof ex
  | SizeOf(t) -> false
  | SizeOfE(ex) -> false
  | SizeOfStr(s) -> false
- | AlignOf(t) -> true
- | AlignOfE(t) -> true
+ | Lval((Mem(ex),o)) -> sizeExprHasNoSizeof ex
  | UnOp(u, e1, t) -> sizeExprHasNoSizeof e1
  | BinOp(b, e1, e2, t) -> (sizeExprHasNoSizeof e1) && (sizeExprHasNoSizeof e2)
  | CastE(t, ex) -> sizeExprHasNoSizeof ex
@@ -65,6 +61,11 @@ let rec sizeExprHasNoSizeof (e: exp) =
  | AddrOf((Mem(ex),o)) -> sizeExprHasNoSizeof ex
  | StartOf((Var(v),o)) -> true
  | StartOf((Mem(ex),o)) -> sizeExprHasNoSizeof ex
+ | Const(c) -> true
+ | Lval((Var(v),o)) -> true
+ | AlignOf(t) -> true
+ | AlignOfE(t) -> true
+ | _ -> true
 
 let rec decayArrayInTypesig ts = match ts with
    TSArray(tsig, optSz, attrs) -> decayArrayInTypesig tsig (* recurse for multidim arrays *)
@@ -81,6 +82,102 @@ let maybeDecayArrayTypesig maybeTs = match maybeTs with
 
 let rec getSizeExpr (ex: exp) (env : (int * typsig) list) = 
   output_string Pervasives.stderr ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ")\n");  flush Pervasives.stderr; 
+  let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
+  in
+  let isStaticallyZero e = isZero (foldConstants e) 
+  in
+  let isStaticallyNullPtr e = match (typeSig (typeOf e)) with
+    TSPtr(_) -> isStaticallyZero(e)
+  | _ -> false
+  in
+  let isTrailingField fi compinfo = 
+    let reverseFields = rev compinfo.cfields
+    in
+    let head = hd reverseFields
+    in
+    fi == head
+  in
+  let arrayElementType ts = match ts with
+        TSArray(t, _, _) -> t
+      | _ -> failwith "impossible"
+  in
+  let pointerTargetType ts = match ts with 
+        TSPtr(t, _) -> t
+      | _ -> failwith "impossible"
+  in
+  (* does a given lvalue offset, applied to an lvalue host of a given type sig, 
+   * yield a *trailing* field, and if so, what is the field's type sig?
+   *
+   * A trailing field is never an array member. E.g. 
+   *      a.i[1] is not a trailing field even if i is a 2-element array.
+   * BUT 
+   *      &a.i[0]   a.k.a.  &a.i   a.k.a.    a.i
+   * might be a trailing field, if i is the last field in the struct. *)
+  let rec isTrailingFieldOffsetExpr ts off = 
+    output_string Pervasives.stderr ("Hello from isTrailingFieldOffsetExpr(" ^ (Pretty.sprint 80 (d_typsig () ts)) ^ (Pretty.sprint 80 (d_offset Pretty.nil () off)) ^ ") ");  flush Pervasives.stderr; 
+    match off with
+      NoOffset -> (output_string Pervasives.stderr ("... no offset\n");  flush Pervasives.stderr; false)
+    | Field(fi, NoOffset) when isTrailingField fi fi.fcomp 
+        -> (output_string Pervasives.stderr ("... trailing field + no offset\n");  flush Pervasives.stderr; true)
+    | Field(fi, NoOffset)
+        -> (output_string Pervasives.stderr ("... non-trailing no-offset\n"); flush Pervasives.stderr; false)
+    | Index(indexEx, maybeOffset)
+        -> (output_string Pervasives.stderr ("... index\n");  flush Pervasives.stderr; isTrailingFieldOffsetExpr (arrayElementType ts) maybeOffset)
+    | Field(fi, someOffset)
+        -> (output_string Pervasives.stderr ("... residual field case\n");  flush Pervasives.stderr; isTrailingFieldOffsetExpr (typeSig fi.ftype) someOffset)
+
+ (*   
+    (getConcreteType (typeSig fi.ftype)) = (getConcreteType ts) -> 
+        if isTrailingField fi fi.fcomp 
+            then (output_string Pervasives.stderr ("... type-matching trailing field + no offset\n");  flush Pervasives.stderr; Some(TSComp(fi.fcomp.cstruct, fi.fcomp.cname, [])))
+            else (output_string Pervasives.stderr ("... type-matching non-trailing field + no offset\n");  flush Pervasives.stderr; None)
+    | Field(fi, Index(indexEx, NoOffset)) when (getConcreteType (typeSig fi.ftype)) = (getConcreteType ts) -> 
+        if isTrailingField fi fi.fcomp 
+            then (output_string Pervasives.stderr ("... type-matching trailing indexed field + no offset\n");  flush Pervasives.stderr; Some(TSComp(fi.fcomp.cstruct, fi.fcomp.cname, [])))
+            else (output_string Pervasives.stderr ("... type-matching non-trailing indexed field + no offset\n");  flush Pervasives.stderr; None)
+    | Field(fi, someOffset) -> (output_string Pervasives.stderr ("... non-type-matching field\n");  flush Pervasives.stderr; containingTypeSigForTrailingFieldOffsetExpr (typeSig fi.ftype) someOffset)
+    | Index(indexEx, maybeOffset) -> (output_string Pervasives.stderr ("... index\n");  flush Pervasives.stderr; containingTypeSigForTrailingFieldOffsetExpr (arrayElementType ts) maybeOffset)
+    *)
+  in
+  let containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv = begin
+    output_string Pervasives.stderr ("Hello from containingTypeSigInTrailingFieldOffsetFromNullPtrExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv)) ^ ")\n");  flush Pervasives.stderr; 
+    match lv with
+      (* Does it make sense to have complex expressions when doing 
+         an offsetof-based size calculation? e.g.
+         
+         &((T * )0)->a.b[x].c[y].d?
+         
+         potentially YES
+         if we're padding in a non-toplevel part of the struct.
+         The size type of such an expression is T.
+         But we want to check that we're padding a tail element.
+         
+         What does the above expression look like?
+         AddrOf(
+             Mem( cast-of-nullptr, 
+                Field(a-fieldinfo, 
+                    Field(b-fieldinfo, 
+                        Index(x-exp, 
+                            Field(c-fieldinfo, 
+                                Index(y-exp, 
+                                    Field(d-fieldinfo, 
+                                        NoOffset)))))))
+       *) 
+    (Mem(e), off) -> output_string Pervasives.stderr ("Saw Mem case\n"); flush Pervasives.stderr; 
+        if isStaticallyNullPtr e 
+            then (
+                output_string Pervasives.stderr ("Saw statically-null case\n"); 
+                flush Pervasives.stderr; 
+                let targetTs = pointerTargetType (typeSig (typeOf e))
+                in
+                if isTrailingFieldOffsetExpr targetTs off 
+                    then Some(targetTs)
+                    else None
+            )
+            else (output_string Pervasives.stderr ("Saw non-statically-null case\n"); flush Pervasives.stderr; None)
+   | _ -> None
+  end
+  in
   match ex with
    |  BinOp(Mult, e1, e2, t) -> begin
          let sz1 = getSizeExpr e1 env in
@@ -113,7 +210,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
                            sizeof S + n * sizeof T
                            
                        in which case our last element is a variable-length thing.
-                    *)
+                     *)
                     Synthetic([s1; TSArray(s2, None, [])])
            | (Synthetic(l1), Existing(s2)) -> Synthetic(l1 @ [s2])
            | (Existing(s1), Synthetic(l2)) -> Synthetic(s1 :: l2)
@@ -148,6 +245,13 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
         |  Mem(_) -> Undet
       end
    | CastE(t, e) -> (getSizeExpr e env)
+   | AddrOf(lv) -> begin 
+        output_string Pervasives.stderr ("Hello from AddrOf case in getSizeExpr\n");  flush Pervasives.stderr;
+        let ts = containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv 
+        in match ts with
+            None -> Undet
+          | Some(someTs) -> Existing(someTs)
+      end
    | _ -> Undet
    
 (* FIXME: split this into a "toplevel" that does the HasNoSizeof check,
