@@ -10,6 +10,14 @@ CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) $(realpath $(dir $(THIS_MAKEFILE)))/l
 
 default: src bin cil
 
+OCAML_DEPS := $(patsubst %.ml,%.d,$(CIL_TOOLS_SRC))
+
+$(OCAML_DEPS): %.d: %.ml
+	$(OCAMLFIND) ocamldep $(filter-out -g,$(OCAMLOPTFLAGS)) $(OCAMLFLAGS) "$<" > "$@"
+
+DEPS += $(OCAML_DEPS)
+-include $(DEPS)
+
 .PHONY: cil
 cil: $(foreach t,$(CIL_TOOLS),$(t)/$(t).cmxs $(t)/$(t).cma)
 

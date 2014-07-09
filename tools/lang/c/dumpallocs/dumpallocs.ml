@@ -81,7 +81,7 @@ let maybeDecayArrayTypesig maybeTs = match maybeTs with
   | _ -> Undet
 
 let rec getSizeExpr (ex: exp) (env : (int * typsig) list) = 
-  output_string Pervasives.stderr ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ")\n");  flush Pervasives.stderr; 
+  debug_print 1 ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ")\n");  flush Pervasives.stderr; 
   let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
   in
   let isStaticallyZero e = isZero (foldConstants e) 
@@ -114,33 +114,33 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
    *      &a.i[0]   a.k.a.  &a.i   a.k.a.    a.i
    * might be a trailing field, if i is the last field in the struct. *)
   let rec isTrailingFieldOffsetExpr ts off = 
-    output_string Pervasives.stderr ("Hello from isTrailingFieldOffsetExpr(" ^ (Pretty.sprint 80 (d_typsig () ts)) ^ (Pretty.sprint 80 (d_offset Pretty.nil () off)) ^ ") ");  flush Pervasives.stderr; 
+    debug_print 1 ("Hello from isTrailingFieldOffsetExpr(" ^ (Pretty.sprint 80 (d_typsig () ts)) ^ (Pretty.sprint 80 (d_offset Pretty.nil () off)) ^ ") ");  flush Pervasives.stderr; 
     match off with
-      NoOffset -> (output_string Pervasives.stderr ("... no offset\n");  flush Pervasives.stderr; false)
+      NoOffset -> (debug_print 1 ("... no offset\n");  flush Pervasives.stderr; false)
     | Field(fi, NoOffset) when isTrailingField fi fi.fcomp 
-        -> (output_string Pervasives.stderr ("... trailing field + no offset\n");  flush Pervasives.stderr; true)
+        -> (debug_print 1 ("... trailing field + no offset\n");  flush Pervasives.stderr; true)
     | Field(fi, NoOffset)
-        -> (output_string Pervasives.stderr ("... non-trailing no-offset\n"); flush Pervasives.stderr; false)
+        -> (debug_print 1 ("... non-trailing no-offset\n"); flush Pervasives.stderr; false)
     | Index(indexEx, maybeOffset)
-        -> (output_string Pervasives.stderr ("... index\n");  flush Pervasives.stderr; isTrailingFieldOffsetExpr (arrayElementType ts) maybeOffset)
+        -> (debug_print 1 ("... index\n");  flush Pervasives.stderr; isTrailingFieldOffsetExpr (arrayElementType ts) maybeOffset)
     | Field(fi, someOffset)
-        -> (output_string Pervasives.stderr ("... residual field case\n");  flush Pervasives.stderr; isTrailingFieldOffsetExpr (typeSig fi.ftype) someOffset)
+        -> (debug_print 1 ("... residual field case\n");  flush Pervasives.stderr; isTrailingFieldOffsetExpr (typeSig fi.ftype) someOffset)
 
  (*   
     (getConcreteType (typeSig fi.ftype)) = (getConcreteType ts) -> 
         if isTrailingField fi fi.fcomp 
-            then (output_string Pervasives.stderr ("... type-matching trailing field + no offset\n");  flush Pervasives.stderr; Some(TSComp(fi.fcomp.cstruct, fi.fcomp.cname, [])))
-            else (output_string Pervasives.stderr ("... type-matching non-trailing field + no offset\n");  flush Pervasives.stderr; None)
+            then (debug_print 1 ("... type-matching trailing field + no offset\n");  flush Pervasives.stderr; Some(TSComp(fi.fcomp.cstruct, fi.fcomp.cname, [])))
+            else (debug_print 1 ("... type-matching non-trailing field + no offset\n");  flush Pervasives.stderr; None)
     | Field(fi, Index(indexEx, NoOffset)) when (getConcreteType (typeSig fi.ftype)) = (getConcreteType ts) -> 
         if isTrailingField fi fi.fcomp 
-            then (output_string Pervasives.stderr ("... type-matching trailing indexed field + no offset\n");  flush Pervasives.stderr; Some(TSComp(fi.fcomp.cstruct, fi.fcomp.cname, [])))
-            else (output_string Pervasives.stderr ("... type-matching non-trailing indexed field + no offset\n");  flush Pervasives.stderr; None)
-    | Field(fi, someOffset) -> (output_string Pervasives.stderr ("... non-type-matching field\n");  flush Pervasives.stderr; containingTypeSigForTrailingFieldOffsetExpr (typeSig fi.ftype) someOffset)
-    | Index(indexEx, maybeOffset) -> (output_string Pervasives.stderr ("... index\n");  flush Pervasives.stderr; containingTypeSigForTrailingFieldOffsetExpr (arrayElementType ts) maybeOffset)
+            then (debug_print 1 ("... type-matching trailing indexed field + no offset\n");  flush Pervasives.stderr; Some(TSComp(fi.fcomp.cstruct, fi.fcomp.cname, [])))
+            else (debug_print 1 ("... type-matching non-trailing indexed field + no offset\n");  flush Pervasives.stderr; None)
+    | Field(fi, someOffset) -> (debug_print 1 ("... non-type-matching field\n");  flush Pervasives.stderr; containingTypeSigForTrailingFieldOffsetExpr (typeSig fi.ftype) someOffset)
+    | Index(indexEx, maybeOffset) -> (debug_print 1 ("... index\n");  flush Pervasives.stderr; containingTypeSigForTrailingFieldOffsetExpr (arrayElementType ts) maybeOffset)
     *)
   in
   let containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv = begin
-    output_string Pervasives.stderr ("Hello from containingTypeSigInTrailingFieldOffsetFromNullPtrExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv)) ^ ")\n");  flush Pervasives.stderr; 
+    debug_print 1 ("Hello from containingTypeSigInTrailingFieldOffsetFromNullPtrExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv)) ^ ")\n");  flush Pervasives.stderr; 
     match lv with
       (* Does it make sense to have complex expressions when doing 
          an offsetof-based size calculation? e.g.
@@ -163,10 +163,10 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
                                     Field(d-fieldinfo, 
                                         NoOffset)))))))
        *) 
-    (Mem(e), off) -> output_string Pervasives.stderr ("Saw Mem case\n"); flush Pervasives.stderr; 
+    (Mem(e), off) -> debug_print 1 ("Saw Mem case\n"); flush Pervasives.stderr; 
         if isStaticallyNullPtr e 
             then (
-                output_string Pervasives.stderr ("Saw statically-null case\n"); 
+                debug_print 1 ("Saw statically-null case\n"); 
                 flush Pervasives.stderr; 
                 let targetTs = pointerTargetType (typeSig (typeOf e))
                 in
@@ -174,7 +174,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
                     then Some(targetTs)
                     else None
             )
-            else (output_string Pervasives.stderr ("Saw non-statically-null case\n"); flush Pervasives.stderr; None)
+            else (debug_print 1 ("Saw non-statically-null case\n"); flush Pervasives.stderr; None)
    | _ -> None
   end
   in
@@ -233,12 +233,12 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
    |  SizeOfE(e) -> Existing(typeSig (typeOf e))
    |  SizeOfStr(s) -> Existing(typeSig charType)
    |  Lval(lhost, offset) -> begin
-        (* output_string Pervasives.stderr ("Hello from Lval case in getSizeExpr\n");  flush Pervasives.stderr; *) 
+        (* debug_print 1 ("Hello from Lval case in getSizeExpr\n");  flush Pervasives.stderr; *) 
         match lhost with 
            Var(v) -> begin
              if v.vglob then Undet else try 
                let found = Existing(assoc v.vid env) in 
-               (* output_string Pervasives.stderr ("environment tells us that vid " ^ (string_of_int v.vid) ^ " has a sizeofness\n"); *)
+               (* debug_print 1 ("environment tells us that vid " ^ (string_of_int v.vid) ^ " has a sizeofness\n"); *)
                found 
              with Not_found -> Undet
            end
@@ -246,7 +246,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
       end
    | CastE(t, e) -> (getSizeExpr e env)
    | AddrOf(lv) -> begin 
-        output_string Pervasives.stderr ("Hello from AddrOf case in getSizeExpr\n");  flush Pervasives.stderr;
+        debug_print 1 ("Hello from AddrOf case in getSizeExpr\n");  flush Pervasives.stderr;
         let ts = containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv 
         in match ts with
             None -> Undet
@@ -258,7 +258,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) =
    and a recursive part which recurses *without* recursively doing the
    HasNoSizeof check. *)
 let getSizeExprElseDefault (e: exp) (env : (int * typsig) list) = 
-  (* output_string Pervasives.stderr ("Hello from getSizeExprElseDefault\n");  flush Pervasives.stderr;  *)
+  (* debug_print 1 ("Hello from getSizeExprElseDefault\n");  flush Pervasives.stderr;  *)
   let explicitSizeExpr = getSizeExpr e env in
   match explicitSizeExpr with
     Undet -> Some(typeSig voidType)
@@ -283,18 +283,18 @@ let rec warnIfLikelyAllocFn (i: instr) (maybeFunName: string option) (arglist: e
        (* Some(f.vname, *)
           if try_match funName "calloc" && (length arglist) > 1
              then (* getSizeExpr (nth arglist 1) *)
-             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
+             debug_print 1 ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
           else if try_match funName "realloc" && (length arglist) > 1
              then (* getSizeExpr (nth arglist 1) *)
-             output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
+             debug_print 1 ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
              else (* getSizeExpr (nth arglist 0) *)
-                output_string Pervasives.stderr ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
+                debug_print 1 ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
       else () (*  ) 
       else (* takes no arguments, so we output a "(none)" line. *)
          Some(f.vname, None) (* We eliminate these lines in merge-allocs, rather than
             here, so we can safely pass over the false positive from objdumpallocs. *)
 *)  end else (* None *)
-      (* (output_string Pervasives.stderr ("call to function " ^ funName ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
+      (* (debug_print 1 ("call to function " ^ funName ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
 | None -> ()
 
 let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctionType : Cil.typsig option =
@@ -303,36 +303,36 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctio
      in
      let fragment = (* string_after *) (matched_string signature) (* nskip *)
      in 
-     (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function arg spec (" ^ fragment ^ " a.k.a. signature + "^ (string_of_int nskip) ^")\n"); flush Pervasives.stderr);
+     (debug_print 1 ("Info: signature " ^ signature ^ " did contain a function arg spec (" ^ fragment ^ " a.k.a. signature + "^ (string_of_int nskip) ^")\n"); flush Pervasives.stderr);
      fragment
  )
  with Not_found -> (
-       (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain an arg spec\n"); flush Pervasives.stderr); 
+       (debug_print 1 ("Warning: signature " ^ signature ^ " did not contain an arg spec\n"); flush Pervasives.stderr); 
        ""
  )
  in let sizeArgPos = 
        if string_match (regexp "[^A-Z]*[A-Z]") signatureArgSpec 0 
        then Some((String.length (matched_string signatureArgSpec)) - 1 (* for the bracket*) - 1 (* because we want zero-based *))
-       else (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain a capitalized arg spec element\n"); flush Pervasives.stderr; None)
+       else (debug_print 1 ("Warning: signature " ^ signature ^ " did not contain a capitalized arg spec element\n"); flush Pervasives.stderr; None)
  in match sizeArgPos with
   Some(s) -> 
      if (length arglist) > s then 
        let szEx = 
-          (output_string Pervasives.stderr ("Looking at arg expression number " ^ (string_of_int s) ^ "\n"); flush Pervasives.stderr); 
+          (debug_print 1 ("Looking at arg expression number " ^ (string_of_int s) ^ "\n"); flush Pervasives.stderr); 
           getSizeExpr (nth arglist s) env 
        in 
        match szEx with
-         Existing(szType) -> (output_string Pervasives.stderr ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
+         Existing(szType) -> (debug_print 1 ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
                Some(szType)
-       | Undet -> output_string Pervasives.stderr ("Could not infer what we are allocating\n"); flush Pervasives.stderr; None
-       | Synthetic(_) -> output_string Pervasives.stderr ("We are allocating a composite: FIXME\n"); flush Pervasives.stderr; None
+       | Undet -> debug_print 1 ("Could not infer what we are allocating\n"); flush Pervasives.stderr; None
+       | Synthetic(_) -> debug_print 1 ("We are allocating a composite: FIXME\n"); flush Pervasives.stderr; None
      else (match maybeFunNameToPrint with 
          Some(fnname) -> 
-               ((output_string Pervasives.stderr ("Warning: signature " ^ signature 
+               ((debug_print 1 ("Warning: signature " ^ signature 
                ^ " wrongly predicts allocation function " ^ fnname ^ " will have at least " 
                ^ (string_of_int s) ^ " arguments, where call site it has only " ^ (string_of_int (length arglist)) ^"\n"); 
                flush Pervasives.stderr); None)
-       | None -> (output_string Pervasives.stderr ("Warning: spec argument count (" ^ (string_of_int s) ^ ") does not match call-site argument count (" ^ (string_of_int (length arglist)) ^ ")")); None)
+       | None -> (debug_print 1 ("Warning: spec argument count (" ^ (string_of_int s) ^ ") does not match call-site argument count (" ^ (string_of_int (length arglist)) ^ ")")); None)
  | None -> 
       (* If we have no sizearg pos, use the return type of the function: 
          if it is a pointer to non-void, we assume the pointer target type is the allocated type. *)
@@ -347,14 +347,14 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctio
 
 let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env calledFunctionType : Cil.typsig option = 
  (* destruct the signature string *)
- (* (output_string Pervasives.stderr ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr;  *)
+ (* (debug_print 1 ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr;  *)
  let signatureFunction = 
        if string_match (regexp "[^\\(]+") signature 0 
-       then (output_string Pervasives.stderr ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; matched_string signature )
-       else (output_string Pervasives.stderr ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; "" )
+       then (debug_print 1 ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; matched_string signature )
+       else (debug_print 1 ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; "" )
  in 
  match maybeFunName with 
-   Some(fname) -> (if fname <> signatureFunction then (* (output_string Pervasives.stderr ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) None (* ) *)
+   Some(fname) -> (if fname <> signatureFunction then (* (debug_print 1 ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) None (* ) *)
                   else (matchUserAllocArgs i arglist signature env (Some(fname)) calledFunctionType))
  | None -> (matchUserAllocArgs i arglist signature env None calledFunctionType)
  (* ) *)
@@ -377,22 +377,22 @@ let userAllocFunctions () : string list =
 (* FIXME: distinguish "it is an allocation function, but I couldn't identify what it's allocating"
    from "it doesn't appear to be an allocation function". *)
 let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates calledFunctionType : Cil.typsig option = 
-  (* output_string Pervasives.stderr "Looking for user alloc expr\n"; flush Pervasives.stderr; *)
+  (* debug_print 1 "Looking for user alloc expr\n"; flush Pervasives.stderr; *)
   let userVerdict = try begin
     (* match f.vname with each candidate *) 
-    (* output_string Pervasives.stderr ("Got " ^ (string_of_int (List.length candidates)) ^ "candidate signatures\n"); flush Pervasives.stderr;  *)
+    (* debug_print 1 ("Got " ^ (string_of_int (List.length candidates)) ^ "candidate signatures\n"); flush Pervasives.stderr;  *)
     let rec firstMatchingSignature cands = 
       let funNameString = match maybeFunName with Some(s) -> s | None -> "(indirect call)"
       in
       match cands with
-        [] -> output_string Pervasives.stderr ("Warning: exhausted candidate signatures in matching function "  ^ funNameString ^ "\n"); None
+        [] -> debug_print 1 ("Warning: exhausted candidate signatures in matching function "  ^ funNameString ^ "\n"); None
       | s::ss -> begin match extractUserAllocMatchingSignature i maybeFunName arglist s env calledFunctionType with
-           None -> (output_string Pervasives.stderr ("Warning: signature " ^ s ^ " did not match function " ^ funNameString ^ "\n"); firstMatchingSignature ss )
+           None -> (debug_print 1 ("Warning: signature " ^ s ^ " did not match function " ^ funNameString ^ "\n"); firstMatchingSignature ss )
          | Some(s) -> Some(s)
         end
     in firstMatchingSignature candidates
   end with Not_found -> (match maybeFunName with 
-     Some(funName) -> (output_string Pervasives.stderr 
+     Some(funName) -> (debug_print 1 
           ("Warning: function " ^ funName ^ " did not match any allocation function descriptor\n"))
   | None -> ()); None
   in
@@ -413,7 +413,7 @@ let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) e
 
 (* I so do not understand Pretty.dprintf *)
 let printAllocFn fileAndLine chan maybeFunvar allocExpr = 
-   (* output_string Pervasives.stderr ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
+   (* debug_print 1 ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
    output_string chan fileAndLine;
    let msg = match maybeFunvar with 
      Some(funvar) -> Pretty.sprint 80 
@@ -470,7 +470,7 @@ let rec untilFixedPoint f initialValue = begin
   in 
   let listAsString = "[" ^ (fold_left (^) "" (map printEl initialValue)) ^ "]"
   in
-  output_string Pervasives.stderr ("hello from untilFixedPoint with initialValue " ^ listAsString ^ "\n"); 
+  debug_print 1 ("hello from untilFixedPoint with initialValue " ^ listAsString ^ "\n"); 
   let newValue = f initialValue in
   if newValue = initialValue then initialValue else untilFixedPoint f newValue
 end
@@ -484,7 +484,7 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
    and simply ignore the pred/succ structure in stmts, 
    instead just considering each instruction across all stmts. 
    Let's try this. *)
-   let rec accumulateOverOneInstr acc i = (* output_string Pervasives.stderr "hello from accumulateOverOneInstr\n"; flush Pervasives.stderr; *)
+   let rec accumulateOverOneInstr acc i = (* debug_print 1 "hello from accumulateOverOneInstr\n"; flush Pervasives.stderr; *)
        match i with
          Call(_, f, args, l) -> acc
        | Set((host, off), e, l) -> begin 
@@ -492,7 +492,7 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
             Var(v) -> if v.vglob then acc else begin
                match getSizeExpr e acc with
                  Existing(t) -> (
-                 (* output_string Pervasives.stderr ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofTypsig " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig t)) ^  ")\n")
+                 (* debug_print 1 ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofTypsig " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig t)) ^  ")\n")
                  ; flush Pervasives.stderr; *) (v.vid, t) :: (remove_assoc v.vid acc))
               |  _ -> acc
             end
@@ -501,13 +501,13 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
        | Asm(_, _, _, _, _, l) -> acc
    in
    let rec accumulateOverInstrs acc instrs = 
-     (* output_string Pervasives.stderr "hello from accumulateOverInstrs\n"; flush Pervasives.stderr; *)
+     (* debug_print 1 "hello from accumulateOverInstrs\n"; flush Pervasives.stderr; *)
      match instrs with 
             [] -> acc
     |  i :: is -> accumulateOverInstrs (accumulateOverOneInstr acc i) is
    in
    let rec accumulateOneStatement acc s = 
-      (* output_string Pervasives.stderr (Pretty.sprint 80 
+      (* debug_print 1 (Pretty.sprint 80 
        (Pretty.dprintf  "Hello from accumulateOneStatement\n\t%a\t\n" d_stmt s)); 
       flush Pervasives.stderr; *)
       match s.skind with
@@ -563,7 +563,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
     DoChildren
 
   method vinst (i: instr) : instr list visitAction = 
-    ( output_string Pervasives.stderr ("considering instruction " ^ (
+    ( debug_print 1 ("considering instruction " ^ (
        match i with 
           Call(_, _, _, l) -> "(call) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
         | Set(_, _, l) -> "(assignment) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
@@ -594,7 +594,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
               both including the same header file, so can't write a single ".allocs"
               for that header).
             *)
-            (* (output_string Pervasives.stderr ("processing a function " ^ v.vname ^ "\n"); *)
+            (* (debug_print 1 ("processing a function " ^ v.vname ^ "\n"); *)
             let chan = match !outChannel with
              | Some(s) -> s
              | None    -> Pervasives.stderr
@@ -611,7 +611,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
               match (getAllocExpr i maybeFunvar args !sizeEnv functionTs) with
                  Some(ts) -> printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts); SkipChildren
               |  _ -> 
-                  (* (output_string Pervasives.stderr (
+                  (* (debug_print 1 (
                      "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
                   ) ; flush Pervasives.stderr;  *) SkipChildren(* ) *) (* this means it's not an allocation function *)
             end (* ) *)
@@ -632,13 +632,13 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
         | _ -> raise (Failure("impossible called function typesig" ^ (Pretty.sprint 80 (d_typsig () functionTs))))
         
         (* TSPtr(TSFun(returnTs, paramTss, isVarArgs, funAttrs), ptrAttrs) -> handleCall None returnTs paramTss isVarArgs funAttrs
-               | _ (* match v.vtype *) -> (output_string Pervasives.stderr ("skipping call to non-function var " ^ v.vname ^ "\n"); flush Pervasives.stderr; SkipChildren)
+               | _ (* match v.vtype *) -> (debug_print 1 ("skipping call to non-function var " ^ v.vname ^ "\n"); flush Pervasives.stderr; SkipChildren)
              end
-        | _ (* match f *) -> (output_string Pervasives.stderr ("skipping call to non-lvalue at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n"); flush Pervasives.stderr; SkipChildren)
+        | _ (* match f *) -> (debug_print 1 ("skipping call to non-lvalue at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n"); flush Pervasives.stderr; SkipChildren)
         *)
       end 
-    | Set(lv, e, l) -> (* (output_string Pervasives.stderr ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); flush Pervasives.stderr; *) SkipChildren (* ) *)
-    | Asm(_, _, _, _, _, l) -> (* (output_string Pervasives.stderr ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); *) SkipChildren (* ) *)
+    | Set(lv, e, l) -> (* (debug_print 1 ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); flush Pervasives.stderr; *) SkipChildren (* ) *)
+    | Asm(_, _, _, _, _, l) -> (* (debug_print 1 ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); *) SkipChildren (* ) *)
    (* ) *)
 end (* class dumpAllocsVisitor *)
 

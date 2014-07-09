@@ -2,7 +2,7 @@
 
 # C++ compiler wrapper for liballocs.
 
-import os, sys, re, subprocess, tempfile
+import os, sys
 # HACK
 sys.path.append(os.path.realpath(os.path.dirname(__file__) + "/../../.."))
 from allocscompilerwrapper import *
@@ -19,10 +19,10 @@ class AllocsCxx(AllocsCompilerWrapper):
             nameStem, nameExtension = os.path.splitext(sourceFile)
             if (nameExtension == ".cpp" or nameExtension == ".cc" or nameExtension == ".C"):
                 outputFilename = nameStem + ".o"
-                sys.stderr.write("Making a secret output file (from C++ source) " + outputFilename + "\n")
+                self.debugMsg("Making a secret output file (from C++ source) " + outputFilename + "\n")
             else:
                 outputFilename = sourceFile + ".o"
-                sys.stderr.write("Making a secret output file (from unknown source) " + outputFilename + "\n")
+                self.debugMsg("Making a secret output file (from unknown source) " + outputFilename + "\n")
             return outputFilename
     
     def getUnderlyingCompilerCommand(self):

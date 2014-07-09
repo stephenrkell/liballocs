@@ -47,13 +47,22 @@ open Pretty
 open Cil
 module NamedTypeMap = Map.Make(String)
 
-(* Module-ify Cil.tysSig *)
+(* Module-ify Cil.typSig *)
 module CilTypeSig = struct
    type t = Cil.typsig
    let compare ts1 ts2 = String.compare (Pretty.sprint 80 (d_typsig () ts1)) (Pretty.sprint 80 (d_typsig () ts2))
 end
 
 module UniqtypeMap = Map.Make(CilTypeSig)
+
+let debug_print lvl s = 
+  try begin 
+    let levelString = (Sys.getenv "DEBUG_CC")
+    in
+    let level = int_of_string levelString
+    in
+    if level >= lvl then output_string Pervasives.stderr s else ()
+  end with Not_found -> () | Failure(_) -> ()
 
 (* HACKed realpath for now: *)
 let abspath f =
@@ -137,7 +146,6 @@ let symnameFromSig ts = "__uniqtype_" ^ "" ^ "_" ^ (barenameFromSig ts)
 
 (* CIL doesn't give us a const void * type builtin, so we define one. *)
 let voidConstPtrType = TPtr(TVoid([Attr("const", [])]),[])
-
 
 (* Returns true if the given lvalue offset ends in a bitfield access. *) 
 let rec is_bitfield lo = match lo with

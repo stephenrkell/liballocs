@@ -73,9 +73,12 @@ class AllocsCompilerWrapper(CompilerWrapper):
         
     def getLibAllocsBaseDir(self):
         return os.path.dirname(__file__) + "/../"
+
+    def getLibNameStem(self):
+        return "allocs"
     
     def getLdLibBase(self):
-        return "-lallocs"
+        return "-l" + self.getLibNameStem()
      
     def getLinkPath(self):
         return self.getLibAllocsBaseDir() + "/lib"
@@ -96,7 +99,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         #if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
         if "CC" in os.environ:# and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
            del os.environ["CC"]
-        sys.stderr.write(sys.argv[0] + " called with args  " + " ".join(sys.argv) + "\n")
+        self.debugMsg(sys.argv[0] + " called with args  " + " ".join(sys.argv) + "\n")
 
         sourceInputFiles, objectInputFiles, outputFile = self.parseInputAndOutputFiles(sys.argv)
 
@@ -130,13 +133,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # then link in the uniqtypes they reference, 
             # then resume linking these .o files
             if len(sourceInputFiles) > 0:
-                sys.stderr.write("Making .o files first from " + " ".join(sourceInputFiles) + "\n")
+                self.debugMsg("Making .o files first from " + " ".join(sourceInputFiles) + "\n")
                 passedThroughArgs = self.makeDotOAndPassThrough(sys.argv, allocsccCustomArgs, sourceInputFiles)
             else:
                 passedThroughArgs = sys.argv[1:]
 
             # we need to wrap each allocation function
-            sys.stderr.write("allocscc doing linking\n")
+            self.debugMsg("allocscc doing linking\n")
             passedThroughArgs += mallocWrapArgs
             # we need to export-dynamic, s.t. __is_a is linked from liballocs
             linkArgs += ["-Wl,--export-dynamic"]
@@ -147,7 +150,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
                 # make a temporary file for the stubs
                 stubsfile = tempfile.NamedTemporaryFile(delete=False, suffix=".c")
-                sys.stderr.write("stubsfile is %s\n" % stubsfile.name)
+                self.debugMsg("stubsfile is %s\n" % stubsfile.name)
                 stubsfile.write("#include \"" + self.getLibAllocsBaseDir() + "/tools/stubgen.h\"\n")
 
                 def writeArgList(fnName, fnSig):
@@ -180,15 +183,14 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         size_find_command = self.getLibAllocsBaseDir() + \
                             ["/tools/find-allocated-type-size", fnName] + [ \
                             objfile for objfile in passedThroughArgs if objfile.endswith(".o")]
-                        sys.stderr.write("Calling " + " ".join(size_find_command) + "\n")
+                        self.debugMsg("Calling " + " ".join(size_find_command) + "\n")
                         outp = subprocess.Popen(size_find_command, stdout=subprocess.PIPE).communicate()[0]
-                        sys.stderr.write("Got output: " + outp + "\n")
-                        sys.stderr.flush()
+                        self.debugMsg("Got output: " + outp + "\n")
                         # we get lines of the form <number> \t <explanation>
                         # so just chomp the first number
                         outp_lines = outp.split("\n")
                         if (len(outp_lines) < 1 or outp_lines[0] == ""):
-                            sys.stderr.write("No output from %s" % " ".join(size_find_command))
+                            self.debugMsg("No output from %s" % " ".join(size_find_command))
                             return 1  # give up now
                         sz = int(outp_lines[0].split("\t")[0])
                         stubsfile.write("#define size_arg_%s %d\n" % (fnName, sz))
@@ -236,11 +238,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     "-I" + self.getLibAllocsBaseDir() + "/tools"] \
                     + [arg for arg in passedThroughArgs if arg.startswith("-D")] \
                     + [stubsfile.name]
-                sys.stderr.write("Preprocessing stubs file %s to %s with command %s\n" \
+                self.debugMsg("Preprocessing stubs file %s to %s with command %s\n" \
                     % (stubsfile.name, stubs_pp, " ".join(stubs_pp_cmd)))
                 ret_stubs_pp = subprocess.call(stubs_pp_cmd)
                 if ret_stubs_pp != 0:
-                    sys.stderr.write("Could not preproces stubs file %s: compiler returned %d\n" \
+                    self.debugMsg("Could not preproces stubs file %s: compiler returned %d\n" \
                         % (stubsfile.name, ret_stubs_pp))
                     exit(1)
                 # now erase the '# ... file ' lines that refer to our stubs file,
@@ -249,19 +251,23 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 + "/__real_|__wrap_|__current_/ s^[;\\{\\}]^&\\n^g", stubs_pp]
                 ret_stubs_sed = subprocess.call(stubs_sed_cmd)
                 if ret_stubs_sed != 0:
-                    sys.stderr.write("Could not sed stubs file %s: sed returned %d\n" \
+                    self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
                         % (stubs_pp, ret_stubs_sed))
                     exit(1)
                 stubs_cc_cmd = ["cc", "-g", "-c", "-o", stubs_bin, \
                     "-I" + self.getLibAllocsBaseDir() + "/tools", \
                     stubs_pp]
-                sys.stderr.write("Compiling stubs file %s to %s with command %s\n" \
+                self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
                     % (stubs_pp, stubs_bin, " ".join(stubs_cc_cmd)))
-                ret_stubs = subprocess.call(stubs_cc_cmd)
-                if ret_stubs != 0:
-                    sys.stderr.write("Could not compile stubs file %s: compiler returned %d\n" \
-                        % (stubsfile.name, ret_stubs))
+                try:
+                    stubs_output = subprocess.check_output(stubs_cc_cmd, stderr=subprocess.STDOUT)
+                except subprocess.CalledProcessError, e:
+                    self.debugMsg("Could not compile stubs file %s: compiler returned %d and said \"%s\"\n" \
+                        % (stubs_pp, e.returncode, stubs_output))
                     exit(1)
+                if stubs_output != "":
+                    self.debugMsg("Compiling stubs file %s: compiler said \"%s\"\n" \
+                        % (stubs_pp, stubs_output))
 
                 # HACK: fix this once I sort out linking
                 linkArgs += [stubs_bin]
@@ -278,9 +284,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     linkArgs += ["-L" + self.getLinkPath()]
                     linkArgs += ["-Wl,-R" + self.getRunPath()]
                     if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                        linkArgs += ["-lallocs"]
+                        linkArgs += [getLdLibBase()]
                 else: # FIXME: weak linkage one day....
-                    linkArgs += [self.getLinkPath() + "/liballocs_noop.o"]
+                    linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + "_noop.o"]
                 # note: we leave the shared library with 
                 # dangling dependencies on __wrap_
                 # and unused __real_
@@ -290,15 +296,18 @@ class AllocsCompilerWrapper(CompilerWrapper):
         else:
             passedThroughArgs = sys.argv[1:]
 
-    #    + ["-Wno-attributes"] \
+        if "DEBUG_CC" in os.environ:
+            verboseArgs = ["--verbose"]
+        else:
+            verboseArgs = []
 
-        argsToExec = ["--verbose"] + allocsccCustomArgs \
+        argsToExec = verboseArgs + allocsccCustomArgs \
         + linkArgs \
         + passedThroughArgs
-        sys.stderr.write("about to run cilly with args: " + " ".join(argsToExec) + "\n")
-        sys.stderr.write("passedThroughArgs is: " + " ".join(passedThroughArgs) + "\n")
-        sys.stderr.write("allocsccCustomArgs is: " + " ".join(allocsccCustomArgs) + "\n")
-        sys.stderr.write("linkArgs is: " + " ".join(linkArgs) + "\n")
+        self.debugMsg("about to run cilly with args: " + " ".join(argsToExec) + "\n")
+        self.debugMsg("passedThroughArgs is: " + " ".join(passedThroughArgs) + "\n")
+        self.debugMsg("allocsccCustomArgs is: " + " ".join(allocsccCustomArgs) + "\n")
+        self.debugMsg("linkArgs is: " + " ".join(linkArgs) + "\n")
 
         ret1 = subprocess.call(self.getUnderlyingCompilerCommand() + argsToExec)
 
@@ -313,12 +322,12 @@ class AllocsCompilerWrapper(CompilerWrapper):
         if not self.isLinkCommand():
             if outputFile:
                 # we have a single named output file
-                ret2 = self.fixupDotO(outputFile)
+                ret2 = self.fixupDotO(outputFile, None)
                 return ret2
             else:
                 # no explicit output file; the compiler output >=1 .o files, one for each input
                 for outputFilename in [nameStem + ".o" for (nameStem, nameExtension) in map(os.path.splitext, sourceInputFiles)]:
-                    self.fixupDotO(outputFilename)
+                    self.fixupDotO(outputFilename, None)
 
         else: # isLinkCommand()
             # We've just output an object, so invoke make to collect the allocsites, 
@@ -328,10 +337,14 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 baseDir = os.environ["ALLOCSITES_BASE"]
             else:
                 baseDir = "/usr/lib/allocsites"
-            targetNames = [baseDir + os.path.realpath(outputFile) + ext for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
+            targetNames = [baseDir + os.path.realpath(outputFile) + ext \
+            for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
+            errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
 
-            ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
-                "-f", "Makefile.allocsites"] +  targetNames)
+            ret2 = 42
+            with open(errfilename, "w") as errfile:
+                ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
+                    "-f", "Makefile.allocsites"] +  targetNames, stderr=errfile, stdout=errfile)
             return ret2
 
     # expose base class methods to derived classes
@@ -344,8 +357,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def parseInputAndOutputFiles(self, args):
         return CompilerWrapper.parseInputAndOutputFiles(self, args)
     
-    def fixupDotO(self, filename):
-        return CompilerWrapper.fixupDotO(self, filename)
+    def fixupDotO(self, filename, errfile):
+        return CompilerWrapper.fixupDotO(self, filename, errfile)
 
     def makeDotOAndPassThrough(self, argv, customArgs, inputFiles):
         return CompilerWrapper.makeDotOAndPassThrough(self, argv, customArgs, inputFiles)

@@ -34,10 +34,10 @@ class AllocsCC(AllocsCompilerWrapper):
             nameStem, nameExtension = os.path.splitext(sourceFile)
             if (nameExtension == ".c"):
                 outputFilename = nameStem + ".o"
-                sys.stderr.write("Making a secret output file (from .c source) " + outputFilename + "\n")
+                self.debugMsg("Making a secret output file (from .c source) " + outputFilename + "\n")
             else:
                 outputFilename = sourceFile + ".o"
-                sys.stderr.write("Making a secret output file (from unknown source) " + outputFilename + "\n")
+                self.debugMsg("Making a secret output file (from unknown source) " + outputFilename + "\n")
             return outputFilename
 
     def getCillyArgs(self):
