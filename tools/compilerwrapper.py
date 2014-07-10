@@ -92,7 +92,7 @@ class CompilerWrapper:
         # do we need to unbind? 
         # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
         # This is needed e.g. for SPEC benchmark bzip2
-        with (self.makeErrFile(errfilename, "w") if not errfile else errfile) as errfile:
+        with (self.makeErrFile(filename + ".fixuplog", "w") if not errfile else errfile) as errfile:
 
             wrappedFns = self.allWrappedSymNames()
             self.debugMsg("Looking for wrapped functions that need unbinding\n")
