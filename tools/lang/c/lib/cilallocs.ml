@@ -108,6 +108,15 @@ let hackTypeName s = (*if (string_match (regexp "__anon\\(struct\\|union\\|enum\
    then Str.global_replace (Str.regexp "_[0-9]+$") "_1" s
    else *) s
 
+let baseTypeStr ts = 
+   let rawString = match ts with 
+     TInt(kind,attrs) -> (Pretty.sprint 80 (d_ikind () kind))
+   | TFloat(kind,attrs) -> (Pretty.sprint 80 (d_fkind () kind))
+   | TBuiltin_va_list(attrs) -> "__builtin_va_list"
+   | _ -> raise(Failure ("bad base type: " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_type ts))))
+   in 
+   Str.global_replace (Str.regexp "[. /-]") "_" (canonicalizeBaseTypeStr (trim rawString))
+
 let rec barenameFromSig ts = 
  let rec labelledArgTs ts startAt =
    match ts with
@@ -116,15 +125,6 @@ let rec barenameFromSig ts =
       let remainder = (labelledArgTs morets (startAt + 1))
       in
       "__ARG" ^ (string_of_int startAt) ^ "_" ^ (barenameFromSig t) ^ remainder
- in
- let baseTypeStr ts = 
-   let rawString = match ts with 
-     TInt(kind,attrs) -> (Pretty.sprint 80 (d_ikind () kind))
-   | TFloat(kind,attrs) -> (Pretty.sprint 80 (d_fkind () kind))
-   | TBuiltin_va_list(attrs) -> "__builtin_va_list"
-   | _ -> raise(Failure ("bad base type: " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_type ts))))
-   in 
-   Str.global_replace (Str.regexp "[. /-]") "_" (canonicalizeBaseTypeStr (trim rawString))
  in
  match ts with
    TSArray(tNestedSig, optSz, attrs) -> "__ARR" ^ (match optSz with Some(s) -> (string_of_int (i64_to_int s)) | None -> "0") ^ "_" ^ (barenameFromSig tNestedSig)
@@ -139,7 +139,33 @@ let rec barenameFromSig ts =
  | TSEnum(enumName, attrs) -> enumName
  | TSBase(TVoid(attrs)) -> "void"
  | TSBase(tbase) -> baseTypeStr tbase
- 
+
+let rec dwarfidlFromSig ts = 
+ let rec dwarfidlLabelledArgTs ts startAt =
+   match ts with
+     [] -> ""
+  |  [t] -> dwarfidlFromSig t
+  | t :: morets -> 
+      let remainder = (dwarfidlLabelledArgTs morets (startAt + 1))
+      in
+      (dwarfidlFromSig t) ^ ", " ^ remainder
+ in
+ match ts with
+   TSArray(tNestedSig, optSz, attrs)
+     -> "array_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "] {" 
+        ^ (match optSz with Some(s) -> ("subrange_type [upper_bound = " ^ (string_of_int (i64_to_int s)) ^ "]") | None -> "") ^ "}"
+ | TSPtr(tNestedSig, attrs) -> "pointer_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "] {}" 
+ | TSComp(isSpecial, name, attrs) -> (hackTypeName name)
+ | TSFun(returnTs, Some(argsTss), false, attrs) -> 
+       "(" ^ (dwarfidlLabelledArgTs argsTss 0) ^ ") => " ^ (dwarfidlFromSig returnTs)
+ | TSFun(returnTs, Some(argsTss), true, attrs) -> 
+       "(" ^ (dwarfidlLabelledArgTs argsTss 0) ^ ", ...)" ^ (dwarfidlFromSig returnTs)
+ | TSFun(returnTs, None, _, attrs) -> 
+        "(...) => " ^ (barenameFromSig returnTs)
+ | TSEnum(enumName, attrs) -> enumName
+ | TSBase(TVoid(attrs)) -> "unspecified_type"
+ | TSBase(tbase) -> baseTypeStr tbase
+
 let userTypeNameToBareName s = Str.global_replace (Str.regexp "[. /-]") "_" (canonicalizeBaseTypeStr (trim s))
 
 let symnameFromSig ts = "__uniqtype_" ^ "" ^ "_" ^ (barenameFromSig ts)
