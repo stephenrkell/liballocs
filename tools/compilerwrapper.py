@@ -24,6 +24,16 @@ class CompilerWrapper:
         if "DEBUG_CC" in os.environ:
             sys.stderr.write(msg)
             sys.stderr.flush()
+    
+    def makeErrFile(self, name, mode):
+        # we get an exception in the case where the dir already exists
+        # AND in the case where it can't be created, so...
+        try:
+            os.makedirs(os.path.dirname(name))
+        except os.error, e:
+            pass
+        # ... we let it pass, because "can't be created" => the open will fail
+        return open(name, mode)
 
     def getCustomCompileArgs(self, sourceInputFiles):
         return []
@@ -82,7 +92,7 @@ class CompilerWrapper:
         # do we need to unbind? 
         # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
         # This is needed e.g. for SPEC benchmark bzip2
-        with (open(errfilename, "w") if not errfile else errfile) as errfile:
+        with (self.makeErrFile(errfilename, "w") if not errfile else errfile) as errfile:
 
             wrappedFns = self.allWrappedSymNames()
             self.debugMsg("Looking for wrapped functions that need unbinding\n")

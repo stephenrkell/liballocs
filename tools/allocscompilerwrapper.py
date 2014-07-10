@@ -269,14 +269,24 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     self.debugMsg("Compiling stubs file %s: compiler said \"%s\"\n" \
                         % (stubs_pp, stubs_output))
 
-                # HACK: fix this once I sort out linking
                 linkArgs += [stubs_bin]
                 linkArgs += ["-L" + self.getLinkPath()]
-                linkArgs += ["-Wl,-R" + self.getRunPath()]
-                if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                    linkArgs += [self.getLdLibBase()]
-                else: # FIXME: weak linkage one day; FIXME: don't clobber as-neededness
-                    linkArgs += ["-Wl,--no-as-needed", self.getLdLibBase() + "_noop"]
+                if not "-static" in passedThroughArgs and not "-Bstatic" in passedThroughArgs:
+                    # we're building a dynamically linked executable
+                    linkArgs += ["-Wl,-R" + self.getRunPath()]
+                    if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
+                        linkArgs += [self.getLdLibBase()]
+                    else: # FIXME: weak linkage one day; FIXME: don't clobber as-neededness
+                        linkArgs += ["-Wl,--no-as-needed", self.getLdLibBase() + "_noop"]
+                else:
+                    # we're building a statically linked executable
+                    if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
+                        linkArgs += [self.getLdLibBase()]
+                    else:
+                        # no load-time overriding; do link-time overriding 
+                        # by using the full, preloaded library in archive form
+                        linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + "_preload.a"]
+                    
             else:
                 # We're building a shared library, so simply add liballocs_noop.o; 
                 # only link directly if we're disabling the preload approach
@@ -342,7 +352,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
 
             ret2 = 42
-            with open(errfilename, "w") as errfile:
+            with self.makeErrFile(errfilename, "w") as errfile:
                 ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
                     "-f", "Makefile.allocsites"] +  targetNames, stderr=errfile, stdout=errfile)
             return ret2
