@@ -58,7 +58,7 @@ $(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%
 	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
 	test -e "$@"
 
-$(ALLOCSITES_BASE)/%-types.c: /%  # pipe err through zip, so need to swap stdout and stderr
+$(ALLOCSITES_BASE)/%-types.c: /% $(ALLOCSITES_BASE)/%.allocs # pipe err through zip, so need to swap stdout and stderr
 	( ( $(DUMPTYPES) "$<"  3>&2 2>&1 1>&3 ) 2>"$@" || ( rm -f "$@"; false ) ) | gzip >"$@".log.gz 
 	test -e "$@"
 
