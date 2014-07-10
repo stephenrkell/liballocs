@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Look for binaries under $1 with a recent ctime, and search for matching
+# binaries under the cwd. Copy the allocsites info if an unambiguous match
+# is found.
+
+prefix="$( readlink -f $1 )"
+
+escape_regexp () {
+    sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\\)/\\\1/g'
+}
+
+ALLOCSITES_BASE="${ALLOCSITES_BASE:-/usr/lib/allocsites}"
+
+find "$prefix" -type f -cmin -30 \( -name '*.so*' -o -perm +001 \) | sed "s^$prefix^^" | while read suffix; do
+    size="$( stat -c%s "$prefix"/"$suffix" )" &&
+    found="$( find . -type f -name "$( basename "$suffix" )" -size "$size"c )" &&
+    if [[ -n "$found" ]]; then
+        # echo "We think file $prefix/$suffix came from $found" 1>&2
+        stem="${ALLOCSITES_BASE}/$( readlink -f "$found" )"
+        dest_stem="${ALLOCSITES_BASE}/$prefix/$suffix"
+        for fname in "$stem".*  "$stem"-*; do
+            ext="$( echo "$fname" | sed "s#^$( echo "$stem" | escape_regexp )##" )"
+            mkdir -p "$( dirname "$dest_stem" )" &&
+            cp -p "$fname" "${dest_stem}${ext}"
+        done
+    else
+        echo "Couldn't find where $prefix/$suffix came from" 1>&2
+    fi
+done
