@@ -55,6 +55,14 @@ end
 
 module UniqtypeMap = Map.Make(CilTypeSig)
 
+let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
+
+let isStaticallyZero e = isZero (foldConstants e) 
+
+let isStaticallyNullPtr e = match (typeSig (typeOf e)) with
+    TSPtr(_) -> isStaticallyZero(e)
+  | _ -> false
+
 let debug_print lvl s = 
   try begin 
     let levelString = (Sys.getenv "DEBUG_CC")

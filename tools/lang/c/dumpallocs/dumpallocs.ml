@@ -89,14 +89,6 @@ let maybeDecayArrayTypesig maybeTs = match maybeTs with
 
 let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz = 
   debug_print 1 ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ")\n");  flush Pervasives.stderr; 
-  let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
-  in
-  let isStaticallyZero e = isZero (foldConstants e) 
-  in
-  let isStaticallyNullPtr e = match (typeSig (typeOf e)) with
-    TSPtr(_) -> isStaticallyZero(e)
-  | _ -> false
-  in
   let isTrailingField fi compinfo = 
     let reverseFields = rev compinfo.cfields
     in
