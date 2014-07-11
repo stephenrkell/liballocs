@@ -405,7 +405,7 @@ struct uniqtype \n\
 		std::vector< iterator_base > real_members;
 		std::vector< Dwarf_Unsigned > real_member_offsets;
 		std::vector< iterator_base > fp_types;
-		if (i_vert->second.is_a<subprogram_die>())
+		if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
 			auto fps = i_vert->second.children().subseq_of<formal_parameter_die>();
 			for (auto i_edge = fps.first; i_edge != fps.second; ++i_edge)
@@ -435,7 +435,7 @@ struct uniqtype \n\
 			auto opt_array_len = i_vert->second.as_a<array_type_die>()->element_count(root);
 			if (opt_array_len) array_len = *opt_array_len;
 			else array_len = 0;
-		} else if (i_vert->second.is_a<subprogram_die>())
+		} else if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
 			/* use array len to encode the number of fps */
 			array_len = fp_types.size();
@@ -498,11 +498,11 @@ struct uniqtype \n\
 			// end the struct
 			out << " }";
 		}
-		else if (i_vert->second.is_a<subprogram_die>())
+		else if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
 			/* Output the return type and argument types. We always output
 			 * a return type, even if it's &__uniqtype__void. */
-			auto return_type = i_vert->second.as_a<subprogram_die>()->find_type();
+			auto return_type = i_vert->second.as_a<type_describing_subprogram_die>()->find_type();
 			/* begin the struct */
 			out << "{ ";
 			out << "0, ";
