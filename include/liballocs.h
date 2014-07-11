@@ -50,7 +50,9 @@ struct uniqtype
 
 #define MAGIC_LENGTH_POINTER ((1u << 19) - 1u)
 #define UNIQTYPE_IS_POINTER_TYPE(u) \
-((u)->is_array && (u)->array_len == MAGIC_LENGTH_POINTER)
+(!((u)->is_array) && (u)->array_len == MAGIC_LENGTH_POINTER)
+#define UNIQTYPE_POINTEE_TYPE(u) \
+(UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->contained[0].ptr : NULL)
 
 /* ** begin added for inline get_alloc_info */
 #ifndef USE_FAKE_LIBUNWIND
@@ -265,9 +267,8 @@ __liballocs_first_subobject_spanning(
 	{
 		unsigned num_contained = cur_obj_uniqtype->array_len;
 		struct uniqtype *element_uniqtype = cur_obj_uniqtype->contained[0].ptr;
-		unsigned target_element_index
-		 = target_offset_within_uniqtype / element_uniqtype->pos_maxoff;
-		if (num_contained > target_element_index)
+		if (element_uniqtype->pos_maxoff != 0 && 
+				num_contained > target_offset_within_uniqtype / element_uniqtype->pos_maxoff)
 		{
 			*p_cur_containing_uniqtype = cur_obj_uniqtype;
 			*p_cur_contained_pos = &cur_obj_uniqtype->contained[0];
@@ -366,7 +367,7 @@ __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 		
 		if (!success) return 0;
 		
-		*p_cumulative_offset_searched += contained_pos->offset;
+		if (p_cumulative_offset_searched) *p_cumulative_offset_searched += contained_pos->offset;
 		
 		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
 		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;
@@ -706,7 +707,7 @@ __liballocs_get_alloc_info
 			if (out_alloc_uniqtype) *out_alloc_uniqtype = alloc_uniqtype;
 			if (out_block_element_count)
 			{
-				if (alloc_uniqtype) 
+				if (alloc_uniqtype && alloc_uniqtype->pos_maxoff > 0) 
 				{
 					*out_block_element_count = (alloc_chunksize - sizeof (struct insert)) / alloc_uniqtype->pos_maxoff;
 				} else *out_block_element_count = 1;
