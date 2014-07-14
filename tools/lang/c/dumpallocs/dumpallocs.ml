@@ -81,7 +81,7 @@ let dwarfIdlExprFromSynthetic tss : string =
        which defines a new data type 
        comprising a sequence of members
        which are *packed*. The packed thing is the hardest but can be bodged for now. *)
-    "structure_type { " ^ (List.fold_left ( fun s t -> s ^ "member _ : " ^ (dwarfidlFromSig t) ^ "; " ) "" tss) ^ "}"
+    "structure_type { " ^ (List.fold_left ( fun s t -> s ^ "member : (" ^ (dwarfidlFromSig t) ^ "); " ) "" tss) ^ "}"
 
 let maybeDecayArrayTypesig maybeTs = match maybeTs with
     Existing(ts) -> Existing(decayArrayInTypesig ts)
