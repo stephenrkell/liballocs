@@ -46,6 +46,8 @@ name_for_base_type(iterator_df<base_type_die> base_t)
 {
 	/* For base types, we use our own language-independent naming scheme. */
 	ostringstream name;
+	string encoding_name = base_t.spec_here().encoding_lookup(base_t->get_encoding());
+	assert(encoding_name.substr(0, sizeof "DW_ATE_" - 1) == "DW_ATE_");
 	unsigned size = *base_t->get_byte_size();
 	switch (base_t->get_encoding())
 	{
@@ -56,7 +58,7 @@ name_for_base_type(iterator_df<base_type_die> base_t)
 			name << "uint";
 			break;
 		default:
-			name << string(base_t.spec_here().encoding_lookup(base_t->get_encoding())).substr(sizeof "DW_ATE_" - 1);
+			name << encoding_name.substr(sizeof "DW_ATE_" - 1);
 			break;
 	}
 
