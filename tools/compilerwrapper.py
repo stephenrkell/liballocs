@@ -34,6 +34,13 @@ class CompilerWrapper:
             pass
         # ... we let it pass, because "can't be created" => the open will fail
         return open(name, mode)
+    
+    def print_errors(self, errfile):
+        # if the errfile is not stderr, cat the errfile to stderr
+        if errfile.fileno() != sys.stderr.fileno():
+            errfile.seek(0)
+            for line in errfile:
+                sys.stderr.write(line)
 
     def getCustomCompileArgs(self, sourceInputFiles):
         return []
@@ -92,7 +99,7 @@ class CompilerWrapper:
         # do we need to unbind? 
         # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
         # This is needed e.g. for SPEC benchmark bzip2
-        with (self.makeErrFile(filename + ".fixuplog", "w") if not errfile else errfile) as errfile:
+        with (self.makeErrFile(filename + ".fixuplog", "w+") if not errfile else errfile) as errfile:
 
             wrappedFns = self.allWrappedSymNames()
             self.debugMsg("Looking for wrapped functions that need unbinding\n")
@@ -109,12 +116,16 @@ class CompilerWrapper:
                 backup_filename = os.path.splitext(filename)[0] + ".backup.o"
                 self.debugMsg("Found that we need to unbind... making backup as %s\n" % \
                     backup_filename)
-                subprocess.call(["cp", filename, backup_filename], stderr=errfile)
+                cp_ret = subprocess.call(["cp", filename, backup_filename], stderr=errfile)
+                if cp_ret != 0:
+                    self.print_errors(errfile)
+                    return cp_ret
                 unbind_pairs = [["--unbind-sym", sym] for sym in wrappedFns]
                 objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
                  + [opt for pair in unbind_pairs for opt in pair] \
                  + [filename], stderr=errfile)
                 if objcopy_ret != 0:
+                    self.print_errors(errfile)
                     return objcopy_ret
                 else:
                     # one more objcopy to rename the __def_ and __ref_ symbols
@@ -125,6 +136,7 @@ class CompilerWrapper:
                      + [opt for seq in def_ref_args for opt in seq] \
                      + [filename], stderr=errfile)
                     if objcopy_ret != 0:
+                        self.print_errors(errfile)
                         return objcopy_ret
 
             self.debugMsg("Looking for wrapped functions that need globalizing\n")

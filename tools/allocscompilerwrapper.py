@@ -352,9 +352,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
             errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
 
             ret2 = 42
-            with self.makeErrFile(errfilename, "w") as errfile:
+            with self.makeErrFile(errfilename, "w+") as errfile:
                 ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
                     "-f", "Makefile.allocsites"] +  targetNames, stderr=errfile, stdout=errfile)
+                if (ret2 != 0 or "DEBUG_CC" in os.environ):
+                    self.print_errors(errfile)
             return ret2
 
     # expose base class methods to derived classes
