@@ -2,7 +2,7 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 OCAMLFIND ?= ocamlfind
 CILLY ?= cilly
-CIL_TOOLS := dumpallocs #trumptr
+CIL_TOOLS := dumpallocs monalloca #trumptr
 OCAMLFLAGS +=  -package findlib -package cil
 OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/lib
 

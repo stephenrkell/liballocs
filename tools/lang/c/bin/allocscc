@@ -42,8 +42,16 @@ class AllocsCC(AllocsCompilerWrapper):
 
     def getCillyArgs(self):
         # allocscc uses this unmodified (we're not an abstract base)
-        return ["--load=%s" % \
-        (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"), "--dodumpallocs"]
+        return [\
+        "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"), \
+         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/monalloca/monalloca.cmxs"), \
+           "--dodumpallocs", "--domonalloca", \
+            "--keepunused", "-include", os.path.dirname(__file__) + "/../../../../include/liballocs_cil_inlines.h", \
+            "-Wno-unused-variable", "-Wno-unused-label"]
+            # We need the above -Wno-unused-... because CIL creates
+            # some unused stuff (unavoidably, I believe) which will
+            # make compilation done with -Werror barf if we don't
+            # silence them.
     
     def getUnderlyingCompilerCommand(self):
         return ["cilly"] + self.getCillyArgs()

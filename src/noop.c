@@ -7,6 +7,10 @@ int __liballocs_global_init(void)
 	return 0;
 }
 
+void __liballocs_unindex_stack_objects_below(void *stack_addr)
+{
+}
+
 const void *__liballocs_typestr_to_uniqtype(const void *r)
 {
 	return NULL;

@@ -312,3 +312,50 @@ let rec tsIsUndefinedType ts wholeFile =
               | Some(argsTss) -> anyTsIsUndefined argsTss
         end
     |   _                                           -> false
+
+let findOrCreateExternalFunctionInFile fl nm proto : fundec = (* findOrCreateFunc fl nm proto *) (* NO! doesn't let us have the fundec *)
+  let rec findFun gs = match gs with
+      [] -> None
+   |  g :: gg -> match g with 
+            GFun(dec, _) ->
+                (* output_string stderr ("saw a function, name " ^ dec.svar.vname ^ "\n"); *)
+                if dec.svar.vname = nm then Some(dec) else findFun gg
+          | _ -> findFun gg
+  in 
+  match findFun fl.globals with 
+    Some(d) -> d
+  | None -> let funDec = emptyFunction nm in
+        funDec.svar.vtype <- proto;
+        fl.globals <- newGlobalsList fl.globals [GVarDecl(funDec.svar, {line = -1; file = "BLAH FIXME"; byte = 0})] isFunction; 
+        funDec
+
+let makeInlineFunctionInFile fl ourFun nm proto body referencedValues = begin
+   let protoArgs = match proto with 
+     TFun(_, Some l, _, _) -> l
+   | _ -> []
+   in
+   let protoWithInlineAttrs = match proto with 
+     TFun(retT, args, isVarargs, attrs) -> TFun(retT, args, isVarargs, attrs @ [Attr("gnu_inline", []); Attr("always_inline", [])])
+   | _ -> proto
+   in
+   let arglist = List.map (fun (ident, typ, attrs) -> makeFormalVar ourFun ident typ) protoArgs in 
+   let () = setFunctionType ourFun protoWithInlineAttrs in
+   let nameFunc =  (fun n t -> makeTempVar ourFun ~name:n t) in
+   let loc = {line = -1; file = "BLAH FIXME"; byte = 0} in
+   let argPatternBindings = List.map (fun ((ident, typ, attrs), arg) -> (ident, Fv arg)) (List.combine protoArgs arglist) in 
+   let extPatternBindings = (* List.map (fun (ident, v) -> (ident, Fv v)) *) referencedValues in
+   let madeBody = mkBlock (Formatcil.cStmts body nameFunc loc (argPatternBindings @ extPatternBindings)) in
+   ourFun.sbody <- madeBody;
+   ourFun.svar.vinline <- true;
+   ourFun.svar.vstorage <- Extern;
+    (* Don't make it static -- inline is enough. Making it static
+        generates lots of spurious warnings when used from a non-static 
+        inline function. *)
+    (* Actually, do make it static -- C99 inlines are weird and don't eliminate
+       multiple definitions the way we'd like.*)
+    (* inlineAssertFun.svar.vstorage <- Static; *)
+    (* ACTUALLY actually, make it extern, which plus gnu_inline above, 
+       should be enough to shut up the warnings and give us a link error if 
+       any non-inlined calls creep through. *)
+    ourFun
+  end
