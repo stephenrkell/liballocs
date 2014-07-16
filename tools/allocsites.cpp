@@ -75,11 +75,13 @@ int main(int argc, char **argv)
 	 * rewrite. */
 	vector<allocsite> allocsites_to_add = read_allocsites(in);
 	cerr << "Found " << allocsites_to_add.size() << " allocation sites" << endl;
-	pair< unique_ptr<root_die>, unique_ptr<ifstream> > pair = make_root_die_and_merge_synthetics(allocsites_to_add);
-	unique_ptr<root_die> p_root = std::move(pair.first);
+	unique_ptr<root_die> p_root;
 
 	if (allocsites_to_add.size() > 0)
 	{
+		pair< unique_ptr<root_die>, unique_ptr<ifstream> > pair = make_root_die_and_merge_synthetics(allocsites_to_add);
+		unique_ptr<root_die> p_root = std::move(pair.first);
+		
 		multimap<string, iterator_df<type_die> > types_by_codeless_name;
 		get_types_by_codeless_uniqtype_name(types_by_codeless_name,
 			p_root->begin(), p_root->end());
@@ -94,6 +96,7 @@ int main(int argc, char **argv)
 			iterator_df<compile_unit_die> found_cu;
 			optional<string> found_sourcefile_path;
 			iterator_df<type_die> found_type;
+			iterator_df<type_die> second_chance_type;
 			/* Find a CU such that 
 			 - one of its source files is named sourcefile, taken relative to comp_dir if necessary;
 			 - that file defines a type of the name we want
@@ -213,6 +216,7 @@ int main(int argc, char **argv)
 											<< " whereas we want one named "
 											<< *i_cu.name_here()
 											<< endl;
+										second_chance_type = i_found->second;
 									}
 
 								}
@@ -258,7 +262,13 @@ int main(int argc, char **argv)
 					}
 					cerr << ") but required by allocsite: " << objname 
 					<< "<" << type_symname << "> @" << std::hex << file_addr << std::dec << ">" << endl;
-				continue; // next allocsite
+				
+				if (second_chance_type)
+				{
+					cerr << "Warning: guessing that we can get away with " 
+						<< second_chance_type << endl;
+					found_type = second_chance_type;
+				} else continue;
 			}
 			// now we found the type
 			//cerr << "SUCCESS: found type: " << *found_type << endl;
