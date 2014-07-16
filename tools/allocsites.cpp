@@ -26,6 +26,7 @@ using std::map;
 using std::multimap;
 using std::ios;
 using std::ifstream;
+using std::unique_ptr;
 using boost::optional;
 using std::ostringstream;
 using namespace dwarf;
@@ -55,11 +56,6 @@ int main(int argc, char **argv)
 	/* We read from stdin lines such as those output by dumpallocs,
 	 * prefixed by their filename. Actually they will have been 
 	 * stored in .allocsites files. */ 
-	
-	using std::unique_ptr;
-	unique_ptr<std::ifstream> p_objfile;
-	unique_ptr<root_die> p_root;
-	
 	std::shared_ptr<ifstream> p_in;
 	if (argc > 1) 
 	{
@@ -74,90 +70,13 @@ int main(int argc, char **argv)
 	
 	allocsites_relation_t allocsites_relation;
 	
-	char buf[4096];
-	string objname;
-	string symname;
-	unsigned file_addr;
-	string sourcefile; 
-	unsigned line;
-	unsigned end_line;
-	string alloc_typename;
-	struct allocsite_to_add
-	{
-		string clean_typename;
-		string sourcefile;
-		string objname;
-		unsigned file_addr;
-	};
-	
-	vector<allocsite_to_add> allocsites_to_add;
-	
-	optional<string> seen_objname;
-	
-	while (in.getline(buf, sizeof buf - 1)
-		&& 0 == read_allocs_line(string(buf), objname, symname, file_addr, sourcefile, line, end_line, alloc_typename))
-	{
-		if (!seen_objname)
-		{
-			seen_objname = objname;
-			p_objfile = unique_ptr<std::ifstream>(new std::ifstream(*seen_objname));
-			if (!*p_objfile)
-			{
-				assert(false);
-			}
-			p_root = unique_ptr<root_die>(new root_die(fileno(*p_objfile)));
-			assert(p_root);
-		}
-		else assert(*seen_objname == objname);
-
-		/* alloc_typename is in C declarator form.
-		   What to do about this?
-		   HACK: for now, support only a limited set of cases:
-		   IDENT
-		   IDENT '*'+
-		   
-		   AND delete the tokens "const", "volatile", "struct" and "union" first!
-		   HACK: we are not respecting the C struct/union namespacing here. OH well.
-		 */
-		
-		string nonconst_typename = alloc_typename;
-		const char *to_delete[] = { "const", "volatile", "struct", "union" };
-		for (int i = 0; i < srk31::array_len(to_delete); ++i)
-		{
-			size_t pos = 0;
-			size_t foundpos;
-			while ((foundpos = nonconst_typename.find(to_delete[i], pos)) != string::npos) 
-			{
-				/* Is this a well-bounded match, i.e. not part of a token? 
-				 * - start must be beginning-of-string or following a non-a-zA-Z0-9_ char 
-				 * - end must be end-of-string or followed by a non-a-zA-Z0-9_ char */
-				size_t endpos = foundpos + string(to_delete[i]).length();
-				if (
-					(foundpos == 0 || (!isalnum(nonconst_typename[foundpos - 1]) 
-					               &&  '_' != nonconst_typename[foundpos - 1] ))
-				  && 
-					(endpos == nonconst_typename.length()
-					|| (!isalnum(nonconst_typename[endpos] || '_' != nonconst_typename[endpos])))
-					)
-				{
-					/* it's a proper match -- delete that string and then start in the same place */
-					nonconst_typename.replace(foundpos, endpos - foundpos, "");
-					pos = foundpos;
-				}
-				else
-				{
-					/* It's not a proper match -- advance past this match. */
-					pos = foundpos + 1;
-				}
-			}
-		}
-		//cerr << "After nonconsting, typename " << alloc_typename << " is " << nonconst_typename << endl;
-		string clean_typename = nonconst_typename;
-		boost::trim(clean_typename);
-		
-		allocsites_to_add.push_back((allocsite_to_add){ clean_typename, sourcefile, objname, file_addr });
-	} // end while read line
+	/* We want the helper to make a root_die for us, based on the first 
+	 * allocsite. How? Read them all, then merge the synthetics and 
+	 * rewrite. */
+	vector<allocsite> allocsites_to_add = read_allocsites(in);
 	cerr << "Found " << allocsites_to_add.size() << " allocation sites" << endl;
+	pair< unique_ptr<root_die>, unique_ptr<ifstream> > pair = make_root_die_and_merge_synthetics(allocsites_to_add);
+	unique_ptr<root_die> p_root = std::move(pair.first);
 
 	if (allocsites_to_add.size() > 0)
 	{
@@ -337,10 +256,8 @@ int main(int argc, char **argv)
 						if (i_cu != embodying_cus.begin()) cerr << ", ";
 						cerr << *(*i_cu)->get_name();
 					}
-					cerr << ") embodying " 
-					<< sourcefile << ":" << line << "-" << end_line
-					<< " (allocsite: " << objname 
-					<< "<" << symname << "> @" << std::hex << file_addr << std::dec << ">)" << endl;
+					cerr << ") but required by allocsite: " << objname 
+					<< "<" << type_symname << "> @" << std::hex << file_addr << std::dec << ">" << endl;
 				continue; // next allocsite
 			}
 			// now we found the type

@@ -419,7 +419,7 @@ struct uniqtype \n\
 			for (auto i_edge = members.first; i_edge != members.second; ++i_edge)
 			{
 				/* if we don't have a byte offset, skip it ( -- it's a static var?) */
-				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(root);
+				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(root, true);
 				if (!opt_offset) continue;
 				else
 				{ 
@@ -449,21 +449,24 @@ struct uniqtype \n\
 		string mangled_name = mangle_typename(i_vert->first);
 		
 		/* Our last chance to skip things we don't want to emit. */
-		if (i_vert->second.is_a<with_data_members_die>() && !opt_sz)
+		if (i_vert->second.is_a<with_data_members_die>() && real_members.size() == 0 && !opt_sz)
 		{
 			// we have an incomplete type -- skip it!
 			err << "Warning: with-data-members type " 
 				<< i_vert->first.second
 				<< " is incomplete, skipping." << endl;
+			out << "/* skipped -- incomplete */" << endl;
 			continue;
 		}
+		/* We can also be *variable-length*. In this case we output a pos_maxoff of -1
+		 * i.e. maximum-unsigned-value. */
 		
 		out << "struct uniqtype " << mangled_name
 			<< " __attribute__((section (\"" << ".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
 			<< " = {\n\t" 
 			<< "{ 0, 0, 0 },\n\t"
 			<< "\"" << i_vert->first.second << "\",\n\t"
-			<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
+			<< (opt_sz ? (int) *opt_sz : -1) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
 			<< "0 /* neg_maxoff */,\n\t"
 			<< (i_vert->second.is_a<array_type_die>() ? 1 : members_count) << " /* nmemb */,\n\t"
 			<< (i_vert->second.is_a<array_type_die>() ? "1" : "0") << " /* is_array */,\n\t"

@@ -76,12 +76,12 @@ type sz =
   | Existing of typsig
   | Synthetic of typsig list
 
-let dwarfIdlExprFromSynthetic tss : string = 
+let dwarfIdlExprFromSynthetic tss ident : string = 
     (* we want to output a dwarfidl expression 
        which defines a new data type 
        comprising a sequence of members
        which are *packed*. The packed thing is the hardest but can be bodged for now. *)
-    "structure_type { " ^ (List.fold_left ( fun s t -> s ^ "member : (" ^ (dwarfidlFromSig t) ^ "); " ) "" tss) ^ "}"
+    "structure_type " ^ ident ^ " { " ^ (List.fold_left ( fun s t -> s ^ "member : " ^ (dwarfidlFromSig t) ^ "; " ) "" tss) ^ "};"
 
 let maybeDecayArrayTypesig maybeTs = match maybeTs with
     Existing(ts) -> Existing(decayArrayInTypesig ts)
@@ -611,7 +611,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Mul where an arg is a Sizeof lets us terminate *)
               match (getAllocExpr i maybeFunvar args !sizeEnv functionTs) with
                  Some(Existing(ts)) -> printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts); SkipChildren
-              |  Some(Synthetic(tss)) -> printAllocFn fileAndLine chan maybeFunvar (dwarfIdlExprFromSynthetic tss); SkipChildren
+              |  Some(Synthetic(tss)) -> printAllocFn fileAndLine chan maybeFunvar (dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine))) ); SkipChildren
               |  Some(Undet) -> (* it is an allocation function, but... *)
                     printAllocFn fileAndLine chan maybeFunvar "__uniqtype_00000000_void"; SkipChildren
               |  None -> 

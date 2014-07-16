@@ -4,7 +4,19 @@
 #include <sstream>
 #include <fstream>
 #include <iomanip>
+#include <fileno.hpp>
 #include <srk31/algorithm.hpp>
+#include <boost/algorithm/string.hpp>
+#include <boost/regex.hpp>
+#include <dwarfidl/create.hpp>
+
+// regex usings
+using boost::regex;
+using boost::regex_match;
+using boost::smatch;
+using boost::regex_constants::egrep;
+using boost::match_default;
+using boost::format_all;
 
 using std::cerr;
 using std::endl;
@@ -13,6 +25,136 @@ using std::string;
 using std::deque;
 using namespace dwarf::core;
 using dwarf::tool::abstract_c_compiler;
+
+vector<allocsite>
+read_allocsites(std::istream& in)
+{
+	char buf[4096];
+	string objname;
+	string symname;
+	unsigned file_addr;
+	string sourcefile; 
+	unsigned line;
+	unsigned end_line;
+	string alloc_typename;
+	
+	vector<allocsite> allocsites_to_add;
+	
+	optional<string> seen_objname;
+	
+	while (in.getline(buf, sizeof buf - 1)
+		&& 0 == read_allocs_line(string(buf), objname, symname, file_addr, sourcefile, line, end_line, alloc_typename))
+	{
+		/* alloc_typename is in C declarator form.
+		   What to do about this?
+		   HACK: for now, support only a limited set of cases:
+		   IDENT
+		   IDENT '*'+
+		   
+		   AND delete the tokens "const", "volatile", "struct" and "union" first!
+		   HACK: we are not respecting the C struct/union namespacing here. OH well.
+		 */
+		
+		string nonconst_typename = alloc_typename;
+// 		const char *to_delete[] = { "const", "volatile", "struct", "union" };
+// 		for (int i = 0; i < srk31::array_len(to_delete); ++i)
+// 		{
+// 			size_t pos = 0;
+// 			size_t foundpos;
+// 			while ((foundpos = nonconst_typename.find(to_delete[i], pos)) != string::npos) 
+// 			{
+// 				/* Is this a well-bounded match, i.e. not part of a token? 
+// 				 * - start must be beginning-of-string or following a non-a-zA-Z0-9_ char 
+// 				 * - end must be end-of-string or followed by a non-a-zA-Z0-9_ char */
+// 				size_t endpos = foundpos + string(to_delete[i]).length();
+// 				if (
+// 					(foundpos == 0 || (!isalnum(nonconst_typename[foundpos - 1]) 
+// 					               &&  '_' != nonconst_typename[foundpos - 1] ))
+// 				  && 
+// 					(endpos == nonconst_typename.length()
+// 					|| (!isalnum(nonconst_typename[endpos] || '_' != nonconst_typename[endpos])))
+// 					)
+// 				{
+// 					/* it's a proper match -- delete that string and then start in the same place */
+// 					nonconst_typename.replace(foundpos, endpos - foundpos, "");
+// 					pos = foundpos;
+// 				}
+// 				else
+// 				{
+// 					/* It's not a proper match -- advance past this match. */
+// 					pos = foundpos + 1;
+// 				}
+// 			}
+// 		}
+		//cerr << "After nonconsting, typename " << alloc_typename << " is " << nonconst_typename << endl;
+		string clean_typename = nonconst_typename;
+		boost::trim(clean_typename);
+
+		
+		allocsites_to_add.push_back((allocsite){ clean_typename, sourcefile, objname, file_addr });
+	} // end while read line
+	cerr << "Found " << allocsites_to_add.size() << " allocation sites" << endl;
+	return allocsites_to_add;
+}
+opt<vector<allocsite> > read_allocsites_for_binary(const string& s)
+{
+	/* Is there an allocsites file for the input object? */
+	char *real_path = realpath(s.c_str(), NULL);
+	assert(real_path);
+	
+	string full_path = string(getenv("ALLOCSITES_BASE")?:"/usr/lib/allocsites") + "/" + real_path + ".allocs";
+	std::ifstream in(full_path);
+	if (in)
+	{
+		return read_allocsites(in);
+	}
+	else return opt<vector<allocsite> >();
+}
+
+void merge_and_rewrite_synthetic_data_types(root_die& r, vector<allocsite>& as)
+{
+	for (auto i_a = as.begin(); i_a != as.end(); ++i_a)
+	{
+		if (i_a->clean_typename.substr(0, sizeof "__uniqtype_" - 1) != "__uniqtype_")
+		{
+			cerr << "Found synthetic typename " << i_a->clean_typename;
+
+			/* Add under the last CU in the file, to avoid (for now) offset woes. */
+			auto cus_seq = r.begin().children().subseq_of<compile_unit_die>();
+
+			auto last_cu = cus_seq.first;
+
+			for (auto i_cu = cus_seq.first; 
+				i_cu != cus_seq.second; 
+				++i_cu, (i_cu != cus_seq.second && ((last_cu = i_cu), true)));
+
+			auto created = dwarfidl::create_dies(last_cu.base().base(), i_a->clean_typename);
+			assert(created);
+			assert(created.is_a<type_die>());
+			/* We use the codeless name here, which is what dumpallocs would emit. */
+			i_a->clean_typename = mangle_typename(make_pair("", 
+				canonical_key_from_type(created.as_a<type_die>()).second));
+		}
+	}
+}
+
+std::pair<std::unique_ptr<root_die>, std::unique_ptr<std::ifstream> >
+make_root_die_and_merge_synthetics(vector<allocsite>& as)
+{
+	/* what's the objname of the first entry? */
+	string seen_objname = as.begin()->objname;
+	auto p_objfile = std::unique_ptr<std::ifstream>(new std::ifstream(seen_objname));
+	if (!*p_objfile)
+	{
+		assert(false);
+	}
+	/* what's the objname of the first entry? */
+	auto p_root = std::unique_ptr<root_die>(new root_die(fileno(*p_objfile)));
+	assert(p_root);
+	/* rewrite the allocsites we were passed */
+	merge_and_rewrite_synthetic_data_types(*p_root, as);
+	return std::move(make_pair(std::move(p_root), std::move(p_objfile)));
+}
 
 string summary_code_to_string(opt<uint32_t> maybe_code)
 {

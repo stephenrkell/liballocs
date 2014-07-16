@@ -91,6 +91,8 @@ let trim str =   if str = "" then "" else   let search_pos init p next =
     in
     String.sub str left (right - left + 1)   with   | Failure "empty" -> "" ;;
 
+let identFromString s = Str.global_replace (Str.regexp "[\t. /-]") "_" s
+
 let rec canonicalizeBaseTypeStr s = 
  (* 'generated' from a table maintained in srk's libcxxgen  *)
 if (s = "signed char" || s = "char" || s = "char signed" ||  false) then "signed char"
@@ -123,7 +125,7 @@ let baseTypeStr ts =
    | TBuiltin_va_list(attrs) -> "__builtin_va_list"
    | _ -> raise(Failure ("bad base type: " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_type ts))))
    in 
-   Str.global_replace (Str.regexp "[. /-]") "_" (canonicalizeBaseTypeStr (trim rawString))
+   identFromString (canonicalizeBaseTypeStr (trim rawString))
 
 let rec barenameFromSig ts = 
  let rec labelledArgTs ts startAt =
@@ -160,9 +162,9 @@ let rec dwarfidlFromSig ts =
  in
  match ts with
    TSArray(tNestedSig, optSz, attrs)
-     -> "array_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "] {" 
-        ^ (match optSz with Some(s) -> ("subrange_type [upper_bound = " ^ (string_of_int (i64_to_int s)) ^ "]") | None -> "") ^ "}"
- | TSPtr(tNestedSig, attrs) -> "pointer_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "] {}" 
+     -> "(array_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "] {" 
+        ^ (match optSz with Some(s) -> ("subrange_type [upper_bound = " ^ (string_of_int (i64_to_int s)) ^ "];") | None -> "") ^ " })"
+ | TSPtr(tNestedSig, attrs) -> "(pointer_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "];)" 
  | TSComp(isSpecial, name, attrs) -> (hackTypeName name)
  | TSFun(returnTs, Some(argsTss), false, attrs) -> 
        "(" ^ (dwarfidlLabelledArgTs argsTss 0) ^ ") => " ^ (dwarfidlFromSig returnTs)
@@ -171,10 +173,10 @@ let rec dwarfidlFromSig ts =
  | TSFun(returnTs, None, _, attrs) -> 
         "(...) => " ^ (barenameFromSig returnTs)
  | TSEnum(enumName, attrs) -> enumName
- | TSBase(TVoid(attrs)) -> "unspecified_type"
+ | TSBase(TVoid(attrs)) -> "(unspecified_type)"
  | TSBase(tbase) -> baseTypeStr tbase
 
-let userTypeNameToBareName s = Str.global_replace (Str.regexp "[. /-]") "_" (canonicalizeBaseTypeStr (trim s))
+let userTypeNameToBareName s = identFromString (canonicalizeBaseTypeStr (trim s))
 
 let symnameFromSig ts = "__uniqtype_" ^ "" ^ "_" ^ (barenameFromSig ts)
 

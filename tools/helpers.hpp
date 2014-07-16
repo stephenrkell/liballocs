@@ -24,6 +24,20 @@ using namespace dwarf;
 using spec::opt;
 using lib::Dwarf_Unsigned;
 
+struct allocsite
+{
+	string clean_typename;
+	string sourcefile;
+	string objname;
+	unsigned file_addr;
+};
+
+vector<allocsite> read_allocsites(std::istream& in);
+opt<vector<allocsite> > read_allocsites_for_binary(const string& s);
+void merge_and_rewrite_synthetic_data_types(core::root_die& r, vector<allocsite>& as);
+std::pair<std::unique_ptr<core::root_die>, std::unique_ptr<std::ifstream> >
+make_root_die_and_merge_synthetics(vector<allocsite>& as);
+
 #define IS_VARIADIC(t) \
 ((t).is_a<subroutine_type_die>() ? (t).as_a<subroutine_type_die>()->is_variadic() \
 		:   (t).is_a<subprogram_die>() ? (t).as_a<subprogram_die>()->is_variadic() \

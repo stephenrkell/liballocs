@@ -114,6 +114,11 @@ int main(int argc, char **argv)
 	} root(fileno(infstream));
 	assert(&root.get_frame_section());
 	opt<core::root_die&> opt_r = root; // for debugging
+	
+	/* Do we have an allocsites file for this object? If so, we incorporate its 
+	 * synthetic data types. */
+	auto allocsites = read_allocsites_for_binary(argv[1]);
+	if (allocsites) merge_and_rewrite_synthetic_data_types(root, *allocsites);
 
 	struct subprogram_key : public pair< pair<string, string>, string > // ordering for free
 	{
