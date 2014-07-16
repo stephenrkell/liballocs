@@ -665,9 +665,9 @@ __liballocs_get_alloc_info
 			assert(get_object_memory_kind(heap_info) == HEAP
 				|| get_object_memory_kind(heap_info) == UNKNOWN); // might not have seen that maps yet
 			assert(
-				__liballocs_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC
+				__liballocs_get_memory_kind((void*)(uintptr_t)(heap_info->alloc_site)) == STATIC
 				|| (__liballocs_add_missing_maps(),
-					 __liballocs_get_memory_kind((void*)(uintptr_t) heap_info->alloc_site) == STATIC));
+					 __liballocs_get_memory_kind((void*)(uintptr_t)(heap_info->alloc_site)) == STATIC));
 
 			/* Now we have a uniqtype or an allocsite. For long-lived objects 
 			 * the uniqtype will have been installed in the heap header already.
@@ -677,13 +677,13 @@ __liballocs_get_alloc_info
 			if (__builtin_expect(heap_info->alloc_site_flag, 1))
 			{
 				if (out_alloc_site) *out_alloc_site = NULL;
-				alloc_uniqtype = (void*)(uintptr_t)heap_info->alloc_site;
+				alloc_uniqtype = (void*)(uintptr_t)(heap_info->alloc_site);
 			}
 			else
 			{
 				/* Look up the allocsite's uniqtype, and install it in the heap info 
 				 * (on NDEBUG builds only, because it reduces debuggability a bit). */
-				void *alloc_site = (void*)(uintptr_t)heap_info->alloc_site;
+				void *alloc_site = (void*)(uintptr_t)(heap_info->alloc_site);
 				if (out_alloc_site) *out_alloc_site = alloc_site;
 				alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
 #ifdef NDEBUG
