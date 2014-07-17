@@ -448,7 +448,16 @@ struct uniqtype \n\
 		} else array_len = 0;
 		string mangled_name = mangle_typename(i_vert->first);
 		
-		/* Our last chance to skip things we don't want to emit. */
+		/* Our last chance to skip things we don't want to emit. 
+		 * NOTE that for incompletes, we distinguish "flexible", "opaque" and "undefined" types
+		 * (FIXME: actually use this terminology consistently).
+		 * 
+		 * "flexible" means it has some defined members, but no length; pos_maxoff will be -1. 
+		 * "opaque" is things like functions which deliberately have no length nor contents;
+		        pos_maxoff will be 0.
+		 * "undefined" is structs that are declared but not defined. *Usually* the intention
+		 * here is the same as for "opaque"... HMM.
+		 */
 		if (i_vert->second.is_a<with_data_members_die>() && real_members.size() == 0 && !opt_sz)
 		{
 			// we have an incomplete type -- skip it!
@@ -466,7 +475,8 @@ struct uniqtype \n\
 			<< " = {\n\t" 
 			<< "{ 0, 0, 0 },\n\t"
 			<< "\"" << i_vert->first.second << "\",\n\t"
-			<< (opt_sz ? (int) *opt_sz : -1) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
+			/* implement the flexible/opaque/undefined distinction we mentioned... */
+			<< (opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
 			<< "0 /* neg_maxoff */,\n\t"
 			<< (i_vert->second.is_a<array_type_die>() ? 1 : members_count) << " /* nmemb */,\n\t"
 			<< (i_vert->second.is_a<array_type_die>() ? "1" : "0") << " /* is_array */,\n\t"
