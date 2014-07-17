@@ -363,9 +363,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def isLinkCommand(self):
         return CompilerWrapper.isLinkCommand(self)
     
-    def allWrappedSymNames(self):
-        return CompilerWrapper.allWrappedSymNames(self)
-    
     def parseInputAndOutputFiles(self, args):
         return CompilerWrapper.parseInputAndOutputFiles(self, args)
     
