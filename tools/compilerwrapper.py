@@ -103,7 +103,7 @@ class CompilerWrapper:
 
             wrappedFns = self.allWrappedSymNames()
             self.debugMsg("Looking for wrapped functions that need unbinding\n")
-            cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"" \
+            cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"; exit $?" \
                 % (filename, "|".join(wrappedFns))
             self.debugMsg("cmdstring is " + cmdstring + "\n")
             grep_ret = subprocess.call(["sh", "-c", cmdstring], stdout=errfile, stderr=errfile)
@@ -114,16 +114,18 @@ class CompilerWrapper:
                 # for the allocation function. We then rename these to 
                 # __real_ and __wrap_ respectively. 
                 backup_filename = os.path.splitext(filename)[0] + ".backup.o"
-                self.debugMsg("Found that we need to unbind... making backup as %s\n" % \
-                    backup_filename)
+                self.debugMsg("Found that we need to unbind some or all of symbols [%s]... making backup as %s\n" % \
+                    (", ".join(wrappedFns), backup_filename))
                 cp_ret = subprocess.call(["cp", filename, backup_filename], stderr=errfile)
                 if cp_ret != 0:
                     self.print_errors(errfile)
                     return cp_ret
                 unbind_pairs = [["--unbind-sym", sym] for sym in wrappedFns]
-                objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
+                unbind_cmd = ["objcopy", "--prefer-non-section-relocs"] \
                  + [opt for pair in unbind_pairs for opt in pair] \
-                 + [filename], stderr=errfile)
+                 + [filename]
+                self.debugMsg("cmdstring is " + " ".join(unbind_cmd) + "\n")
+                objcopy_ret = subprocess.call(unbind_cmd, stderr=errfile)
                 if objcopy_ret != 0:
                     self.print_errors(errfile)
                     return objcopy_ret
