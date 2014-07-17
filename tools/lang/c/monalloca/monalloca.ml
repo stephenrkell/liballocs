@@ -75,31 +75,38 @@ let rec try_match vname pattern =
         then true
         else false
     with Not_found -> false
+    
+let rec findCleanupLocal (rest : varinfo list) = match rest with
+    [] -> None
+  | l::ll -> if l.vname = "__liballocs_alloca_cleanup_local" 
+        then Some(l) 
+        else findCleanupLocal ll 
 
 let ensureCleanupLocal (fn : fundec) =
-    let rec findCleanupLocal (rest : varinfo list) = match rest with
-        [] -> None
-      | l::ll -> if l.vname = "__liballocs_alloca_cleanup_local" 
-            then Some(l) 
-            else findCleanupLocal ll
-    in
     (* val makeLocalVar : fundec -> ?insert:bool -> string -> typ -> varinfo *)
     match findCleanupLocal fn.slocals with 
-        Some(s) -> ()
-      | None -> let v = makeLocalVar fn ~insert:true "__liballocs_alloca_cleanup_local" intType
-        in v.vattr <- v.vattr @ [Attr("cleanup", [ACons("__liballocs_alloca_caller_frame_cleanup", [])])]
+        Some(s) -> s
+      | None -> let v = makeLocalVar fn ~insert:true "__liballocs_alloca_cleanup_local" ulongType
+        in v.vattr <- v.vattr @ [Attr("cleanup", [ACons("__liballocs_alloca_caller_frame_cleanup", [])])];
+        (* trying to initialize this right here, by adding to fn.sbody.bstmts, doesn't work -- 
+           likely because it gets clobbered by the visitor code. So we do it when visiting the function
+           instead. *)
+        fn.sbody.bstmts <- (mkStmtOneInstr (Set((Var(v), NoOffset), zero, v.vdecl)))
+                           :: fn.sbody.bstmts; 
+        v
 
 class monAllocaExprVisitor = fun (fl: Cil.file) 
                             -> fun enclosingFunction
                             -> fun liballocsAllocaFun
                             -> fun liballocsAllocaCleanupFun
+                            -> fun currentAllocsiteVar
                             -> object(self)
   inherit nopCilVisitor
 
   method vinst (i: instr) : instr list visitAction = 
     let isAllocaFun fe = match fe with
         Lval(Var(v), NoOffset) 
-        when enclosingFunction.svar.vname <> "__liballocs_unindex_stack_objects_below" 
+        when enclosingFunction.svar.vname <> "__liballocs_unindex_stack_objects_counted_by" 
             && enclosingFunction.svar.vname <> "__liballocs_alloca"
             && (v.vname = "alloca" || v.vname = "__builtin_alloca") -> true
       | _ -> false
@@ -121,8 +128,39 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
               mov %rax, __current_allocsite
              
              *)
-             ensureCleanupLocal enclosingFunction;
-             ChangeTo([Call(tgt, Lval(Var(liballocsAllocaFun.svar), NoOffset), args, l)])
+             let v = ensureCleanupLocal enclosingFunction
+             in
+             let mkLabel num = ".L__monalloca_alloca_label_" 
+                ^ (identFromString l.file) ^ "_" 
+                ^ (string_of_int l.line) ^ "_"
+                ^ (string_of_int num)
+             in
+             let labelString1 = mkLabel 1
+             in 
+             let labelString2 = mkLabel 2
+             in
+             (* We also need a test for zeroness of the (weak) &__current_allocsite. *)
+             ChangeTo([Asm([(* attrs *)], 
+                           [(* template strings *)
+                                "   callq "^ labelString1 ^"\n\
+                                "^ labelString1 ^": \n\
+                                    pop %%rax\n\
+                                    test %0,%0\n\
+                                    jz "^ labelString2 ^"\n\
+                                    mov %%rax, 0(%0)\n\
+                                "^ labelString2 ^":"
+                           ], 
+                           [(* outputs: (string option * string * lval) *)
+                                
+                           ], 
+                           [(* inputs: (string option * string * exp) *)
+                                (None, "r", mkAddrOf (Var(currentAllocsiteVar), NoOffset))
+                           ], 
+                           [(* clobbers: string *)
+                                "%rax"
+                           ],
+                           (* location *) l ); 
+                Call(tgt, Lval(Var(liballocsAllocaFun.svar), NoOffset), args @ [mkAddrOf (Var(v), NoOffset)], l)])
         end
     | _ -> SkipChildren 
 end (* class monAllocaVisitor *)
@@ -136,17 +174,44 @@ class monAllocaFunVisitor = fun (fl: Cil.file) -> object(self)
     initializer
         liballocsAllocaFun <- findOrCreateExternalFunctionInFile
                         fl "__liballocs_alloca" (TFun(voidPtrType, 
-                        Some [ ("sz", ulongType, []) ], 
+                        Some [ ("sz", ulongType, []);
+                               ("counter", ulongPtrType, []) ], 
                         false, [])) 
                         ;
         liballocsAllocaCleanupFun <- findOrCreateExternalFunctionInFile
                         fl "__liballocs_alloca_caller_frame_cleanup" (TFun(voidType, 
-                        Some [], 
+                        Some [ ("obj", voidPtrType, [])], 
                         false, []))
    
     method vfunc (f: fundec) : fundec visitAction = 
-        let maExprVisitor = new monAllocaExprVisitor fl f liballocsAllocaFun liballocsAllocaCleanupFun in
-            ChangeTo(visitCilFunction maExprVisitor f)
+        let currentAllocsiteVar = 
+            let rec findVar gs = match gs with
+                [] -> None
+              | g::gs -> match g with 
+                GVarDecl(v, _) when v.vname = "__current_allocsite" -> Some(v)
+              | _ -> findVar gs
+            in 
+            match findVar fl.globals with 
+                Some(v) -> v
+              | None -> failwith "no __current_allocsite global in file"
+        in        
+        
+        (* fn.sbody.bstmts <- (mkStmtOneInstr (Set((Var(v), NoOffset), zero, v.vdecl)))
+                           :: fn.sbody.bstmts; *)
+
+        let maExprVisitor = new monAllocaExprVisitor fl f liballocsAllocaFun liballocsAllocaCleanupFun currentAllocsiteVar
+        in
+        let modifiedFunDec = visitCilFunction maExprVisitor f
+        in 
+        let cleanupLocal = findCleanupLocal modifiedFunDec.slocals
+        in 
+        match cleanupLocal with
+            None -> ChangeTo(modifiedFunDec)
+          | Some(v) -> 
+                modifiedFunDec.sbody.bstmts <- 
+                    (mkStmtOneInstr (Set((Var(v), NoOffset), zero, v.vdecl))) :: modifiedFunDec.sbody.bstmts;
+                ChangeTo(modifiedFunDec)
+                
 end (* class monAllocaFunVisitor *)
 
 let feature : Feature.t = 

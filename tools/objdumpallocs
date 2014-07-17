@@ -122,17 +122,19 @@ case "$filetype" in
 esac
 
 line_regexp='^([0-9a-f]*) <([^>]*)>'
-alloc_descriptors="${LIBALLOCS_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p"
+alloc_descriptors="${LIBALLOCS_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p alloca(Z)p"
 suballoc_descriptors="${LIBALLOCS_SUBALLOC_FNS:-}"
 allocsz_descriptors="${LIBALLOCS_ALLOCSZ_FNS:-}"
 all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}${allocsz_descriptors:+ ${allocsz_descriptors}}"
 echo "all_alloc_descriptors is: $all_alloc_descriptors" 1>&2
-alloc_site_regexp="${line_regexp}.*(call|jmp).*(<($( 
-    echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc' | \
+# Treat callq of monalloca labels as a possible alloc site, as that's what 
+# our alloca instrumentation inserts.
+alloc_site_regexp="${line_regexp}.*((call|jmp).*(<($( 
+    echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc\n__monalloca_' | \
     make_match_any_line_floating_eregexp )|$( 
     echo -n "${all_alloc_descriptors}" | \
         sed -r 's/([a-zA-Z0-9_]+)\([^\)]*\)[a-zA-Z]?( +|$)/\1\n__wrap_\1\n/g' | \
-    make_match_any_line_floating_eregexp ))|.*\*)"
+    make_match_any_line_floating_eregexp ))|.*\*)|.* 00 00 00 00.*callq)"
 # HACK: if liballocs_alloc_fns is unset, use "malloc" a second time
 # (leaving this out will make the regexp end "|)" so match all calls)
 
@@ -161,7 +163,7 @@ apply_relocs () {
 
 # get allocation sites in "address sym offset" form
 allocsites_tmpfile="$(mktemp)"
-objdump --prefix-addresses ${disassembly_opts} "$inputfile" | \
+objdump --prefix-addresses --show-raw-insn ${disassembly_opts} "$inputfile" | \
 apply_relocs | \
 egrep "$alloc_site_regexp" | \
 sed -r "s/${alloc_site_regexp}.*/\1\t\2/" | \
@@ -170,7 +172,7 @@ echo "Written allocsites output to $allocsites_tmpfile" 1>&2
 
 # read the whole objdump to a temporary file, to avoid re-disassembling
 tmpfile="$(mktemp)"
-objdump --line-numbers --prefix-addresses ${disassembly_opts} -S "$inputfile" | \
+objdump --line-numbers --prefix-addresses --show-raw-insn ${disassembly_opts} -S "$inputfile" | \
    apply_relocs > "$tmpfile"
 echo "Written objdump output to $tmpfile" 1>&2
 

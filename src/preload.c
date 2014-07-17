@@ -3,11 +3,22 @@
  *  fork(), vfork(), clone()     -- FIXME: do we care about the fork-without-exec case?
  */
 
+
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <link.h>
 #include <assert.h>
 #include <sys/types.h>
+/* We make very heavy use of malloc_usable_size in heap_index. But we also 
+ * override it -- twice! -- once in mallochooks, to intercept the early_malloc
+ * case, and once here to intercept the fast case. 
+ * 
+ * We want to be very careful with the visibility of this symbol, so that references
+ * we make always go straight to our definition, not via the PLT. So declare it
+ * as protected. NOTE that it will always make at least one call through the PLT, 
+ * because the underlying logic is in libc.  */
+size_t malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
+size_t __real_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -50,6 +61,43 @@ static const char *filename_for_fd(int fd)
  * on x86-64, mmap has 8-byte size_t length and 8-byte off_t offset.
  * So I think the differences are only on 32-bit platforms. 
  * For now, just alias mmap64 to mmap. */
+
+size_t (__attribute__((visibility("protected"))) __wrap_malloc_usable_size)(void *ptr)
+{
+	/* We use this all the time in heap_index. 
+	 * BUT because heap_index addresses can be on the stack too, 
+	 * in the case of alloca, we need to intercept this case
+	 * and handle it appropriately. 
+	 * 
+	 * How can we detect the stack case quickly?
+	 * We could just ask the l0index.
+	 * 
+	 * If we wanted a faster-but-less-general common case, 
+	 * - If ptr is on the same page as our thread's rsp, 
+	 *   it's definitely a stack pointer.
+	 * - If ptr is within MAXIMUM_STACK_SIZE of our thread's rsp, 
+	 *   it's *probably* a stack ptr, but to be certain it seems
+	 *   that we still have to consult the l0 index.
+	 * - Can we *rule out* the stack case quickly?
+	 *   HMM... all this is only using the same tricks we have in 
+	 *   get_object_memory_kind, so use that.
+	 * 
+	 */
+	void *sp;
+	 #ifdef UNW_TARGET_X86
+		__asm__ ("movl %%esp, %0\n" :"=r"(sp));
+	#else // assume X86_64 for now
+		__asm__("movq %%rsp, %0\n" : "=r"(sp));
+	#endif
+
+	_Bool is_stack = (get_object_memory_kind(ptr) == STACK);
+	
+	if (is_stack)
+	{
+		return *(((unsigned long *) ptr) - 1);
+	}
+	else return __real_malloc_usable_size(ptr);
+}
 
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)

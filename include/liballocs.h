@@ -460,6 +460,11 @@ __liballocs_get_alloc_info
 	void *object_start = NULL;
 	if (out_alloc_site) *out_alloc_site = 0; // will likely get updated later
 	if (out_memory_kind) *out_memory_kind = k;
+	/* These are shared between the heap case and the alloca-subcase of the stack case, 
+	 * so we declare them here. */
+	struct suballocated_chunk_rec *containing_suballoc;
+	size_t alloc_chunksize;
+	struct insert *heap_info;
 	switch(k)
 	{
 		case STACK:
@@ -470,7 +475,6 @@ __liballocs_get_alloc_info
 			// how do we know which is the one we want?
 			// we can get a uniqtype for each one, including maximum posoff and negoff
 			// -- yes, use those
-			// begin pasted-then-edited from stack.cpp in pmirror
 			/* We declare all our variables up front, in the hope that we can rely on
 			 * the stack pointer not moving between getcontext and the sanity check.
 			 * FIXME: better would be to write this function in C90 and compile with
@@ -514,9 +518,9 @@ __liballocs_get_alloc_info
 				_Bool got_bp = (unw_ret == 0);
 				_Bool got_higherframe_bp = 0;
 				/* Also do a test about whether we're in main, above which we want to
-				 * tolerate unwind failures more gracefully.
+				 * tolerate unwind failures more gracefully. NOTE: this is just for
+				 * debugging; we don't normally pay any attention to this. 
 				 */
-				char proc_name_buf[100];
 				unw_word_t byte_offset_from_proc_start;
 				at_or_above_main |= 
 					(
@@ -583,7 +587,10 @@ __liballocs_get_alloc_info
 				 * The difficulty is in the fact that frame offsets can be
 				 * negative, i.e. arguments exist somewhere in the parent
 				 * frame. */
-				// 0. if our target address is greater than higherframe_bp, continue
+				/* 0. if our target address is greater than higherframe_bp,
+				 * -- i.e. *higher* in the stack than the top of the next frame 
+				 * -- continue (it's in a frame we haven't yet reached!)
+				 */
 				if (got_higherframe_bp && (uintptr_t) obj > higherframe_bp)
 				{
 					continue;
@@ -611,15 +618,23 @@ __liballocs_get_alloc_info
 					if (out_alloc_site) *out_alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
 					goto out_success;
 				}
-				else
+				// have we gone too far? we are going upwards in memory...
+				// ... so if our current frame (not higher frame)'s 
+				// numerically lowest (deepest) addr 
+				// is still higher than our object's addr, we must have gone past it
+				if (frame_base - frame_desc->neg_maxoff > (unsigned char *) obj)
 				{
-					// have we gone too far? we are going upwards in memory...
-					// ... so if our lowest addr is still too high
-					if (frame_base - frame_desc->neg_maxoff > (unsigned char *) obj)
+					containing_suballoc = NULL;
+					heap_info = lookup_object_info(obj, (void**) out_object_start, 
+						&alloc_chunksize, &containing_suballoc);
+					if (heap_info)
 					{
-						if (out_reason) *out_reason = "stack walk reached higher frame";
-						goto abort_stack;
+						/* It looks like this is an alloca chunk, so proceed. */
+						goto do_alloca_as_if_heap;
 					}
+					
+					if (out_reason) *out_reason = "stack walk reached higher frame";
+					goto abort_stack;
 				}
 
 				assert(step_ret > 0 || higherframe_sp == BEGINNING_OF_STACK);
@@ -631,7 +646,6 @@ __liballocs_get_alloc_info
 				goto abort_stack;
 			}
 		#undef BEGINNING_OF_STACK
-		// end pasted from pmirror stack.cpp
 		break; // end case STACK
 		abort_stack:
 			if (out_reason && !*out_reason) *out_reason = "stack object";
@@ -651,9 +665,8 @@ __liballocs_get_alloc_info
 			 * is initialized during load, but can be extended as new allocsites
 			 * are discovered, e.g. indirect ones.)
 			 */
-			struct suballocated_chunk_rec *containing_suballoc = NULL;
-			size_t alloc_chunksize;
-			struct insert *heap_info = lookup_object_info(obj, (void**) out_object_start, 
+			containing_suballoc = NULL;
+			heap_info = lookup_object_info(obj, (void**) out_object_start, 
 					&alloc_chunksize, &containing_suballoc);
 			if (!heap_info)
 			{
@@ -673,6 +686,8 @@ __liballocs_get_alloc_info
 			 * the uniqtype will have been installed in the heap header already.
 			 * This is the expected case.
 			 */
+		do_alloca_as_if_heap:
+			;
 			struct uniqtype *alloc_uniqtype;
 			if (__builtin_expect(heap_info->alloc_site_flag, 1))
 			{

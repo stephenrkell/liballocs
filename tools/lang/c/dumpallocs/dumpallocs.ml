@@ -410,7 +410,7 @@ let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) e
     Some(f) -> Some(f.vname)
   | None -> None
   in 
-  getUserAllocExpr i maybeFunName arglist env (["malloc(Z)p"; "calloc(zZ)p"; "realloc(pZ)p"; "posix_memalign(pzZ)p"] @ (userAllocFunctions ())) calledFunctionType
+  getUserAllocExpr i maybeFunName arglist env (["malloc(Z)p"; "calloc(zZ)p"; "realloc(pZ)p"; "posix_memalign(pzZ)p"; "alloca(Z)p"; "__builtin_alloca(Z)p"] @ (userAllocFunctions ())) calledFunctionType
 
 (* I so do not understand Pretty.dprintf *)
 let printAllocFn fileAndLine chan maybeFunvar allocSymOrExpr = 

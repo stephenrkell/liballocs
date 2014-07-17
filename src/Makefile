@@ -9,8 +9,8 @@ MALLOC_HOOKS ?= ../../libmallochooks.hg
 # we --defsym'd them and they are clearly defined in the .o file.
 # So don't use that rule. We use the preprocessor (above) to define __next_hook_*.
 
-HOOKS_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_preload_fast.o event_hooks_fast.o
-#HOOKS_OBJS := heap_index_hooks.o malloc_hook_stubs_preload.o event_hooks.o
+#HOOKS_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_preload_fast.o event_hooks_fast.o
+HOOKS_OBJS := heap_index_hooks.o malloc_hook_stubs_preload.o event_hooks.o
 
 CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include
 #DEFAULT_EXTRA_CFLAGS := -fPIC -flto -O4 #-DNDEBUG
@@ -22,7 +22,10 @@ NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_H
 FAST_CFLAGS += -fpic -flto -O4 #-DNDEBUG
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
-LDFLAGS += -Wl,-O2 -flto -fPIC
+LDFLAGS += -Wl,-O2 -flto -fPIC 
+
+# We define our own malloc_usable_size to catch the alloca case.
+liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size
 
 BUILD_MALLOC_HOOKS := event
 MALLOC_HOOKS_METHOD := preload

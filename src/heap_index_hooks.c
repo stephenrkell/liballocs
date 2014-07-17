@@ -18,6 +18,9 @@
 /* This file uses GNU C extensions */
 #define _GNU_SOURCE 
 
+#include <sys/types.h>
+size_t malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
+size_t __real_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -30,7 +33,7 @@
 #ifdef MALLOC_USABLE_SIZE_HACK
 #include <dlfcn.h>
 extern "C" {
-static inline size_t malloc_usable_size(void *ptr);
+static inline size_t malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
 }
 #else
 size_t malloc_usable_size(void *ptr);
@@ -365,6 +368,15 @@ static uintptr_t nbytes_in_index_for_l0_entry(void *userchunk_base)
 }
 
 static void 
+index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller);
+
+void 
+__liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
+{
+	index_insert(new_userchunkaddr, modified_size, caller);
+}
+
+static void 
 index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 {
 	int lock_ret;
@@ -684,6 +696,13 @@ void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 	*p_size = size_to_allocate;
 }
 
+static void index_delete(void *userptr);
+
+void 
+__liballocs_index_delete(void *userptr)
+{
+	index_delete(userptr);
+}
 
 static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 {
@@ -2000,4 +2019,65 @@ void __unindex_deep_alloc(void *ptr, int level)
 	unindex_deep_alloc_internal(ptr, found_ins, p_rec);
 	
 	BIG_UNLOCK
+}
+
+void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
+{
+	if (*bytes_counter == 0) return;
+	
+	/* Starting at the stack pointer, we look for indexed chunks and 
+	 * keep unindexing until we have unindexed exactly *bytes_counter bytes. */
+	void *sp;
+	#ifdef UNW_TARGET_X86
+		__asm__ ("movl %%esp, %0\n" :"=r"(sp));
+	#else // assume X86_64 for now
+		__asm__("movq %%rsp, %0\n" : "=r"(sp));
+	#endif
+
+	struct entry *first_head = INDEX_LOC_FOR_ADDR(sp);
+	struct entry *cur_head = first_head;
+	unsigned long total_to_unindex = *bytes_counter;
+	unsigned long total_unindexed = 0;
+	unsigned chunks_unindexed = 0;
+	
+	/* Iterate forward over the buckets, but not beyond frame_addr's bucket. */
+	for (; cur_head != INDEX_LOC_FOR_ADDR(frame_addr) + 1; ++cur_head)
+	{
+		/* Repeatedly find the lowest-addressed chunk and unindex it. */
+		while (entry_ptr_to_addr(cur_head) != NULL)
+		{
+			void *cur_userchunk = entry_ptr_to_addr(cur_head);
+			struct insert *cur_insert = insert_for_chunk(cur_userchunk);
+			void *lowest_chunkaddr = cur_userchunk;
+
+			for (;
+				cur_userchunk; 
+				cur_userchunk = entry_to_same_range_addr(cur_insert->un.ptrs.next, cur_userchunk), 
+					cur_insert = cur_userchunk ? insert_for_chunk(cur_userchunk) : NULL)
+			{
+				if ((char*) cur_userchunk < (char*) lowest_chunkaddr)
+				{
+					lowest_chunkaddr = cur_userchunk;
+				}
+			}
+			
+			/* Now we definitely have a lowest chunk addr */
+			unsigned long bytes_to_unindex = malloc_usable_size(lowest_chunkaddr);
+			index_delete(lowest_chunkaddr);
+			total_unindexed += bytes_to_unindex;
+			++chunks_unindexed;
+			if (total_unindexed >= total_to_unindex)
+			{
+				if (total_unindexed > total_to_unindex)
+				{
+					fprintf(stderr, 
+						"Warning: unindexed too many bytes "
+						"(requested %lu from %p; got %lu in %u chunks)\n",
+						total_to_unindex, frame_addr, total_unindexed, chunks_unindexed);
+				}
+				return;
+			}
+		}
+	}
+	assert(0);
 }

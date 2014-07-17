@@ -7,7 +7,7 @@ int __liballocs_global_init(void)
 	return 0;
 }
 
-void __liballocs_unindex_stack_objects_below(void *stack_addr)
+void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {
 }
 
@@ -47,4 +47,17 @@ struct uniqtype *
 __liballocs_get_alloc_type(void *obj)
 {
 	return NULL;
+}
+
+
+
+void 
+__liballocs_index_delete(void *userptr)
+{
+	
+}
+
+void __liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
+{
+	
 }

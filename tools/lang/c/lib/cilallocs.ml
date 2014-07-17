@@ -182,6 +182,8 @@ let symnameFromSig ts = "__uniqtype_" ^ "" ^ "_" ^ (barenameFromSig ts)
 
 (* CIL doesn't give us a const void * type builtin, so we define one. *)
 let voidConstPtrType = TPtr(TVoid([Attr("const", [])]),[])
+(* ditto for unsigned long * *)
+let ulongPtrType = TPtr(TInt(IULong, []),[])
 
 (* Returns true if the given lvalue offset ends in a bitfield access. *) 
 let rec is_bitfield lo = match lo with
