@@ -62,7 +62,8 @@ static const char *filename_for_fd(int fd)
  * So I think the differences are only on 32-bit platforms. 
  * For now, just alias mmap64 to mmap. */
 
-size_t (__attribute__((visibility("protected"))) __wrap_malloc_usable_size)(void *ptr)
+size_t __wrap_malloc_usable_size (void *ptr) __attribute__((visibility("protected")));
+size_t __wrap_malloc_usable_size (void *ptr)
 {
 	/* We use this all the time in heap_index. 
 	 * BUT because heap_index addresses can be on the stack too, 

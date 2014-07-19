@@ -41,10 +41,6 @@ FILE *stream_err __attribute__((visibility("hidden")));
 
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
-// keep these close, keep them fast
-uintptr_t page_size __attribute__((visibility("hidden")));
-uintptr_t log_page_size __attribute__((visibility("hidden")));
-uintptr_t page_mask __attribute__((visibility("hidden")));
 
 int __liballocs_debug_level __attribute__((visibility("hidden")));
 _Bool __liballocs_is_initialized __attribute__((visibility("protected")));
@@ -59,6 +55,32 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 
 // HACK
 void __liballocs_preload_init(void);
+
+struct liballocs_err
+{
+	const char *message;
+};
+struct liballocs_err __liballocs_err_stack_walk_step_failure __attribute__((visibility("protected"))) 
+ = { "stack walk reached higher frame" };
+struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame __attribute__((visibility("protected"))) 
+ = { "stack walk reached higher frame" };
+struct liballocs_err __liballocs_err_stack_walk_reached_top_of_stack __attribute__((visibility("protected"))) 
+ = { "stack walk reached top-of-stack" };
+struct liballocs_err __liballocs_err_unknown_stack_walk_problem __attribute__((visibility("protected"))) 
+ = { "unknown stack walk problem" };
+struct liballocs_err __liballocs_err_unindexed_heap_object __attribute__((visibility("protected"))) 
+ = { "unindexed heap object" };
+struct liballocs_err __liballocs_err_unrecognised_alloc_site __attribute__((visibility("protected"))) 
+ = { "unrecognised alloc site" };
+struct liballocs_err __liballocs_err_unrecognised_static_object __attribute__((visibility("protected"))) 
+ = { "unrecognised static object" };
+struct liballocs_err __liballocs_err_object_of_unknown_storage __attribute__((visibility("protected"))) 
+ = { "object of unknown storage" };
+
+const char *__liballocs_errstring(struct liballocs_err *err)
+{
+	return err->message;
+}
 
 #define BLACKLIST_SIZE 8
 struct blacklist_ent 
@@ -487,18 +509,18 @@ static void consider_blacklisting(const void *obj)
 		slot_to_extend < &blacklist[BLACKLIST_SIZE]; ++slot_to_extend)
 	{
 		if ((uintptr_t) slot_to_extend->actual_start + slot_to_extend->actual_length
-			 == (((uintptr_t) obj) & page_mask))
+			 == (((uintptr_t) obj) & PAGE_MASK))
 		{
 			// post-extend this one
-			slot_to_extend->actual_length += page_size;
+			slot_to_extend->actual_length += PAGE_SIZE;
 			slot = slot_to_extend;
 			break;
 		}
-		else if ((uintptr_t) slot_to_extend->actual_start - page_size == (((uintptr_t) obj) & page_mask))
+		else if ((uintptr_t) slot_to_extend->actual_start - PAGE_SIZE == (((uintptr_t) obj) & PAGE_MASK))
 		{
 			// pre-extend this one
-			slot_to_extend->actual_start -= page_size;
-			slot_to_extend->actual_length += page_size;
+			slot_to_extend->actual_start -= PAGE_SIZE;
+			slot_to_extend->actual_length += PAGE_SIZE;
 			slot = slot_to_extend;
 			break;
 		}
@@ -516,8 +538,8 @@ static void consider_blacklisting(const void *obj)
 		else 
 		{
 			slot = free_slot;
-			slot->actual_start = (void *)(((uintptr_t) obj) & page_mask);
-			slot->actual_length = page_size;
+			slot->actual_start = (void *)(((uintptr_t) obj) & PAGE_MASK);
+			slot->actual_length = PAGE_SIZE;
 		}
 	}
 	
@@ -544,7 +566,7 @@ static void consider_blacklisting(const void *obj)
 	// WHERE the smallest mask we want is one page
 	while (((bits & mask) < (uintptr_t) slot->actual_start
 			|| (bits & mask) + (~mask + 1) > (uintptr_t) slot->actual_start + slot->actual_length)
-		&& ~mask + 1 > page_size)
+		&& ~mask + 1 > PAGE_SIZE)
 	{
 		mask >>= 1;                            // shift the mask right
 		mask |= 1ul<<sizeof (uintptr_t) * 8 - 1; // set the top bit of the mask
@@ -633,11 +655,6 @@ int __liballocs_global_init(void)
 	static _Bool tried_to_initialize;
 	if (tried_to_initialize) return -1;
 	tried_to_initialize = 1;
-	
-	// grab stuff from sysconf
-	page_size = (uintptr_t) sysconf(_SC_PAGE_SIZE);
-	log_page_size = integer_log2(page_size);
-	page_mask = ~((uintptr_t) sysconf(_SC_PAGE_SIZE) - 1);
 	
 	// print a summary when the program exits
 	atexit(print_exit_summary);
@@ -936,10 +953,10 @@ __liballocs_get_alloc_type(void *obj)
 	memory_kind k;
 	const void *object_start;
 	struct uniqtype *out;
-	_Bool abort = __liballocs_get_alloc_info(obj, NULL, NULL, NULL, NULL, 
-		NULL, &out, NULL, NULL);
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
+		NULL, &out, NULL);
 	
-	if (abort) return NULL;
+	if (err) return NULL;
 	
 	return out;
 }

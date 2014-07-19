@@ -54,6 +54,9 @@ struct uniqtype
 #define UNIQTYPE_POINTEE_TYPE(u) \
 (UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->contained[0].ptr : NULL)
 
+#define ALLOC_IS_DYNAMICALLY_SIZED(all, as) \
+	((all) != (as))
+
 /* ** begin added for inline get_alloc_info */
 #ifndef USE_FAKE_LIBUNWIND
 #include <libunwind.h>
@@ -192,22 +195,32 @@ extern struct uniqtype __uniqtype__unsigned_char __attribute__((weak));
 extern struct uniqtype __uniqtype__void __attribute__((weak));
 extern struct uniqtype __uniqtype__int __attribute__((weak));
 
+struct liballocs_err;
+extern struct liballocs_err __liballocs_err_stack_walk_step_failure __attribute__((visibility("protected")));
+extern struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame __attribute__((visibility("protected")));;
+extern struct liballocs_err __liballocs_err_stack_walk_reached_top_of_stack __attribute__((visibility("protected")));;
+extern struct liballocs_err __liballocs_err_unknown_stack_walk_problem __attribute__((visibility("protected")));;
+extern struct liballocs_err __liballocs_err_unindexed_heap_object __attribute__((visibility("protected")));;
+extern struct liballocs_err __liballocs_err_unrecognised_alloc_site __attribute__((visibility("protected")));;
+extern struct liballocs_err __liballocs_err_unrecognised_static_object __attribute__((visibility("protected")));;
+extern struct liballocs_err __liballocs_err_object_of_unknown_storage __attribute__((visibility("protected")));;
+
+const char *__liballocs_errstring(struct liballocs_err *err);
+
 #define DEFAULT_ATTRS __attribute__((visibility("protected")))
 
 /* Iterate over all uniqtypes in a given shared object. */
 int __liballocs_iterate_types(void *typelib_handle, 
 		int (*cb)(struct uniqtype *t, void *arg), void *arg) DEFAULT_ATTRS;
 /* Our main API: query allocation information for a pointer */
-extern inline _Bool __liballocs_get_alloc_info(const void *obj, 
-	const char **out_reason, const void **out_reason_ptr,
-	memory_kind *out_memory_kind, const void **out_object_start,
-	unsigned *out_block_element_count,
-	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site,
-	signed *out_target_offset_within_uniqtype) DEFAULT_ATTRS __attribute__((gnu_inline,hot));
+extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
+	memory_kind *out_memory_kind, const void **out_alloc_start,
+	unsigned long *out_alloc_size_bytes,
+	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site) DEFAULT_ATTRS __attribute__((gnu_inline,hot));
 extern inline _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched) DEFAULT_ATTRS __attribute__((gnu_inline,hot));;
+		signed *p_cumulative_offset_searched) DEFAULT_ATTRS __attribute__((gnu_inline,hot));
 /* Some inlines follow at the bottom. */
 
 /* our own private assert */
@@ -403,36 +416,29 @@ __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 }
 
 extern inline 
-_Bool 
+struct liballocs_err * 
 __attribute__((always_inline,gnu_inline)) 
 __liballocs_get_alloc_info
 	(const void *obj, 
-	const char **out_reason,
-	const void **out_reason_ptr,
 	memory_kind *out_memory_kind,
-	const void **out_object_start,
-	unsigned *out_block_element_count,
+	const void **out_alloc_start,
+	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, 
-	const void **out_alloc_site,
-	signed *out_target_offset_within_uniqtype) __attribute__((always_inline,gnu_inline));
+	const void **out_alloc_site) __attribute__((always_inline,gnu_inline));
 
 extern inline 
-_Bool 
+struct liballocs_err *
 __attribute__((always_inline,gnu_inline)) 
 __liballocs_get_alloc_info
 	(const void *obj, 
-	const char **out_reason,
-	const void **out_reason_ptr,
 	memory_kind *out_memory_kind,
-	const void **out_object_start,
-	unsigned *out_block_element_count,
+	const void **out_alloc_start,
+	unsigned long *out_alloc_size_bytes, 
 	struct uniqtype **out_alloc_uniqtype, 
-	const void **out_alloc_site,
-	signed *out_target_offset_within_uniqtype)
+	const void **out_alloc_site)
 {
 	int modulo; 
-	signed target_offset_wholeblock;
-	signed target_offset_within_uniqtype;
+	struct liballocs_err *err = 0;
 
 	memory_kind k = get_object_memory_kind(obj);
 	if (__builtin_expect(k == UNKNOWN, 0))
@@ -570,7 +576,7 @@ __liballocs_get_alloc_info
 				{
 					// return value <1 means error
 
-					if (out_reason) *out_reason = "stack walk step failure";
+					err = &__liballocs_err_stack_walk_step_failure;
 					goto abort_stack;
 					break;
 				}
@@ -613,9 +619,10 @@ __liballocs_get_alloc_info
 					&& (unsigned char *) obj < frame_base + frame_desc->pos_maxoff)
 				{
 					object_start = frame_base;
-					if (out_object_start) *out_object_start = object_start;
+					if (out_alloc_start) *out_alloc_start = object_start;
 					if (out_alloc_uniqtype) *out_alloc_uniqtype = frame_desc;
 					if (out_alloc_site) *out_alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
+					if (out_alloc_size_bytes) *out_alloc_size_bytes = frame_desc->pos_maxoff;
 					goto out_success;
 				}
 				// have we gone too far? we are going upwards in memory...
@@ -625,7 +632,7 @@ __liballocs_get_alloc_info
 				if (frame_base - frame_desc->neg_maxoff > (unsigned char *) obj)
 				{
 					containing_suballoc = NULL;
-					heap_info = lookup_object_info(obj, (void**) out_object_start, 
+					heap_info = lookup_object_info(obj, (void**) out_alloc_start, 
 						&alloc_chunksize, &containing_suballoc);
 					if (heap_info)
 					{
@@ -633,7 +640,7 @@ __liballocs_get_alloc_info
 						goto do_alloca_as_if_heap;
 					}
 					
-					if (out_reason) *out_reason = "stack walk reached higher frame";
+					err = &__liballocs_err_stack_walk_reached_higher_frame;
 					goto abort_stack;
 				}
 
@@ -642,16 +649,15 @@ __liballocs_get_alloc_info
 			// if we hit the termination condition, we've failed
 			if (higherframe_sp == BEGINNING_OF_STACK)
 			{
-				if (out_reason) *out_reason = "stack walk reached top-of-stack";
+				err = &__liballocs_err_stack_walk_reached_top_of_stack;
 				goto abort_stack;
 			}
 		#undef BEGINNING_OF_STACK
 		break; // end case STACK
 		abort_stack:
-			if (out_reason && !*out_reason) *out_reason = "stack object";
-			if (out_reason_ptr) *out_reason_ptr = obj;
+			if (!err) err = &__liballocs_err_unknown_stack_walk_problem;
 			++__liballocs_aborted_stack;
-			return 1;
+			return err;
 		} // end case STACK
 		case HEAP:
 		{
@@ -666,14 +672,13 @@ __liballocs_get_alloc_info
 			 * are discovered, e.g. indirect ones.)
 			 */
 			containing_suballoc = NULL;
-			heap_info = lookup_object_info(obj, (void**) out_object_start, 
+			heap_info = lookup_object_info(obj, (void**) out_alloc_start, 
 					&alloc_chunksize, &containing_suballoc);
 			if (!heap_info)
 			{
-				if (out_reason) *out_reason = "unindexed heap object";
-				if (out_reason) *out_reason_ptr = obj;
+				err = &__liballocs_err_unindexed_heap_object;
 				++__liballocs_aborted_unindexed_heap;
-				return 1;
+				return err;
 			}
 			assert(get_object_memory_kind(heap_info) == HEAP
 				|| get_object_memory_kind(heap_info) == UNKNOWN); // might not have seen that maps yet
@@ -712,21 +717,14 @@ __liballocs_get_alloc_info
 			// if we didn't get an alloc uniqtype, we abort
 			if (!alloc_uniqtype) 
 			{
-				if (out_reason) *out_reason = "unrecognised allocsite";
-				if (out_reason_ptr) *out_reason_ptr = out_alloc_site ? *out_alloc_site : NULL;
+				err = &__liballocs_err_unrecognised_alloc_site;
 				++__liballocs_aborted_unrecognised_allocsite;
-				return 1;
+				return err;
 			}
 			
 			// else do the other outputs
 			if (out_alloc_uniqtype) *out_alloc_uniqtype = alloc_uniqtype;
-			if (out_block_element_count)
-			{
-				if (alloc_uniqtype && alloc_uniqtype->pos_maxoff > 0) 
-				{
-					*out_block_element_count = (alloc_chunksize - sizeof (struct insert)) / alloc_uniqtype->pos_maxoff;
-				} else *out_block_element_count = 1;
-			}
+			if (out_alloc_size_bytes) *out_alloc_size_bytes = alloc_chunksize - sizeof (struct insert);
 			break;
 		}
 		case STATIC:
@@ -739,8 +737,7 @@ __liballocs_get_alloc_info
 //			if (blacklisted)
 //			{
 //				// FIXME: record blacklist hits separately
-//				reason = "unrecognised static object";
-//				reason_ptr = obj;
+//				err = &__liballocs_err_unrecognised_static_object;
 //				++__liballocs_aborted_static;
 //				goto abort;
 //			}
@@ -748,62 +745,42 @@ __liballocs_get_alloc_info
 			if (out_alloc_uniqtype) *out_alloc_uniqtype = alloc_uniqtype;
 			if (!alloc_uniqtype)
 			{
-				if (out_reason) *out_reason = "unrecognised static object";
-				if (out_reason_ptr) *out_reason_ptr = obj;
+				err = &__liballocs_err_unrecognised_static_object;
 				++__liballocs_aborted_static;
 //				consider_blacklisting(obj);
-				return 1;
+				return err;
 			}
 			
 			// else we can go ahead
-			if (out_object_start) *out_object_start = object_start;
-			if (out_alloc_site && out_object_start) *out_alloc_site = *out_object_start;
+			if (out_alloc_start) *out_alloc_start = object_start;
+			if (out_alloc_site) *out_alloc_site = object_start;
+			if (out_alloc_size_bytes) *out_alloc_size_bytes = alloc_uniqtype->pos_maxoff;
 			break;
 		}
 		case UNKNOWN:
 		case MAPPED_FILE:
 		default:
 		{
-			if (out_reason) *out_reason = "object of unknown storage";
-			if (out_reason_ptr) *out_reason_ptr = obj;
+			err = &__liballocs_err_object_of_unknown_storage;
 			++__liballocs_aborted_unknown_storage;
-			return 1;
+			return err;
 		}
 	}
 	
 out_success:
-	target_offset_wholeblock = (char*) obj - (char*) object_start;
-	/* If we're searching in a heap array, we need to take the offset modulo the 
-	 * element size. Otherwise just take the whole-block offset. */
-	if (k == HEAP 
-			&& out_alloc_uniqtype
-			&& (*out_alloc_uniqtype)->pos_maxoff != 0 
-			&& (*out_alloc_uniqtype)->neg_maxoff == 0)
-	{
-		target_offset_within_uniqtype = target_offset_wholeblock % (*out_alloc_uniqtype)->pos_maxoff;
-	} else target_offset_within_uniqtype = target_offset_wholeblock;
-	// assert that the signs are the same
-	assert(target_offset_wholeblock < 0 
-		? target_offset_within_uniqtype < 0 
-		: target_offset_within_uniqtype >= 0);
-	if (out_target_offset_within_uniqtype) *out_target_offset_within_uniqtype = target_offset_within_uniqtype;
-	
-	return 0;
+	return NULL;
 }
 
 // extern inline 
-// _Bool 
+// struct liballocs_err * 
 // __attribute__((always_inline,gnu_inline)) 
 // __liballocs_get_alloc_info
 // 	(const void *obj, 
-// 	const char **out_reason,
-// 	const void **out_reason_ptr,
 // 	memory_kind *out_memory_kind,
-// 	const void **out_object_start,
-// 	unsigned *out_block_element_count,
+// 	const void **out_alloc_start,
+// 	unsigned long *out_alloc_size_bytes,
 // 	struct uniqtype **out_alloc_uniqtype, 
-// 	const void **out_alloc_site,
-// 	signed *out_target_offset_within_uniqtype) __attribute__((always_inline,gnu_inline));
+// 	const void **out_alloc_site) __attribute__((always_inline,gnu_inline));
 
 /* We define a more friendly API for simple queries.
  * NOTE that we don't make these functions inline. They are still fast, internally,

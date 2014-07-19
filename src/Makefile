@@ -13,13 +13,29 @@ HOOKS_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_preload_fast.o event_hoo
 #HOOKS_OBJS := heap_index_hooks.o malloc_hook_stubs_preload.o event_hooks.o
 
 CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include
-#DEFAULT_EXTRA_CFLAGS := -fPIC -flto -O4 #-DNDEBUG
-DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -finline-functions
+
+# STRANGE: this
+#DEFAULT_EXTRA_CFLAGS := -fPIC -flto -O4 # note! no -DNDEBUG
+# is slower than the following (4.61, 4.54, 4.60)
+#DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -finline-functions
+# ; what about this? it's the same or slightly slower
+#DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -finline-functions -DNDEBUG
+# what about this one? makes little difference
+#DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
+# what about this one? same or slightly slower
+#DEFAULT_EXTRA_CFLAGS := -fPIC -Os -flto -DNDEBUG
+# what about this one? slightly faster
+#DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -DNDEBUG
+# what about this one?  among the fastest (4.52, 4.50, 4.51)
+DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+# really double-check that the following isn't faster? nope (4.64, 4.64, 4.59)
+#DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
 
 default: liballocs_preload.so liballocs_preload.a liballocs_noop.so liballocs_noop.o liballocs.a
 
 NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
-FAST_CFLAGS += -fpic -flto -O4 #-DNDEBUG
+FAST_CFLAGS += -fpic -flto -O4 -DNDEBUG
+#FAST_CFLAGS += -fpic -O3 -DNDEBUG
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
 LDFLAGS += -Wl,-O2 -flto -fPIC 

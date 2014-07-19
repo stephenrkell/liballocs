@@ -13,15 +13,20 @@
 
 #include "liballocs.h"
 
-extern uintptr_t page_size __attribute__((visibility("hidden")));
-extern uintptr_t log_page_size __attribute__((visibility("hidden")));
-extern uintptr_t page_mask __attribute__((visibility("hidden")));
+/* FIXME: more portable */
+#define PAGE_SIZE 4096
+#define LOG_PAGE_SIZE 12
+#define PAGE_MASK ~((PAGE_SIZE - 1))
+
 #define ROUND_DOWN_TO_PAGE_SIZE(n) \
-	(assert(sysconf(_SC_PAGE_SIZE) == 4096), ((n)>>12)<<12)
+	(assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE), ((n)>>LOG_PAGE_SIZE)<<LOG_PAGE_SIZE)
 #define ROUND_UP_TO_PAGE_SIZE(n) \
-	(assert(sysconf(_SC_PAGE_SIZE) == 4096), (n) % 4096 == 0 ? (n) : ((((n) >> 12) + 1) << 12))
+	(assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE), (n) % PAGE_SIZE == 0 ? (n) : ((((n) >> LOG_PAGE_SIZE) + 1) << LOG_PAGE_SIZE))
 // mappings over 4GB in size are assumed to be memtables and are ignored
-#define BIGGEST_MAPPING (1ull<<32) 
+#define BIGGEST_MAPPING (1ull<<32)
+
+#define PAGENUM(p) (((uintptr_t) (p)) >> LOG_PAGE_SIZE)
+#define ADDR_OF_PAGENUM(p) ((const void *) ((p) << LOG_PAGE_SIZE))
 
 const char *
 dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
