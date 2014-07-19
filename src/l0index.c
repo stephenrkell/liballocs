@@ -43,17 +43,14 @@ static struct mapping *get_mapping_from_node(struct prefix_tree_node *n)
 #define NMAPPINGS 1024
 struct mapping mappings[NMAPPINGS]; // NOTE: we *don't* use mappings[0]; the 0 byte means "empty"
 
-#define PAGE_SIZE 4096
-#define LOG_PAGE_SIZE 12
-
 #define SANITY_CHECK_MAPPING(m) \
 	do { \
 		if (MAPPING_IN_USE((m))) { \
-			for (unsigned long i = pagenum((m)->begin); i < pagenum((m)->end); ++i) { \
+			for (unsigned long i = PAGENUM((m)->begin); i < PAGENUM((m)->end); ++i) { \
 				assert(l0index[i] == ((m) - &mappings[0])); \
 			} \
-			assert(l0index[pagenum((m)->begin)-1] != ((m) - &mappings[0])); \
-			assert(l0index[pagenum((m)->end)] != ((m) - &mappings[0])); \
+			assert(l0index[PAGENUM((m)->begin)-1] != ((m) - &mappings[0])); \
+			assert(l0index[PAGENUM((m)->end)] != ((m) - &mappings[0])); \
 		} \
 	} while (0)
 	
@@ -94,16 +91,6 @@ static void (__attribute__((constructor)) init)(void)
 		l0index = MEMTABLE_NEW_WITH_TYPE(mapping_num_t, PAGE_SIZE, (void*) 0, (void*) STACK_BEGIN);
 		assert(l0index != MAP_FAILED);
 	}
-}
-
-static uintptr_t pagenum(const void *p)
-{
-	return ((uintptr_t) p) >> LOG_PAGE_SIZE;
-}
-
-static const void *addr_of_pagenum(uintptr_t pagenum)
-{
-	return (const void *) (pagenum << LOG_PAGE_SIZE);
 }
 
 _Bool __attribute__((visibility("hidden"))) insert_equal(struct insert *p_ins1, struct insert *p_ins2)
@@ -152,26 +139,26 @@ static struct mapping *find_free_mapping(void)
 static _Bool
 is_unindexed(void *begin, void *end)
 {
-	mapping_num_t *pos = &l0index[pagenum(begin)];
-	while (pos < l0index + pagenum(end) && !*pos) { ++pos; }
+	mapping_num_t *pos = &l0index[PAGENUM(begin)];
+	while (pos < l0index + PAGENUM(end) && !*pos) { ++pos; }
 	
-	if (pos == l0index + pagenum(end)) return 1;
+	if (pos == l0index + PAGENUM(end)) return 1;
 	
 	debug_printf(3, "Found already-indexed position %p (mapping %d)\n", 
-			addr_of_pagenum(pos - l0index), *pos);
+			ADDR_OF_PAGENUM(pos - l0index), *pos);
 	return 0;
 }
 
 static _Bool
 is_unindexed_or_heap(void *begin, void *end)
 {
-	mapping_num_t *pos = &l0index[pagenum(begin)];
-	while (pos < l0index + pagenum(end) && (!*pos || mappings[*pos].n.kind == HEAP)) { ++pos; }
+	mapping_num_t *pos = &l0index[PAGENUM(begin)];
+	while (pos < l0index + PAGENUM(end) && (!*pos || mappings[*pos].n.kind == HEAP)) { ++pos; }
 	
-	if (pos == l0index + pagenum(end)) return 1;
+	if (pos == l0index + PAGENUM(end)) return 1;
 	
 	debug_printf(3, "Found already-indexed non-heap position %p (mapping %d)\n", 
-			addr_of_pagenum(pos - l0index), *pos);
+			ADDR_OF_PAGENUM(pos - l0index), *pos);
 	return 0;
 }
 
@@ -246,7 +233,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 			/* We have overlap. Unmap the whole thing? Or just the portion we overlap? 
 			 * Since heap regions can shrink as well as grow, it seems safest to unmap
 			 * only the overlapping portion. */
-			if (mappings[i_map].n.kind == 3)
+			if (mappings[i_map].n.kind == HEAP)
 			{
 				// force an unmapping of the overlapping region
 				char *overlap_begin = MAXPTR((char*) mappings[i_map].begin, (char*) base);
@@ -279,12 +266,43 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 					}
 					return &mappings[i_map];
 				}
-				else
+				else if (mappings[i_map].n.kind == STACK && kind == STACK
+					/* for stack, upper bound must be unchanged */
+					&& mappings[i_map].end == (char*) base + s)
 				{
-					/* We overlap, it's not heap, and the containment check failed. 
-					 * Something weird is going on. */
-					assert(0);
+					_Bool contracting = base > mappings[i_map].begin;
+					/* assert that we're not contracting -- we're expanding! */
+					assert(!contracting);
+
+//					if (contracting)
+//					{
+//						// simply update the lower bound, do the memset, sanity check and exit
+//						void *old_begin = m->begin;
+//						m->begin = base;
+//						assert(m->end == (char*) base + s);
+//						memset_mapping(l0index + PAGENUM(old_begin), 0, 
+//									((char*) old_begin - (char*) base) >> LOG_PAGE_SIZE);
+//						SANITY_CHECK_MAPPING(m);
+//						return m;
+//					}
+//					else // expanding or zero-growth
+//					{
+						// simply update the lower bound, do the memset, sanity check and exit
+						void *old_begin = mappings[i_map].begin;
+						mappings[i_map].begin = base;
+						assert(mappings[i_map].end == (char*) base + s);
+						if (old_begin != base)
+						{
+							memset_mapping(l0index + PAGENUM(base), i_map, 
+										((char*) old_begin - (char*) base) >> LOG_PAGE_SIZE);
+						}
+						SANITY_CHECK_MAPPING(&mappings[i_map]);
+						return &mappings[i_map];
+//					}
 				}
+				/* We overlap, it's not heap, and the containment check failed. 
+				 * Something weird is going on. */
+				assert(0);
 			}
 		} // end if overlaps
 		// else no overlap; continue
@@ -292,13 +310,15 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	
 	/* If we got here, we've unmapped anything overlapping us. */
 	
-	mapping_num_t mapping_num = l0index[pagenum(base)];
+	mapping_num_t mapping_num = l0index[PAGENUM(base)];
 	//SANITY_CHECK_MAPPING(&mappings[mapping_num]);
 	assert(mapping_num == 0);
 	
 	// test for nearby mappings to extend
-	mapping_num_t abuts_existing_start = l0index[pagenum((char*) base + s)];
-	mapping_num_t abuts_existing_end = l0index[pagenum((char*) base - 1)];
+	mapping_num_t abuts_existing_start = l0index[PAGENUM((char*) base + s)];
+	mapping_num_t abuts_existing_end = l0index[PAGENUM((char*) base - 1)];
+	
+	// FIXME: the following ovelrap logic appears to be dead code... delete it?
 	
 	/* Tolerate overlapping either of these two, if we're mapping heap (anonymous). 
 	 * We simply adjust our base and size so that we fit exactly. 
@@ -321,8 +341,8 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 		}
 		
 		// also adjust w.r.t. overlaps
-		mapping_num_t our_end_overlaps = l0index[pagenum((char*) base + s) - 1];
-		mapping_num_t our_begin_overlaps = l0index[pagenum((char*) base)];
+		mapping_num_t our_end_overlaps = l0index[PAGENUM((char*) base + s) - 1];
+		mapping_num_t our_begin_overlaps = l0index[PAGENUM((char*) base)];
 
 		if (our_end_overlaps
 			&& range_overlaps_mapping(&mappings[our_end_overlaps], base, s)
@@ -350,7 +370,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	else if (kind == STACK)
 	{
 		/* Tolerate sharing an upper boundary with an existing mapping. */
-		mapping_num_t our_end_overlaps = l0index[pagenum((char*) base + s) - 1];
+		mapping_num_t our_end_overlaps = l0index[PAGENUM((char*) base + s) - 1];
 		
 		if (our_end_overlaps)
 		{
@@ -363,7 +383,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 				void *old_begin = m->begin;
 				m->begin = base;
 				assert(m->end == (char*) base + s);
-				memset_mapping(l0index + pagenum(old_begin), 0, 
+				memset_mapping(l0index + PAGENUM(old_begin), 0, 
 							((char*) old_begin - (char*) base) >> LOG_PAGE_SIZE);
 				SANITY_CHECK_MAPPING(m);
 				return m;
@@ -376,7 +396,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 				assert(m->end == (char*) base + s);
 				if (old_begin != base)
 				{
-					memset_mapping(l0index + pagenum(base), our_end_overlaps, 
+					memset_mapping(l0index + PAGENUM(base), our_end_overlaps, 
 								((char*) old_begin - (char*) base) >> LOG_PAGE_SIZE);
 				}
 				SANITY_CHECK_MAPPING(m);
@@ -425,7 +445,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	{
 		debug_printf(3, "%s: post-extending existing mapping ending at %p\n", __func__,
 				mappings[abuts_existing_end].end);
-		memset_mapping(l0index + pagenum(mappings[abuts_existing_end].end), abuts_existing_end, 
+		memset_mapping(l0index + PAGENUM(mappings[abuts_existing_end].end), abuts_existing_end, 
 			s >> LOG_PAGE_SIZE);
 		mappings[abuts_existing_end].end = (char*) base + s;
 		SANITY_CHECK_MAPPING(&mappings[abuts_existing_end]);
@@ -436,7 +456,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 		debug_printf(3, "%s: pre-extending existing mapping at %p-%p\n", __func__,
 				mappings[abuts_existing_start].begin, mappings[abuts_existing_start].end);
 		mappings[abuts_existing_start].begin = (char*) base;
-		memset_mapping(l0index + pagenum(base), abuts_existing_start, s >> LOG_PAGE_SIZE);
+		memset_mapping(l0index + PAGENUM(base), abuts_existing_start, s >> LOG_PAGE_SIZE);
 		SANITY_CHECK_MAPPING(&mappings[abuts_existing_start]);
 		return &mappings[abuts_existing_start];
 	}
@@ -451,7 +471,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 		found->end = (char*) base + s;
 		found->n.kind = kind;
 		found->n.info = *p_info;
-		memset_mapping(l0index + pagenum(base), (mapping_num_t) (found - &mappings[0]), s >> LOG_PAGE_SIZE);
+		memset_mapping(l0index + PAGENUM(base), (mapping_num_t) (found - &mappings[0]), s >> LOG_PAGE_SIZE);
 		SANITY_CHECK_MAPPING(found);
 		return found;
 	}
@@ -504,9 +524,9 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 	struct node_info info = { .what = DATA_PTR, .un = { data_ptr: data_ptr } };
 	
 	/* Just add the as-yet-unmapped bits of the range. */
-	uintptr_t begin_pagenum = pagenum(base);
+	uintptr_t begin_pagenum = PAGENUM(base);
 	uintptr_t current_pagenum = begin_pagenum;
-	uintptr_t end_pagenum = pagenum((char*) base + s);
+	uintptr_t end_pagenum = PAGENUM((char*) base + s);
 	while (current_pagenum < end_pagenum)
 	{
 		uintptr_t next_indexed_pagenum = current_pagenum;
@@ -515,9 +535,9 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 		
 		if (next_indexed_pagenum > current_pagenum)
 		{
-			prefix_tree_add_full((void*) addr_of_pagenum(current_pagenum), 
-				(char*) addr_of_pagenum(next_indexed_pagenum)
-					 - (char*) addr_of_pagenum(current_pagenum), 
+			prefix_tree_add_full((void*) ADDR_OF_PAGENUM(current_pagenum), 
+				(char*) ADDR_OF_PAGENUM(next_indexed_pagenum)
+					 - (char*) ADDR_OF_PAGENUM(current_pagenum), 
 				kind, &info);
 		}
 		
@@ -597,7 +617,7 @@ static struct mapping *split_mapping(struct mapping *m, void *split_addr)
 	mapping_num_t new_mapping_num = new_m - &mappings[0];
 	unsigned long npages
 	 = ((char*) new_m->end - ((char*) new_m->begin)) >> LOG_PAGE_SIZE;
-	memset_mapping(l0index + pagenum((char*) new_m->begin), new_mapping_num, npages);
+	memset_mapping(l0index + PAGENUM((char*) new_m->begin), new_mapping_num, npages);
 
 	// delete (from m) the part now covered by new_m
 	m->end = new_m->begin;
@@ -618,7 +638,7 @@ void prefix_tree_del_node(struct prefix_tree_node *n)
 	struct mapping *m = get_mapping_from_node(n);
 	
 	// check sanity
-	assert(l0index[pagenum(m->begin)] == m - &mappings[0]);
+	assert(l0index[PAGENUM(m->begin)] == m - &mappings[0]);
 	
 	prefix_tree_del(m->begin, (char*) m->end - (char*) m->begin);
 	
@@ -643,14 +663,14 @@ void prefix_tree_del(void *base, size_t s)
 		return;
 	}
 	
-	unsigned long cur_pagenum = pagenum(base); 
-	unsigned long end_pagenum = pagenum((char*)base + s);
+	unsigned long cur_pagenum = PAGENUM(base); 
+	unsigned long end_pagenum = PAGENUM((char*)base + s);
 	mapping_num_t mapping_num;
 	// if we get mapping num 0 at first, try again after forcing __liballocs_init_l0()
 	do
 	{
 		/* We might span multiple mappings, because munmap() is like that. */
-		mapping_num = l0index[pagenum(base)];
+		mapping_num = l0index[PAGENUM(base)];
 	}
 	while (mapping_num == 0 && (!initialized_maps ? (__liballocs_init_l0(), 1) : 0));
 
@@ -667,7 +687,7 @@ void prefix_tree_del(void *base, size_t s)
 			}
 			if (cur_pagenum == end_pagenum) break;
 			debug_printf(3, "Warning: l0-unindexing a partially unmapped region %p-%p\n",
-				addr_of_pagenum(initial_cur_pagenum), addr_of_pagenum(cur_pagenum));
+				ADDR_OF_PAGENUM(initial_cur_pagenum), ADDR_OF_PAGENUM(cur_pagenum));
 		}
 		mapping_num = l0index[cur_pagenum];
 		/* If mapping num is 0 when we get here, it means there's no mapping here. 
@@ -708,7 +728,7 @@ void prefix_tree_del(void *base, size_t s)
 			assert(this_unmapping_end > this_unmapping_begin);
 			unsigned long npages = (this_unmapping_end - this_unmapping_begin)>>LOG_PAGE_SIZE;
 			// zero out the to-be-unmapped part of the memtable
-			memset_mapping(l0index + pagenum(this_unmapping_begin), 0, npages);
+			memset_mapping(l0index + PAGENUM(this_unmapping_begin), 0, npages);
 			// this mapping now ends at the unmapped base addr
 			next_addr = m->end;
 			m->end = base;
@@ -721,7 +741,7 @@ void prefix_tree_del(void *base, size_t s)
 			assert((char*) new_begin > (char*) m->begin);
 			unsigned long npages
 			 = ((char*) new_begin - (char*) m->begin) >> LOG_PAGE_SIZE;
-			memset_mapping(l0index + pagenum(m->begin), 0, npages);
+			memset_mapping(l0index + PAGENUM(m->begin), 0, npages);
 			m->begin = new_begin;
 			next_addr = new_begin; // should terminate us
 			SANITY_CHECK_MAPPING(m);
@@ -729,9 +749,9 @@ void prefix_tree_del(void *base, size_t s)
 		else 
 		{
 			// else we're just deleting the whole entry
-			memset_mapping(l0index + pagenum(m->begin), 0, 
-					pagenum((char*) m->begin + this_mapping_size)
-					 - pagenum(m->begin));
+			memset_mapping(l0index + PAGENUM(m->begin), 0, 
+					PAGENUM((char*) m->begin + this_mapping_size)
+					 - PAGENUM(m->begin));
 			next_addr = m->end;
 			m->begin = m->end = NULL;
 			SANITY_CHECK_MAPPING(m);
@@ -742,7 +762,7 @@ void prefix_tree_del(void *base, size_t s)
 		
 		/* How far have we got?  */
 		assert(next_addr);
-		cur_pagenum = pagenum(next_addr);
+		cur_pagenum = PAGENUM(next_addr);
 		
 	} while (cur_pagenum < end_pagenum);
 	
@@ -757,7 +777,7 @@ enum object_memory_kind __liballocs_get_memory_kind(const void *obj)
 	if (__builtin_expect(obj == 0, 0)) return UNUSABLE;
 	if (__builtin_expect(obj == (void*) -1, 0)) return UNUSABLE;
 	
-	mapping_num_t mapping_num = l0index[pagenum(obj)];
+	mapping_num_t mapping_num = l0index[PAGENUM(obj)];
 	if (mapping_num == 0) return UNKNOWN;
 	else return mappings[mapping_num].n.kind;
 }
@@ -790,7 +810,7 @@ prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_p
 	
 	if (!l0index) init();
 	if (out_prev_ptr) *out_prev_ptr = NULL;
-	mapping_num_t mapping_num = l0index[pagenum(base)];
+	mapping_num_t mapping_num = l0index[PAGENUM(base)];
 	if (mapping_num == 0) { ret = NULL; }
 	else { ret = &mappings[mapping_num].n; }
 	
@@ -808,8 +828,8 @@ size_t prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin,
 	BIG_LOCK
 	
 	struct prefix_tree_node **out = out_begin;
-	uintptr_t end_pagenum = pagenum(end);
-	uintptr_t begin_pagenum = pagenum(begin);
+	uintptr_t end_pagenum = PAGENUM(end);
+	uintptr_t begin_pagenum = PAGENUM(begin);
 	while (out - out_begin < out_size)
 	{
 		// look for the next mapping that overlaps: skip unmapped bits
@@ -822,7 +842,7 @@ size_t prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin,
 		*out++ = &mappings[num].n;
 		
 		// advance begin_pagenum to one past the end of this mapping
-		begin_pagenum = pagenum(mappings[num].end);
+		begin_pagenum = PAGENUM(mappings[num].end);
 	}
 	
 	BIG_UNLOCK
@@ -839,7 +859,7 @@ prefix_tree_bounds(const void *ptr, const void **out_begin, const void **out_end
 	
 	struct prefix_tree_node *ret;
 	if (!l0index) init();
-	mapping_num_t mapping_num = l0index[pagenum(ptr)];
+	mapping_num_t mapping_num = l0index[PAGENUM(ptr)];
 	if (mapping_num == 0) { ret = NULL; }
 	else 
 	{
@@ -862,12 +882,10 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 	BIG_LOCK
 	
 	__liballocs_ensure_init();
-	
-	assert(page_size);
 
 	char *chunk_end = (char*) ptr + malloc_usable_size((void*) ptr);
 	
-	if ((uintptr_t) ptr % page_size <= MAXIMUM_MALLOC_HEADER_OVERHEAD
+	if ((uintptr_t) ptr % PAGE_SIZE <= MAXIMUM_MALLOC_HEADER_OVERHEAD
 			&& (uintptr_t) chunk_end % PAGE_SIZE == 0
 			&& (uintptr_t) ptr - ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) ptr) <= MAXIMUM_MALLOC_HEADER_OVERHEAD)
 	{
@@ -889,9 +907,9 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 		_Bool saw_fit = 0;
 		
 		mapping_num_t cur_num;
-		for (cur_num = l0index[pagenum(ptr)]; 
+		for (cur_num = l0index[PAGENUM(ptr)]; 
 				cur_num != 0 && mappings[cur_num].n.info.what == DATA_PTR; 
-				cur_num = l0index[pagenum(mappings[cur_num].end)])
+				cur_num = l0index[PAGENUM(mappings[cur_num].end)])
 		{
 			struct mapping *m = &mappings[cur_num];
 			SANITY_CHECK_MAPPING(m);
@@ -937,8 +955,8 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 			mapping_num_t last_num = cur_num;
 			assert(caller);
 			assert(lowest_bound);
-			uintptr_t npages = ((uintptr_t) chunk_end - (uintptr_t) lowest_bound) >> log_page_size;
-			uintptr_t bottom_pagenum = pagenum(lowest_bound);
+			uintptr_t npages = ((uintptr_t) chunk_end - (uintptr_t) lowest_bound) >> LOG_PAGE_SIZE;
+			uintptr_t bottom_pagenum = PAGENUM(lowest_bound);
 			mapping_num_t mapping_num = l0index[bottom_pagenum];
 			assert(mapping_num != 0);
 			struct mapping *m = &mappings[mapping_num];
@@ -972,7 +990,7 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 				debug_printf(3, "We want to extend our bottom mapping number %ld (%p-%p) "
 					"to include %ld bytes from %p\n", 
 					(long)(m - &mappings[0]), m->begin, m->end, s, m->end); 
-				assert(l0index[pagenum((char*) m->end - 1)] == m - &mappings[0]);
+				assert(l0index[PAGENUM((char*) m->end - 1)] == m - &mappings[0]);
 				SANITY_CHECK_MAPPING(m);
 				struct mapping *new_m = create_or_extend_mapping(
 						m->end, s, m->n.kind, &m->n.info);
@@ -1016,14 +1034,14 @@ unsigned __unindex_l0(const void *mem)
 	const void *lower;
 	const void *upper;
 	struct prefix_tree_node *n = prefix_tree_bounds(mem, &lower, &upper);
-	unsigned lower_to_upper_npages = ((uintptr_t) upper - (uintptr_t) lower) >> log_page_size;
+	unsigned lower_to_upper_npages = ((uintptr_t) upper - (uintptr_t) lower) >> LOG_PAGE_SIZE;
 	assert(n);
 
 	/* We want to unindex the same number of pages we indexed. */
 	unsigned npages_to_unindex = n->info.un.ins_and_bits.npages;
-	unsigned total_size_to_unindex = npages_to_unindex << log_page_size;
+	unsigned total_size_to_unindex = npages_to_unindex << LOG_PAGE_SIZE;
 
-	unsigned total_size_unindexed = lower_to_upper_npages << log_page_size;
+	unsigned total_size_unindexed = lower_to_upper_npages << LOG_PAGE_SIZE;
 	do
 	{
 		total_size_unindexed += unindex_l0_one_mapping(n, lower, upper);

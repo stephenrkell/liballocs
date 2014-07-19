@@ -359,10 +359,10 @@ static uintptr_t nbytes_in_index_for_l0_entry(void *userchunk_base)
 {
 	void *allocptr = userptr_to_allocptr(userchunk_base);
 	void *end_addr = (char*) allocptr + malloc_usable_size(allocptr);
-	uintptr_t begin_pagenum = ((uintptr_t) userchunk_base >> 12);
-	uintptr_t end_pagenum = ((uintptr_t) end_addr >> 12)
-			 + (((((uintptr_t) end_addr) % 4096) == 0) ? 0 : 1);
-	unsigned long nbytes_in_index = ((end_pagenum - begin_pagenum) << 12)
+	uintptr_t begin_pagenum = ((uintptr_t) userchunk_base >> LOG_PAGE_SIZE);
+	uintptr_t end_pagenum = ((uintptr_t) end_addr >> LOG_PAGE_SIZE)
+			 + (((((uintptr_t) end_addr) % PAGE_SIZE) == 0) ? 0 : 1);
+	unsigned long nbytes_in_index = ((end_pagenum - begin_pagenum) << LOG_PAGE_SIZE)
 			/ entry_coverage_in_bytes;
 	return nbytes_in_index;
 }
