@@ -188,12 +188,23 @@ const void *__liballocs_typestr_to_uniqtype(const char *typestr) __attribute__((
 void *__liballocs_my_typeobj(void) __attribute__((weak));
 
 /* Uniqtypes for signed_char and unsigned_char -- we declare them as int 
- * to avoid the need to define struct uniqtype in this header file. */
+ * to avoid the need to define struct uniqtype in this header file. 
+ * 
+ * CARE: we need to make sure that these *are* present in the output binary.
+ * If we use them and they're weak, *and* they are not defined (whether in 
+ * liballocs or the client program that includes this), they will get 'defined'
+ * to zero. This is BAD because if we later load a -types object that references
+ * one of them, it will get a null pointer instead of a real object address.
+ * 
+ * The way to solve this is the way we normally do: link-used-types! 
+ * Actually liballocs doesn't need these guys, but libcrunch does. So we run
+ * link-used-types on libcrunch.o., after building it. Heh.
+ */
 
-extern struct uniqtype __uniqtype__signed_char __attribute__((weak));
-extern struct uniqtype __uniqtype__unsigned_char __attribute__((weak));
-extern struct uniqtype __uniqtype__void __attribute__((weak));
-extern struct uniqtype __uniqtype__int __attribute__((weak));
+extern struct uniqtype __uniqtype__signed_char/* __attribute__((weak)) */;
+extern struct uniqtype __uniqtype__unsigned_char/* __attribute__((weak)) */;
+extern struct uniqtype __uniqtype__void/* __attribute__((weak))*/;
+extern struct uniqtype __uniqtype__int/* __attribute__((weak))*/;
 
 struct liballocs_err;
 extern struct liballocs_err __liballocs_err_stack_walk_step_failure __attribute__((visibility("protected")));

@@ -259,7 +259,7 @@ int main(int argc, char **argv)
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	map< iterator_df<type_die>, set<string> > names_by_type;
-	write_master_relation(master_relation, r, cout, cerr, false /* emit_void */, true, 
+	write_master_relation(master_relation, r, cout, cerr, true /* emit_void */, true, 
 		names_emitted, types_by_name, true);
 	
 	// for CIL workaround: for each alias, write a one-element master relation

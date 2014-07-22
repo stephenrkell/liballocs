@@ -585,17 +585,17 @@ static void consider_blacklisting(const void *obj)
 
 void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning of main's stack frame
 
-const struct uniqtype *__liballocs_uniqtype_void; // remember the location of the void uniqtype
-const struct uniqtype *__liballocs_uniqtype_signed_char;
-const struct uniqtype *__liballocs_uniqtype_unsigned_char;
-#define LOOKUP_CALLER_TYPE(frag, caller) /* FIXME: use caller not RTLD_DEFAULT -- use interval tree? */ \
-    ( \
-		(__liballocs_uniqtype_ ## frag) ? __liballocs_uniqtype_ ## frag : \
-		(__liballocs_uniqtype_ ## frag = dlsym(RTLD_DEFAULT, "__uniqtype__" #frag), \
-			assert(__liballocs_uniqtype_ ## frag), \
-			__liballocs_uniqtype_ ## frag \
-		) \
-	)
+// const struct uniqtype *__liballocs_uniqtype_void; // remember the location of the void uniqtype
+// const struct uniqtype *__liballocs_uniqtype_signed_char;
+// const struct uniqtype *__liballocs_uniqtype_unsigned_char;
+// #define LOOKUP_CALLER_TYPE(frag, caller) /* FIXME: use caller not RTLD_DEFAULT -- use interval tree? */ \
+//     ( \
+// 		(__liballocs_uniqtype_ ## frag) ? __liballocs_uniqtype_ ## frag : \
+// 		(__liballocs_uniqtype_ ## frag = dlsym(RTLD_DEFAULT, "__uniqtype__" #frag), \
+// 			assert(__liballocs_uniqtype_ ## frag), \
+// 			__liballocs_uniqtype_ ## frag \
+// 		) \
+// 	)
 
 /* counters */
 unsigned long __liballocs_aborted_stack;
