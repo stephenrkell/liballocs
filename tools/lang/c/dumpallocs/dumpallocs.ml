@@ -1,5 +1,5 @@
 (* Copyright (c) 2011--14,
- *  Stephen Kell        <stephen.kell@cs.ox.ac.uk>
+ *  Stephen Kell        <stephen.kell@cl.cam.ac.uk>
  *
  * and based on logwrites.ml, which is 
  *
@@ -345,17 +345,23 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctio
          end
       | _ -> raise (Failure "impossible function type")
 
+let functionNameMatchesSignature fname signature = 
+    let signatureFunction = 
+           if string_match (regexp "[^\\(]+") signature 0 
+           then (debug_print 1 ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; matched_string signature )
+           else (debug_print 1 ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; "" )
+    in 
+    fname = signatureFunction
+
 let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env calledFunctionType : sz option = 
  (* destruct the signature string *)
  (* (debug_print 1 ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr;  *)
- let signatureFunction = 
-       if string_match (regexp "[^\\(]+") signature 0 
-       then (debug_print 1 ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; matched_string signature )
-       else (debug_print 1 ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; "" )
- in 
  match maybeFunName with 
-   Some(fname) -> (if fname <> signatureFunction then (* (debug_print 1 ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) None (* ) *)
-                  else Some(matchUserAllocArgs i arglist signature env (Some(fname)) calledFunctionType))
+   Some(fname) when functionNameMatchesSignature fname signature
+    -> Some(matchUserAllocArgs i arglist signature env (Some(fname)) calledFunctionType)
+ | Some(_) ->     (* (debug_print 1 ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) 
+                    None 
+                  (* ) *)
  | None -> Some(matchUserAllocArgs i arglist signature env None calledFunctionType)
  (* ) *)
 
@@ -401,6 +407,11 @@ let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp 
      Some(funName) -> (warnIfLikelyAllocFn i maybeFunName arglist; None) 
    | None -> None)
 
+let allAllocFunctions () : string list = 
+    ["malloc(Z)p"; "calloc(zZ)p"; "realloc(pZ)p"; "posix_memalign(pzZ)p"; 
+        "alloca(Z)p"; "__builtin_alloca(Z)p"] 
+        @ (userAllocFunctions ())
+
 (* Work out whether this call is an allocation call. If it is,
    return Some(sz)
    where sz is the data type we inferred was being allocated (might be Undet)
@@ -410,7 +421,7 @@ let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) e
     Some(f) -> Some(f.vname)
   | None -> None
   in 
-  getUserAllocExpr i maybeFunName arglist env (["malloc(Z)p"; "calloc(zZ)p"; "realloc(pZ)p"; "posix_memalign(pzZ)p"; "alloca(Z)p"; "__builtin_alloca(Z)p"] @ (userAllocFunctions ())) calledFunctionType
+  getUserAllocExpr i maybeFunName arglist env (allAllocFunctions ()) calledFunctionType
 
 (* I so do not understand Pretty.dprintf *)
 let printAllocFn fileAndLine chan maybeFunvar allocSymOrExpr = 
@@ -560,6 +571,20 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
     Cil.prepareCFG(f);
     Cil.computeCFGInfo f false; 
     sizeEnv := untilFixedPoint (propagateSizeEnv f.sallstmts) []; 
+    (* if this is an allocation function, make it noinline -- this avoids 
+     * the (rare) case where an allocation call is inlined. NOTE that -ffunction-sections
+     * added by crunchcc is handling a different case, that of *out-of-line* call sites 
+     * coming from  the same compilation unit not having a relocation record. *)
+    let rec functionNameMatchesAnySignature fname ss =
+        match ss with
+            [] -> false
+          | s :: more -> if functionNameMatchesSignature fname s then true 
+                         else functionNameMatchesAnySignature fname more
+    in
+    (if functionNameMatchesAnySignature f.svar.vname (allAllocFunctions ())
+        then (f.svar.vattr <- f.svar.vattr @ [Attr("noinline", [])]; ())
+        else ()
+    ); 
     (* now we know which locals are sizes, we can visit calls -- in vinstr *)
     DoChildren
 
