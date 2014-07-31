@@ -224,17 +224,52 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 			{
 				// adjust start/end to be multiples of the page size
 				uintptr_t rounded_down_base = MAPPING_BASE_FROM_PHDR_VADDR(info->dlpi_addr, info->dlpi_phdr[i].p_vaddr);
-				uintptr_t rounded_up_end = MAPPING_END_FROM_PHDR_VADDR(info->dlpi_addr, 
+				uintptr_t rounded_up_end_of_file = MAPPING_END_FROM_PHDR_VADDR(info->dlpi_addr, 
+						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_filesz);
+				uintptr_t rounded_up_end_of_mem = MAPPING_END_FROM_PHDR_VADDR(info->dlpi_addr, 
 						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_memsz);
 				// add it to the tree
-				const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, (void*) info->dlpi_addr);
+				const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, 
+					(void*) info->dlpi_addr);
 				// HACK HACK HACK HACK: memory leak: please don't strdup
+				char *data_ptr = dynobj_name ? strdup(dynobj_name) : NULL;
+
+				/* If this mapping has memsz bigger than filesz, the memory kind
+				 * should still be STATIC. 
+				 * 
+				 * PROBLEM: if we create it from the maps file, it will be HEAP
+				 * because we can't tell that it's a STATIC file's bss.
+				 * BUT we hope that later, HEAP will get rewritten to STATIC.
+				 * We do this below, i.e. whenever we iterate over all loaded objs'
+				 * mappings. We arrange that we always do this.
+				 * 
+				 * So all we need to do is arrange that the bss and file-backed
+				 * parts of the mappings we create here are created separately,
+				 * so that the bss part does not have a data_ptr (but is still
+				 * STATIC). This will prevent bad coalescings that confuse
+				 * us later.
+				 * 
+				 * Recall: only the memory kind matters for our metadata;
+				 * the data ptr is irrelevant. Still, we should use the STATIC
+				 * memory kind for bss.
+				 */
 				struct prefix_tree_node *added = prefix_tree_add(
 					(void*) rounded_down_base, 
-					rounded_up_end - rounded_down_base,
-					STATIC, dynobj_name ? strdup(dynobj_name) : NULL);
+					rounded_up_end_of_file - rounded_down_base,
+					STATIC, data_ptr);
 				// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
 				if (added && added->kind != STATIC) added->kind = STATIC;
+				
+				if (rounded_up_end_of_mem > rounded_up_end_of_file)
+				{
+					struct prefix_tree_node *added = prefix_tree_add(
+						(void*) rounded_up_end_of_file, 
+						rounded_up_end_of_mem - rounded_up_end_of_file,
+						STATIC, NULL);
+					// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
+					if (added && added->kind != STATIC) added->kind = STATIC;
+					
+				}
 			}
 		}
 		
