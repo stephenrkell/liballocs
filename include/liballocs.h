@@ -81,6 +81,29 @@ extern unsigned long __liballocs_hit_static_case;
 extern unsigned long __liballocs_aborted_unindexed_heap;
 extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
+/* This API is a mess because there are three different classes of client. 
+ * 
+ * - extenders (libcrunch)
+ * - direct clients (programs linking -lallocs and using our API) 
+ * - weak clients (programs that can use liballocs, but run okay without)
+ * 
+ * The first two are the ones who'll instantiate our inlines and hence
+ * generate references to our stuff. Weak clients will just (perhaps)
+ * embed our CIL inlines. So it's only stuff in the liballocs_cil_inlines.h 
+ * header file that they depend on. We deliberately keep this small, and
+ * ideally it will run even without the noop library (i.e. never branch
+ * out of line), but the linker currently won't generate the right code
+ * without the noop library being present.
+ * 
+ * FIXME: clean all this up.
+ */
+
+// stuff for use by extenders only -- direct/weak clients shouldn't use this
+struct addrlist;
+_Bool addrlist_contains(struct addrlist *l, void *addr) __attribute__((visibility("hidden")));
+void addrlist_add(struct addrlist *l, void *addr) __attribute__((visibility("hidden")));
+extern struct addrlist unrecognised_heap_alloc_sites;
+
 extern void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning of main's stack frame
 
 extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
@@ -717,6 +740,12 @@ __liballocs_get_alloc_info
 				void *alloc_site = (void*)(uintptr_t)(heap_info->alloc_site);
 				if (out_alloc_site) *out_alloc_site = alloc_site;
 				alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
+				/* Remember the unrecog'd alloc sites we see. */
+				if (!alloc_uniqtype && alloc_site && 
+						!addrlist_contains(&unrecognised_heap_alloc_sites, alloc_site))
+				{
+					addrlist_add(&unrecognised_heap_alloc_sites, alloc_site);
+				}
 #ifdef NDEBUG
 				// install it for future lookups
 				// FIXME: make this atomic using a union
@@ -729,7 +758,10 @@ __liballocs_get_alloc_info
 			if (!alloc_uniqtype) 
 			{
 				err = &__liballocs_err_unrecognised_alloc_site;
-				if (__builtin_expect(k == HEAP, 1)) ++__liballocs_aborted_unrecognised_allocsite; 
+				if (__builtin_expect(k == HEAP, 1))
+				{
+					++__liballocs_aborted_unrecognised_allocsite;
+				}
 				else ++__liballocs_aborted_stack;
 				return err;
 			}

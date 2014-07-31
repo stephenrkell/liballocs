@@ -9,6 +9,7 @@
 #include "memtable.h"
 #include "heap_index.h"
 #include "allocsmt.h"
+#include <link.h>
 #include <stdint.h>
 
 #include "liballocs.h"
@@ -93,6 +94,12 @@ extern __thread void *__current_allocsite __attribute__((weak)); // defined by h
 #else
 extern void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 #endif
+struct addrlist
+{
+	unsigned count;
+	unsigned allocsz;
+	void **addrs;
+};
 
 // extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((visibility("hidden")));
 // extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite)

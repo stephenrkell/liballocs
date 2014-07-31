@@ -49,8 +49,6 @@ __liballocs_get_alloc_type(void *obj)
 	return NULL;
 }
 
-
-
 void 
 __liballocs_index_delete(void *userptr)
 {

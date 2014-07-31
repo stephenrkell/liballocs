@@ -35,9 +35,13 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 }
 #endif
 
+
+
 char exe_basename[4096] __attribute__((visibility("hidden")));
 char exe_fullname[4096];
 FILE *stream_err __attribute__((visibility("hidden")));
+
+struct addrlist unrecognised_heap_alloc_sites __attribute__((visibility("hidden")));
 
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
