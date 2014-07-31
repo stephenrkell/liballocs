@@ -729,7 +729,8 @@ __liballocs_get_alloc_info
 			if (!alloc_uniqtype) 
 			{
 				err = &__liballocs_err_unrecognised_alloc_site;
-				++__liballocs_aborted_unrecognised_allocsite;
+				if (__builtin_expect(k == HEAP, 1)) ++__liballocs_aborted_unrecognised_allocsite; 
+				else ++__liballocs_aborted_stack;
 				return err;
 			}
 			
