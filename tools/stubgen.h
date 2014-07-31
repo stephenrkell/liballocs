@@ -99,7 +99,7 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
 		_Bool set_currently_allocating = 0; \
 		if (&__current_allocfn && !__current_allocfn) /* This means we're not in any kind of alloc function yet */ \
 		{ \
-			_Bool set_currently_allocating = 0; \
+			set_currently_allocating = 0; \
 			if (&__currently_allocating && !__currently_allocating) { \
 				__currently_allocating = 1; \
 				set_currently_allocating = 1; \
