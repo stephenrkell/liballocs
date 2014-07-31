@@ -9,6 +9,12 @@ pad_numbers () {
     sed 's/\f\t/\n/g'
 }
 
+use_src_realpaths () {
+    while IFS=$'\t' read alloc_sourcefile alloc_sourceline alloc_fun alloc_ciltype; do
+        echo "$( readlink -f $alloc_sourcefile)"$'\t'"$alloc_sourceline"$'\t'"$alloc_fun"$'\t'"$alloc_ciltype"
+    done
+}
+
 # for readelf_debug
 . $(dirname $0)/../lib/debug-funcs.sh
 
@@ -53,4 +59,4 @@ cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
             ;;
         esac
     done
-done | pad_numbers | sort -t$'\t' -k1 -k2 | uniq 
+done | pad_numbers | use_src_realpaths | sort -t$'\t' -k1 -k2 | uniq 

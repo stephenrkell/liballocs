@@ -227,7 +227,7 @@ while read address sym offset; do
         echo "Context attempt was:"$'\n'"$with_file_line_header" 1>&2
         continue
     fi
-    filename="$( echo "$file_line_header" | sed -r 's/:[0-9]+( \(discriminator [0-9]*\))?$//' )"
+    filename="$( readlink -f "$( echo "$file_line_header" | sed -r 's/:[0-9]+( \(discriminator [0-9]*\))?$//' )" )"
     line_number="$( echo "$file_line_header" | sed -r 's/.*:([0-9]+)( \(discriminator [0-9]*\))?$/\1/' )"
     # How many source lines are in the chunk?
     # We grep -v out the header and anything that looks like an instruction disassembly line

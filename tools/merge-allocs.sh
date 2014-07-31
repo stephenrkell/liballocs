@@ -72,8 +72,8 @@ all_source_allocs_file="$2"
 ## multiple lines for the same malloc call? 
 ## e.g. for /usr/local/src/git-1.7.5.4/builtin/log.c line 1268
 
-# echo "all_source_allocs_file: $all_source_allocs_file" 1>&2
-# echo "all_obj_allocs_file: $all_obj_allocs_file" 1>&2
+echo "all_source_allocs_file: $all_source_allocs_file" 1>&2
+echo "all_obj_allocs_file: $all_obj_allocs_file" 1>&2
 
 # second pass -- we read input grouped by source file then line number
 keep_old_source_line=0
@@ -106,7 +106,7 @@ while read obj func addr sourcefile sourceline sourceline_end alloctype rest; do
         # Detecting 2: if it has source line < toplevel, we can safely skip it as it will never be needed.
         # Else if its source line is in our window, it's a match
         # Else we have case 3, so we need to advance toplevel.
-        if [[ "$(readlink -f "$alloc_sourcefile" )" == "$( readlink -f "$sourcefile" )" ]] && \
+        if [[ "$alloc_sourcefile" == "$sourcefile" ]] && \
            lexicographic_compare_ge "$alloc_sourceline" "$sourceline" && \
            lexicographic_compare_lt "$alloc_sourceline" "$sourceline_end"; then
 #           [[ "$alloc_sourceline" -lt "$(( $sourceline + $sourceline_end ))" ]]; then
@@ -133,11 +133,12 @@ while read obj func addr sourcefile sourceline sourceline_end alloctype rest; do
             continue 2
         # lexicographic compare...
         else
-            echo found "$(readlink -f "$alloc_sourcefile" )" != "$( readlink -f "$sourcefile" )" or \
-           NOT lexicographic_compare_ge "$alloc_sourceline" "$sourceline" or \
-           NOT lexicographic_compare_lt "$alloc_sourceline" "$sourceline_end" 1>&2
-            if lexicographic_compare_lt "$(readlink -f "$alloc_sourcefile")" "$( readlink -f "$sourcefile" )" || \
-             ( [[ "$(readlink -f "$alloc_sourcefile")" == "$( readlink -f "$sourcefile" )" ]] && \
+            echo "NO MATCH: found $alloc_sourcefile != $sourcefile or " \
+           "NOT lexicographic_compare_ge $alloc_sourceline $sourceline or" \
+           "NOT lexicographic_compare_lt $alloc_sourceline $sourceline_end" 1>&2
+           
+            if lexicographic_compare_lt "$alloc_sourcefile" "$sourcefile" || \
+             ( [[ "$alloc_sourcefile" == "$sourcefile" ]] && \
                lexicographic_compare_lt "$alloc_sourceline" "$sourceline_end" ); then
                # we will not use this source line [again], so skip it
                # warn only if we have not used this source line
