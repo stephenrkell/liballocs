@@ -84,11 +84,12 @@ class CompilerWrapper:
                 continue
             if num == 0:
                 continue # this means we have "allocscc" as the arg
-            if args[num].endswith('.o'):
+            if args[num].endswith('.o') or args[num].endswith('.a'):
                 objectInputFiles += [args[num]]
-            if args[num].endswith('.a') or args[num].endswith('.o') or \
-                args[num].endswith('.so'):
-                # it's a linker input; not the source file
+                continue
+            if args[num].endswith('.so'):
+                # HMM: what does this mean exactly? it's like "-lBLAH" but giving an explicit path
+                objectInputFiles += [args[num]]
                 continue
             else:
                 self.debugMsg("guessed that source file is " + args[num] + "\n")
@@ -158,18 +159,18 @@ class CompilerWrapper:
             self.debugMsg("No need to globalize\n")
             return 0
 
-    def makeDotOAndPassThrough(self, argv, customArgs, inputFiles):
-        argvToPassThrough = [x for x in argv[1:] if not x in inputFiles]
+    def makeDotOAndPassThrough(self, argv, customArgs, sourceInputFiles):
+        argvToPassThrough = [x for x in argv[1:] if not x in sourceInputFiles]
         argvWithoutOutputOptions = [argvToPassThrough[i] for i in range(0, len(argvToPassThrough)) \
            if argvToPassThrough[i] != '-o' and (i != 0 and argvToPassThrough[i-1] != '-o') \
            and argvToPassThrough[i] != '-shared' and argvToPassThrough[i] != '-c' \
            and argvToPassThrough[i] != '-static']
 
-        self.debugMsg("Source input files: " + ', '.join(inputFiles) + "\n")
+        self.debugMsg("Source input files: " + ', '.join(sourceInputFiles) + "\n")
         self.debugMsg("Custom args: " + ', '.join(customArgs) + "\n")
         self.debugMsg("argv without output options: " + ', '.join(argvWithoutOutputOptions) + "\n")
 
-        for sourceFile in inputFiles:
+        for sourceFile in sourceInputFiles:
             # compile to .o with the custom args
             # -- erase -shared etc, and erase "-o blah"
             outputFilename = self.makeObjectFileName(sourceFile)
@@ -188,7 +189,7 @@ class CompilerWrapper:
                     exit(ret2)
 
                 # include the .o file in our passed-through args
-                argvToPassThrough += [outputFilename]
+                argvToPassThrough = [outputFilename] + argvToPassThrough
 
         self.debugMsg("After making .o files, passing through arguments " + " ".join(argvToPassThrough) + "\n")
         return argvToPassThrough
