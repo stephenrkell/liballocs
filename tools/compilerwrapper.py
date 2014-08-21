@@ -47,7 +47,9 @@ class CompilerWrapper:
     
     def isLinkCommand(self):
         seenLib = False
-        seenExecutableOutput = False
+        seenNonExecutableOutput = False
+        # By default, the compiler will try to output an executable.
+        # But if we see options for other kinds of output, we take note.
         for argnum in range(0,len(sys.argv)):
             arg = sys.argv[argnum]
             if arg.startswith('-l'):
@@ -56,12 +58,17 @@ class CompilerWrapper:
                 return True
             if arg == '-c':
                 return False
-            if arg == "-o" and len(sys.argv) >= argnum + 2 and not '.' in os.path.basename(sys.argv[argnum + 1]):
-                seenExecutableOutput = True
-        if seenExecutableOutput:
-            return True
+            if arg == '-E':
+                return False
+            if arg == "-o" and len(sys.argv) >= argnum + 2:
+                outputFilename = os.path.basename(sys.argv[argnum + 1])
+                # HACK: is this really necessary?
+                if outputFilename.endswith(".o") or outputFilename.endswith(".i"):
+                    seenNonExecutableOutput = True
+        if seenNonExecutableOutput:
+            return False
+        return True
         # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
-        return False
    
     def allWrappedSymNames(self):
         return []
