@@ -1,0 +1,57 @@
+#!/bin/bash
+
+objfile="$1"
+
+test -n "$objfile" || (echo "Please specify an object file"; false) || exit 1
+
+. $(dirname "$0")/../../../used-types-funcs.sh
+
+usedtypes_src=$( mktemp )
+usedtypes_obj=$( mktemp )
+
+objcopy_and_redefine_c_names () {
+    our_objfile="$1"
+    
+    candidate_symnames="$( nm -fposix -u "$our_objfile" | \
+sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype__ )"
+
+    echo "sed program is $sed_program" 1>&2
+
+    # we need to push candidates into the filter and see what comes out;
+    # if it changes, add a --redefine-sym option to the list 
+    
+    . ${LIBALLOCS_BASE}/tools/lang/c/lib/symname-funcs.sh
+    
+    # if any substitutions took effect, issue a redefine-sym command
+    while read cand && read canon <&3; do
+        if [[ "$cand" != "$canon" ]]; then
+            first_redefinition_args="${first_redefinition_args} --redefine-sym ${cand}=${canon}"
+        fi
+    done<<<"${candidate_symnames}" 3<<<"$( echo "${candidate_symnames}" | translate_symnames "$our_objfile" )"
+    
+    if [[ -n "${first_redefinition_args}" ]]; then
+        # first, lower all undef typenames to canonical ones (but staying codeless)
+        echo ${OBJCOPY} $first_redefinition_args "$our_objfile" 1>&2 && \
+        ${OBJCOPY} $first_redefinition_args "$our_objfile" && \
+        echo "objcopy renamed symbols in $our_objfile according to $first_redefinition_args" 1>&2
+        
+    else
+        echo "No need to replace any C typenames" 1>&2
+    fi
+}
+
+echo ${USEDTYPES} "$objfile" 1>&2 # for debugging
+(  objcopy_and_redefine_c_names "$objfile" && \
+   echo "Successfully did objcopy_and_redefine_c_names" 1>&2 && \
+   echo ${USEDTYPES} "$objfile" 1>&2 && \
+   ${USEDTYPES} "$objfile" > "$usedtypes_src" && \
+   echo "Successfully did usedtypes" 1>&2 && \
+   compile "$usedtypes_src" "$usedtypes_obj" && \
+   echo "Successfully did compile" 1>&2 && \
+   objcopy_and_redefine_codeless_names "$objfile" "$usedtypes_obj" && \
+   echo "Successfully did objcopy_and_redefine_codeless_names" 1>&2 && \
+   link_defining_aliases "$objfile" "$usedtypes_obj" && \
+   echo "Successfully did link_defining_aliases" 1>&2 ) || \
+    (echo NOT REALLY rm -f "$objfile" 1>&2 ; exit 1)
+
+# rm -f "$usedtypes_src" "$usedtypes_obj"
