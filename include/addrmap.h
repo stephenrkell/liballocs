@@ -25,7 +25,7 @@ extern void *__addrmap_executable_end_addr __attribute__((weak));
 // use for fast "is it our stack?" check
 extern unsigned long __addrmap_max_stack_size __attribute__((weak));
 
-extern intptr_t startup_brk __attribute__((weak)); // defined in addrmap.c
+extern uintptr_t startup_brk __attribute__((weak)); // defined in addrmap.c
 
 enum object_memory_kind
 {
@@ -133,7 +133,7 @@ enum object_memory_kind
 	if (__builtin_expect(
 		addr >= current_sp && addr < STACK_BEGIN 
 		&& (!&__addrmap_max_stack_size || // it's weak
-			(STACK_BEGIN - addr) < (signed long) __addrmap_max_stack_size), 0)) return STACK;
+			(STACK_BEGIN - addr) < (unsigned long) __addrmap_max_stack_size), 0)) return STACK;
 	
 	/* FIXME: other threads' stacks! */
 

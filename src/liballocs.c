@@ -170,6 +170,61 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	
 	return cb_ret;
 }
+/* FIXME: invalidate cache entries on dlclose(). */
+#ifndef DLADDR_CACHE_SIZE
+#define DLADDR_CACHE_SIZE 16
+#endif
+Dl_info dladdr_with_cache(const void *addr)
+{
+	struct cache_rec { const void *addr; Dl_info info; };
+	
+	static struct cache_rec cache[DLADDR_CACHE_SIZE];
+	static unsigned next_free;
+	
+	for (unsigned i = 0; i < DLADDR_CACHE_SIZE; ++i)
+	{
+		if (cache[i].addr)
+		{
+			if (cache[i].addr == addr)
+			{
+				return cache[i].info;
+			}
+		}
+	}
+	
+	Dl_info info;
+	int ret = dladdr(addr, &info);
+	assert(ret != 0);
+
+	/* always cache the dladdr result */
+	cache[next_free++] = (struct cache_rec) { addr, info };
+	if (next_free == DLADDR_CACHE_SIZE)
+	{
+		debug_printf(5, "dladdr cache wrapped around\n");
+		next_free = 0;
+	}
+	
+	return info;
+}
+
+const char *format_symbolic_address(const void *addr)
+{
+	Dl_info info = dladdr_with_cache(addr);
+	
+	static __thread char buf[8192];
+	
+	snprintf(buf, sizeof buf, "%s`%s+%p", 
+		info.dli_fname ? basename(info.dli_fname) : "unknown", 
+		info.dli_sname ? info.dli_sname : "unknown", 
+		info.dli_saddr
+			? (void*)((char*) addr - (char*) info.dli_saddr)
+			: NULL);
+		
+	buf[sizeof buf - 1] = '\0';
+	
+	return buf;
+}
+
 
 static _Bool done_init;
 void __liballocs_main_init(void) __attribute__((constructor(101)));
@@ -629,6 +684,15 @@ static void print_exit_summary(void)
 		fprintf(stream_err, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
 		fprintf(stream_err, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
 		fprintf(stream_err, "====================================================\n");
+		for (unsigned i = 0; i < unrecognised_heap_alloc_sites.count; ++i)
+		{
+			if (i == 0)
+			{
+				fprintf(stream_err, "Saw the following unrecognised heap alloc sites: \n");
+			}
+			fprintf(stream_err, "%p (%s)\n", unrecognised_heap_alloc_sites.addrs[i], 
+					format_symbolic_address(unrecognised_heap_alloc_sites.addrs[i]));
+		}
 	}
 	
 	if (getenv("LIBALLOCS_DUMP_SMAPS_AT_EXIT"))

@@ -104,6 +104,9 @@ _Bool addrlist_contains(struct addrlist *l, void *addr) __attribute__((visibilit
 void addrlist_add(struct addrlist *l, void *addr) __attribute__((visibility("hidden")));
 extern struct addrlist unrecognised_heap_alloc_sites;
 
+const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
+Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("hidden")));
+		
 extern void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning of main's stack frame
 
 extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
@@ -312,7 +315,7 @@ __liballocs_first_subobject_spanning(
 	 * structs versus arrays. */
 	if (cur_obj_uniqtype->is_array)
 	{
-		unsigned num_contained = cur_obj_uniqtype->array_len;
+		signed num_contained = cur_obj_uniqtype->array_len;
 		struct uniqtype *element_uniqtype = cur_obj_uniqtype->contained[0].ptr;
 		if (element_uniqtype->pos_maxoff != 0 && 
 				num_contained > target_offset_within_uniqtype / element_uniqtype->pos_maxoff)
@@ -326,7 +329,7 @@ __liballocs_first_subobject_spanning(
 	}
 	else // struct/union case
 	{
-		unsigned num_contained = cur_obj_uniqtype->nmemb;
+		signed num_contained = cur_obj_uniqtype->nmemb;
 
 		int lower_ind = 0;
 		int upper_ind = num_contained;
@@ -426,7 +429,7 @@ __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched);
 			if (__builtin_expect(recursive_test, 1)) return 1;
 			// else look for a later contained subobject at the same offset
-			unsigned subobj_ind = contained_pos - &containing_uniqtype->contained[0];
+			signed subobj_ind = contained_pos - &containing_uniqtype->contained[0];
 			assert(subobj_ind >= 0);
 			assert(subobj_ind == 0 || subobj_ind < containing_uniqtype->nmemb);
 			if (__builtin_expect(
@@ -471,7 +474,6 @@ __liballocs_get_alloc_info
 	struct uniqtype **out_alloc_uniqtype, 
 	const void **out_alloc_site)
 {
-	int modulo; 
 	struct liballocs_err *err = 0;
 
 	memory_kind k = get_object_memory_kind(obj);
@@ -520,7 +522,7 @@ __liballocs_get_alloc_info
 			 * FIXME: better would be to write this function in C90 and compile with
 			 * special flags. */
 			unw_cursor_t cursor, saved_cursor, prev_saved_cursor;
-			unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0, callee_ip;
+			unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0, callee_ip __attribute__((unused));
 			int unw_ret;
 			unw_context_t unw_context;
 
@@ -540,7 +542,6 @@ __liballocs_get_alloc_info
 #endif
 			unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
 
-			int step_ret;
 			_Bool at_or_above_main = 0;
 			do
 			{
@@ -561,11 +562,10 @@ __liballocs_get_alloc_info
 				 * tolerate unwind failures more gracefully. NOTE: this is just for
 				 * debugging; we don't normally pay any attention to this. 
 				 */
-				unw_word_t byte_offset_from_proc_start;
 				at_or_above_main |= 
 					(
-						(got_bp && bp >= (intptr_t) __liballocs_main_bp)
-					 || (sp >= (intptr_t) __liballocs_main_bp) // NOTE: this misses the in-main case
+						(got_bp && bp >= (uintptr_t) __liballocs_main_bp)
+					 || (sp >= (uintptr_t) __liballocs_main_bp) // NOTE: this misses the in-main case
 					);
 
 				/* Now get the sp of the next higher stack frame, 
@@ -731,7 +731,7 @@ __liballocs_get_alloc_info
 			if (__builtin_expect(heap_info->alloc_site_flag, 1))
 			{
 				if (out_alloc_site) *out_alloc_site = NULL;
-				alloc_uniqtype = (void*)(uintptr_t)(heap_info->alloc_site);
+				alloc_uniqtype = (struct uniqtype *)(uintptr_t)(heap_info->alloc_site);
 			}
 			else
 			{
