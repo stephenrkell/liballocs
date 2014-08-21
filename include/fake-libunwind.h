@@ -137,14 +137,14 @@ typedef struct
 typedef unw_cursor_t unw_context_t;
 
 
-/* These are defined in fake-unwind.c. We make them hidden to allow them to be 
- * inlined, and also to avoid their replacing the non-fake libunwind in others
+/* These are defined in fake-unwind.c (hidden, to allow them to be 
+ * inlined at link time, and to avoid their replacing the non-fake libunwind in others
  * parts of the program. */
-int __attribute__((visibility("hidden"))) unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest);
-int __attribute__((visibility("hidden"))) unw_init_local(unw_cursor_t *cursor, unw_context_t *context);
-int __attribute__((visibility("hidden"))) unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp);
-int __attribute__((visibility("hidden"))) unw_getcontext(unw_context_t *ucp);
-int __attribute__((visibility("hidden"))) unw_step(unw_cursor_t *cp);
+int unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest);
+int unw_init_local(unw_cursor_t *cursor, unw_context_t *context);
+int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp);
+int unw_getcontext(unw_context_t *ucp);
+int unw_step(unw_cursor_t *cp);
 
 #if defined(__cplusplus) || defined(c_plusplus)
 }

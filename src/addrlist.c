@@ -9,7 +9,8 @@
 
 #include <stdlib.h>
 
-_Bool addrlist_contains(struct addrlist *l, void *addr)
+_Bool __liballocs_addrlist_contains(struct addrlist *l, void *addr) __attribute__((visibility("protected")));
+_Bool __liballocs_addrlist_contains(struct addrlist *l, void *addr)
 {
 	for (unsigned i = 0; i < l->count; ++i)
 	{
@@ -17,7 +18,8 @@ _Bool addrlist_contains(struct addrlist *l, void *addr)
 	}
 	return 0;
 }
-void addrlist_add(struct addrlist *l, void *addr)
+void __liballocs_addrlist_add(struct addrlist *l, void *addr) __attribute__((visibility("protected")));
+void __liballocs_addrlist_add(struct addrlist *l, void *addr)
 {
 	if (l->count == l->allocsz)
 	{

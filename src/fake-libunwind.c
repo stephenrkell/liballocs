@@ -15,6 +15,7 @@ static int access_mem(unw_addr_space_t as, unw_word_t addr, unw_word_t *data,int
 }
 struct accessors local_accessors = { &access_mem };
 
+int unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest) __attribute__((visibility("protected")));
 int unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest)
 {
 	switch (reg)
@@ -29,6 +30,8 @@ int unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest)
 		default: return 1;
 	}
 }
+
+int unw_init_local(unw_cursor_t *cursor, unw_context_t *context) __attribute__((visibility("protected")));
 int unw_init_local(unw_cursor_t *cursor, unw_context_t *context)
 {
 	*cursor = *context;
@@ -40,7 +43,8 @@ int unw_init_local(unw_cursor_t *cursor, unw_context_t *context)
 		? (unw_word_t) (bp) \
 		: 0)
 
-int __attribute__((noinline)) unw_getcontext(unw_context_t *ucp)
+int unw_getcontext(unw_context_t *ucp) __attribute__((noinline,visibility("protected")));
+int unw_getcontext(unw_context_t *ucp)
 {
 	/* The initial state of the cursor should be such that 
 	 * if the caller does 
@@ -82,6 +86,7 @@ int __attribute__((noinline)) unw_getcontext(unw_context_t *ucp)
 #endif
 #endif
 
+int unw_step(unw_cursor_t *cp) __attribute__((visibility("protected")));
 int unw_step(unw_cursor_t *cp)
 {
 	/* Return >0 if we have stepped to a valid frame, or 0 if we were already

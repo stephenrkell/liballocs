@@ -6,6 +6,11 @@
 #error Unsupported architecture.
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+typedef bool _Bool;
+#endif
+
 #include "memtable.h"
 #include "heap_index.h"
 #include "allocsmt.h"
@@ -53,7 +58,7 @@ struct node_info
 };
 typedef uint16_t mapping_num_t;
 mapping_num_t *l0index __attribute__((visibility("hidden")));
-extern _Bool initialized_maps __attribute__((visibility("hidden")));
+extern _Bool initialized_maps;
 struct prefix_tree_node {
 	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC
 	struct node_info info;
@@ -80,9 +85,9 @@ struct prefix_tree_node *
 prefix_tree_bounds(const void *ptr, const void **begin, const void **end) __attribute__((visibility("hidden")));
 int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data) __attribute__((visibility("hidden")));
 
-extern char exe_fullname[4096] __attribute__((visibility("hidden")));
-extern char exe_basename[4096] __attribute__((visibility("hidden")));
-extern FILE *stream_err __attribute__((visibility("hidden")));
+extern char exe_fullname[4096];
+extern char exe_basename[4096];
+extern FILE *stream_err;
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \
       fprintf(stream_err, "%s: " fmt, exe_basename, ## __VA_ARGS__ );  \
@@ -193,13 +198,17 @@ void warnx(const char *fmt, ...);
 unsigned long malloc_usable_size (void *ptr);
 
 /* counters */
-extern unsigned long __liballocs_aborted_stack __attribute__((visibility("protected")));
-extern unsigned long __liballocs_aborted_static __attribute__((visibility("protected")));
-extern unsigned long __liballocs_aborted_unknown_storage __attribute__((visibility("protected")));
-extern unsigned long __liballocs_hit_heap_case __attribute__((visibility("protected")));
-extern unsigned long __liballocs_hit_stack_case __attribute__((visibility("protected")));
-extern unsigned long __liballocs_hit_static_case __attribute__((visibility("protected")));
-extern unsigned long __liballocs_aborted_unindexed_heap __attribute__((visibility("protected")));
-extern unsigned long __liballocs_aborted_unrecognised_allocsite __attribute__((visibility("protected")));
+extern unsigned long __liballocs_aborted_stack;
+extern unsigned long __liballocs_aborted_static;
+extern unsigned long __liballocs_aborted_unknown_storage;
+extern unsigned long __liballocs_hit_heap_case;
+extern unsigned long __liballocs_hit_stack_case;
+extern unsigned long __liballocs_hit_static_case;
+extern unsigned long __liballocs_aborted_unindexed_heap;
+extern unsigned long __liballocs_aborted_unrecognised_allocsite;
+
+#ifdef __cplusplus
+} /* end extern "C" */
+#endif
 
 #endif

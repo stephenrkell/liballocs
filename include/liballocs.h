@@ -8,6 +8,9 @@
 #ifdef __cplusplus
 extern "C" {
 typedef bool _Bool;
+#define INLINE inline
+#else
+#define INLINE inline __attribute__((gnu_inline))
 #endif
 
 #include <sys/types.h>
@@ -100,14 +103,14 @@ extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 // stuff for use by extenders only -- direct/weak clients shouldn't use this
 struct addrlist;
-_Bool addrlist_contains(struct addrlist *l, void *addr) __attribute__((visibility("hidden")));
-void addrlist_add(struct addrlist *l, void *addr) __attribute__((visibility("hidden")));
-extern struct addrlist unrecognised_heap_alloc_sites;
+_Bool __liballocs_addrlist_contains(struct addrlist *l, void *addr);
+void __liballocs_addrlist_add(struct addrlist *l, void *addr);
+extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
 
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("hidden")));
 		
-extern void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning of main's stack frame
+extern void *__liballocs_main_bp; // beginning of main's stack frame
 
 extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
 extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtype(const void *allocsite)
@@ -227,20 +230,17 @@ void *__liballocs_my_typeobj(void) __attribute__((weak));
  * link-used-types on libcrunch.o., after building it. Heh.
  */
 
-extern struct uniqtype __uniqtype__signed_char/* __attribute__((weak)) */;
-extern struct uniqtype __uniqtype__unsigned_char/* __attribute__((weak)) */;
 extern struct uniqtype __uniqtype__void/* __attribute__((weak))*/;
-extern struct uniqtype __uniqtype__int/* __attribute__((weak))*/;
 
 struct liballocs_err;
-extern struct liballocs_err __liballocs_err_stack_walk_step_failure __attribute__((visibility("protected")));
-extern struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame __attribute__((visibility("protected")));;
-extern struct liballocs_err __liballocs_err_stack_walk_reached_top_of_stack __attribute__((visibility("protected")));;
-extern struct liballocs_err __liballocs_err_unknown_stack_walk_problem __attribute__((visibility("protected")));;
-extern struct liballocs_err __liballocs_err_unindexed_heap_object __attribute__((visibility("protected")));;
-extern struct liballocs_err __liballocs_err_unrecognised_alloc_site __attribute__((visibility("protected")));;
-extern struct liballocs_err __liballocs_err_unrecognised_static_object __attribute__((visibility("protected")));;
-extern struct liballocs_err __liballocs_err_object_of_unknown_storage __attribute__((visibility("protected")));;
+extern struct liballocs_err __liballocs_err_stack_walk_step_failure;
+extern struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame;
+extern struct liballocs_err __liballocs_err_stack_walk_reached_top_of_stack;
+extern struct liballocs_err __liballocs_err_unknown_stack_walk_problem;
+extern struct liballocs_err __liballocs_err_unindexed_heap_object;
+extern struct liballocs_err __liballocs_err_unrecognised_alloc_site;
+extern struct liballocs_err __liballocs_err_unrecognised_static_object;
+extern struct liballocs_err __liballocs_err_object_of_unknown_storage;
 
 const char *__liballocs_errstring(struct liballocs_err *err);
 
@@ -254,10 +254,10 @@ extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	memory_kind *out_memory_kind, const void **out_alloc_start,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site) DEFAULT_ATTRS __attribute__((gnu_inline,hot));
-extern inline _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
+extern INLINE _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched) DEFAULT_ATTRS __attribute__((gnu_inline,hot));
+		signed *p_cumulative_offset_searched) DEFAULT_ATTRS __attribute__((hot));
 /* Some inlines follow at the bottom. */
 
 /* our own private assert */
@@ -383,17 +383,26 @@ __liballocs_first_subobject_spanning(
 	}
 }
 
-extern inline
+#ifndef __cplusplus
+extern 
+#endif
+inline
 _Bool 
-__attribute__((gnu_inline))
 __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched) __attribute__((gnu_inline));
-
-extern inline
-_Bool 
+		signed *p_cumulative_offset_searched)
+#ifndef __cplusplus
 __attribute__((gnu_inline))
+#endif
+;
+
+#ifndef __cplusplus
+extern 
+__attribute__((gnu_inline))
+#endif
+inline
+_Bool 
 __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
@@ -742,9 +751,9 @@ __liballocs_get_alloc_info
 				alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
 				/* Remember the unrecog'd alloc sites we see. */
 				if (!alloc_uniqtype && alloc_site && 
-						!addrlist_contains(&unrecognised_heap_alloc_sites, alloc_site))
+						!__liballocs_addrlist_contains(&__liballocs_unrecognised_heap_alloc_sites, alloc_site))
 				{
-					addrlist_add(&unrecognised_heap_alloc_sites, alloc_site);
+					__liballocs_addrlist_add(&__liballocs_unrecognised_heap_alloc_sites, alloc_site);
 				}
 #ifdef NDEBUG
 				// install it for future lookups

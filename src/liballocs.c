@@ -19,6 +19,7 @@
 
 #ifdef USE_FAKE_LIBUNWIND
 #include "fake-libunwind.h"
+int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp) __attribute__((visibility("hidden")));
 int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp)
 {
 	assert(!offp);
@@ -38,10 +39,11 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 
 
 char exe_basename[4096] __attribute__((visibility("hidden")));
-char exe_fullname[4096];
+char exe_fullname[4096] __attribute__((visibility("hidden")));
 FILE *stream_err __attribute__((visibility("hidden")));
 
-struct addrlist unrecognised_heap_alloc_sites __attribute__((visibility("hidden")));
+struct addrlist __liballocs_unrecognised_heap_alloc_sites __attribute__((visibility("protected")))
+ = { 0, 0, NULL };
 
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
@@ -126,6 +128,7 @@ static ElfW(Dyn) *get_dynamic_entry_from_handle(void *handle, unsigned long tag)
 	return get_dynamic_entry_from_section(((struct link_map *) handle)->l_ld, tag);
 }
 
+int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg) __attribute__((visibility("protected")));
 int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg)
 {
 	/* Don't use dladdr() to iterate -- too slow! Instead, iterate 
@@ -174,6 +177,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 #ifndef DLADDR_CACHE_SIZE
 #define DLADDR_CACHE_SIZE 16
 #endif
+Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("hidden")));
 Dl_info dladdr_with_cache(const void *addr)
 {
 	struct cache_rec { const void *addr; Dl_info info; };
@@ -207,6 +211,7 @@ Dl_info dladdr_with_cache(const void *addr)
 	return info;
 }
 
+const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr)
 {
 	Dl_info info = dladdr_with_cache(addr);
@@ -227,7 +232,7 @@ const char *format_symbolic_address(const void *addr)
 
 
 static _Bool done_init;
-void __liballocs_main_init(void) __attribute__((constructor(101)));
+void __liballocs_main_init(void) __attribute__((constructor(101),visibility("protected")));
 // NOTE: runs *before* the constructor in preload.c
 void __liballocs_main_init(void)
 {
@@ -237,12 +242,14 @@ void __liballocs_main_init(void)
 }
 
 // FIXME: do better!
+char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
 char *realpath_quick(const char *arg)
 {
 	static char buf[4096];
 	return realpath(arg, &buf[0]);
 }
 
+const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr) __attribute__((visibility("hidden")));
 const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 {
 	if (strlen(dlpi_name) == 0)
@@ -657,14 +664,14 @@ void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning
 // 	)
 
 /* counters */
-unsigned long __liballocs_aborted_stack;
-unsigned long __liballocs_aborted_static;
-unsigned long __liballocs_aborted_unknown_storage;
-unsigned long __liballocs_hit_heap_case;
-unsigned long __liballocs_hit_stack_case;
-unsigned long __liballocs_hit_static_case;
-unsigned long __liballocs_aborted_unindexed_heap;
-unsigned long __liballocs_aborted_unrecognised_allocsite;
+unsigned long __liballocs_aborted_stack __attribute__((visibility("protected")));
+unsigned long __liballocs_aborted_static __attribute__((visibility("protected")));
+unsigned long __liballocs_aborted_unknown_storage __attribute__((visibility("protected")));
+unsigned long __liballocs_hit_heap_case __attribute__((visibility("protected")));
+unsigned long __liballocs_hit_stack_case __attribute__((visibility("protected")));
+unsigned long __liballocs_hit_static_case __attribute__((visibility("protected")));
+unsigned long __liballocs_aborted_unindexed_heap __attribute__((visibility("protected")));
+unsigned long __liballocs_aborted_unrecognised_allocsite __attribute__((visibility("protected")));
 
 static void print_exit_summary(void)
 {
@@ -684,14 +691,14 @@ static void print_exit_summary(void)
 		fprintf(stream_err, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
 		fprintf(stream_err, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
 		fprintf(stream_err, "====================================================\n");
-		for (unsigned i = 0; i < unrecognised_heap_alloc_sites.count; ++i)
+		for (unsigned i = 0; i < __liballocs_unrecognised_heap_alloc_sites.count; ++i)
 		{
 			if (i == 0)
 			{
 				fprintf(stream_err, "Saw the following unrecognised heap alloc sites: \n");
 			}
-			fprintf(stream_err, "%p (%s)\n", unrecognised_heap_alloc_sites.addrs[i], 
-					format_symbolic_address(unrecognised_heap_alloc_sites.addrs[i]));
+			fprintf(stream_err, "%p (%s)\n", __liballocs_unrecognised_heap_alloc_sites.addrs[i], 
+					format_symbolic_address(__liballocs_unrecognised_heap_alloc_sites.addrs[i]));
 		}
 	}
 	
@@ -714,7 +721,7 @@ static void print_exit_summary(void)
 /* This is *not* a constructor. We don't want to be called too early,
  * because it might not be safe to open the -uniqtypes.so handle yet.
  * So, initialize on demand. */
-int __liballocs_global_init(void) __attribute__((constructor));
+int __liballocs_global_init(void) __attribute__((constructor,visibility("protected")));
 int __liballocs_global_init(void)
 {
 	if (__liballocs_is_initialized) return 0; // we are okay
@@ -906,6 +913,7 @@ static void *typeobj_handle_for_addr(void *caller)
 	return dlopen(types_libname, RTLD_NOW | RTLD_NOLOAD);
 }
 
+void *__liballocs_my_typeobj(void) __attribute__((visibility("protected")));
 void *__liballocs_my_typeobj(void)
 {
 	__liballocs_ensure_init();
@@ -917,6 +925,7 @@ void *__liballocs_my_typeobj(void)
 
 
 /* This is left out-of-line because it's inherently a slow path. */
+const void *__liballocs_typestr_to_uniqtype(const char *typestr) __attribute__((visibility("protected")));
 const void *__liballocs_typestr_to_uniqtype(const char *typestr)
 {
 	if (!typestr) return NULL;
@@ -957,6 +966,10 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 	return (struct uniqtype *) returned;
 }
 
+_Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
+	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
+	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
+		signed *p_cumulative_offset_searched) __attribute__((visibility("protected")));
 _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,

@@ -261,6 +261,7 @@ do_init(void)
 	assert(index_region != MAP_FAILED);
 }
 
+void post_init(void) __attribute__((visibility("hidden")));
 void post_init(void)
 {
 	do_init();
@@ -589,6 +590,10 @@ static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, siz
 void 
 post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
 		size_t requested_size, size_t requested_alignment, const void *caller)
+		__attribute__((visibility("hidden")));
+void 
+post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
+		size_t requested_size, size_t requested_alignment, const void *caller)
 {
 /* "headers" version */
 // 	/* We always index just the userptr! index_insert will use 
@@ -662,6 +667,7 @@ post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alig
 	safe_to_call_malloc = 1; // if somebody succeeded, anyone should succeed
 }
 
+void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller) __attribute__((visibility("hidden")));
 void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 {
 	/* We increase the size by the amount of extra data we store, 
@@ -873,13 +879,17 @@ out:
 	BIG_UNLOCK
 }
 
+void pre_nonnull_free(void *userptr, size_t freed_usable_size) __attribute__((visibility("hidden")));
 void pre_nonnull_free(void *userptr, size_t freed_usable_size)
 {
 	index_delete(userptr/*, freed_usable_size*/);
 }
 
-void post_nonnull_free(void *userptr) {}
+void post_nonnull_free(void *userptr) __attribute__((visibility("hidden")));
+void post_nonnull_free(void *userptr) 
+{}
 
+void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller) __attribute__((visibility("hidden")));
 void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller)
 {
 	/* When this happens, we *may or may not be freeing an area*
@@ -1536,6 +1546,7 @@ static void delete_suballocated_chunk(struct suballocated_chunk_rec *p_rec)
 #define BUCKET_PTR_FROM_INSERT_PTR(p_ins, p_rec) \
 	((p_rec)->metadata_recs + (((p_ins) - (p_rec)->metadata_recs) % INSERTS_PER_LAYER(p_rec)))
 
+int __index_deep_alloc(void *ptr, int level, unsigned size_bytes) __attribute__((visibility("protected")));
 int __index_deep_alloc(void *ptr, int level, unsigned size_bytes) 
 {
 	int lock_ret;
@@ -1998,6 +2009,7 @@ static void unindex_deep_alloc_internal(void *ptr, struct insert *existing_ins,
 	check_bucket_sanity(p_bucket, p_rec);
 }
 
+void __unindex_deep_alloc(void *ptr, int level) __attribute__((visibility("protected")));
 void __unindex_deep_alloc(void *ptr, int level) 
 {
 	int lock_ret;
