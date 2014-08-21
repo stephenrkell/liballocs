@@ -277,10 +277,12 @@ struct uniqtype \n\
 	 * our own section flags and attributes to override the compiler. */
 	if (emit_void)
 	{
-		/* DWARF doesn't reify void, but we do. So output a rec for void first of all. */
+		/* DWARF doesn't reify void, but we do. So output a rec for void first of all.
+		 * We make it void so that multiple definitions in the same final link do not
+		 * cause a problem. */
 		out << "\n/* uniqtype for void */\n";
 		out << "struct uniqtype " << mangle_typename(make_pair(string(""), string("void")))
-			<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
+			<< " __attribute__((weak,section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
 			<< " = {\n\t" 
 			<< "{ 0, 0, 0 },\n\t"
 			<< "\"void\"" << ",\n\t"
