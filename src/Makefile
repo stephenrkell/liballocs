@@ -27,9 +27,13 @@ CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include
 # what about this one? slightly faster
 #DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -DNDEBUG
 # what about this one?  among the fastest (4.52, 4.50, 4.51)
-DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+#DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
 # really double-check that the following isn't faster? nope (4.64, 4.64, 4.59)
 #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
+
+# Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
+DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+
 
 default: liballocs_preload.so liballocs_preload.a liballocs_noop.so liballocs_noop.o liballocs.a
 
@@ -72,7 +76,7 @@ FAKE_UNWIND_OBJ :=
 LIBUNWIND_LDLIBS := -lunwind -lunwind-`uname -m` 
 endif
 
-UTIL_OBJS := l0index.o maps.o addrmap.o
+UTIL_OBJS := l0index.o maps.o addrmap.o addrlist.o
 MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ)
 MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS)
 PRELOAD_OBJS := preload.o
