@@ -30,6 +30,37 @@ void __liballocs_init_l0(void)
 	}
 }
 
+static ssize_t get_a_line(char *buf, size_t size, FILE *stream)
+{
+	if (size == 0) return -1; // now size is at least 1
+	
+	// read some stuff, at most `size - 1' bytes (we're going to add a null), into the buffer
+	size_t bytes_read = fread(buf, 1, size - 1, stream);
+	
+	// if we got EOF and read zero bytes, return -1
+	if (bytes_read == 0) return -1;
+	
+	// did we get enough that we have a whole line?
+	char *found = memchr(buf, '\n', bytes_read);
+	// if so, rewind the file to just after the newline
+	if (found)
+	{
+		size_t end_of_newline_displacement = (found - buf) + 1;
+		(void) fseek(stream, 
+				end_of_newline_displacement - bytes_read /* i.e. negative if we read more */,
+				SEEK_CUR);
+		buf[end_of_newline_displacement] = '\0';
+		return end_of_newline_displacement;
+	}
+	else
+	{
+		/* We didn't read enough. But that should only be because of EOF of error.
+		 * So just return whatever we got. */
+		buf[bytes_read] = '\0';
+		return bytes_read;
+	}
+}
+
 void __liballocs_add_missing_maps(void)
 {
 	#define NUM_FIELDS 11
@@ -50,9 +81,11 @@ void __liballocs_add_missing_maps(void)
 	struct link_map *executable_handle = dlopen(NULL, RTLD_NOW|RTLD_NOLOAD);
 	assert(executable_handle);
 	
-	char *linebuf = NULL;
-	ssize_t nread;
-	while (getline(&linebuf, &nread, maps) != -1)
+	/* We used to use getline(), but in some deployments it's not okay to 
+	 * use malloc when we're called early during initialization. So we write
+	 * our own read loop. */
+	char linebuf[8192];
+	while (get_a_line(linebuf, sizeof linebuf, maps) != -1)
 	{
 		rest[0] = '\0';
 		int fields_read = sscanf(linebuf, 
@@ -119,7 +152,7 @@ void __liballocs_add_missing_maps(void)
 					}
 					break;
 				case '[':
-					if (0 == strcmp(rest, "[stack]"))
+					if (0 == strncmp(rest, "[stack", 6))
 					{
 						kind = STACK;
 						data_ptr = (void*) second;
@@ -218,7 +251,6 @@ void __liballocs_add_missing_maps(void)
 continue_loop:
 		0;
 	} // end while
-	if (linebuf) free(linebuf);
 	
 	fclose(maps);
 }
