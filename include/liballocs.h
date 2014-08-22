@@ -61,7 +61,7 @@ struct uniqtype
 	((all) != (as))
 
 /* ** begin added for inline get_alloc_info */
-#ifndef USE_FAKE_LIBUNWIND
+#ifdef USE_REAL_LIBUNWIND
 #include <libunwind.h>
 #else
 #include "fake-libunwind.h"
@@ -226,11 +226,18 @@ void *__liballocs_my_typeobj(void) __attribute__((weak));
  * one of them, it will get a null pointer instead of a real object address.
  * 
  * The way to solve this is the way we normally do: link-used-types! 
- * Actually liballocs doesn't need these guys, but libcrunch does. So we run
- * link-used-types on libcrunch.o., after building it. Heh.
+ * 
+ * Note that liballocs itself doesn't need these guys, but libcrunch does.
+ * However, we still build them in because clients are likely to want them,
+ * and it saves them having to do the link-used-types trick themselves
+ * (mainly because I couldn't figure out a good way to shoehorn it into
+ * the node.js build process -- it was giving me gyp).
  */
 
 extern struct uniqtype __uniqtype__void/* __attribute__((weak))*/;
+extern struct uniqtype __uniqtype__int/* __attribute__((weak))*/;
+extern struct uniqtype __uniqtype__signed_char/* __attribute__((weak))*/;
+extern struct uniqtype __uniqtype__unsigned_char/* __attribute__((weak))*/;
 
 struct liballocs_err;
 extern struct liballocs_err __liballocs_err_stack_walk_step_failure;

@@ -17,8 +17,9 @@
  * we make always go straight to our definition, not via the PLT. So declare it
  * as protected. NOTE that it will always make at least one call through the PLT, 
  * because the underlying logic is in libc.  */
-size_t malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
-size_t __real_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
+size_t malloc_usable_size(void *ptr) /*__attribute__((visibility("protected")))*/;
+size_t __real_malloc_usable_size(void *ptr) /*__attribute__((visibility("protected")))*/;
+size_t __wrap_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <stdio.h>

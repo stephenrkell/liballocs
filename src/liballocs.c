@@ -11,13 +11,13 @@
 #include <link.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-#ifndef USE_FAKE_LIBUNWIND
+#ifdef USE_REAL_LIBUNWIND
 #include <libunwind.h>
 #endif
 #include "liballocs.h"
 #include "liballocs_private.h"
 
-#ifdef USE_FAKE_LIBUNWIND
+#ifndef USE_REAL_LIBUNWIND
 #include "fake-libunwind.h"
 int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp) __attribute__((visibility("hidden")));
 int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp)
