@@ -327,7 +327,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         self.debugMsg("allocsccCustomArgs is: " + " ".join(allocsccCustomArgs) + "\n")
         self.debugMsg("linkArgs is: " + " ".join(linkArgs) + "\n")
 
-        ret1 = subprocess.call(self.getUnderlyingCompilerCommand() + argsToExec)
+        ret1 = subprocess.call(self.getUnderlyingCompilerCommand(sourceInputFiles) + argsToExec)
 
         if ret1 != 0:
             # we didn't succeed, so quit now
@@ -338,15 +338,16 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # definitions which the compiler generated.
 
         if not self.isLinkCommand():
-            if outputFile:
-                # we have a single named output file
-                ret2 = self.fixupDotO(outputFile, None)
-                return ret2
-            else:
-                # no explicit output file; the compiler output >=1 .o files, one for each input
-                for outputFilename in [nameStem + ".o" \
-                    for (nameStem, nameExtension) in map(os.path.splitext, sourceInputFiles)]:
-                    self.fixupDotO(outputFilename, None)
+            if not self.isPreprocessOnlyCommand():
+                if outputFile:
+                    # we have a single named output file
+                    ret2 = self.fixupDotO(outputFile, None)
+                    return ret2
+                else:
+                    # no explicit output file; the compiler output >=1 .o files, one for each input
+                    for outputFilename in [nameStem + ".o" \
+                        for (nameStem, nameExtension) in map(os.path.splitext, sourceInputFiles)]:
+                        self.fixupDotO(outputFilename, None)
 
         else: # isLinkCommand()
             # We've just output an object, so invoke make to collect the allocsites, 
@@ -356,17 +357,20 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 baseDir = os.environ["ALLOCSITES_BASE"]
             else:
                 baseDir = "/usr/lib/allocsites"
-            targetNames = [baseDir + os.path.realpath(outputFile) + ext \
-            for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
-            errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
+            if os.path.exists(os.path.realpath(outputFile)):
+                targetNames = [baseDir + os.path.realpath(outputFile) + ext \
+                    for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
+                errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
 
-            ret2 = 42
-            with self.makeErrFile(errfilename, "w+") as errfile:
-                ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
-                    "-f", "Makefile.allocsites"] +  targetNames, stderr=errfile, stdout=errfile)
-                if (ret2 != 0 or "DEBUG_CC" in os.environ):
-                    self.print_errors(errfile)
-            return ret2
+                ret2 = 42
+                with self.makeErrFile(errfilename, "w+") as errfile:
+                    ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
+                        "-f", "Makefile.allocsites"] +  targetNames, stderr=errfile, stdout=errfile)
+                    if (ret2 != 0 or "DEBUG_CC" in os.environ):
+                        self.print_errors(errfile)
+                return ret2
+            else:
+                return 1
 
     # expose base class methods to derived classes
     def isLinkCommand(self):

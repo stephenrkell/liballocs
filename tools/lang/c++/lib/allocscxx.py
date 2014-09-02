@@ -25,7 +25,7 @@ class AllocsCxx(AllocsCompilerWrapper):
                 self.debugMsg("Making a secret output file (from unknown source) " + outputFilename + "\n")
             return outputFilename
     
-    def getUnderlyingCompilerCommand(self):
+    def getUnderlyingCompilerCommand(self, sourceFiles):
         return ["c++"]
 
 if __name__ == '__main__':

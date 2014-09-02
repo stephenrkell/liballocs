@@ -10,7 +10,7 @@ class CompilerWrapper:
     __metaclass__ = abc.ABCMeta
     
     @abc.abstractmethod
-    def getUnderlyingCompilerCommand(self):
+    def getUnderlyingCompilerCommand(self, sourceFiles):
         """return a list of strings that is the command (including arguments) to invoke
            the underlying compiler"""
         return
@@ -60,6 +60,9 @@ class CompilerWrapper:
                 return False
             if arg == '-E':
                 return False
+            # -M options: if we use -MF or -MD or -MMD, we might actually be doing the compile. 
+            if (arg == '-M' or arg == '-MM') and not ("-MF" in sys.argv):
+                return False
             if arg == "-o" and len(sys.argv) >= argnum + 2:
                 outputFilename = os.path.basename(sys.argv[argnum + 1])
                 # HACK: is this really necessary?
@@ -69,6 +72,9 @@ class CompilerWrapper:
             return False
         return True
         # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
+    
+    def isPreprocessOnlyCommand(self):
+        return "-E" in sys.argv
    
     def allWrappedSymNames(self):
         return []
@@ -87,6 +93,8 @@ class CompilerWrapper:
             if args[num] == "-o":
                 outputFile = args[num + 1]
                 skipNext = True
+            if args[num] == '-param' or args[num] == '--param':
+                skipNext = True
             if args[num].startswith('-'):
                 continue
             if num == 0:
@@ -101,9 +109,13 @@ class CompilerWrapper:
             else:
                 self.debugMsg("guessed that source file is " + args[num] + "\n")
                 sourceInputFiles += [args[num]]
+        if outputFile == None and self.isLinkCommand() and not "-shared" in args:
+            outputFile = "a.out"
         return (sourceInputFiles, objectInputFiles, outputFile)
    
     def fixupDotO(self, filename, errfile):
+        if self.isPreprocessOnlyCommand():
+            return
         # do we need to unbind? 
         # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
         # This is needed e.g. for SPEC benchmark bzip2
@@ -181,7 +193,7 @@ class CompilerWrapper:
             # compile to .o with the custom args
             # -- erase -shared etc, and erase "-o blah"
             outputFilename = self.makeObjectFileName(sourceFile)
-            commandAndArgs = self.getUnderlyingCompilerCommand() + argvWithoutOutputOptions + customArgs \
+            commandAndArgs = self.getUnderlyingCompilerCommand([sourceFile]) + argvWithoutOutputOptions + customArgs \
             + ["-c", "-o", outputFilename, sourceFile]
             self.debugMsg("Building " + outputFilename + " using " + " ".join(commandAndArgs) + "\n")
             ret1 = subprocess.call(commandAndArgs)
