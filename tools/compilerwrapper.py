@@ -5,9 +5,16 @@
 
 import os, sys, re, subprocess, tempfile, abc
 import abc
+import copy
+
+class SourceFile(str):
+    lang = None
 
 class CompilerWrapper:
     __metaclass__ = abc.ABCMeta
+
+    class StrWithLang(str):
+        lang = None
     
     @abc.abstractmethod
     def getUnderlyingCompilerCommand(self, sourceFiles):
@@ -58,7 +65,7 @@ class CompilerWrapper:
                 return True
             if arg == '-c':
                 return False
-            if arg == '-E':
+            if arg == '-E' or arg == '-S':
                 return False
             # -M options: if we use -MF or -MD or -MMD, we might actually be doing the compile. 
             if (arg == '-M' or arg == '-MM') and not ("-MF" in sys.argv):
@@ -73,15 +80,17 @@ class CompilerWrapper:
         return True
         # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
     
-    def isPreprocessOnlyCommand(self):
-        return "-E" in sys.argv
+    def commandStopsBeforeObjectOutput(self):
+        return "-E" in sys.argv or "-S" in sys.argv
    
     def allWrappedSymNames(self):
         return []
     
+    
     def parseInputAndOutputFiles(self, args):
         skipNext = False
         outputFile = None
+        currentLang = None
         sourceInputFiles = []
         objectInputFiles = []
         for num in range(0,len(args)):
@@ -93,9 +102,23 @@ class CompilerWrapper:
             if args[num] == "-o":
                 outputFile = args[num + 1]
                 skipNext = True
+            if args[num] == "-x":
+                if args[num + 1] == "none":
+                    currentLang = None
+                else:
+                    currentLang = args[num + 1]
+                skipNext = True
+            if args[num] == "-include" or args[num] == "-isystem" \
+                  or args[num] == "-include" or args[num] == "-idirafter" \
+                  or args[num] == "-imacros" or args[num] == "-iprefix" \
+                  or args[num] == "-iquote" or args[num] == "-iwithprefix" \
+                  or args[num] == "-iwithprefixbefore":
+                skipNext = True # HMM -- want to save this somehow?
             if args[num] == '-param' or args[num] == '--param':
                 skipNext = True
-            if args[num].startswith('-'):
+            if args[num] == '-MT' or args[num] == "-MF":
+                skipNext = True
+            if args[num] != "-" and args[num].startswith('-'):
                 continue
             if num == 0:
                 continue # this means we have "allocscc" as the arg
@@ -108,13 +131,17 @@ class CompilerWrapper:
                 continue
             else:
                 self.debugMsg("guessed that source file is " + args[num] + "\n")
-                sourceInputFiles += [args[num]]
+                sourceFileToAdd = SourceFile(args[num])
+                if currentLang != None:
+                    sourceFileToAdd.lang = currentLang
+                sourceInputFiles += [sourceFileToAdd]
+                    
         if outputFile == None and self.isLinkCommand() and not "-shared" in args:
             outputFile = "a.out"
         return (sourceInputFiles, objectInputFiles, outputFile)
-   
+    
     def fixupDotO(self, filename, errfile):
-        if self.isPreprocessOnlyCommand():
+        if self.commandStopsBeforeObjectOutput():
             return
         # do we need to unbind? 
         # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
@@ -178,6 +205,19 @@ class CompilerWrapper:
             self.debugMsg("No need to globalize\n")
             return 0
 
+    def optionsToBuildOneObjectFile(self, sourceFile, outputFilename, argvWithoutOutputOptions):
+        return argvWithoutOutputOptions  ["-c", "-o", outputFilename, sourceFile]
+
+    def buildOneObjectFile(self, sourceFile, outputFilename, argvWithoutOutputOptions):
+        return self.runUnderlyingCompiler([sourceFile], 
+            self.optionsToBuildOneObjectFile(sourceFile, outputFilename, argvWithoutOutputOptions))
+    
+    def runUnderlyingCompiler(self, sourceFiles, otherOptions):
+        commandAndArgs = self.getUnderlyingCompilerCommand(sourceFiles) + otherOptions
+        self.debugMsg("Running " + " ".join(commandAndArgs) + "\n")
+        ret1 = subprocess.call(commandAndArgs)
+        return ret1
+
     def makeDotOAndPassThrough(self, argv, customArgs, sourceInputFiles):
         argvToPassThrough = [x for x in argv[1:] if not x in sourceInputFiles]
         argvWithoutOutputOptions = [argvToPassThrough[i] for i in range(0, len(argvToPassThrough)) \
@@ -193,10 +233,8 @@ class CompilerWrapper:
             # compile to .o with the custom args
             # -- erase -shared etc, and erase "-o blah"
             outputFilename = self.makeObjectFileName(sourceFile)
-            commandAndArgs = self.getUnderlyingCompilerCommand([sourceFile]) + argvWithoutOutputOptions + customArgs \
-            + ["-c", "-o", outputFilename, sourceFile]
-            self.debugMsg("Building " + outputFilename + " using " + " ".join(commandAndArgs) + "\n")
-            ret1 = subprocess.call(commandAndArgs)
+            ret1 = buildOneObjectFile(sourceFile, outputFilename, \
+                    argvWithoutOutputOptions + customArgs)
 
             if ret1 != 0:
                 # we didn't succeed, so quit now

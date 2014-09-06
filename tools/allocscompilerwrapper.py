@@ -281,11 +281,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     linkArgs += ["-L" + self.getLinkPath()]
                     if not "-static" in passedThroughArgs and not "-Bstatic" in passedThroughArgs:
                         # we're building a dynamically linked executable
-                        linkArgs += ["-Wl,-R" + self.getRunPath()]
+                        linkArgs += ["-Wl,-rpath," + self.getRunPath()]
                         if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                             linkArgs += [self.getLdLibBase()]
                         else: # FIXME: weak linkage one day; FIXME: don't clobber as-neededness
-                            linkArgs += ["-Wl,--no-as-needed", self.getLdLibBase() + "_noop"]
+                            # HACK: why do we need --as-needed? try without
+                            #linkArgs += [ "-Wl,--no-as-needed" ]
+                            linkArgs += [self.getLdLibBase() + "_noop"]
                     else:
                         # we're building a statically linked executable
                         if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
@@ -300,7 +302,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 # only link directly if we're disabling the preload approach
                 if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                     linkArgs += ["-L" + self.getLinkPath()]
-                    linkArgs += ["-Wl,-R" + self.getRunPath()]
+                    linkArgs += ["-Wl,-rpath," + self.getRunPath()]
                     if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                         linkArgs += [getLdLibBase()]
                 else: # FIXME: weak linkage one day....
@@ -327,7 +329,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         self.debugMsg("allocsccCustomArgs is: " + " ".join(allocsccCustomArgs) + "\n")
         self.debugMsg("linkArgs is: " + " ".join(linkArgs) + "\n")
 
-        ret1 = subprocess.call(self.getUnderlyingCompilerCommand(sourceInputFiles) + argsToExec)
+        ret1 = self.runUnderlyingCompiler(sourceInputFiles, argsToExec)
 
         if ret1 != 0:
             # we didn't succeed, so quit now
@@ -338,7 +340,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # definitions which the compiler generated.
 
         if not self.isLinkCommand():
-            if not self.isPreprocessOnlyCommand():
+            if not self.commandStopsBeforeObjectOutput():
                 if outputFile:
                     # we have a single named output file
                     ret2 = self.fixupDotO(outputFile, None)

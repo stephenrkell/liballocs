@@ -49,19 +49,24 @@ class AllocsCC(AllocsCompilerWrapper):
         
         allSourceFilesAreC = True
         for sourceFile in sourceFiles:
-            if not sourceFile.endswith(".c"):
+            if sourceFile.lang != "c" and not sourceFile.endswith(".c"):
                 allSourceFilesAreC = False
         
         includeArgs = []
+        # We can only do monalloca, and anything else that involves -include, 
+        # if we're compiling only C files.
         if allSourceFilesAreC:
-            includeArgs = ["-include", os.path.dirname(__file__) + "/../../../../include/liballocs_cil_inlines.h"]
+            self.debugMsg("All source files (%d) are C files\n" % len(sourceFiles))
+            includeArgs = ["-include", \
+               os.path.dirname(__file__) + "/../../../../include/liballocs_cil_inlines.h", \
+        "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/monalloca/monalloca.cmxs"), \
+        "--domonalloca"]
         else:
-            pass
+            self.debugMsg("Not all source files (%d) are C files\n" % len(sourceFiles))
         
         return [\
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"), \
-         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/monalloca/monalloca.cmxs"), \
-           "--dodumpallocs", "--domonalloca", \
+           "--dodumpallocs", \
             "--keepunused"] \
             + includeArgs + \
             ["-Wno-unused-variable", "-Wno-unused-label"]
@@ -72,6 +77,19 @@ class AllocsCC(AllocsCompilerWrapper):
     
     def getUnderlyingCompilerCommand(self, sourceFiles):
         return ["cilly"] + self.getCillyArgs(sourceFiles)
+    
+    # HACK HACK HACK override buildOneObjectFile so that if we fail, we try the vanilla cc
+    def runUnderlyingCompiler(self, sourceFiles, options):
+        ret1 = AllocsCompilerWrapper.runUnderlyingCompiler(self, sourceFiles, options)
+        if (ret1 != 0):
+            originalCommand = self.getUnderlyingCompilerCommand(sourceFiles) + options
+            alternativeCommand = ["cc"] + [s for s in originalCommand if s != "cilly" and \
+                not s.startswith("--")]
+            self.debugMsg("Falling back to: " + " ".join(alternativeCommand) + "\n")
+            ret1 = subprocess.call(alternativeCommand)
+            if (ret1 == 0):
+                self.debugMsg("WARNING: fell back to cc to compile [%s]\n" % ", ".join(sourceFiles))
+        return ret1
 
 if __name__ == '__main__':
     wrapper = AllocsCC()
