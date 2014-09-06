@@ -134,10 +134,8 @@ enum object_memory_kind
 		addr >= current_sp && addr < STACK_BEGIN 
 		&& (!&__addrmap_max_stack_size || // it's weak
 			(STACK_BEGIN - addr) < (unsigned long) __addrmap_max_stack_size), 0)) return STACK;
-	
-	/* FIXME: other threads' stacks! */
 
-	/* It's between HEAP and STATIC. */
+	/* It's between HEAP and STATIC and another thread's STACK. */
 	/* We don't know. The caller has to fall back to some more expensive method. */
 	return UNKNOWN;
 }
