@@ -24,9 +24,8 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 {
 	assert(!offp);
 	dlerror();
-	Dl_info info;
-	int success = dladdr((void*) p_cursor->frame_ip, &info);
-	if (!success) return 1;
+	Dl_info info = dladdr_with_cache((void*) p_cursor->frame_ip);
+	if (!info.dli_fname) return 1;
 	if (!info.dli_sname) return 2;
 	else 
 	{
@@ -35,8 +34,6 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 	}
 }
 #endif
-
-
 
 char exe_basename[4096] __attribute__((visibility("hidden")));
 char exe_fullname[4096] __attribute__((visibility("hidden")));
@@ -47,6 +44,8 @@ struct addrlist __liballocs_unrecognised_heap_alloc_sites __attribute__((visibil
 
 static const char *allocsites_base;
 static unsigned allocsites_base_len;
+
+
 
 int __liballocs_debug_level __attribute__((visibility("hidden")));
 _Bool __liballocs_is_initialized __attribute__((visibility("protected")));
@@ -177,7 +176,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 #ifndef DLADDR_CACHE_SIZE
 #define DLADDR_CACHE_SIZE 16
 #endif
-Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("hidden")));
+Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("protected")));
 Dl_info dladdr_with_cache(const void *addr)
 {
 	struct cache_rec { const void *addr; Dl_info info; };

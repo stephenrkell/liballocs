@@ -12,7 +12,7 @@ struct mapping
 {
 	void *begin;
 	void *end;
-	struct prefix_tree_node n;
+	struct mapping_info n;
 };
 
 #ifndef NO_PTHREADS
@@ -31,7 +31,7 @@ static pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 #endif
 
 
-static struct mapping *get_mapping_from_node(struct prefix_tree_node *n)
+static struct mapping *get_mapping_from_node(struct mapping_info *n)
 {
 	/* HACK: FIXME: please get rid of this stupid node-based interface. */
 	return (struct mapping *)((char*) n - offsetof(struct mapping, n));
@@ -99,10 +99,10 @@ _Bool __attribute__((visibility("hidden"))) insert_equal(struct insert *p_ins1, 
 		p_ins1->alloc_site == p_ins2->alloc_site;
 		// don't compare prev/next, at least not for now
 }
-_Bool __attribute__((visibility("hidden"))) node_info_equal(unsigned kind, struct node_info *p_info1, struct node_info *p_info2)
+_Bool __attribute__((visibility("hidden"))) mapping_info_equal(mapping_flags_t f, struct mapping_info *p_info1, struct mapping_info *p_info2)
 {
 	return p_info1->what == p_info2->what && 
-	(p_info1->what == DATA_PTR ? node_info_has_data_ptr_equal_to(kind, p_info2, p_info1->un.data_ptr)
+	(p_info1->what == DATA_PTR ? mapping_info_has_data_ptr_equal_to(f, p_info2, p_info1->un.data_ptr)
 	            : (assert(p_info1->what == INS_AND_BITS), 
 					(insert_equal(&p_info1->un.ins_and_bits.ins, &p_info2->un.ins_and_bits.ins)
 						&& p_info1->un.ins_and_bits.npages == p_info2->un.ins_and_bits.npages
@@ -110,16 +110,24 @@ _Bool __attribute__((visibility("hidden"))) node_info_equal(unsigned kind, struc
 					)
 	);
 }
-_Bool  __attribute__((visibility("hidden"))) node_info_has_data_ptr_equal_to(unsigned kind, const struct node_info *p_info, const void *data_ptr)
+_Bool  __attribute__((visibility("hidden"))) mapping_info_has_data_ptr_equal_to(mapping_flags_t f, const struct mapping_info *p_info, const void *data_ptr)
 {
 	return p_info->what == DATA_PTR
 			&& (
 					// -- it should be value-equal for stack and string-equal for static/mapped
-							(kind == STACK && data_ptr == p_info->un.data_ptr)
+							(f.kind == STACK && data_ptr == p_info->un.data_ptr)
 							|| 
 						((data_ptr == NULL && p_info->un.data_ptr == NULL)
 							|| (data_ptr != NULL && p_info->un.data_ptr  != NULL && 
 							0 == strcmp(p_info->un.data_ptr, data_ptr))));
+}
+
+_Bool __attribute__((visibility("hidden"))) mapping_flags_equal(mapping_flags_t f1, mapping_flags_t f2)
+{
+	return f1.kind == f2.kind
+			&& f1.r == f2.r
+			&& f1.w == f2.w
+			&& f1.x == f2.x;
 }
 
 static struct mapping *find_free_mapping(void)
@@ -153,7 +161,7 @@ static _Bool
 is_unindexed_or_heap(void *begin, void *end)
 {
 	mapping_num_t *pos = &l0index[PAGENUM(begin)];
-	while (pos < l0index + PAGENUM(end) && (!*pos || mappings[*pos].n.kind == HEAP)) { ++pos; }
+	while (pos < l0index + PAGENUM(end) && (!*pos || mappings[*pos].n.f.kind == HEAP)) { ++pos; }
 	
 	if (pos == l0index + PAGENUM(end)) return 1;
 	
@@ -172,7 +180,7 @@ static _Bool range_overlaps_mapping(struct mapping *m, void *base, size_t s)
 	/* they come and go without our direct oversight. */ \
 	do { \
 		for (unsigned i = 1; i < NMAPPINGS; ++i) { \
-			assert(mappings[i].n.kind == HEAP || \
+			assert(mappings[i].n.f.kind == HEAP || \
 				!range_overlaps_mapping(&mappings[i], (base), (s))); \
 		} \
 	} while (0)
@@ -191,13 +199,13 @@ static _Bool range_overlaps_mapping(struct mapping *m, void *base, size_t s)
 	((((char*)(a)) < ((char*)(b))) ? (a) : (b))
 
 static
-struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, struct node_info *p_info)
+struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f, struct mapping_info *p_info)
 {
 	assert((uintptr_t) base % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	assert(s % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	
 	debug_printf(3, "%s: creating mapping base %p, size %lu, kind %u, info %p\n", 
-		__func__, base, (unsigned long) s, kind, p_info);
+		__func__, base, (unsigned long) s, f.kind, p_info);
 	
 	/* In the case of heap regions, libc can munmap them without our seeing it. 
 	 * So, we might be surprised to find that our index is out-of-date here. 
@@ -233,7 +241,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 			/* We have overlap. Unmap the whole thing? Or just the portion we overlap? 
 			 * Since heap regions can shrink as well as grow, it seems safest to unmap
 			 * only the overlapping portion. */
-			if (mappings[i_map].n.kind == HEAP)
+			if (mappings[i_map].n.f.kind == HEAP)
 			{
 				// force an unmapping of the overlapping region
 				char *overlap_begin = MAXPTR((char*) mappings[i_map].begin, (char*) base);
@@ -241,7 +249,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 				
 				debug_printf(3, "%s: forcing unmapping of %p-%p (from mapping number %d), overlapping %p-%p\n", 
 					__func__, overlap_begin, overlap_end, i_map,  base, (char*) base + s);
-				prefix_tree_del(overlap_begin, overlap_end - overlap_begin);
+				mapping_del(overlap_begin, overlap_end - overlap_begin);
 				bytes_unmapped += overlap_end - overlap_begin;
 			}
 			else
@@ -254,19 +262,19 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 				 * If we find it, we're okay. */
 				if (mappings[i_map].begin <= base
 							&& (char*) mappings[i_map].end >= (char*) base + s
-							&& mappings[i_map].n.kind == kind 
-							&& node_info_equal(kind, &mappings[i_map].n.info, p_info))
+							&& mapping_flags_equal(mappings[i_map].n.f, f)
+							&& mapping_info_equal(f, &mappings[i_map].n, p_info))
 				{
 					debug_printf(3, "%s: mapping already present\n", __func__);
 					// if we're STATIC and have a data pt, we borrow the new data_ptr 
 					// because it's more likely to be up-to-date
-					if (kind == STATIC && p_info->what == DATA_PTR)
+					if (f.kind == STATIC && p_info->what == DATA_PTR)
 					{
-						mappings[i_map].n.info.un.data_ptr = p_info->un.data_ptr;
+						mappings[i_map].n.un.data_ptr = p_info->un.data_ptr;
 					}
 					return &mappings[i_map];
 				}
-				else if (mappings[i_map].n.kind == STACK && kind == STACK
+				else if (mappings[i_map].n.f.kind == STACK && f.kind == STACK
 					/* for stack, upper bound must be unchanged */
 					&& mappings[i_map].end == (char*) base + s)
 				{
@@ -323,19 +331,19 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	/* Tolerate overlapping either of these two, if we're mapping heap (anonymous). 
 	 * We simply adjust our base and size so that we fit exactly. 
 	 */
-	if (kind == HEAP)
+	if (f.kind == HEAP)
 	{
 		SANITY_CHECK_NEW_MAPPING(base, s);
 		// adjust w.r.t. abutments
 		if (abuts_existing_start 
 			&& range_overlaps_mapping(&mappings[abuts_existing_start], base, s)
-			&& mappings[abuts_existing_start].n.kind == HEAP)
+			&& mappings[abuts_existing_start].n.f.kind == HEAP)
 		{
 			s = (char*) mappings[abuts_existing_start].begin - (char*) base;
 		}
 		if (abuts_existing_end
 			&& range_overlaps_mapping(&mappings[abuts_existing_end], base, s)
-			&& mappings[abuts_existing_start].n.kind == HEAP)
+			&& mappings[abuts_existing_start].n.f.kind == HEAP)
 		{
 			base = mappings[abuts_existing_end].end;
 		}
@@ -346,7 +354,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 
 		if (our_end_overlaps
 			&& range_overlaps_mapping(&mappings[our_end_overlaps], base, s)
-			&& mappings[our_end_overlaps].n.kind == HEAP)
+			&& mappings[our_end_overlaps].n.f.kind == HEAP)
 		{
 			// move our end earlier, but not to earlier than base
 			void *cur_end = (char *) base + s;
@@ -355,7 +363,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 		}
 		if (our_begin_overlaps
 			&& range_overlaps_mapping(&mappings[our_begin_overlaps], base, s)
-			&& mappings[our_begin_overlaps].n.kind == HEAP)
+			&& mappings[our_begin_overlaps].n.f.kind == HEAP)
 		{
 			// move our begin later, but not to later than base + s
 			void *new_begin = MINPTR(mappings[our_begin_overlaps].begin, (char*) base + s); 
@@ -367,7 +375,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 		
 		STRICT_SANITY_CHECK_NEW_MAPPING(base, s);
 	}
-	else if (kind == STACK)
+	else if (f.kind == STACK)
 	{
 		/* Tolerate sharing an upper boundary with an existing mapping. */
 		mapping_num_t our_end_overlaps = l0index[PAGENUM((char*) base + s) - 1];
@@ -414,19 +422,19 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	debug_printf(3, "%s: abuts_existing_start: %d, abuts_existing_end: %d\n",
 			__func__, abuts_existing_start, abuts_existing_end);
 
-	_Bool kind_matches = 1;
+	_Bool flags_matches = 1;
 	_Bool node_matches = 1;
 	
 	_Bool can_coalesce_after = abuts_existing_start
-				&& (kind_matches = (mappings[abuts_existing_start].n.kind == kind))
-				&& (node_matches = (node_info_equal(kind, &mappings[abuts_existing_start].n.info, p_info)));
+				&& (flags_matches = (mapping_flags_equal(mappings[abuts_existing_start].n.f, f)))
+				&& (node_matches = (mapping_info_equal(f, &mappings[abuts_existing_start].n, p_info)));
 	_Bool can_coalesce_before = abuts_existing_end
-				&& (kind_matches = (mappings[abuts_existing_end].n.kind == kind))
-				&& (node_matches = (node_info_equal(kind, &mappings[abuts_existing_end].n.info, p_info)));
+				&& (flags_matches = (mapping_flags_equal(mappings[abuts_existing_end].n.f, f)))
+				&& (node_matches = (mapping_info_equal(f, &mappings[abuts_existing_end].n, p_info)));
 	debug_printf(3, "%s: can_coalesce_after: %s, can_coalesce_before: %s, "
-			"kind_matches: %s, node_matches: %s \n",
+			"flags_matches: %s, node_matches: %s \n",
 			__func__, can_coalesce_after ? "true" : "false", can_coalesce_before ? "true" : "false", 
-			kind_matches ? "true": "false", node_matches ? "true": "false" );
+			flags_matches ? "true": "false", node_matches ? "true": "false" );
 	
 	/* If we *both* abut a start and an end, we're coalescing 
 	 * three mappings. If so, just bump up our base and s, 
@@ -469,8 +477,9 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, unsigned kind, st
 	{
 		found->begin = base;
 		found->end = (char*) base + s;
-		found->n.kind = kind;
-		found->n.info = *p_info;
+		found->n.f = f;
+		found->n.what = p_info->what;
+		found->n.un = p_info->un;
 		memset_mapping(l0index + PAGENUM(base), (mapping_num_t) (found - &mappings[0]), s >> LOG_PAGE_SIZE);
 		SANITY_CHECK_MAPPING(found);
 		return found;
@@ -485,19 +494,19 @@ static _Bool path_is_realpath(const char *path)
 	return 0 == strcmp(path, rp);
 }
 
-struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr) __attribute__((visibility("hidden")));
-struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *data_ptr)
+struct mapping_info *mapping_add(void *base, size_t s, mapping_flags_t f, const void *data_ptr) __attribute__((visibility("hidden")));
+struct mapping_info *mapping_add(void *base, size_t s, mapping_flags_t f, const void *data_ptr)
 {
 	if (!l0index) init();
 	
-	assert(!data_ptr || kind == STACK || path_is_realpath((const char *) data_ptr));
+	assert(!data_ptr || f.kind == STACK || path_is_realpath((const char *) data_ptr));
 	
-	struct node_info info = { .what = DATA_PTR, .un = { data_ptr: data_ptr } };
-	return prefix_tree_add_full(base, s, kind, &info);
+	struct mapping_info info = { .f = f, .what = DATA_PTR, .un = { data_ptr: data_ptr } };
+	return mapping_add_full(base, s, &info);
 }
 
-void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *data_ptr) __attribute__((visibility("hidden")));
-void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *data_ptr)
+void mapping_add_sloppy(void *base, size_t s, mapping_flags_t f, const void *data_ptr) __attribute__((visibility("hidden")));
+void mapping_add_sloppy(void *base, size_t s, mapping_flags_t f, const void *data_ptr)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -521,7 +530,7 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 		return;
 	}
 	
-	struct node_info info = { .what = DATA_PTR, .un = { data_ptr: data_ptr } };
+	struct mapping_info info = { .f = f, .what = DATA_PTR, .un = { data_ptr: data_ptr } };
 	
 	/* Just add the as-yet-unmapped bits of the range. */
 	uintptr_t begin_pagenum = PAGENUM(base);
@@ -535,10 +544,10 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 		
 		if (next_indexed_pagenum > current_pagenum)
 		{
-			prefix_tree_add_full((void*) ADDR_OF_PAGENUM(current_pagenum), 
+			mapping_add_full((void*) ADDR_OF_PAGENUM(current_pagenum), 
 				(char*) ADDR_OF_PAGENUM(next_indexed_pagenum)
 					 - (char*) ADDR_OF_PAGENUM(current_pagenum), 
-				kind, &info);
+				&info);
 		}
 		
 		current_pagenum = next_indexed_pagenum;
@@ -549,8 +558,8 @@ void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *dat
 	BIG_UNLOCK
 }
 
-int prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end)__attribute__((visibility("hidden")));
-int prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end)
+int mapping_lookup_exact(struct mapping_info *n, void *begin, void *end)__attribute__((visibility("hidden")));
+int mapping_lookup_exact(struct mapping_info *n, void *begin, void *end)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -560,8 +569,8 @@ int prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *
 	return ret;
 }
 
-struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *p_arg) __attribute__((visibility("hidden")));
-struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *p_arg)
+struct mapping_info *mapping_add_full(void *base, size_t s, struct mapping_info *p_arg) __attribute__((visibility("hidden")));
+struct mapping_info *mapping_add_full(void *base, size_t s, struct mapping_info *p_arg)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -570,6 +579,8 @@ struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kin
 
 	assert((uintptr_t) base % PAGE_SIZE == 0);
 	assert(s % PAGE_SIZE == 0);
+	
+	mapping_flags_t f = p_arg->f;
 	
 	/* What's the biggest mapping you can think of? 
 	 * 
@@ -591,9 +602,9 @@ struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kin
 	uintptr_t first_page_num = (uintptr_t) base >> LOG_PAGE_SIZE;
 	uintptr_t npages = s >> LOG_PAGE_SIZE;
 
-	struct mapping *m = create_or_extend_mapping(base, s, kind, p_arg);
+	struct mapping *m = create_or_extend_mapping(base, s, f, p_arg);
 	SANITY_CHECK_MAPPING(m);
-	struct prefix_tree_node *ret = &m->n;
+	struct mapping_info *ret = &m->n;
 
 	BIG_UNLOCK
 	return ret;
@@ -628,8 +639,8 @@ static struct mapping *split_mapping(struct mapping *m, void *split_addr)
 	return new_m;
 }
 
-void prefix_tree_del_node(struct prefix_tree_node *n) __attribute__((visibility("hidden")));
-void prefix_tree_del_node(struct prefix_tree_node *n)
+void mapping_del_node(struct mapping_info *n) __attribute__((visibility("hidden")));
+void mapping_del_node(struct mapping_info *n)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -640,13 +651,19 @@ void prefix_tree_del_node(struct prefix_tree_node *n)
 	// check sanity
 	assert(l0index[PAGENUM(m->begin)] == m - &mappings[0]);
 	
-	prefix_tree_del(m->begin, (char*) m->end - (char*) m->begin);
+	mapping_del(m->begin, (char*) m->end - (char*) m->begin);
 	
 	BIG_UNLOCK
 }
 
-void prefix_tree_del(void *base, size_t s) __attribute__((visibility("hidden")));
-void prefix_tree_del(void *base, size_t s)
+static void clear_mapping(struct mapping *m)
+{
+	m->begin = m->end = NULL;
+	memset(&m->n, 0, sizeof m->n);
+}
+
+void mapping_del(void *base, size_t s) __attribute__((visibility("hidden")));
+void mapping_del(void *base, size_t s)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -753,7 +770,7 @@ void prefix_tree_del(void *base, size_t s)
 					PAGENUM((char*) m->begin + this_mapping_size)
 					 - PAGENUM(m->begin));
 			next_addr = m->end;
-			m->begin = m->end = NULL;
+			clear_mapping(m);
 			SANITY_CHECK_MAPPING(m);
 		}
 		
@@ -779,7 +796,7 @@ enum object_memory_kind __liballocs_get_memory_kind(const void *obj)
 	
 	mapping_num_t mapping_num = l0index[PAGENUM(obj)];
 	if (mapping_num == 0) return UNKNOWN;
-	else return mappings[mapping_num].n.kind;
+	else return mappings[mapping_num].n.f.kind;
 }
 
 void __liballocs_print_mappings_to_stream_err(void) __attribute__((visibility("protected")));
@@ -792,24 +809,26 @@ void __liballocs_print_mappings_to_stream_err(void)
 	for (struct mapping *m = &mappings[1]; m < &mappings[NMAPPINGS]; ++m)
 	{
 		if (MAPPING_IN_USE(m)) fprintf(stream_err, "%p-%p %01d %s %s %p\n", 
-				m->begin, m->end, m->n.kind, name_for_memory_kind(m->n.kind), 
-				m->n.info.what == DATA_PTR ? "(data ptr) " : "(insert + bits) ", 
-				m->n.info.what == DATA_PTR ? m->n.info.un.data_ptr : (void*)(uintptr_t) m->n.info.un.ins_and_bits.ins.alloc_site);
+				m->begin, m->end, m->n.f.kind, name_for_memory_kind(m->n.f.kind), 
+				m->n.what == DATA_PTR ? "(data ptr) " : "(insert + bits) ", 
+				m->n.what == DATA_PTR ? m->n.un.data_ptr : (void*)(uintptr_t) m->n.un.ins_and_bits.ins.alloc_site);
 	}
 	
 	BIG_UNLOCK
 }
-struct prefix_tree_node *
-prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr) __attribute__((visibility("hidden")));
-struct prefix_tree_node * 
-prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr)
+struct mapping_info *
+mapping_lookup(void *base) __attribute__((visibility("hidden")));
+
+struct mapping_info *__liballocs_mapping_lookup(const void *obj) __attribute__((visibility("default"), alias("mapping_lookup")));
+
+struct mapping_info * 
+mapping_lookup(void *base)
 {
 	int lock_ret;
 	BIG_LOCK
-	struct prefix_tree_node *ret;
+	struct mapping_info *ret;
 	
 	if (!l0index) init();
-	if (out_prev_ptr) *out_prev_ptr = NULL;
 	mapping_num_t mapping_num = l0index[PAGENUM(base)];
 	if (mapping_num == 0) { ret = NULL; }
 	else { ret = &mappings[mapping_num].n; }
@@ -819,15 +838,15 @@ prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_p
 }
 
 size_t
-prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
+mapping_get_overlapping(struct mapping_info **out_begin, 
 		size_t out_size, void *begin, void *end) __attribute__((visibility("hidden")));
-size_t prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
+size_t mapping_get_overlapping(struct mapping_info **out_begin, 
 		size_t out_size, void *begin, void *end)
 {
 	int lock_ret;
 	BIG_LOCK
 	
-	struct prefix_tree_node **out = out_begin;
+	struct mapping_info **out = out_begin;
 	uintptr_t end_pagenum = PAGENUM(end);
 	uintptr_t begin_pagenum = PAGENUM(begin);
 	while (out - out_begin < out_size)
@@ -849,15 +868,15 @@ size_t prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin,
 	return out - out_begin;
 }
 
-struct prefix_tree_node *
-prefix_tree_bounds(const void *ptr, const void **out_begin, const void **out_end) __attribute__((visibility("hidden")));
-struct prefix_tree_node *
-prefix_tree_bounds(const void *ptr, const void **out_begin, const void **out_end)
+struct mapping_info *
+mapping_bounds(const void *ptr, const void **out_begin, const void **out_end) __attribute__((visibility("hidden")));
+struct mapping_info *
+mapping_bounds(const void *ptr, const void **out_begin, const void **out_end)
 {
 	int lock_ret;
 	BIG_LOCK
 	
-	struct prefix_tree_node *ret;
+	struct mapping_info *ret;
 	if (!l0index) init();
 	mapping_num_t mapping_num = l0index[PAGENUM(ptr)];
 	if (mapping_num == 0) { ret = NULL; }
@@ -908,7 +927,7 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 		
 		mapping_num_t cur_num;
 		for (cur_num = l0index[PAGENUM(ptr)]; 
-				cur_num != 0 && mappings[cur_num].n.info.what == DATA_PTR; 
+				cur_num != 0 && mappings[cur_num].n.what == DATA_PTR; 
 				cur_num = l0index[PAGENUM(mappings[cur_num].end)])
 		{
 			struct mapping *m = &mappings[cur_num];
@@ -964,11 +983,10 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 			
 			assert(mappings[last_num].end == chunk_end);
 			
-			assert(m->n.info.what == DATA_PTR);
-			assert(m->n.kind == HEAP);
-			m->n.info = (struct node_info) {
-				.what = INS_AND_BITS, 
-				.un = {
+			assert(m->n.what == DATA_PTR);
+			assert(m->n.f.kind == HEAP);
+			m->n.what = INS_AND_BITS;
+			m->n.un = (union mapping_info_union) {
 					ins_and_bits: { 
 						.ins = (struct insert) {
 							.alloc_site_flag = 0,
@@ -978,28 +996,27 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 						.npages = npages, 
 						.obj_offset = (char*) ptr - (char*) lowest_bound
 					}
-				}
-			};
+				};
 			
 			// delete the other mappings, then extend over them
 			if ((char*) m->end < chunk_end) 
 			{
 				size_t s = chunk_end - (char*) m->end;
-				prefix_tree_del(m->end, s);
-				debug_printf(3, "node_info is %p\n,",&m->n.info ); 
+				mapping_del(m->end, s);
+				debug_printf(3, "mapping_info is %p\n,",&m->n ); 
 				debug_printf(3, "We want to extend our bottom mapping number %ld (%p-%p) "
 					"to include %ld bytes from %p\n", 
 					(long)(m - &mappings[0]), m->begin, m->end, s, m->end); 
 				assert(l0index[PAGENUM((char*) m->end - 1)] == m - &mappings[0]);
 				SANITY_CHECK_MAPPING(m);
 				struct mapping *new_m = create_or_extend_mapping(
-						m->end, s, m->n.kind, &m->n.info);
+						m->end, s, m->n.f, &m->n);
 				SANITY_CHECK_MAPPING(new_m);
 				assert(new_m == m);
 			}
 
 			BIG_UNLOCK
-			return &m->n.info.un.ins_and_bits.ins;
+			return &m->n.un.ins_and_bits.ins;
 		}
 		else
 		{
@@ -1019,9 +1036,9 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 	return NULL;
 }
 
-static unsigned unindex_l0_one_mapping(struct prefix_tree_node *n, const void *lower, const void *upper)
+static unsigned unindex_l0_one_mapping(struct mapping_info *n, const void *lower, const void *upper)
 {
-	n->info.what = 0;
+	n->what = 0;
 	return (char*) upper - (char*) lower;
 }
 
@@ -1033,12 +1050,12 @@ unsigned __unindex_l0(const void *mem)
 	
 	const void *lower;
 	const void *upper;
-	struct prefix_tree_node *n = prefix_tree_bounds(mem, &lower, &upper);
+	struct mapping_info *n = mapping_bounds(mem, &lower, &upper);
 	unsigned lower_to_upper_npages = ((uintptr_t) upper - (uintptr_t) lower) >> LOG_PAGE_SIZE;
 	assert(n);
 
 	/* We want to unindex the same number of pages we indexed. */
-	unsigned npages_to_unindex = n->info.un.ins_and_bits.npages;
+	unsigned npages_to_unindex = n->un.ins_and_bits.npages;
 	unsigned total_size_to_unindex = npages_to_unindex << LOG_PAGE_SIZE;
 
 	unsigned total_size_unindexed = lower_to_upper_npages << LOG_PAGE_SIZE;
@@ -1048,7 +1065,7 @@ unsigned __unindex_l0(const void *mem)
 		if (total_size_unindexed < total_size_to_unindex)
 		{
 			// advance to the next mapping
-			n = prefix_tree_bounds(upper, &lower, &upper);
+			n = mapping_bounds(upper, &lower, &upper);
 		}
 	} while (total_size_unindexed < total_size_to_unindex);
 	
@@ -1062,8 +1079,8 @@ struct insert *__lookup_l0(const void *mem, void **out_object_start)
 	int lock_ret;
 	BIG_LOCK
 	
-	struct prefix_tree_node *n = prefix_tree_deepest_match_from_root((void*) mem, NULL);
-	if (n && n->info.what)
+	struct mapping_info *n = mapping_lookup((void*) mem);
+	if (n && n->what)
 	{
 		// 1. we have to search backwards for the start of the mmapped region
 		const void *cur = mem;
@@ -1071,16 +1088,16 @@ struct insert *__lookup_l0(const void *mem, void **out_object_start)
 		// walk backwards through contiguous mappings, til we find one with the high bit set
 		do
 		{
-			n = prefix_tree_bounds(cur, &lower, &upper);
+			n = mapping_bounds(cur, &lower, &upper);
 			cur = n ? (const char*) lower - 1  : cur;
-		} while (n && (assert(n->info.what), !n->info.un.ins_and_bits.is_object_start));
+		} while (n && (assert(n->what), !n->un.ins_and_bits.is_object_start));
 		
 		// if n is null, it means we ran out of mappings before we saw the high bit
 		assert(n);
 		
-		*out_object_start = (char*) lower + n->info.un.ins_and_bits.obj_offset;
+		*out_object_start = (char*) lower + n->un.ins_and_bits.obj_offset;
 		BIG_UNLOCK
-		return &n->info.un.ins_and_bits.ins;
+		return &n->un.ins_and_bits.ins;
 	}
 	else 
 	{

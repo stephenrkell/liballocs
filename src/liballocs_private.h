@@ -39,50 +39,34 @@ dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 		__attribute__((visibility("hidden")));
 char execfile_name[4096] __attribute__((visibility("hidden")));
 char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
-/* We use this prefix tree to map the address space. */
-enum node_info_kind { DATA_PTR, INS_AND_BITS };
-struct node_info
-{
-	enum node_info_kind what;
-	union
-	{
-		const void *data_ptr;
-		struct 
-		{
-			struct insert ins;
-			unsigned is_object_start:1;
-			unsigned npages:20;
-			unsigned obj_offset:7;
-		} ins_and_bits;
-	} un;
-};
+
 typedef uint16_t mapping_num_t;
 mapping_num_t *l0index __attribute__((visibility("hidden")));
 extern _Bool initialized_maps;
-struct prefix_tree_node {
-	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC
-	struct node_info info;
-};
+
+/* FIXME: rename to __liballocs_ */
+_Bool mapping_flags_equal(mapping_flags_t f1, mapping_flags_t f2);
+
 void __liballocs_init_l0(void) __attribute__((visibility("protected")));
-struct prefix_tree_node *prefix_tree_add(void *base, size_t s, unsigned kind, const void *arg) __attribute__((visibility("hidden")));
-void prefix_tree_add_sloppy(void *base, size_t s, unsigned kind, const void *arg) __attribute__((visibility("hidden")));
-struct prefix_tree_node *prefix_tree_add_full(void *base, size_t s, unsigned kind, struct node_info *arg) __attribute__((visibility("hidden")));
-void prefix_tree_del(void *base, size_t s) __attribute__((visibility("hidden")));
-void prefix_tree_del_node(struct prefix_tree_node *n) __attribute__((visibility("hidden")));
-int prefix_tree_node_exact_match(struct prefix_tree_node *n, void *begin, void *end) __attribute__((visibility("hidden")));
+struct mapping_info *mapping_add(void *base, size_t s, mapping_flags_t f, const void *arg) __attribute__((visibility("hidden")));
+void mapping_add_sloppy(void *base, size_t s, mapping_flags_t f, const void *arg) __attribute__((visibility("hidden")));
+struct mapping_info *mapping_add_full(void *base, size_t s, struct mapping_info *arg) __attribute__((visibility("hidden")));
+void mapping_del(void *base, size_t s) __attribute__((visibility("hidden")));
+void mapping_del_node(struct mapping_info *n) __attribute__((visibility("hidden")));
+int mapping_lookup_exact(struct mapping_info *n, void *begin, void *end) __attribute__((visibility("hidden")));
 size_t
-prefix_tree_get_overlapping_mappings(struct prefix_tree_node **out_begin, 
+mapping_get_overlapping(struct mapping_info **out_begin, 
 		size_t out_size, void *begin, void *end) __attribute__((visibility("hidden")));
 // these ones are public, so use protected visibility
 void __liballocs_add_missing_maps(void) __attribute__((visibility("protected")));
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));;
 void __liballocs_print_mappings_to_stream_err(void) __attribute__((visibility("protected")));
-_Bool node_info_has_data_ptr_equal_to(unsigned kind, const struct node_info *info, const void *data_ptr) __attribute((visibility("hidden")));
+_Bool mapping_info_has_data_ptr_equal_to(mapping_flags_t f, const struct mapping_info *info, const void *data_ptr) __attribute((visibility("hidden")));
 
-struct prefix_tree_node *
-prefix_tree_deepest_match_from_root(void *base, struct prefix_tree_node ***out_prev_ptr) __attribute__((visibility("hidden")));
-struct prefix_tree_node *
-prefix_tree_bounds(const void *ptr, const void **begin, const void **end) __attribute__((visibility("hidden")));
+struct mapping_info *
+mapping_lookup(void *base) __attribute__((visibility("hidden")));
+struct mapping_info *
+mapping_bounds(const void *ptr, const void **begin, const void **end) __attribute__((visibility("hidden")));
 int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data) __attribute__((visibility("hidden")));
 
 extern char exe_fullname[4096];

@@ -14,6 +14,7 @@ typedef bool _Bool;
 #endif
 
 #include <sys/types.h>
+#include <link.h>
 #include "addrmap.h"
 #include "heap_index.h"
 
@@ -108,8 +109,8 @@ void __liballocs_addrlist_add(struct addrlist *l, void *addr);
 extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
 
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
-Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("hidden")));
-		
+Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("protected")));
+
 extern void *__liballocs_main_bp; // beginning of main's stack frame
 
 extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
@@ -236,8 +237,19 @@ void *__liballocs_my_typeobj(void) __attribute__((weak));
 
 extern struct uniqtype __uniqtype__void/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype__int/* __attribute__((weak))*/;
+extern struct uniqtype __uniqtype__unsigned_int/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype__signed_char/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype__unsigned_char/* __attribute__((weak))*/;
+extern struct uniqtype __uniqtype____FUN_FROM___FUN_TO_unsigned_long_int /* __attribute__((weak))*/;
+#define __liballocs_uniqtype_of_typeless_functions __uniqtype____FUN_FROM___FUN_TO_unsigned_long_int
+extern struct uniqtype __uniqtype__long_int;
+extern struct uniqtype __uniqtype__unsigned_long_int;
+extern struct uniqtype __uniqtype__short_int;
+extern struct uniqtype __uniqtype__short_unsigned_int;
+extern struct uniqtype __uniqtype____PTR_void;
+extern struct uniqtype __uniqtype____PTR_signed_char;
+extern struct uniqtype __uniqtype__float;
+extern struct uniqtype __uniqtype__double;
 
 struct liballocs_err;
 extern struct liballocs_err __liballocs_err_stack_walk_step_failure;
@@ -250,6 +262,9 @@ extern struct liballocs_err __liballocs_err_unrecognised_static_object;
 extern struct liballocs_err __liballocs_err_object_of_unknown_storage;
 
 const char *__liballocs_errstring(struct liballocs_err *err);
+
+/* We define a dladdr that caches stuff. */
+Dl_info dladdr_with_cache(const void *addr);
 
 #define DEFAULT_ATTRS __attribute__((visibility("protected")))
 
@@ -266,6 +281,36 @@ extern INLINE _Bool __liballocs_find_matching_subobject(signed target_offset_wit
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
 		signed *p_cumulative_offset_searched) DEFAULT_ATTRS __attribute__((hot));
 /* Some inlines follow at the bottom. */
+
+/* Public API for l0index / mappings. */
+typedef struct mapping_flags
+{
+	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC, ...
+	unsigned r:1;
+	unsigned w:1;
+	unsigned x:1;
+} mapping_flags_t;
+_Bool mapping_flags_equal(mapping_flags_t f1, mapping_flags_t f2);
+enum mapping_info_kind { DATA_PTR, INS_AND_BITS };
+union mapping_info_union
+{
+	const void *data_ptr;
+	struct 
+	{
+		struct insert ins;
+		unsigned is_object_start:1;
+		unsigned npages:20;
+		unsigned obj_offset:7;
+	} ins_and_bits;
+};
+struct mapping_info {
+	struct mapping_flags f;
+	enum mapping_info_kind what;
+	/* PRIVATE i.e. change-prone impl details beyond here! */
+	union mapping_info_union un;
+};
+/* Will be defined as an alias of mapping_lookup. */
+struct mapping_info *__liballocs_mapping_lookup(const void *obj);
 
 /* our own private assert */
 extern inline void

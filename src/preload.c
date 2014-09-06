@@ -31,8 +31,8 @@ size_t __wrap_malloc_usable_size(void *ptr) __attribute__((visibility("protected
 #include "liballocs_private.h"
 
 /* We should be safe to use it once malloc is initialized. */
-// #define safe_to_use_prefix_tree (__liballocs_is_initialized)
-#define safe_to_use_prefix_tree (l0index)
+// #define safe_to_use_mappings (__liballocs_is_initialized)
+#define safe_to_use_mappings (l0index)
 #define safe_to_call_dlsym (safe_to_call_malloc)
 
 static const char *filename_for_fd(int fd)
@@ -111,7 +111,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	 * in these cases.
 	 */
 
-	if (!safe_to_use_prefix_tree || !safe_to_call_dlsym)
+	if (!safe_to_use_mappings || !safe_to_call_dlsym)
 	{
 		// call via syscall and skip hooking logic
 		return (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
@@ -127,15 +127,14 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	void *ret = orig_mmap(addr, length, prot, flags, fd, offset);
 	if (ret != MAP_FAILED)
 	{
+		mapping_flags_t f = { .kind = (fd == -1) ? HEAP : MAPPED_FILE, 
+			.r = (flags & PROT_READ), 
+			.w = (flags & PROT_WRITE),
+			.x = (flags & PROT_EXEC) 
+		};
+		const char *data_ptr = (fd == -1) ? NULL : filename_for_fd(fd);
 		/* Add to the prefix tree */
-		if (fd != -1)
-		{
-			prefix_tree_add(ret, ROUND_UP_TO_PAGE_SIZE(length), MAPPED_FILE, filename_for_fd(fd));
-		}
-		else
-		{
-			prefix_tree_add(ret, ROUND_UP_TO_PAGE_SIZE(length), HEAP, NULL);
-		}
+		mapping_add(ret, ROUND_UP_TO_PAGE_SIZE(length), f, data_ptr);
 	}
 	return ret;
 }
@@ -151,13 +150,13 @@ int munmap(void *addr, size_t length)
 		assert(orig_munmap);
 	}
 	
-	if (!safe_to_use_prefix_tree) return orig_munmap(addr, length);
+	if (!safe_to_use_mappings) return orig_munmap(addr, length);
 	else
 	{
 		int ret = orig_munmap(addr, length);
 		if (ret == 0)
 		{
-			prefix_tree_del(addr, ROUND_UP_TO_PAGE_SIZE(length));
+			mapping_del(addr, ROUND_UP_TO_PAGE_SIZE(length));
 		}
 		return ret;
 	}
@@ -185,7 +184,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 			? orig_mremap(old_addr, old_size, new_size, flags, new_address) \
 			: orig_mremap(old_addr, old_size, new_size, flags))
 	
-	if (!safe_to_use_prefix_tree) 
+	if (!safe_to_use_mappings) 
 	{
 		return orig_call;
 	}
@@ -194,12 +193,11 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 		void *ret = orig_call;
 		if (ret != MAP_FAILED)
 		{
-			struct prefix_tree_node *cur = prefix_tree_deepest_match_from_root(old_addr, NULL);
+			struct mapping_info *cur = mapping_lookup(old_addr);
 			assert(cur != NULL);
-			unsigned kind = cur->kind;
-			struct node_info saved = cur->info;
-			prefix_tree_del(old_addr, ROUND_UP_TO_PAGE_SIZE(old_size));
-			prefix_tree_add_full(ret, ROUND_UP_TO_PAGE_SIZE(new_size), kind, &saved);
+			struct mapping_info saved = *cur;
+			mapping_del(old_addr, ROUND_UP_TO_PAGE_SIZE(old_size));
+			mapping_add_full(ret, ROUND_UP_TO_PAGE_SIZE(new_size), &saved);
 		}
 		return ret;
 	}
@@ -254,22 +252,28 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 				 * the data ptr is irrelevant. Still, we should use the STATIC
 				 * memory kind for bss.
 				 */
-				struct prefix_tree_node *added = prefix_tree_add(
+				
+				mapping_flags_t f = { .kind = STATIC, 
+					.r = (info->dlpi_phdr[i].p_flags & PF_R), 
+					.w = (info->dlpi_phdr[i].p_flags & PF_W), 
+					.x = (info->dlpi_phdr[i].p_flags & PF_X)
+				};
+				
+				struct mapping_info *added = mapping_add(
 					(void*) rounded_down_base, 
 					rounded_up_end_of_file - rounded_down_base,
-					STATIC, data_ptr);
+					f, data_ptr);
 				// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
-				if (added && added->kind != STATIC) added->kind = STATIC;
+				if (added && added->f.kind != STATIC) added->f.kind = STATIC;
 				
 				if (rounded_up_end_of_mem > rounded_up_end_of_file)
 				{
-					struct prefix_tree_node *added = prefix_tree_add(
+					struct mapping_info *added = mapping_add(
 						(void*) rounded_up_end_of_file, 
 						rounded_up_end_of_mem - rounded_up_end_of_file,
-						STATIC, NULL);
+						f, NULL);
 					// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
-					if (added && added->kind != STATIC) added->kind = STATIC;
-					
+					if (added && added->f.kind != STATIC) added->f.kind = STATIC;
 				}
 			}
 		}
@@ -371,7 +375,7 @@ int dlclose(void *handle)
 		assert(orig_dlclose);
 	}
 	
-	if (!safe_to_use_prefix_tree) return orig_dlclose(handle);
+	if (!safe_to_use_mappings) return orig_dlclose(handle);
 	else
 	{
 		char *copied_filename = strdup(((struct link_map *) handle)->l_name);
@@ -400,7 +404,7 @@ int dlclose(void *handle)
 				// yes, it was unloaded
 				for (int i = 0; i < mappings.nmappings; ++i)
 				{
-					prefix_tree_del(mappings.mappings[i].base, 
+					mapping_del(mappings.mappings[i].base, 
 						mappings.mappings[i].size);
 				}
 			}

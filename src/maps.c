@@ -176,19 +176,16 @@ void __liballocs_add_missing_maps(void)
 			 * state by throwing them away, cf. heap mapping extensions 
 			 * where we really want to keep what we know). */
 			#define MAX_OVERLAPPING 32
-			struct prefix_tree_node *overlapping[MAX_OVERLAPPING];
-			// struct prefix_tree_node **match_prevptr;
-			//match_first
-			// = prefix_tree_deepest_match_from_root(obj, &match_prevptr);
-			//struct prefix_tree_node *match_second
-			// = prefix_tree_deepest_match_from_root(obj_lastbyte, &match_prevptr);
-			size_t n_overlapping = prefix_tree_get_overlapping_mappings(
+			struct mapping_info *overlapping[MAX_OVERLAPPING];
+			size_t n_overlapping = mapping_get_overlapping(
 					&overlapping[0], MAX_OVERLAPPING, obj, (char*) obj + size);
 			assert(n_overlapping < MAX_OVERLAPPING); // '<=' would mean we might have run out of space
 			
 			// if we have nothing overlapping, we should definitely add it....
 			_Bool need_to_add = (n_overlapping == 0);
-					
+			
+			mapping_flags_t f = { .kind = kind, .r = (r == 'r'), .w = (w == 'w'), .x = (x == 'x') };
+			
 			/* Else some other number of overlapping mappings exists. */
 			for (unsigned i = 0; i < n_overlapping; ++i)
 			{
@@ -196,24 +193,24 @@ void __liballocs_add_missing_maps(void)
 				 * with the right kind and, where appropriate, filename. 
 				 * Note that the mappings's dimensions needn't be the same, because we merge
 				 * adjacent entries, etc.. */
-				if ((overlapping[i]->kind == kind
+				if ((mapping_flags_equal(overlapping[i]->f, f)
 						/* match STATIC and MAPPED_FILE interchangeably, because 
 						 * we can't always tell the difference */
-						|| (overlapping[i]->kind == STATIC && kind == MAPPED_FILE
-							|| overlapping[i]->kind == MAPPED_FILE && kind == STATIC
+						|| (overlapping[i]->f.kind == STATIC && f.kind == MAPPED_FILE
+							|| overlapping[i]->f.kind == MAPPED_FILE && f.kind == STATIC
 						)
 					)
-					&& (overlapping[i]->info.what != DATA_PTR 
+					&& (overlapping[i]->what != DATA_PTR 
 						|| // we do have a data ptr
-							node_info_has_data_ptr_equal_to(kind, &overlapping[i]->info, data_ptr))) continue;
+							mapping_info_has_data_ptr_equal_to(f, overlapping[i], data_ptr))) continue;
 				
 				need_to_add = 1;
 				
 				// if we got here, is this a different mapped file? it's clearly not mapped there any more
-				if (overlapping[i]->kind == STATIC || overlapping[i]->kind == MAPPED_FILE)
+				if (overlapping[i]->f.kind == STATIC || overlapping[i]->f.kind == MAPPED_FILE)
 				{
-					assert(overlapping[i]->info.what == DATA_PTR);
-					const char *existing_data_ptr = overlapping[i]->info.un.data_ptr;
+					assert(overlapping[i]->what == DATA_PTR);
+					const char *existing_data_ptr = overlapping[i]->un.data_ptr;
 					if ((data_ptr != NULL && existing_data_ptr == NULL)
 							|| (data_ptr == NULL && existing_data_ptr != NULL)
 							|| (data_ptr != NULL && existing_data_ptr != NULL && 
@@ -221,10 +218,10 @@ void __liballocs_add_missing_maps(void)
 					{
 						debug_printf(2, "a static or mapped-file mapping, kind %d, data_ptr \"%s\", overlapping %p-%p "
 								"seems to have gone away: now covered by kind %d, data_ptr \"%s\"\n",
-							overlapping[i]->kind, (const char *) existing_data_ptr, 
+							overlapping[i]->f.kind, (const char *) existing_data_ptr, 
 							obj, (char*) obj + size, 
-							kind, (const char *) data_ptr);
-						prefix_tree_del_node(overlapping[i]);
+							f.kind, (const char *) data_ptr);
+						mapping_del_node(overlapping[i]);
 						continue;
 					}
 					
@@ -233,7 +230,7 @@ void __liballocs_add_missing_maps(void)
 					 * when we try to add this it will still cause a problem. */
 					debug_printf(2, "skipping static or mapped-file mapping (\"%s\") "
 						"overlapping %p-%p and apparently already present\n",
-						(const char *) overlapping[i]->info.un.data_ptr, obj, (char*) obj + size);
+						(const char *) overlapping[i]->un.data_ptr, obj, (char*) obj + size);
 					goto continue_loop;
 				}
 			}
@@ -242,10 +239,10 @@ void __liballocs_add_missing_maps(void)
 			
 			/* We always add heap and stack because they're sloppier, and because 
 			 * our checks above didn't account for changes in size. */
-			if (need_to_add || kind == HEAP || kind == STACK)
+			if (need_to_add || f.kind == HEAP || f.kind == STACK)
 			{
-				if (kind == HEAP) prefix_tree_add_sloppy(obj, second - first, kind, data_ptr);
-				else prefix_tree_add(obj, second - first, kind, data_ptr);
+				if (f.kind == HEAP) mapping_add_sloppy(obj, second - first, f, data_ptr);
+				else mapping_add(obj, second - first, f, data_ptr);
 			}
 		} // end if size > 0
 continue_loop:
