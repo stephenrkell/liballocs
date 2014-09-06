@@ -91,7 +91,7 @@ let trim str =   if str = "" then "" else   let search_pos init p next =
     in
     String.sub str left (right - left + 1)   with   | Failure "empty" -> "" ;;
 
-let identFromString s = Str.global_replace (Str.regexp "[\t. /-]") "_" s
+let identFromString s = Str.global_replace (Str.regexp "[^a-zA-Z0-9_]") "_" s
 
 let rec canonicalizeBaseTypeStr s = 
  (* 'generated' from a table maintained in srk's libcxxgen  *)
