@@ -206,14 +206,22 @@ class CompilerWrapper:
             return 0
 
     def optionsToBuildOneObjectFile(self, sourceFile, outputFilename, argvWithoutOutputOptions):
-        return argvWithoutOutputOptions  ["-c", "-o", outputFilename, sourceFile]
+        return argvWithoutOutputOptions + ["-c", "-o", outputFilename, sourceFile]
 
     def buildOneObjectFile(self, sourceFile, outputFilename, argvWithoutOutputOptions):
         return self.runUnderlyingCompiler([sourceFile], 
             self.optionsToBuildOneObjectFile(sourceFile, outputFilename, argvWithoutOutputOptions))
     
     def runUnderlyingCompiler(self, sourceFiles, otherOptions):
-        commandAndArgs = self.getUnderlyingCompilerCommand(sourceFiles) + otherOptions
+        # HACK, FIXME, etc
+        #libraryArgs = [arg for arg in otherOptions if arg.startswith("-l") or arg.endswith(".a") \
+        #    or arg.endswith(".so")]
+        #nonLibraryArgs = [arg for arg in otherOptions if not arg in libraryArgs]
+        # NO NO NO -- this doesn't work, because we will disrupt the use of 
+        # things like "-Wl,--some-option", "-lallocs_noop", "-Wl,--some-option"
+        # (e.g. push/pop as-needed)
+        commandAndArgs = self.getUnderlyingCompilerCommand(sourceFiles) + \
+            otherOptions # nonLibraryArgs + libraryArgs
         self.debugMsg("Running " + " ".join(commandAndArgs) + "\n")
         ret1 = subprocess.call(commandAndArgs)
         return ret1
@@ -233,7 +241,7 @@ class CompilerWrapper:
             # compile to .o with the custom args
             # -- erase -shared etc, and erase "-o blah"
             outputFilename = self.makeObjectFileName(sourceFile)
-            ret1 = buildOneObjectFile(sourceFile, outputFilename, \
+            ret1 = self.buildOneObjectFile(sourceFile, outputFilename, \
                     argvWithoutOutputOptions + customArgs)
 
             if ret1 != 0:

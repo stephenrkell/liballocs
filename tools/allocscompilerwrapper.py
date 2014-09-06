@@ -285,9 +285,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                             linkArgs += [self.getLdLibBase()]
                         else: # FIXME: weak linkage one day; FIXME: don't clobber as-neededness
-                            # HACK: why do we need --as-needed? try without
-                            #linkArgs += [ "-Wl,--no-as-needed" ]
+                            # HACK: why do we need --as-needed? try without.
+                            # NO NO NO! linker chooses the path of weakness, i.e. instead of 
+                            # using symbols from _noop.so, uses 0 and doesn't depend on noop.
+                            # AHA: the GNU linker has this handy --push-state thing...
+                            linkArgs += [ "-Wl,--push-state", "-Wl,--no-as-needed" ]
                             linkArgs += [self.getLdLibBase() + "_noop"]
+                            linkArgs += [ "-Wl,--pop-state" ]
                     else:
                         # we're building a statically linked executable
                         if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
