@@ -7,6 +7,7 @@ void __assert_fail();
 void __liballocs_index_insert(void *new_userchunkaddr, unsigned long modified_size, 
 		const void *caller);
 void __liballocs_index_delete(void*);
+struct uniqtype; /* forward decl */
 
 /* This *must* match the size of 'struct insert' in heap_index! But we don't
  * include that header right now, to avoid perturbing the inclusion order

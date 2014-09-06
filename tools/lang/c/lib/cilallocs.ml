@@ -272,8 +272,19 @@ let getOrCreateUniqtypeGlobal m typename concreteType globals =
       in 
       (m, foundVar, globals)
   with Not_found -> 
+     let rec findStructUniqtype gs = match gs with 
+            [] -> raise Not_found
+          | g :: rest -> match g with 
+                GCompTagDecl(c, _) when c.cstruct && c.cname = "uniqtype" -> TComp(c, [])
+              | GCompTag(c, _) when c.cstruct && c.cname = "uniqtype" -> 
+                    debug_print 1 "strange; uniqtype is defined\n"; TComp(c, [])
+              | _ -> findStructUniqtype rest
+     in
+     let typeStructUniqtype = try findStructUniqtype globals
+        with Not_found -> failwith "no struct uniqtype in file; why is libcrunch_cil_inlines not included?"
+     in
      let newGlobal = 
-       let tempGlobal = makeGlobalVar typename (TInt(IInt, [])); 
+       let tempGlobal = makeGlobalVar typename typeStructUniqtype; 
        in 
        tempGlobal.vstorage <- Extern;
        tempGlobal.vattr <- [Attr("weak", [])];
