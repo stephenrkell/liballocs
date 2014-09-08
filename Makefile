@@ -1,7 +1,7 @@
 default: src lib tools tests
 
 .PHONY: src
-src: | tools
+src: tools
 	$(MAKE) -C src
 
 .PHONY: tools
