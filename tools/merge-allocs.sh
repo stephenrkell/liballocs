@@ -3,8 +3,6 @@
 # We merge the binary-derived allocsite information from objdumpallocs
 # with the precise source-level allocsite information from dumpallocs.ml.
 
-. ~/lib/bash/util
-
 # We can't easily predict where the .allocs file will be for a given source file.
 # (see dumpallocs.ml for the reason).
 
