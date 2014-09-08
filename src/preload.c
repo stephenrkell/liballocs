@@ -16,10 +16,12 @@
  * We want to be very careful with the visibility of this symbol, so that references
  * we make always go straight to our definition, not via the PLT. So declare it
  * as protected. NOTE that it will always make at least one call through the PLT, 
- * because the underlying logic is in libc.  */
+ * because the underlying logic is in libc. FIXME: all this is messed up and doesn't
+ * seem to work. What we want is to avoid two PLT indirections (one is unavoidable). */
 size_t malloc_usable_size(void *ptr) /*__attribute__((visibility("protected")))*/;
 size_t __real_malloc_usable_size(void *ptr) /*__attribute__((visibility("protected")))*/;
 size_t __wrap_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
+size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -63,7 +65,13 @@ static const char *filename_for_fd(int fd)
  * So I think the differences are only on 32-bit platforms. 
  * For now, just alias mmap64 to mmap. */
 
+/* Stop gcc from tail-call-opt'ing the __mallochooks_ call, because 
+ * it has made it impossible to debug linkage problems. */
+#pragma GCC optimize(push)
+#pragma GCC optimize("no-optimize-sibling-calls")
+
 size_t __wrap_malloc_usable_size (void *ptr) __attribute__((visibility("protected")));
+size_t malloc_usable_size (void *ptr) __attribute__((alias("__wrap_malloc_usable_size"),visibility("default")));
 size_t __wrap_malloc_usable_size (void *ptr)
 {
 	/* We use this all the time in heap_index. 
@@ -92,14 +100,16 @@ size_t __wrap_malloc_usable_size (void *ptr)
 		__asm__("movq %%rsp, %0\n" : "=r"(sp));
 	#endif
 
-	_Bool is_stack = (get_object_memory_kind(ptr) == STACK);
+	_Bool is_stack = (__liballocs_get_memory_kind(ptr) == STACK);
 	
 	if (is_stack)
 	{
 		return *(((unsigned long *) ptr) - 1);
 	}
-	else return __real_malloc_usable_size(ptr);
+	else return //__real_malloc_usable_size(ptr);
+       	__mallochooks_malloc_usable_size(ptr);
 }
+#pragma GCC optimize(pop)
 
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
