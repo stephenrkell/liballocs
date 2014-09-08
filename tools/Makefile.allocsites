@@ -49,12 +49,10 @@ $(ALLOCSITES_BASE)$(ALLOCSITES_BASE)/%:
 	false
 
 $(ALLOCSITES_BASE)/%.srcallocs: $(ALLOCSITES_BASE)/%.objallocs
-	mkdir -p $$(dirname "$@")
 	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
 	test -e "$@"
 
 $(ALLOCSITES_BASE)/%.allocs: $(ALLOCSITES_BASE)/%.objallocs $(ALLOCSITES_BASE)/%.srcallocs
-	mkdir -p $$(dirname "$@")
 	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
 	test -e "$@"
 
