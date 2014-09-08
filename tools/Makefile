@@ -7,7 +7,11 @@ LDLIBS += -lallocstool -ldwarfidl -lantlr3c -lcxxgen -ldwarfpp -ldwarf -lboost_r
 
 CPP_SRC := $(wildcard *.cpp)
 
-default: liballocstool.a dumptypes allocsites usedtypes find-allocated-type-size
+default: liballocstool.a dumptypes allocsites usedtypes find-allocated-type-size lang
+
+.PHONY: lang
+lang:
+	for dir in $(wildcard lang/*); do if [ -e $$dir/Makefile ]; then $(MAKE) -C $$dir; fi; done
 
 .PHONY: clean
 clean:
