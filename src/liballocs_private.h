@@ -31,6 +31,14 @@ typedef bool _Bool;
 // mappings over 4GB in size are assumed to be memtables and are ignored
 #define BIGGEST_MAPPING (1ull<<32)
 
+#define MAPPING_BASE_FROM_PHDR_VADDR(base_addr, vaddr) \
+   (ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr)))
+#define MAPPING_END_FROM_PHDR_VADDR(base_addr, vaddr, memsz) \
+	(ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
+
+/* The biggest virtual address that we might find in an executable image. */
+#define BIGGEST_SANE_EXECUTABLE_VADDR  (1ull<<31)
+
 #define PAGENUM(p) (((uintptr_t) (p)) >> LOG_PAGE_SIZE)
 #define ADDR_OF_PAGENUM(p) ((const void *) ((p) << LOG_PAGE_SIZE))
 

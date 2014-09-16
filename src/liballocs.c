@@ -717,6 +717,27 @@ static void print_exit_summary(void)
 	}
 }
 
+int biggest_vaddr_cb(struct dl_phdr_info *info, size_t size, void *data)
+{
+	uintptr_t *biggest_seen = (uintptr_t *) data;
+	
+	if (info && info->dlpi_phdr)
+	{
+		/* Add together this phdr's vaddr and memsz. */
+		uintptr_t max_plus_one = info->dlpi_phdr->p_vaddr + info->dlpi_phdr->p_memsz;
+		if (max_plus_one > *biggest_seen) *biggest_seen = max_plus_one;
+	}
+}
+
+void *biggest_vaddr_in_obj(void *handle)
+{
+	uintptr_t biggest_seen = 0;
+	
+	dl_iterate_phdr(biggest_vaddr_cb, &biggest_seen);
+			
+	return (void*) biggest_seen;
+}
+
 /* This is *not* a constructor. We don't want to be called too early,
  * because it might not be safe to open the -uniqtypes.so handle yet.
  * So, initialize on demand. */
@@ -778,11 +799,13 @@ int __liballocs_global_init(void)
 	 */
 
 	// grab the executable's end address
-	dlerror();
+	// we used to try dlsym()'ing "_end" but this doesn't work! 
+	// Not all executables have _end and _begin exported as dynamic syms
 	void *executable_handle = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
 	assert(executable_handle != NULL);
-	__addrmap_executable_end_addr = dlsym(executable_handle, "_end");
+	__addrmap_executable_end_addr = biggest_vaddr_in_obj(executable_handle);
 	assert(__addrmap_executable_end_addr != 0);
+	assert(__addrmap_executable_end_addr < BIGGEST_SANE_EXECUTABLE_VADDR);
 	
 	// grab the executable's basename
 	ssize_t readlink_ret = readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);

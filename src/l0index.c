@@ -684,12 +684,15 @@ void mapping_del(void *base, size_t s)
 	unsigned long end_pagenum = PAGENUM((char*)base + s);
 	mapping_num_t mapping_num;
 	// if we get mapping num 0 at first, try again after forcing __liballocs_init_l0()
-	do
+	/* We might span multiple mappings, because munmap() is like that. */
+	mapping_num = l0index[PAGENUM(base)];
+	if (mapping_num == 0)
 	{
-		/* We might span multiple mappings, because munmap() is like that. */
+		__liballocs_init_l0();
 		mapping_num = l0index[PAGENUM(base)];
+		/* Give up if we still can't get it. */
+		if (mapping_num == 0) return;
 	}
-	while (mapping_num == 0 && (!initialized_maps ? (__liballocs_init_l0(), 1) : 0));
 
 	do
 	{

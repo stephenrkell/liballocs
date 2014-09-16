@@ -33,7 +33,7 @@ CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS)
 # Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
 DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
 
-default: liballocs_preload.so liballocs_preload.a liballocs_exe.a liballocs_noop.so liballocs_noop.o liballocs.a
+default: liballocs_preload.so liballocs_preload.a liballocs_exe.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
 
 NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
 FAST_CFLAGS += -fpic -flto -ffat-lto-objects -O4 -DNDEBUG
@@ -130,8 +130,11 @@ liballocs_preload.so: liballocs_preload.a
 liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	ar r "$@" $+ 
 
-liballocs_exe.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
-	ar r "$@" $+ 
+preload-wrap.o: preload.o
+	objcopy --strip-symbol malloc_usable_size "$<" "$@"
+
+liballocs_exe.a: $(MAIN_OBJS) preload-wrap.o $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
+	rm -f "$@" && ar r "$@" $+ 
 
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
@@ -140,7 +143,10 @@ liballocs_nomemtable_preload.so: $(MAIN_OBJS_NOMEMTABLE) $(PRELOAD_OBJS) $(FAKE_
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
 # this version lacks preload stuff
-liballocs.a: $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ)
+liballocs.a: $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ) $(filter-out malloc%,$(HOOKS_PRELOAD_OBJS))
+	ar r "$@" $+
+
+liballocs_noop.a: noop.o
 	ar r "$@" $+
 
 liballocs.so: liballocs.a

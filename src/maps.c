@@ -11,13 +11,13 @@
 #include "liballocs_private.h"
 
 _Bool initialized_maps __attribute__((visibility("hidden")));
-// static _Bool trying_to_initialize;
+static _Bool trying_to_initialize;
 
 void __liballocs_init_l0(void)
 {
-	if (!initialized_maps /* && !trying_to_initialize */)
+	if (!initialized_maps && !trying_to_initialize)
 	{
-		// trying_to_initialize = 1;
+		trying_to_initialize = 1;
 		/* First use dl_iterate_phdr to check that all library mappings are in the tree 
 		 * with a STATIC kind. Since we hook dlopen(), at least from the point where we're
 		 * initialized, we should only have to do this on startup.  */
@@ -26,8 +26,92 @@ void __liballocs_init_l0(void)
 		/* Now fill in the rest from /proc. */
 		__liballocs_add_missing_maps();
 		initialized_maps = 1;
-		// trying_to_initialize = 0;
+		trying_to_initialize = 0;
 	}
+}
+
+__attribute__((visibility("hidden")))
+int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
+{
+	static _Bool running;
+	/* HACK: if we have an instance already running, quit early. */
+	if (running) return 1;
+	running = 1;
+	const char *filename = (const char *) data;
+	if (filename == NULL || 0 == strcmp(filename, info->dlpi_name))
+	{
+		// this is the file we care about, so iterate over its phdrs
+		for (int i = 0; i < info->dlpi_phnum; ++i)
+		{
+			// if this phdr's a LOAD
+			if (info->dlpi_phdr[i].p_type == PT_LOAD)
+			{
+				// adjust start/end to be multiples of the page size
+				uintptr_t rounded_down_base = MAPPING_BASE_FROM_PHDR_VADDR(info->dlpi_addr, info->dlpi_phdr[i].p_vaddr);
+				uintptr_t rounded_up_end_of_file = MAPPING_END_FROM_PHDR_VADDR(info->dlpi_addr, 
+						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_filesz);
+				uintptr_t rounded_up_end_of_mem = MAPPING_END_FROM_PHDR_VADDR(info->dlpi_addr, 
+						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_memsz);
+				// add it to the tree
+				const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, 
+					(void*) info->dlpi_addr);
+				// HACK HACK HACK HACK: memory leak: please don't strdup
+				char *data_ptr = dynobj_name ? strdup(dynobj_name) : NULL;
+
+				/* If this mapping has memsz bigger than filesz, the memory kind
+				 * should still be STATIC. 
+				 * 
+				 * PROBLEM: if we create it from the maps file, it will be HEAP
+				 * because we can't tell that it's a STATIC file's bss.
+				 * BUT we hope that later, HEAP will get rewritten to STATIC.
+				 * We do this below, i.e. whenever we iterate over all loaded objs'
+				 * mappings. We arrange that we always do this.
+				 * 
+				 * So all we need to do is arrange that the bss and file-backed
+				 * parts of the mappings we create here are created separately,
+				 * so that the bss part does not have a data_ptr (but is still
+				 * STATIC). This will prevent bad coalescings that confuse
+				 * us later.
+				 * 
+				 * Recall: only the memory kind matters for our metadata;
+				 * the data ptr is irrelevant. Still, we should use the STATIC
+				 * memory kind for bss.
+				 */
+				
+				mapping_flags_t f = { .kind = STATIC, 
+					.r = (info->dlpi_phdr[i].p_flags & PF_R), 
+					.w = (info->dlpi_phdr[i].p_flags & PF_W), 
+					.x = (info->dlpi_phdr[i].p_flags & PF_X)
+				};
+				
+				struct mapping_info *added = mapping_add(
+					(void*) rounded_down_base, 
+					rounded_up_end_of_file - rounded_down_base,
+					f, data_ptr);
+				// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
+				if (added && added->f.kind != STATIC) added->f.kind = STATIC;
+				
+				if (rounded_up_end_of_mem > rounded_up_end_of_file)
+				{
+					struct mapping_info *added = mapping_add(
+						(void*) rounded_up_end_of_file, 
+						rounded_up_end_of_mem - rounded_up_end_of_file,
+						f, NULL);
+					// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
+					if (added && added->f.kind != STATIC) added->f.kind = STATIC;
+				}
+			}
+		}
+		
+		// if we're looking for a single file, can stop now
+		if (filename != NULL) return 1;
+	}
+
+	running = 0;
+	
+	// keep going
+	return 0;
+	
 }
 
 static ssize_t get_a_line(char *buf, size_t size, FILE *stream)
