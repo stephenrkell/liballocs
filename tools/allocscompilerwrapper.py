@@ -149,9 +149,19 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # we need to export-dynamic, s.t. __is_a is linked from liballocs
             linkArgs += ["-Wl,--export-dynamic"]
             # if we're building an executable, append the magic objects
-            # -- and link with the noop *shared* library, to be interposable
-            if not "-shared" in passedThroughArgs \
-                and not "-G" in passedThroughArgs:
+            # -- and link with the noop *shared* library, to be interposable.
+            # Recall that if we're building a shared object, we don't need to
+            # link in the alloc stubs, because we will use symbol interposition
+            # to get control into our stubs. OH, but wait. We still have custom
+            # allocation functions, and we want them to set the alloc site. 
+            # So we do want to link in the wrappers. Do we need to rewrite
+            # references to __real_X after this?
+            if not "-r" in passedThroughArgs \
+                and not "-Wl,-r" in passedThroughArgs:
+                
+                # \
+                # and not "-shared" in passedThroughArgs \
+                # and not "-G" in passedThroughArgs:
 
                 # make a temporary file for the stubs
                 # -- we derive the name from the output binary, and bail if it's taken?
@@ -242,7 +252,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     # To do "mostly the right thing", we preprocess with 
                     # most of the user's options, 
                     # then compile with a more tightly controlled set
-                    stubs_pp_cmd = ["cc", "-E", "-o", stubs_pp, \
+                    extraFlags = []
+                    if "-shared" in passedThroughArgs \
+                        or "-G" in passedThroughArgs:
+                        extraFlags += ["-fPIC"]
+                    else:
+                        pass
+                    stubs_pp_cmd = ["cc", "-E"] + extraFlags + ["-o", stubs_pp, \
                         "-I" + self.getLibAllocsBaseDir() + "/tools"] \
                         + [arg for arg in passedThroughArgs if arg.startswith("-D")] \
                         + [stubsfile.name]
@@ -262,7 +278,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
                             % (stubs_pp, ret_stubs_sed))
                         exit(1)
-                    stubs_cc_cmd = ["cc", "-g", "-c", "-o", stubs_bin, \
+                    stubs_cc_cmd = ["cc", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
                         "-I" + self.getLibAllocsBaseDir() + "/tools", \
                         stubs_pp]
                     self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
@@ -279,7 +295,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
                     linkArgs += [stubs_bin]
                     linkArgs += ["-L" + self.getLinkPath()]
-                    if not "-static" in passedThroughArgs and not "-Bstatic" in passedThroughArgs:
+                    if not "-static" in passedThroughArgs and not "-Bstatic" in passedThroughArgs \
+                        and not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
                         # we're building a dynamically linked executable
                         linkArgs += ["-Wl,-rpath," + self.getRunPath()]
                         if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
@@ -302,19 +319,26 @@ class AllocsCompilerWrapper(CompilerWrapper):
                             linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + "_preload.a"]
                     
             else:
-                # We're building a shared library, so simply add liballocs_noop.o; 
-                # only link directly if we're disabling the preload approach
-                if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                    linkArgs += ["-L" + self.getLinkPath()]
-                    linkArgs += ["-Wl,-rpath," + self.getRunPath()]
+                if not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
+                    # We're building a shared library, so simply add liballocs_noop.o; 
+                    # only link directly if we're disabling the preload approach
                     if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                        linkArgs += [getLdLibBase()]
-                else: # FIXME: weak linkage one day....
-                    linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + "_noop.o"]
-                # note: we leave the shared library with 
-                # dangling dependencies on __wrap_
-                # and unused __real_
-
+                        linkArgs += ["-L" + self.getLinkPath()]
+                        linkArgs += ["-Wl,-rpath," + self.getRunPath()]
+                        if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
+                            linkArgs += [getLdLibBase()]
+                    else: # FIXME: weak linkage one day....
+                        linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + "_noop.o"]
+                    # note: we leave the shared library with 
+                    # dangling dependencies on __wrap_
+                    # and unused __real_
+                else:
+                    # we're building a relocatable object. Don't add anything, because
+                    # we'll get multiple definition errors. Instead assume that allocscc
+                    # will be used to link the eventual output, so that is the right time
+                    # to fill in the extra undefineds that we're inserting.
+                    pass
+            
             linkArgs += ["-ldl"]
 
         else:
@@ -356,27 +380,28 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         self.fixupDotO(outputFilename, None)
 
         else: # isLinkCommand()
-            # We've just output an object, so invoke make to collect the allocsites, 
-            # with our target name as the file we've just built, using ALLOCSITES_BASE 
-            # to set the appropriate prefix
-            if "ALLOCSITES_BASE" in os.environ:
-                baseDir = os.environ["ALLOCSITES_BASE"]
-            else:
-                baseDir = "/usr/lib/allocsites"
-            if os.path.exists(os.path.realpath(outputFile)):
-                targetNames = [baseDir + os.path.realpath(outputFile) + ext \
-                    for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
-                errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
+            if not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
+                # We've just output an object, so invoke make to collect the allocsites, 
+                # with our target name as the file we've just built, using ALLOCSITES_BASE 
+                # to set the appropriate prefix
+                if "ALLOCSITES_BASE" in os.environ:
+                    baseDir = os.environ["ALLOCSITES_BASE"]
+                else:
+                    baseDir = "/usr/lib/allocsites"
+                if os.path.exists(os.path.realpath(outputFile)):
+                    targetNames = [baseDir + os.path.realpath(outputFile) + ext \
+                        for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
+                    errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
 
-                ret2 = 42
-                with self.makeErrFile(errfilename, "w+") as errfile:
-                    ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
-                        "-f", "Makefile.allocsites"] +  targetNames, stderr=errfile, stdout=errfile)
-                    if (ret2 != 0 or "DEBUG_CC" in os.environ):
-                        self.print_errors(errfile)
-                return ret2
-            else:
-                return 1
+                    ret2 = 42
+                    with self.makeErrFile(errfilename, "w+") as errfile:
+                        ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
+                            "-f", "Makefile.allocsites"] +  targetNames, stderr=errfile, stdout=errfile)
+                        if (ret2 != 0 or "DEBUG_CC" in os.environ):
+                            self.print_errors(errfile)
+                    return ret2
+                else:
+                    return 1
 
     # expose base class methods to derived classes
     def isLinkCommand(self):

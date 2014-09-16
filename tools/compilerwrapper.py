@@ -122,7 +122,8 @@ class CompilerWrapper:
                 continue
             if num == 0:
                 continue # this means we have "allocscc" as the arg
-            if args[num].endswith('.o') or args[num].endswith('.a'):
+            # glibc builds some files with ".os" extensions
+            if args[num].endswith('.o') or args[num].endswith('.os') or args[num].endswith('.a'):
                 objectInputFiles += [args[num]]
                 continue
             if args[num].endswith('.so'):
