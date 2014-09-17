@@ -1,6 +1,6 @@
 DEPS := 
 
-CXXFLAGS += -std=c++0x -g -O0
+CXXFLAGS += -std=c++0x -g -O2
 CXXFLAGS += -Wno-deprecated-declarations # while we're using old libdwarfpp -- FIXME
 LDFLAGS += -L`pwd` -Wl,-R`pwd`
 LDLIBS += -lallocstool -ldwarfidl -lantlr3c -lcxxgen -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization -lc++fileno -lsrk31c++ -lelf
