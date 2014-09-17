@@ -1375,9 +1375,9 @@ struct insert *lookup_l01_object_info(const void *mem, void **out_object_start)
 	} while (!seen_object_starting_earlier
 		&& find_next_nonempty_bin(&cur_head, &index_region[0], &object_minimum_size)); 
 fail:
-	fprintf(stderr, "Heap index lookup failed with "
+	fprintf(stderr, "Heap index lookup failed for %p with "
 		"cur_head %p, object_minimum_size %zu, seen_object_starting_earlier %d\n",
-		cur_head, object_minimum_size, (int) seen_object_starting_earlier);
+		mem, cur_head, object_minimum_size, (int) seen_object_starting_earlier);
 	return NULL;
 	/* FIXME: use the actual biggest allocated object, not a guess. */
 }
