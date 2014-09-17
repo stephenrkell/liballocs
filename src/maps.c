@@ -79,9 +79,9 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 				 */
 				
 				mapping_flags_t f = { .kind = STATIC, 
-					.r = (info->dlpi_phdr[i].p_flags & PF_R), 
-					.w = (info->dlpi_phdr[i].p_flags & PF_W), 
-					.x = (info->dlpi_phdr[i].p_flags & PF_X)
+					.r = (_Bool) (info->dlpi_phdr[i].p_flags & PF_R), 
+					.w = (_Bool) (info->dlpi_phdr[i].p_flags & PF_W), 
+					.x = (_Bool) (info->dlpi_phdr[i].p_flags & PF_X)
 				};
 				
 				struct mapping_info *added = mapping_add(
@@ -98,7 +98,7 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 						rounded_up_end_of_mem - rounded_up_end_of_file,
 						f, NULL);
 					// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
-					if (added && added->f.kind != STATIC) added->f.kind = STATIC;
+					if (added && added->f.kind != HEAP) added->f.kind = HEAP;
 				}
 			}
 		}
@@ -188,7 +188,7 @@ void __liballocs_add_missing_maps(void)
 			void *obj = (void *)(uintptr_t) first;
 			void *obj_lastbyte = (void *)((uintptr_t) second - 1);
 			
-			enum object_memory_kind kind;
+			enum object_memory_kind kind = UNKNOWN;
 			void *data_ptr;
 			// if 'rest' is '/' it's static, else it's heap or thread
 			switch (rest[0])
@@ -280,8 +280,8 @@ void __liballocs_add_missing_maps(void)
 				if ((mapping_flags_equal(overlapping[i]->f, f)
 						/* match STATIC and MAPPED_FILE interchangeably, because 
 						 * we can't always tell the difference */
-						|| (overlapping[i]->f.kind == STATIC && f.kind == MAPPED_FILE
-							|| overlapping[i]->f.kind == MAPPED_FILE && f.kind == STATIC
+						|| ((overlapping[i]->f.kind == STATIC && f.kind == MAPPED_FILE)
+							|| (overlapping[i]->f.kind == MAPPED_FILE && f.kind == STATIC)
 						)
 					)
 					&& (overlapping[i]->what != DATA_PTR 
@@ -312,10 +312,14 @@ void __liballocs_add_missing_maps(void)
 					/* If we got here, it means we have a static mapping which compared 
 					 * equal in content, but might not have the same dimensions. Anyway, 
 					 * when we try to add this it will still cause a problem. */
-					debug_printf(2, "skipping static or mapped-file mapping (\"%s\") "
+					// DO NOT UNDERSTAND!
+					// Try just deleting this node. 
+					debug_printf(2, "skipping POSSIBLY NOT static or mapped-file mapping (\"%s\") "
 						"overlapping %p-%p and apparently already present\n",
 						(const char *) overlapping[i]->un.data_ptr, obj, (char*) obj + size);
-					goto continue_loop;
+					//goto continue_loop;
+					mapping_del_node(overlapping[i]);
+					continue;
 				}
 			}
 			
