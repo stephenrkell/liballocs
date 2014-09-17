@@ -242,7 +242,8 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def, 
 	std::set< std::string >& names_emitted,
 	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name,
-	bool emit_codeless_aliases)
+	bool emit_codeless_aliases,
+	bool emit_subobject_names /* = false */)
 {
 	/* Keep in sync with liballocs_private.h! */
 	if (emit_struct_def) cout << "struct uniqtype_cache_word \n\
@@ -281,6 +282,13 @@ struct uniqtype \n\
 		 * We make it void so that multiple definitions in the same final link do not
 		 * cause a problem. */
 		out << "\n/* uniqtype for void */\n";
+		if (emit_subobject_names)
+		{
+			out << "const char *" << mangle_typename(make_pair(string(""), string("void")))
+				<< "_subobj_names[] "
+				<< " __attribute__((weak,section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
+				<< "= { (void*)0 };\n";
+		}
 		out << "struct uniqtype " << mangle_typename(make_pair(string(""), string("void")))
 			<< " __attribute__((weak,section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
 			<< " = {\n\t" 
@@ -472,8 +480,41 @@ struct uniqtype \n\
 		/* We can also be *variable-length*. In this case we output a pos_maxoff of -1
 		 * i.e. maximum-unsigned-value. */
 		
+		if (emit_subobject_names)
+		{
+			out << "const char *" << mangled_name << "_subobj_names[] "
+				<< " __attribute__((weak,section (\".data." << mangled_name 
+					<< ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))";
+				if (i_vert->second.is_a<with_data_members_die>())
+				{
+					out << " = { ";
+					unsigned num = 0;
+					for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++num)
+					{
+						auto i_edge = i_i_edge->as_a<member_die>();
+						
+						if (i_edge.name_here())
+						{
+							string name = *i_edge.name_here();
+							out << "\"" << name << "\"";
+						}
+						else
+						{
+							/* FIXME: do something nicer */
+							out << "\"_" << num << "\"";
+						}
+						/* always output a comma */
+						out << ", ";
+					}
+					out << "(void*)0 };\n";
+				}
+				else
+				{
+					out << "= { (void*)0 };\n";
+				}
+		}
 		out << "struct uniqtype " << mangled_name
-			<< " __attribute__((section (\"" << ".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
+			<< " __attribute__((section (\".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
 			<< " = {\n\t" 
 			<< "{ 0, 0, 0 },\n\t"
 			<< "\"" << i_vert->first.second << "\",\n\t"
