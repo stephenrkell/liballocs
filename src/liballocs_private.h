@@ -1,6 +1,10 @@
 #ifndef LIBALLOCS_PRIVATE_H_
 #define LIBALLOCS_PRIVATE_H_
 
+#ifndef VIS
+#define VIS(v) //__attribute__((visibility( #v )))
+#endif
+
 /* x86_64 only, for now */
 #if !defined(__x86_64__) && !defined(X86_64)
 #error Unsupported architecture.
@@ -55,7 +59,7 @@ extern _Bool initialized_maps;
 /* FIXME: rename to __liballocs_ */
 _Bool mapping_flags_equal(mapping_flags_t f1, mapping_flags_t f2);
 
-void __liballocs_init_l0(void) __attribute__((visibility("protected")));
+void __liballocs_init_l0(void) VIS(protected);
 struct mapping_info *mapping_add(void *base, size_t s, mapping_flags_t f, const void *arg) __attribute__((visibility("hidden")));
 void mapping_add_sloppy(void *base, size_t s, mapping_flags_t f, const void *arg) __attribute__((visibility("hidden")));
 struct mapping_info *mapping_add_full(void *base, size_t s, struct mapping_info *arg) __attribute__((visibility("hidden")));
@@ -66,10 +70,12 @@ size_t
 mapping_get_overlapping(struct mapping_info **out_begin, 
 		size_t out_size, void *begin, void *end) __attribute__((visibility("hidden")));
 // these ones are public, so use protected visibility
-void __liballocs_add_missing_maps(void) __attribute__((visibility("protected")));
-enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));;
-void __liballocs_print_mappings_to_stream_err(void) __attribute__((visibility("protected")));
+void __liballocs_add_missing_maps(void) VIS(protected);
+enum object_memory_kind __liballocs_get_memory_kind(const void *obj) VIS(protected);;
+void __liballocs_print_mappings_to_stream_err(void) VIS(protected);
 _Bool mapping_info_has_data_ptr_equal_to(mapping_flags_t f, const struct mapping_info *info, const void *data_ptr) __attribute((visibility("hidden")));
+
+const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 
 struct mapping_info *
 mapping_lookup(void *base) __attribute__((visibility("hidden")));

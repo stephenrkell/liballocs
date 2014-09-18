@@ -1,6 +1,11 @@
 #ifndef LIBALLOCS_H_
 #define LIBALLOCS_H_
 
+#ifndef VIS
+#define VIS(v) //__attribute__((visibility( #v )))
+#endif
+
+
 #ifndef _GNU_SOURCE
 #warning "compilation unit is not _GNU_SOURCE; some features liballocs requires may not be available"
 #endif
@@ -100,6 +105,27 @@ extern unsigned long __liballocs_aborted_unrecognised_allocsite;
  * without the noop library being present.
  * 
  * FIXME: clean all this up.
+ * It gets even more complicated. Linking -lallocs causes client executables
+ * to have their own copies of various symbols, e.g.
+ * 0000000001679988 g     O .bss   0000000000000008              __liballocs_hit_stack_case
+ * -- because this is how executables refer to data in shared libraries!?
+ * I.e. executable code is not PIC: it uses the small code model. 
+ * Where do copy relocations come in?
+ * To refer to external data from the executable, we allocate space for it
+ * in the executable, and mark that space with COPY, meaning it gets a copy
+ * of whatever was in the shared library, and overrides that library's definition.
+ * 
+ * BUT the code that's generated in liballocs will use the local copy, 
+ * because we've used protected visibility to keep intra-library references
+ * local/fast.
+ * 
+ * We could try compiling node -fPIC and linking -fpie.
+ * 
+ * OR we could remove the "protected" visibility from liballocs-internal
+ * references.
+ * 
+ * AND/OR we could retain liballocs_exe to be the (slower) executable-safe
+ * version, and keep .a 
  */
 
 // stuff for use by extenders only -- direct/weak clients shouldn't use this
@@ -108,8 +134,7 @@ _Bool __liballocs_addrlist_contains(struct addrlist *l, void *addr);
 void __liballocs_addrlist_add(struct addrlist *l, void *addr);
 extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
 
-const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
-Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("protected")));
+Dl_info dladdr_with_cache(const void *addr) /*VIS(protected)*/;
 
 extern void *__liballocs_main_bp; // beginning of main's stack frame
 
@@ -241,7 +266,20 @@ extern struct uniqtype __uniqtype__unsigned_int/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype__signed_char/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype__unsigned_char/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype____FUN_FROM___FUN_TO_unsigned_long_int /* __attribute__((weak))*/;
-#define __liballocs_uniqtype_of_typeless_functions __uniqtype____FUN_FROM___FUN_TO_unsigned_long_int
+#define as_if_uniqtype_obj(p) (*(struct uniqtype *)(p))
+/* Thing that should be easy but is in fact hard: 
+ * get the address of the effective global definition of sym. 
+ * If it's copy-reloc'd into the executable from a shared lib, 
+ * and that shared-lib is *preloaded*, 
+ * we want the address of the executable's version,
+ * but RTLD_DEFAULT seems to return the 
+ * preloaded lib's. */
+#define __liballocs_uniqtype_of_typeless_functions \
+ (\
+     as_if_uniqtype_obj( \
+        dlsym(dlopen(NULL, RTLD_NOW), "__uniqtype____FUN_FROM___FUN_TO_uint$64") ?: \
+        dlsym(RTLD_DEFAULT,           "__uniqtype____FUN_FROM___FUN_TO_uint$64")) \
+ )
 extern struct uniqtype __uniqtype__long_int;
 extern struct uniqtype __uniqtype__unsigned_long_int;
 extern struct uniqtype __uniqtype__short_int;
@@ -266,7 +304,7 @@ const char *__liballocs_errstring(struct liballocs_err *err);
 /* We define a dladdr that caches stuff. */
 Dl_info dladdr_with_cache(const void *addr);
 
-#define DEFAULT_ATTRS __attribute__((visibility("protected")))
+#define DEFAULT_ATTRS VIS(protected)
 
 /* Iterate over all uniqtypes in a given shared object. */
 int __liballocs_iterate_types(void *typelib_handle, 

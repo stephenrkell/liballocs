@@ -5,7 +5,7 @@
 #include "liballocs.h"
 
 double __liballocs_blah;
-
+extern struct uniqtype __uniqtype____FUN_FROM___FUN_TO_unsigned_long_int;
 unsigned long __liballocs_uniqtypes_dummy() __attribute__((optimize("O0")));
 unsigned long __liballocs_uniqtypes_dummy()
 {
@@ -17,7 +17,7 @@ unsigned long __liballocs_uniqtypes_dummy()
 		&__uniqtype__unsigned_char,
 		&__uniqtype__int,
 		&__uniqtype__unsigned_int,
-		&__liballocs_uniqtype_of_typeless_functions,
+		&/*__liballocs_uniqtype_of_typeless_functions*/ __uniqtype____FUN_FROM___FUN_TO_unsigned_long_int,
 		&__uniqtype__long_int,
 		&__uniqtype__unsigned_long_int,
 		&__uniqtype__short_int,

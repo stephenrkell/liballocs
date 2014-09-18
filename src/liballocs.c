@@ -39,7 +39,7 @@ char exe_basename[4096] __attribute__((visibility("hidden")));
 char exe_fullname[4096] __attribute__((visibility("hidden")));
 FILE *stream_err __attribute__((visibility("hidden")));
 
-struct addrlist __liballocs_unrecognised_heap_alloc_sites __attribute__((visibility("protected")))
+struct addrlist __liballocs_unrecognised_heap_alloc_sites VIS(protected)
  = { 0, 0, NULL };
 
 static const char *allocsites_base;
@@ -47,13 +47,13 @@ static unsigned allocsites_base_len;
 
 
 
-int __liballocs_debug_level __attribute__((visibility("hidden")));
-_Bool __liballocs_is_initialized __attribute__((visibility("protected")));
-allocsmt_entry_type *__liballocs_allocsmt __attribute__((visibility("protected")));
+int __liballocs_debug_level VIS(protected);
+_Bool __liballocs_is_initialized VIS(protected);
+allocsmt_entry_type *__liballocs_allocsmt VIS(protected);
 
 // these two are defined in addrmap.h as weak
-void *__addrmap_executable_end_addr __attribute__((visibility("protected")));;
-unsigned long __addrmap_max_stack_size __attribute__((visibility("protected")));;
+void *__addrmap_executable_end_addr VIS(protected);
+unsigned long __addrmap_max_stack_size VIS(protected);
 
 // helper
 static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typestr);
@@ -65,21 +65,21 @@ struct liballocs_err
 {
 	const char *message;
 };
-struct liballocs_err __liballocs_err_stack_walk_step_failure __attribute__((visibility("protected"))) 
+struct liballocs_err __liballocs_err_stack_walk_step_failure VIS(protected) 
  = { "stack walk reached higher frame" };
-struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame __attribute__((visibility("protected"))) 
+struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame VIS(protected) 
  = { "stack walk reached higher frame" };
-struct liballocs_err __liballocs_err_stack_walk_reached_top_of_stack __attribute__((visibility("protected"))) 
+struct liballocs_err __liballocs_err_stack_walk_reached_top_of_stack VIS(protected) 
  = { "stack walk reached top-of-stack" };
-struct liballocs_err __liballocs_err_unknown_stack_walk_problem __attribute__((visibility("protected"))) 
+struct liballocs_err __liballocs_err_unknown_stack_walk_problem VIS(protected) 
  = { "unknown stack walk problem" };
-struct liballocs_err __liballocs_err_unindexed_heap_object __attribute__((visibility("protected"))) 
+struct liballocs_err __liballocs_err_unindexed_heap_object VIS(protected) 
  = { "unindexed heap object" };
-struct liballocs_err __liballocs_err_unrecognised_alloc_site __attribute__((visibility("protected"))) 
+struct liballocs_err __liballocs_err_unrecognised_alloc_site VIS(protected) 
  = { "unrecognised alloc site" };
-struct liballocs_err __liballocs_err_unrecognised_static_object __attribute__((visibility("protected"))) 
+struct liballocs_err __liballocs_err_unrecognised_static_object VIS(protected) 
  = { "unrecognised static object" };
-struct liballocs_err __liballocs_err_object_of_unknown_storage __attribute__((visibility("protected"))) 
+struct liballocs_err __liballocs_err_object_of_unknown_storage VIS(protected) 
  = { "object of unknown storage" };
 
 const char *__liballocs_errstring(struct liballocs_err *err)
@@ -127,7 +127,7 @@ static ElfW(Dyn) *get_dynamic_entry_from_handle(void *handle, unsigned long tag)
 	return get_dynamic_entry_from_section(((struct link_map *) handle)->l_ld, tag);
 }
 
-int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg) __attribute__((visibility("protected")));
+int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg) VIS(protected);
 int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg)
 {
 	/* Don't use dladdr() to iterate -- too slow! Instead, iterate 
@@ -176,7 +176,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 #ifndef DLADDR_CACHE_SIZE
 #define DLADDR_CACHE_SIZE 16
 #endif
-Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("protected")));
+Dl_info dladdr_with_cache(const void *addr) VIS(protected);
 Dl_info dladdr_with_cache(const void *addr)
 {
 	struct cache_rec { const void *addr; Dl_info info; };
@@ -648,7 +648,7 @@ static void consider_blacklisting(const void *obj)
 #endif
 }
 
-void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning of main's stack frame
+void *__liballocs_main_bp VIS(protected); // beginning of main's stack frame
 
 // const struct uniqtype *__liballocs_uniqtype_void; // remember the location of the void uniqtype
 // const struct uniqtype *__liballocs_uniqtype_signed_char;
@@ -663,14 +663,14 @@ void *__liballocs_main_bp __attribute__((visibility("protected"))); // beginning
 // 	)
 
 /* counters */
-unsigned long __liballocs_aborted_stack __attribute__((visibility("protected")));
-unsigned long __liballocs_aborted_static __attribute__((visibility("protected")));
-unsigned long __liballocs_aborted_unknown_storage __attribute__((visibility("protected")));
-unsigned long __liballocs_hit_heap_case __attribute__((visibility("protected")));
-unsigned long __liballocs_hit_stack_case __attribute__((visibility("protected")));
-unsigned long __liballocs_hit_static_case __attribute__((visibility("protected")));
-unsigned long __liballocs_aborted_unindexed_heap __attribute__((visibility("protected")));
-unsigned long __liballocs_aborted_unrecognised_allocsite __attribute__((visibility("protected")));
+unsigned long __liballocs_aborted_stack VIS(protected);
+unsigned long __liballocs_aborted_static VIS(protected);
+unsigned long __liballocs_aborted_unknown_storage VIS(protected);
+unsigned long __liballocs_hit_heap_case VIS(protected);
+unsigned long __liballocs_hit_stack_case VIS(protected);
+unsigned long __liballocs_hit_static_case VIS(protected);
+unsigned long __liballocs_aborted_unindexed_heap VIS(protected);
+unsigned long __liballocs_aborted_unrecognised_allocsite VIS(protected);
 
 static void print_exit_summary(void)
 {
@@ -935,7 +935,7 @@ static void *typeobj_handle_for_addr(void *caller)
 	return dlopen(types_libname, RTLD_NOW | RTLD_NOLOAD);
 }
 
-void *__liballocs_my_typeobj(void) __attribute__((visibility("protected")));
+void *__liballocs_my_typeobj(void) VIS(protected);
 void *__liballocs_my_typeobj(void)
 {
 	__liballocs_ensure_init();
@@ -947,7 +947,7 @@ void *__liballocs_my_typeobj(void)
 
 
 /* This is left out-of-line because it's inherently a slow path. */
-const void *__liballocs_typestr_to_uniqtype(const char *typestr) __attribute__((visibility("protected")));
+const void *__liballocs_typestr_to_uniqtype(const char *typestr) VIS(protected);
 const void *__liballocs_typestr_to_uniqtype(const char *typestr)
 {
 	if (!typestr) return NULL;
@@ -991,7 +991,7 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched) __attribute__((visibility("protected")));
+		signed *p_cumulative_offset_searched) VIS(protected);
 _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,

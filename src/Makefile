@@ -30,17 +30,19 @@ CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS)
 # really double-check that the following isn't faster? nope (4.64, 4.64, 4.59)
 #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
 
-# Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
-DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+#  Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
+#DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+DEFAULT_EXTRA_CFLAGS := -fPIC -O0 # -DNDEBUG
 
 default: liballocs_preload.so liballocs_preload.a liballocs_exe.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
 
 NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
-FAST_CFLAGS += -fpic -flto -ffat-lto-objects -O4 -DNDEBUG
-#FAST_CFLAGS += -fpic -O3 -DNDEBUG
+#FAST_CFLAGS += -fpic -flto -ffat-lto-objects -O4 -DNDEBUG
+FAST_CFLAGS += -fpic -O3 -DNDEBUG
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
-LDFLAGS += -Wl,-O2 -flto -fPIC 
+#LDFLAGS += -Wl,-O2 -flto -fPIC 
+LDFLAGS += -fPIC 
 
 # We define our own malloc_usable_size to catch the alloca case.
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size
@@ -125,7 +127,10 @@ event_hooks.o: CFLAGS += $(NON_FAST_CFLAGS)
 # BUT since they're generated per-build from the LIBALLOCS_ALLOC_FNS content, this doesn't work --
 # stick with stubs!
 liballocs_preload.so: liballocs_preload.a
-	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive -Wl,-Bstatic -L. "$<" -Wl,--no-whole-archive -Wl,-Bdynamic $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
+	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive -Wl,-Bstatic -L. "$<" \
+	   -Wl,--no-whole-archive -Wl,-Bdynamic $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS) 
+#	   -Wl,--defsym,__uniqtype____FUN_FROM___FUN_TO_unsigned_long_int=__uniqtype_40242f21___FUN_FROM___FUN_TO_uint\$$64
+
 
 liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	ar r "$@" $+ 
@@ -135,6 +140,9 @@ preload-wrap.o: preload.o
 
 liballocs_exe.a: $(MAIN_OBJS) preload-wrap.o $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
 	rm -f "$@" && ar r "$@" $+ 
+
+liballocs_exe.so: liballocs_exe.a
+	$(CC) -shared -Wl,--whole-archive "$<" -Wl,--no-whole-archive -Wl,--defsym,malloc_usable_size=__wrap_malloc_usable_size
 
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
