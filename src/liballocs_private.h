@@ -17,6 +17,7 @@ typedef bool _Bool;
 #include <link.h>
 #include <stdint.h>
 
+// #define VIS(str) __attribute__((visibility( #str )))
 #include "liballocs.h"
 
 /* FIXME: more portable */
@@ -47,6 +48,7 @@ dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 		__attribute__((visibility("hidden")));
 char execfile_name[4096] __attribute__((visibility("hidden")));
 char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
+const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 
 typedef uint16_t mapping_num_t;
 mapping_num_t *l0index __attribute__((visibility("hidden")));

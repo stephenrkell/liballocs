@@ -33,14 +33,14 @@ CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS)
 # Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
 DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
 
-default: liballocs_preload.so liballocs_preload.a liballocs_exe.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
+default: liballocs_preload.so liballocs_nonshared.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
 
 NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
 FAST_CFLAGS += -fpic -flto -ffat-lto-objects -O4 -DNDEBUG
 #FAST_CFLAGS += -fpic -O3 -DNDEBUG
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
-LDFLAGS += -Wl,-O2 -flto -fPIC 
+LDFLAGS += -Wl,-O2 -flto -Bsymbolic-functions -fPIC 
 
 # We define our own malloc_usable_size to catch the alloca case.
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size
@@ -124,17 +124,54 @@ event_hooks.o: CFLAGS += $(NON_FAST_CFLAGS)
 # HMM. We still have to --wrap the allocation funcs, but we could put the wrappers in the preload lib...
 # BUT since they're generated per-build from the LIBALLOCS_ALLOC_FNS content, this doesn't work --
 # stick with stubs!
-liballocs_preload.so: liballocs_preload.a
-	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive -Wl,-Bstatic -L. "$<" -Wl,--no-whole-archive -Wl,-Bdynamic $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
-liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
-	ar r "$@" $+ 
+# What libraries do we build?
+# 
+# liballocs_preload.so -- the main binary
+# liballocs.so         -- nasty linker script for clients, working around uniqueness problem
+# liballocs_nonshared.a -- just uniqtypes; linker script points to this, s.t. client exes (-lallocs) get this linked in statically (uniqtypes)
+# liballocs.a          -- the main binary usable for statically-linked exes -- no uniqueness problem
+# liballocs_noop.so     -- non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
+# liballocs_noop.o      -- non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
+#
+# What do client solibs get?
+# Easiest is just to treat them like exes. They will get their own copy 
+# of the basic uniqtypes, but this will get uniqued as appropriate.
 
-preload-wrap.o: preload.o
-	objcopy --strip-symbol malloc_usable_size "$<" "$@"
+liballocs_preload.so: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
+	$(CC) $(CFLAGS) -shared -o "$@" $+ $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
-liballocs_exe.a: $(MAIN_OBJS) preload-wrap.o $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
-	rm -f "$@" && ar r "$@" $+ 
+liballocs_nonshared.a: uniqtypes.o
+	$(AR) r "$@" $+
+
+liballocs.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
+	$(AR) r "$@" $+
+
+## What's going on here?
+## We have a __wrap_malloc_usable_size in our preload, and normally we alias it
+## to the main one too. Here we strip that alias, to avoid multiple definitions.
+## WHY is malloc_usable_size special? Perhaps because it's in preload.o, whereas
+## our other wrappers (like malloc) are in the malloc hooks... have we excluded
+## them here?
+#preload-wrap.o: preload.o
+#	objcopy --strip-symbol malloc_usable_size "$<" "$@"
+#
+#liballocs_exe.a: $(MAIN_OBJS) preload-wrap.o $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
+#	rm -f "$@" && ar r "$@" $+ 
+
+noop.o: CFLAGS += -fPIC 
+liballocs_noop.o: noop.o
+	ln -s "$<" "$@"
+
+liballocs_noop.so: noop.o
+	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
+
+# this version lacks preload stuff
+#liballocs.a: $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ) $(filter-out malloc%,$(HOOKS_PRELOAD_OBJS))
+#	ar r "$@" $+
+
+liballocs_noop.a: noop.o
+	ar r "$@" $+
 
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
@@ -142,26 +179,8 @@ libdumpsmaps.so: libdumpsmaps.o
 liballocs_nomemtable_preload.so: $(MAIN_OBJS_NOMEMTABLE) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) dummy_thread_locals.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
-# this version lacks preload stuff
-liballocs.a: $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ) $(filter-out malloc%,$(HOOKS_PRELOAD_OBJS))
-	ar r "$@" $+
-
-liballocs_noop.a: noop.o
-	ar r "$@" $+
-
-liballocs.so: liballocs.a
-	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS) #-lheap_index_hooks
-
-noop.o: CFLAGS += -fPIC 
-
 liballocs_nomemtable.o: liballocs.c
 	$(CC) $(CFLAGS) -DNO_MEMTABLE -c -o "$@" "$<" 
-
-liballocs_noop.so: noop.o
-	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
-
-liballocs_noop.o: noop.o
-	ln -s "$<" "$@"
 
 # have to preload the hooks yourself if you want them to hook!
 

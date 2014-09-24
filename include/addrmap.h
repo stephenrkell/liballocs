@@ -25,7 +25,7 @@ extern void *__addrmap_executable_end_addr __attribute__((weak));
 // use for fast "is it our stack?" check
 extern unsigned long __addrmap_max_stack_size __attribute__((weak));
 
-extern uintptr_t startup_brk __attribute__((weak)); // defined in addrmap.c
+extern uintptr_t __liballocs_startup_brk __attribute__((weak)); // defined in addrmap.c
 
 enum object_memory_kind
 {
@@ -114,9 +114,9 @@ enum object_memory_kind
 	{
 #endif
 		/* imprecise startup_brk version -- always compiled in, but usually bypassed */
-		if (__builtin_expect(addr < startup_brk, 0)) return STATIC;
+		if (__builtin_expect(addr < __liballocs_startup_brk, 0)) return STATIC;
 		/* expect this to succeed, i.e. brk-delimited heap region is the common case. */
-		if (__builtin_expect(addr >= startup_brk && addr < (uintptr_t) CUR_BRK, 1)) return HEAP;
+		if (__builtin_expect(addr >= __liballocs_startup_brk && addr < (uintptr_t) CUR_BRK, 1)) return HEAP;
 #ifndef USE_STARTUP_BRK
 	}
 #endif

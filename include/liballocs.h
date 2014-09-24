@@ -108,8 +108,7 @@ _Bool __liballocs_addrlist_contains(struct addrlist *l, void *addr);
 void __liballocs_addrlist_add(struct addrlist *l, void *addr);
 extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
 
-const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
-Dl_info dladdr_with_cache(const void *addr) __attribute__((visibility("protected")));
+Dl_info dladdr_with_cache(const void *addr); //VIS(protected);
 
 extern void *__liballocs_main_bp; // beginning of main's stack frame
 
@@ -217,22 +216,11 @@ int __liballocs_global_init(void) __attribute__((weak));
 const void *__liballocs_typestr_to_uniqtype(const char *typestr) __attribute__((weak));
 void *__liballocs_my_typeobj(void) __attribute__((weak));
 
-/* Uniqtypes for signed_char and unsigned_char -- we declare them as int 
- * to avoid the need to define struct uniqtype in this header file. 
+/* Uniqtypes for signed_char and unsigned_char and so on.
  * 
- * CARE: we need to make sure that these *are* present in the output binary.
- * If we use them and they're weak, *and* they are not defined (whether in 
- * liballocs or the client program that includes this), they will get 'defined'
- * to zero. This is BAD because if we later load a -types object that references
- * one of them, it will get a null pointer instead of a real object address.
- * 
- * The way to solve this is the way we normally do: link-used-types! 
- * 
- * Note that liballocs itself doesn't need these guys, but libcrunch does.
- * However, we still build them in because clients are likely to want them,
- * and it saves them having to do the link-used-types trick themselves
- * (mainly because I couldn't figure out a good way to shoehorn it into
- * the node.js build process -- it was giving me gyp).
+ * These are part of the API, BUT we don't want them to appear in the preload .so 
+ * because then they can't be uniqued w.r.t. the executable.
+ * So they go in a nasty .a, and the -lallocs .so is a linker script.
  */
 
 extern struct uniqtype __uniqtype__void/* __attribute__((weak))*/;
@@ -240,8 +228,9 @@ extern struct uniqtype __uniqtype__int/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype__unsigned_int/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype__signed_char/* __attribute__((weak))*/;
 extern struct uniqtype __uniqtype__unsigned_char/* __attribute__((weak))*/;
-extern struct uniqtype __uniqtype____FUN_FROM___FUN_TO_unsigned_long_int /* __attribute__((weak))*/;
-#define __liballocs_uniqtype_of_typeless_functions __uniqtype____FUN_FROM___FUN_TO_unsigned_long_int
+extern struct uniqtype __uniqtype____FUN_FROM___FUN_TO_uint$64 /* __attribute__((weak))*/;
+// #pragma 
+#define __liballocs_uniqtype_of_typeless_functions __uniqtype____FUN_FROM___FUN_TO_uint$64
 extern struct uniqtype __uniqtype__long_int;
 extern struct uniqtype __uniqtype__unsigned_long_int;
 extern struct uniqtype __uniqtype__short_int;
@@ -250,6 +239,19 @@ extern struct uniqtype __uniqtype____PTR_void;
 extern struct uniqtype __uniqtype____PTR_signed_char;
 extern struct uniqtype __uniqtype__float;
 extern struct uniqtype __uniqtype__double;
+/* FIXME: HACK HACK HACK */
+#define UNIQTYPE_IS_BASE(u) ( \
+	((u) == &__uniqtype__int) || \
+	((u) == &__uniqtype__unsigned_int) || \
+	((u) == &__uniqtype__signed_char) || \
+	((u) == &__uniqtype__unsigned_char) || \
+	((u) == &__uniqtype__long_int) || \
+	((u) == &__uniqtype__unsigned_long_int) || \
+	((u) == &__uniqtype__short_int) || \
+	((u) == &__uniqtype__short_unsigned_int) || \
+	((u) == &__uniqtype__float) || \
+	((u) == &__uniqtype__double) \
+	)
 
 struct liballocs_err;
 extern struct liballocs_err __liballocs_err_stack_walk_step_failure;
@@ -266,7 +268,10 @@ const char *__liballocs_errstring(struct liballocs_err *err);
 /* We define a dladdr that caches stuff. */
 Dl_info dladdr_with_cache(const void *addr);
 
-#define DEFAULT_ATTRS __attribute__((visibility("protected")))
+#ifndef VIS
+#define VIS(str) /* always default visibility */
+#endif
+#define DEFAULT_ATTRS VIS(protected)
 
 /* Iterate over all uniqtypes in a given shared object. */
 int __liballocs_iterate_types(void *typelib_handle, 
