@@ -58,7 +58,7 @@ tools/usedtypes
 tools/lang/c/cil*
 tools/lang/c/bin/base-types-translation
 src/*_fast.c
-*/debuglog.txt
+*debuglog.txt
 filemap-libcrunch
 filemap-libcrunch-norenames
 filemap-pmirror
@@ -75,3 +75,4 @@ tests/simple-client/simple-client
 tests/sloppy-dumptypes/errvar
 tools/lang/c++/notes.txt
 *.cmxs
+free.res
