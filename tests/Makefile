@@ -79,6 +79,8 @@ checkrun-section-group:
 	$(MAKE) cleanrun-section-group >/dev/null 2>&1
 checkrun-simple-multi-alloc:
 	$(MAKE) cleanrun-simple-multi-alloc >/dev/null 2>&1
+checkrun-simple-client:
+	$(MAKE) cleanrun-simple-client >/dev/null 2>&1
 
 _onlyrun-%:
 	LD_PRELOAD=$(PRELOAD) ./$*
