@@ -128,21 +128,25 @@ event_hooks.o: CFLAGS += $(NON_FAST_CFLAGS)
 # What libraries do we build?
 # 
 # liballocs_preload.so -- the main binary
+# liballocs_preload.a  -- in archive form, for extending libraries to link in (libcrunch)
 # liballocs.so         -- nasty linker script for clients, working around uniqueness problem
 # liballocs_nonshared.a -- just uniqtypes; linker script points to this, s.t. client exes (-lallocs) get this linked in statically (uniqtypes)
 # liballocs.a          -- the main binary usable for statically-linked exes -- no uniqueness problem
 # liballocs_noop.so     -- non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
+# liballocs_noop.a      -- in archive form, for extending noop libraries to link in (libcrunch_noop)
 # liballocs_noop.o      -- non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
 #
 # What do client solibs get?
 # Easiest is just to treat them like exes. They will get their own copy 
 # of the basic uniqtypes, but this will get uniqued as appropriate.
 
-liballocs_preload.so: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
-	$(CC) $(CFLAGS) -shared -o "$@" $+ $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
+liballocs_preload.so: liballocs_preload.a
+	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
+	
+liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
+	$(AR) r "$@" $+
 
 liballocs_nonshared.a: uniqtypes.o
-	$(AR) r "$@" $+
 
 liballocs.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
 	$(AR) r "$@" $+
@@ -163,6 +167,9 @@ noop.o: CFLAGS += -fPIC
 liballocs_noop.o: noop.o
 	ln -s "$<" "$@"
 
+liballocs_noop.a: noop.o
+	$(AR) r "$@" $+
+
 liballocs_noop.so: noop.o
 	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
 
@@ -170,8 +177,6 @@ liballocs_noop.so: noop.o
 #liballocs.a: $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ) $(filter-out malloc%,$(HOOKS_PRELOAD_OBJS))
 #	ar r "$@" $+
 
-liballocs_noop.a: noop.o
-	ar r "$@" $+
 
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
@@ -184,5 +189,6 @@ liballocs_nomemtable.o: liballocs.c
 
 # have to preload the hooks yourself if you want them to hook!
 
+# liballocs.so is a linker script, so don't remove it
 clean: 
-	rm -f *.o *.so .*.d *.a *_fast.c
+	rm -f *.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d *.a *_fast.c

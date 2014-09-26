@@ -11,12 +11,14 @@ tools:
 .PHONY: lib
 lib: src
 	mkdir -p lib && cd lib && \
-    ln -sf ../src/liballocs_noop.so ../src/liballocs_preload.so . && \
-    ln -sf ../src/liballocs_preload.so ../src/liballocs.so && \
-    ln -sf ../src/liballocs_nonshared.a liballocs_nonshared.a && \
-    ln -sf ../src/liballocs_noop.a liballocs_noop.a && \
+    ln -sf ../src/liballocs_noop.so . && \
+    ln -sf ../src/liballocs_preload.so . && \
+    ln -sf ../src/liballocs.so . && \
+    ln -sf ../src/liballocs_preload.a . && \
+    ln -sf ../src/liballocs_nonshared.a . && \
+    ln -sf ../src/liballocs_noop.a . && \
     ln -sf ../src/noop.o liballocs_noop.o && \
-    ln -sf ../src/liballocs.a . 
+    ln -sf ../src/liballocs.a .
 
 .PHONY: clean
 clean:

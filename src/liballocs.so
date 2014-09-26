@@ -1,0 +1,4 @@
+/* HACK */
+OUTPUT_FORMAT(elf64-x86-64)
+GROUP ( liballocs_preload.so liballocs_nonshared.a )
+
