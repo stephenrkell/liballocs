@@ -714,25 +714,39 @@ static void print_exit_summary(void)
 	}
 }
 
-int biggest_vaddr_cb(struct dl_phdr_info *info, size_t size, void *data)
+int biggest_vaddr_cb(struct dl_phdr_info *info, size_t size, void *load_addr)
 {
-	uintptr_t *biggest_seen = (uintptr_t *) data;
+	int biggest_seen = 0;
 	
-	if (info && info->dlpi_phdr)
+	if (info && (void*) info->dlpi_addr == load_addr && info->dlpi_phdr)
 	{
-		/* Add together this phdr's vaddr and memsz. */
-		uintptr_t max_plus_one = info->dlpi_phdr->p_vaddr + info->dlpi_phdr->p_memsz;
-		if (max_plus_one > *biggest_seen) *biggest_seen = max_plus_one;
+		/* This is the object we want; iterate over its phdrs. */
+		for (int i = 0; i < info->dlpi_phnum; ++i)
+		{
+			if (info->dlpi_phdr[i].p_type == PT_LOAD)
+			{
+				/* We can round down to int because vaddrs *within* an object 
+				 * will not be more than 2^31 from the object base. */
+				uintptr_t max_plus_one = (int) (info->dlpi_phdr[i].p_vaddr + info->dlpi_phdr[i].p_memsz);
+				if (max_plus_one > biggest_seen) biggest_seen = max_plus_one;
+			}
+		}
+		/* Return the biggest we saw. */
+		return biggest_seen;
 	}
+	
+	/* keep going */
+	return 0;
 }
 
 void *biggest_vaddr_in_obj(void *handle)
 {
-	uintptr_t biggest_seen = 0;
+	/* Get the phdrs of the object. */
+	struct link_map *lm = handle;
 	
-	dl_iterate_phdr(biggest_vaddr_cb, &biggest_seen);
+	int seen = dl_iterate_phdr(biggest_vaddr_cb, (void*) lm->l_addr);
 			
-	return (void*) biggest_seen;
+	return (void*)(uintptr_t)seen;
 }
 
 /* This is *not* a constructor. We don't want to be called too early,
