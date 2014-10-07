@@ -147,6 +147,7 @@ liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_
 	$(AR) r "$@" $+
 
 liballocs_nonshared.a: uniqtypes.o
+	$(AR) r "$@" $+
 
 liballocs.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
 	$(AR) r "$@" $+
