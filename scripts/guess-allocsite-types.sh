@@ -1,7 +1,17 @@
 #!/bin/bash
 
+# "Historical interest only"
+# -- a pleasingly primitive version of dumpallocs!
 
-. ~/lib/bash/util
+escape_eregexp () {
+    # filter which reads a string on input, and yields a plain grep-style regexp
+    # which matches the string literally, by escaping the metacharacters
+    sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\||\{|\}|\?|\+|\(|\)|\\)/\\\1/g'
+}
+
+escapefn_eregexp () {
+    echo "$1" | escape_eregexp
+}
 
 # Build a list of allocation sites with the power of objdump.
 # We record them as the string inside the < >
