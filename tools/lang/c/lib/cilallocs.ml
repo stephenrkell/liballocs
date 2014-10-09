@@ -112,20 +112,15 @@ else if (s = "bool" ||  false) then "bool"
 else if (s = "wchar_t" ||  false) then "wchar_t"
   else s
 
-(* WORKAROUND for CIL's anonymous structure types: 
-   we undo the numbering (set to 1) and hope for the best. *)
-let hackTypeName s = (*if (string_match (regexp "__anon\\(struct\\|union\\|enum\\)_.*_[0-9]+$") s 0)
-   then Str.global_replace (Str.regexp "_[0-9]+$") "_1" s
-   else *) s
-
-let baseTypeStr ts = 
-   let rawString = match ts with 
+let baseTypeRawStr ts = 
+  let rawString = match ts with 
      TInt(kind,attrs) -> (Pretty.sprint 80 (d_ikind () kind))
    | TFloat(kind,attrs) -> (Pretty.sprint 80 (d_fkind () kind))
    | TBuiltin_va_list(attrs) -> "__builtin_va_list"
    | _ -> raise(Failure ("bad base type: " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_type ts))))
-   in 
-   identFromString (canonicalizeBaseTypeStr (trim rawString))
+   in canonicalizeBaseTypeStr (trim rawString)
+   
+let baseTypeStr ts = identFromString (baseTypeRawStr ts)
 
 let rec barenameFromSig ts = 
  let rec labelledArgTs ts startAt =
@@ -139,7 +134,7 @@ let rec barenameFromSig ts =
  match ts with
    TSArray(tNestedSig, optSz, attrs) -> "__ARR" ^ (match optSz with Some(s) -> (string_of_int (i64_to_int s)) | None -> "0") ^ "_" ^ (barenameFromSig tNestedSig)
  | TSPtr(tNestedSig, attrs) -> "__PTR_" ^ (barenameFromSig tNestedSig)
- | TSComp(isSpecial, name, attrs) -> (hackTypeName name)
+ | TSComp(isSpecial, name, attrs) -> name
  | TSFun(returnTs, Some(argsTss), false, attrs) -> 
        "__FUN_FROM_" ^ (labelledArgTs argsTss 0) ^ "__FUN_TO_" ^ (barenameFromSig returnTs)
  | TSFun(returnTs, Some(argsTss), true, attrs) -> 
@@ -149,6 +144,10 @@ let rec barenameFromSig ts =
  | TSEnum(enumName, attrs) -> enumName
  | TSBase(TVoid(attrs)) -> "void"
  | TSBase(tbase) -> baseTypeStr tbase
+
+(* dwarfidl has a latent escaping convention in its ident syntax, to allow 
+ * idents to easily encode near-arbitrary strings. Yes, this is sane. *)
+let dwarfidlIdent str = Str.global_replace (Str.regexp "[ :]") "\\\\1" str
 
 let rec dwarfidlFromSig ts = 
  let rec dwarfidlLabelledArgTs ts startAt =
@@ -165,7 +164,7 @@ let rec dwarfidlFromSig ts =
      -> "(array_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "] {" 
         ^ (match optSz with Some(s) -> ("subrange_type [upper_bound = " ^ (string_of_int (i64_to_int s)) ^ "];") | None -> "") ^ " })"
  | TSPtr(tNestedSig, attrs) -> "(pointer_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "];)" 
- | TSComp(isSpecial, name, attrs) -> (hackTypeName name)
+ | TSComp(isSpecial, name, attrs) -> name
  | TSFun(returnTs, Some(argsTss), false, attrs) -> 
        "(" ^ (dwarfidlLabelledArgTs argsTss 0) ^ ") => " ^ (dwarfidlFromSig returnTs)
  | TSFun(returnTs, Some(argsTss), true, attrs) -> 
