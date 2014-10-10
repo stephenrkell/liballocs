@@ -10,7 +10,8 @@ pad_numbers () {
 }
 
 use_src_realpaths () {
-    while IFS=$'\t' read alloc_sourcefile alloc_sourceline alloc_fun alloc_ciltype; do
+    while IFS=$'\t' read -r alloc_sourcefile alloc_sourceline alloc_fun alloc_ciltype; do
+	echo "Saw alloc_ciltype: $alloc_ciltype" 1>&2
         echo "$( readlink -f $alloc_sourcefile)"$'\t'"$alloc_sourceline"$'\t'"$alloc_fun"$'\t'"$alloc_ciltype"
     done
 }
