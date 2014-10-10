@@ -16,6 +16,7 @@ lang:
 .PHONY: clean
 clean:
 	rm -f *.o .*.d dumptypes allocsites usedtypes liballocstool.a
+	for dir in $(wildcard lang/*); do if [ -e $$dir/Makefile ]; then $(MAKE) -C $$dir clean; fi; done
 
 CPP_DEPS := $(patsubst %.cpp,.%.d,$(CPP_SRC))
 DEPS := $(CPP_DEPS)
