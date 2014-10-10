@@ -122,6 +122,10 @@ let baseTypeRawStr ts =
    
 let baseTypeStr ts = identFromString (baseTypeRawStr ts)
 
+(* dwarfidl has a latent escaping convention in its ident syntax, to allow 
+ * idents to easily encode near-arbitrary strings. Yes, this is sane. *)
+let dwarfidlIdent str = Str.global_replace (Str.regexp "\\([ :]\\)") "\\\\\\1" str
+
 let rec barenameFromSig ts = 
  let rec labelledArgTs ts startAt =
    match ts with
@@ -144,10 +148,6 @@ let rec barenameFromSig ts =
  | TSEnum(enumName, attrs) -> enumName
  | TSBase(TVoid(attrs)) -> "void"
  | TSBase(tbase) -> baseTypeStr tbase
-
-(* dwarfidl has a latent escaping convention in its ident syntax, to allow 
- * idents to easily encode near-arbitrary strings. Yes, this is sane. *)
-let dwarfidlIdent str = Str.global_replace (Str.regexp "[ :]") "\\\\1" str
 
 let rec dwarfidlFromSig ts = 
  let rec dwarfidlLabelledArgTs ts startAt =
@@ -173,7 +173,7 @@ let rec dwarfidlFromSig ts =
         "(...) => " ^ (barenameFromSig returnTs)
  | TSEnum(enumName, attrs) -> enumName
  | TSBase(TVoid(attrs)) -> "(unspecified_type)"
- | TSBase(tbase) -> baseTypeStr tbase
+ | TSBase(tbase) -> dwarfidlIdent (baseTypeRawStr tbase)
 
 let userTypeNameToBareName s = identFromString (canonicalizeBaseTypeStr (trim s))
 
