@@ -76,7 +76,7 @@ echo "all_obj_allocs_file: $all_obj_allocs_file" 1>&2
 # second pass -- we read input grouped by source file then line number
 keep_old_source_line=0
 have_matched_this_source_line=0
-while read obj func addr sourcefile sourceline sourceline_end alloctype rest; do
+while read -r obj func addr sourcefile sourceline sourceline_end alloctype rest; do
     #echo "read line for obj $obj sourcefile $sourcefile" 1>&2
     
     # We have our source-level allocs data on fd 3
@@ -85,7 +85,7 @@ while read obj func addr sourcefile sourceline sourceline_end alloctype rest; do
         if [[ $keep_old_source_line -eq 0 ]]; then
             #echo "reading some more" 1>&2
             have_matched_this_source_line=0
-            read alloc_sourcefile alloc_sourceline alloc_fun alloc_ciltype <&3 || break 2
+            read -r alloc_sourcefile alloc_sourceline alloc_fun alloc_ciltype <&3 || break 2
             #echo "Setting have_matched_this_source_line to 0 for sourcefile $alloc_sourcefile line $alloc_sourceline" 1>&2
             #echo "read returned $?, new sourceline is $alloc_sourceline" 1>&2
         else
