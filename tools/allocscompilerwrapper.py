@@ -198,8 +198,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
                             # even built the binary. But we have built the .o, including the
                             # one containing the "real" allocator function. Call a helper
                             # to do this.
-                            size_find_command = self.getLibAllocsBaseDir() + \
-                                ["/tools/find-allocated-type-size", fnName] + [ \
+                            size_find_command = [self.getLibAllocsBaseDir() \
+                                + "/tools/find-allocated-type-size", fnName] + [ \
                                 objfile for objfile in passedThroughArgs if objfile.endswith(".o")]
                             self.debugMsg("Calling " + " ".join(size_find_command) + "\n")
                             outp = subprocess.Popen(size_find_command, stdout=subprocess.PIPE).communicate()[0]
