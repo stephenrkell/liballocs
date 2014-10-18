@@ -76,3 +76,4 @@ tests/sloppy-dumptypes/errvar
 tools/lang/c++/notes.txt
 *.cmxs
 free.res
+tests/alloca/alloca
