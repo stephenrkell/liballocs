@@ -389,7 +389,7 @@ __liballocs_walk_subobjects_spanning(
 	)
 __attribute__((always_inline,gnu_inline));
 
-inline int 
+static inline int 
 __liballocs_walk_subobjects_spanning_rec(
 	signed accum_offset, unsigned accum_depth,
 	const signed target_offset_within_u,
@@ -409,11 +409,12 @@ __liballocs_walk_subobjects_spanning(
 	void *arg
 	)
 {
-	return __liballocs_walk_subobjects_spanning_rec(0, 0u, 
+	return __liballocs_walk_subobjects_spanning_rec(
+		/* accum_offset */ 0, /* accum_depth */ 0, 
 		target_offset_within_u, u, cb, arg);
 }
 
-inline int 
+static inline int 
 __liballocs_walk_subobjects_spanning_rec(
 	signed accum_offset, unsigned accum_depth,
 	const signed target_offset_within_u,
@@ -477,26 +478,12 @@ __liballocs_walk_subobjects_spanning_rec(
 			 * FIXME: need to account for the element size? Or here are we
 			 * ignoring padding anyway? */
 			signed offset = u->contained[lower_ind].offset;
-			for (int i_ind = lower_ind; 
-					i_ind > 0 && u->contained[i_ind-1].offset == offset;
-					--i_ind)
-			{
-				if (target_offset_within_u < u->pos_maxoff)
-				{
-					int ret = cb(u->contained[i_ind].ptr, accum_offset + offset,
-							accum_depth + 1u, u, &u->contained[i_ind], arg);
-					if (ret) return ret;
-					else 
-					{
-						ret = __liballocs_walk_subobjects_spanning_rec(
-							accum_offset + offset, accum_depth + 1u,
-							target_offset_within_u - offset, u->contained[i_ind].ptr, cb, arg);
-						if (ret) return ret;
-					}
-				}
-			}
-			/* also scan forwards! */
-			for (int i_ind = lower_ind + 1; lower_ind < u->nmemb
+			for (;
+					lower_ind > 0 && u->contained[lower_ind-1].offset == offset;
+					--lower_ind);
+			// now we have the lowest lower_ind
+			// scan forwards!
+			for (int i_ind = lower_ind; lower_ind < u->nmemb
 					&& u->contained[i_ind].offset == offset;
 					++i_ind)
 			{
