@@ -20,6 +20,53 @@ sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype__ )"
     
 }
 
+num_and_remainder () {
+    grep '^[0-9]' | sed 's/^[0-9]\+/&\n/g'
+}
+
+chomp_idents () {
+    # next chomp a num, stripping any leading non-numbers
+    num_and_remainder="$( sed 's/^[^0-9]*//' | num_and_remainder )"
+    if [ -z "$num_and_remainder" ]; then exit 0; fi
+    echo "num_and_remainder is $num_and_remainder" 1>&2
+    num="$( echo "$num_and_remainder" | head -n1 )"
+    remainder="$( echo "$num_and_remainder" | tail -n +2 )"
+    # then chomp that many chars from the remainder
+    read -N${num} ident <<<"${remainder}"
+    echo "$ident"
+    # then tail-call if non-empty
+    next_chunk="$( echo "$remainder" | tail -c+${num} )"
+    if [ -n "$next_chunk" ]; then
+        echo "$next_chunk" | chomp_idents
+    fi
+}
+
+translate_symnames () {
+    # anything of the form uniqtype< ... >::obj
+    # gets translated to
+    # __uniqtype__{...}
+    # otherwise we echo as-is
+    # N -- uniqtype
+    # _Z              N               8uniqtype I   Z                 4main       E     4blah E      3obj E
+    # ^- Z-encoding   ^- global ns?   ^-- def   ^-? ^-templ.type.parm             ^expr       ^expr? 
+    
+    while read line; do case "$line" in
+        ('_ZN8uniqtypeI'*'3objE')
+            middle_bit="$( echo "$line" | sed 's/_ZN8uniqtypeI\(.*\)3objE/\1/' )"
+            # HACK: this is just a quick hack for now
+            # -- split 
+            idents="$( echo "$middle_bit" | chomp_idents )"
+            fragment="$( echo "$idents" | tr '\n' '\f' | sed 's/^\f//; s/\f$//' | sed 's/\f/__DOT_/' )"
+            echo __uniqtype__${fragment}
+            echo "rewrote $line to __uniqtype__${fragment}" 1>&2
+        ;;
+        (*) 
+            echo "left alone: $line" 1>&2
+            echo "$line"
+        ;;
+    esac; done
+}
+
 objcopy_and_redefine_cxx_names () {
     our_objfile="$1"
     
@@ -34,9 +81,6 @@ sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep '^_ZN8uniqtype' )"
 
     # we need to push candidates into the filter and see what comes out;
     # if it changes, add a --redefine-sym option to the list 
-    
-    # for translate_symnames
-    . ${LIBALLOCS_BASE}/tools/lang/c/lib/symname-funcs.sh
     
     # if any substitutions took effect, issue a redefine-sym command
     while read cand && read canon <&3; do
