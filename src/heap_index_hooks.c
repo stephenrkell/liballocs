@@ -1945,7 +1945,7 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 		
 		must_see_continuation = 1;
 		
-	} while (p_bucket-- >= &p_rec->metadata_recs[0]
+	} while (--p_bucket >= &p_rec->metadata_recs[0]
 			&& (char*) BUCKET_RANGE_END(p_bucket, p_rec) > earliest_possible_start);
 fail:
 	// failed!
