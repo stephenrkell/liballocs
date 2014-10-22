@@ -1133,6 +1133,8 @@ static int cache_clear_deepest_flag_and_update_ins(void *object_start,
 
 static
 struct insert *lookup_l01_object_info(const void *mem, void **out_object_start);
+static
+struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object_start);
 
 static 
 struct insert *object_insert(const void *obj, struct insert *ins)
@@ -1166,42 +1168,64 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 	/* Try matching in the cache. NOTE: how does this impact l0 and deep-indexed 
 	 * entries? In all cases, we cache them here. We also keep a "is_deepest" flag
 	 * which tells us (conservatively) whether it's known to be the deepest entry
-	 * indexing that storage. We *only* return a cache hit if the flag is set. */
+	 * indexing that storage. In this function, we *only* return a cache hit if the 
+	 * flag is set. (In lookup_l01_object_info, this logic is different.) */
 	check_cache_sanity();
+	void *l01_object_start = NULL;
+	struct insert *found_l01 = NULL;
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
 		if (lookup_cache[i].object_start && 
-				lookup_cache[i].is_deepest && 
 				(char*) mem >= (char*) lookup_cache[i].object_start && 
 				(char*) mem < (char*) lookup_cache[i].object_start + lookup_cache[i].usable_size)
 		{
-			// HIT!
-			assert(lookup_cache[i].object_start);
-#if defined(TRACE_DEEP_HEAP_INDEX) || defined(TRACE_HEAP_INDEX)
-			fprintf(stderr, "Cache hit at pos %d (%p) with alloc site %p\n", i, 
-					lookup_cache[i].object_start, (void*) (uintptr_t) lookup_cache[i].insert->alloc_site);
-			fflush(stderr);
-#endif
-			assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
-			
-			if (out_object_start) *out_object_start = lookup_cache[i].object_start;
-			if (out_containing_chunk) *out_containing_chunk = lookup_cache[i].containing_chunk;
-			// ... so ensure we're not about to evict this guy
-			if (next_to_evict - &lookup_cache[0] == i)
+			// possible hit
+			if (lookup_cache[i].depth == 1 || lookup_cache[i].depth == 0)
 			{
-				next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
-				assert(next_to_evict - &lookup_cache[0] < LOOKUP_CACHE_SIZE);
+				l01_object_start = lookup_cache[i].object_start;
+				found_l01 = lookup_cache[i].insert;
 			}
-			assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
-			return lookup_cache[i].insert;
+			
+			if (lookup_cache[i].is_deepest)
+			{
+				// HIT!
+				assert(lookup_cache[i].object_start);
+	#if defined(TRACE_DEEP_HEAP_INDEX) || defined(TRACE_HEAP_INDEX)
+				fprintf(stderr, "Cache hit at pos %d (%p) with alloc site %p\n", i, 
+						lookup_cache[i].object_start, (void*) (uintptr_t) lookup_cache[i].insert->alloc_site);
+				fflush(stderr);
+	#endif
+				assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
+
+				if (out_object_start) *out_object_start = lookup_cache[i].object_start;
+				if (out_containing_chunk) *out_containing_chunk = lookup_cache[i].containing_chunk;
+				// ... so ensure we're not about to evict this guy
+				if (next_to_evict - &lookup_cache[0] == i)
+				{
+					next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
+					assert(next_to_evict - &lookup_cache[0] < LOOKUP_CACHE_SIZE);
+				}
+				assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
+				return lookup_cache[i].insert;
+			}
 		}
 	}
-	void *l01_object_start;
-	struct insert *found = lookup_l01_object_info(mem, &l01_object_start);
+	
+	// didn't hit cache, but we may have seen the l01 entry
+	struct insert *found;
+	void *object_start;
 	unsigned short depth = 1;
+	if (found_l01)
+	{
+		found = found_l01;
+		object_start = l01_object_start;
+	}
+	else
+	{
+		found = lookup_l01_object_info_nocache(mem, &l01_object_start);
+	}
 	size_t size;
 	struct suballocated_chunk_rec *containing_chunk_rec = NULL; // initialized shortly...
-	void *object_start;
 
 	if (found)
 	{
@@ -1211,7 +1235,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 		_Bool is_deepest = INSERT_DESCRIBES_OBJECT(found);
 		
 		// cache the l01 entry
-		install_cache_entry(object_start, size, 1, is_deepest, NULL, object_insert(l01_object_start, found));
+		install_cache_entry(object_start, size, 1, is_deepest, NULL, object_insert(object_start, found));
 		
 		if (!is_deepest)
 		{
@@ -1283,6 +1307,12 @@ struct insert *lookup_l01_object_info(const void *mem, void **out_object_start)
 		}
 	}
 	
+	return lookup_l01_object_info_nocache(mem, out_object_start);
+}
+
+static
+struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object_start) 
+{
 	struct entry *first_head = INDEX_LOC_FOR_ADDR(mem);
 	struct entry *cur_head = first_head;
 	size_t object_minimum_size = 0;
