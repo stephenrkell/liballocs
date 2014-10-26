@@ -39,6 +39,9 @@ static inline size_t malloc_usable_size(void *ptr) __attribute__((visibility("pr
 size_t malloc_usable_size(void *ptr);
 #endif
 
+// HACK for libcrunch -- please remove (similar to malloc_usable_size -> __mallochooks_*)
+void __libcrunch_uncache_all(const void *allocptr, size_t size) __attribute__((weak));
+
 static void *allocptr_to_userptr(void *allocptr);
 static void *userptr_to_allocptr(void *allocptr);
 
@@ -722,6 +725,13 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	 */
 	
 	if (userptr == NULL) return; // HACK: shouldn't be necessary; a BUG somewhere
+	
+	/* HACK for libcrunch cache invalidation */
+	if (__libcrunch_uncache_all)
+	{
+		void *allocptr = userptr_to_allocptr(userptr);
+		__libcrunch_uncache_all(allocptr, malloc_usable_size(allocptr));
+	}
 	
 	int lock_ret;
 	BIG_LOCK
@@ -1437,7 +1447,6 @@ static void init_suballocs(void)
 {
 	if (!suballocated_chunks)
 	{
-		
 		suballocated_chunks = mmap(NULL, 
 			MAX_SUBALLOCATED_CHUNKS * sizeof (struct suballocated_chunk_rec), 
 			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
