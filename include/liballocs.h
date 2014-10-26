@@ -130,7 +130,7 @@ extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 // stuff for use by extenders only -- direct/weak clients shouldn't use this
 struct addrlist;
-_Bool __liballocs_addrlist_contains(struct addrlist *l, void *addr);
+int __liballocs_addrlist_contains(struct addrlist *l, void *addr);
 void __liballocs_addrlist_add(struct addrlist *l, void *addr);
 extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
 
