@@ -9,12 +9,12 @@
 
 #include <stdlib.h>
 
-_Bool __liballocs_addrlist_contains(struct addrlist *l, void *addr) __attribute__((visibility("protected")));
-_Bool __liballocs_addrlist_contains(struct addrlist *l, void *addr)
+int __liballocs_addrlist_contains(struct addrlist *l, void *addr) __attribute__((visibility("protected")));
+int __liballocs_addrlist_contains(struct addrlist *l, void *addr)
 {
 	for (unsigned i = 0; i < l->count; ++i)
 	{
-		if (l->addrs[i] == addr) return 1;
+		if (l->addrs[i] == addr) return 1 + i;
 	}
 	return 0;
 }
