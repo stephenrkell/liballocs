@@ -171,7 +171,8 @@ int main(int argc, char **argv)
 							// YES this CU embodies the source file, so we can search for the type
 							embodying_cus.push_back(i_cu);
 
-							if (type_symname.size() > 0)
+							// HACK: how is void getting in here? I suppose it does come out in the allocsites
+							if (type_symname.size() > 0 && type_symname != "__uniqtype__void")
 							{
 								//auto found_type_entry = named_toplevel_types.find(clean_typename);
 								auto found_types = types_by_codeless_name.equal_range(type_symname);
@@ -188,39 +189,6 @@ int main(int argc, char **argv)
 	// 								goto cu_loop_exit;
 	// 							}
 
-								/* Make sure we get the version that is defined in this CU. */
-								for (auto i_found = found_types.first; i_found != found_types.second; ++i_found)
-								{
-									if (i_found->second.enclosing_cu()
-										== i_cu)
-									{
-										found_type = i_found->second;
-										// we can exit the loop now
-											
-										cerr << "Success: found a type named " << i_found->first
-											<< " in a CU named "
-											<< *i_found->second.enclosing_cu().name_here()
-											<< " == "
-											<< *i_cu.name_here()
-											<< endl;
-										goto cu_loop_exit;
-									}
-									else 
-									{
-										assert(i_found->second.enclosing_cu().offset_here()
-											!= i_cu.offset_here());
-											
-										cerr << "Found a type named " << i_found->first
-											<< " but it was defined in a CU named "
-											<< *i_found->second.enclosing_cu().name_here()
-											<< " whereas we want one named "
-											<< *i_cu.name_here()
-											<< endl;
-										second_chance_type = i_found->second;
-									}
-
-								}
-								
 								if (found_types.first == found_types.second)
 								{
 									cerr << "Found no types for symbol name "
@@ -237,8 +205,44 @@ int main(int argc, char **argv)
 										if (i_el != uniques.begin()) cerr << ", ";
 										cerr << *i_el;
 									}
+								} 
+								else 
+								{
+									/* Make sure we get the version that is defined in this CU. */
+									for (auto i_found = found_types.first; i_found != found_types.second; ++i_found)
+									{
+										if (i_found->second.enclosing_cu()
+											== i_cu)
+										{
+											found_type = i_found->second;
+											// we can exit the loop now
+
+											cerr << "Success: found a type named " << i_found->first
+												<< " in a CU named "
+												<< *i_found->second.enclosing_cu().name_here()
+												<< " == "
+												<< *i_cu.name_here()
+												<< endl;
+											goto cu_loop_exit;
+										}
+										else 
+										{
+											assert(i_found->second.enclosing_cu().offset_here()
+												!= i_cu.offset_here());
+
+											cerr << "Found a type named " << i_found->first
+												<< " but it was defined in a CU named "
+												<< *i_found->second.enclosing_cu().name_here()
+												<< " whereas we want one named "
+												<< *i_cu.name_here()
+												<< endl;
+											second_chance_type = i_found->second;
+										}
+
+									}
 								}
 								
+								// if we got here, we failed...
 								/* If we fail, we will go round again, since 
 								 * we might find another CU that 
 								 * - embodies this source file, and
