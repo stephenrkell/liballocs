@@ -16,6 +16,11 @@ struct uniqtype; /* forward decl */
 #define ALLOCA_TRAILER_SIZE (sizeof (void*))
 #endif
 
+/* HACK: copied from memtable.h. */
+/* Thanks to Martin Buchholz -- <http://www.wambold.com/Martin/writings/alignof.html> */
+#define ALIGNOF(type) offsetof (struct { char c; type member; }, member)
+#define PAD_TO_ALIGN(n, a) 	((0 == ((n) % (a))) ? (n) : (n) + (a) - ((n) % (a)))
+
 /* This *must* match the treatment of "early_malloc"'d chunks in malloc_hook_stubs.c. 
  * */
 #ifndef ALLOCA_HEADER_SIZE
@@ -45,13 +50,14 @@ extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloc
 	 * and heap indexing code does. ARGH. Maintenance nightmare.... 
 	 * 
 	 * AND only do the indexing things if liballocs is preloaded. Otherwise.... */
-	void *alloc = __builtin_alloca(ALLOCA_HEADER_SIZE + size + ALLOCA_TRAILER_SIZE);
+	unsigned long chunk_size = PAD_TO_ALIGN(size + ALLOCA_TRAILER_SIZE, ALLOCA_TRAILER_SIZE);
+	void *alloc = __builtin_alloca(ALLOCA_HEADER_SIZE + chunk_size);
 	/* write the usable size into the first word, then return the rest. */
-	*(unsigned long *)alloc = size + ALLOCA_HEADER_SIZE;
+	*(unsigned long *)alloc = chunk_size;
 	
 	/* We add only the "usable size" part, because that is what the heap index code
 	 * can see, and that is the code that will be consuming this value. */
-	*frame_counter += size + ALLOCA_TRAILER_SIZE;
+	*frame_counter += chunk_size;
 	
 	void *userptr = (char*) alloc + ALLOCA_HEADER_SIZE;
 	
@@ -59,7 +65,7 @@ extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloc
 	if (&__current_allocsite) caller = __current_allocsite;
 	else caller = (void*) 0;
 	
-	__liballocs_index_insert(userptr, size + ALLOCA_TRAILER_SIZE, caller);
+	__liballocs_index_insert(userptr, chunk_size, caller);
 	
 	if (&__current_allocsite) __current_allocsite = (void*)0;
 	

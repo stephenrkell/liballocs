@@ -109,6 +109,9 @@ static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins)
 			&& (char*)(ins) - (char*)(ptr) < BIGGEST_SENSIBLE_OBJECT);
 	return is_sane_l01 && INSERT_IS_SUBALLOC_CHAIN(ins);
 }
+struct insert *__liballocs_insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);
+void __liballocs_index_delete(void *userptr);
+void __liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller);
 
 /* A thread-local variable to override the "caller" arguments. 
  * Platforms without TLS have to do without this feature. */

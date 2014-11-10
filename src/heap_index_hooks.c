@@ -457,7 +457,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	/* Populate our extra fields */
 	struct insert *p_insert = insert_for_chunk(new_userchunkaddr);
 	p_insert->alloc_site_flag = 0U;
-	p_insert->alloc_site = (unsigned long) caller;
+	p_insert->alloc_site = (uintptr_t) caller;
 
 	/* Add it to the index. We always add to the start of the list, for now. */
 	/* 1. Initialize our insert. */
@@ -585,9 +585,17 @@ static inline struct insert *insert_for_chunk(void *userptr)
 {
 	return insert_for_chunk_and_usable_size(userptr, malloc_usable_size(userptr)); 
 }
+struct insert *__liballocs_insert_for_chunk_and_usable_size(void *userptr, size_t usable_size)
+{
+	return insert_for_chunk_and_usable_size(userptr, usable_size);
+}
 static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, size_t usable_size)
 {
-	return (struct insert*) ((char*) userptr + usable_size) - 1;
+	/* Round down to an aligned address! */
+	return (struct insert*) (
+			(uintptr_t)((char*) userptr + usable_size - sizeof (struct insert))
+				& (~(uintptr_t)(sizeof (struct insert) - 1))
+			);
 }
 
 void 
@@ -676,7 +684,11 @@ void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 	/* We increase the size by the amount of extra data we store, 
 	 * and possibly a bit more to allow for alignment.  */
 	size_t orig_size = *p_size;
-	size_t size_to_allocate = orig_size + sizeof (struct insert);
+	/* Add the size of struct insert, and round this up to the align of struct insert. 
+	 * This ensure we always have room for an *aligned* struct insert. */
+	size_t size_with_insert = orig_size + sizeof (struct insert);
+	size_t size_to_allocate = PAD_TO_ALIGN(size_with_insert, sizeof (struct insert));
+	assert(0 == size_to_allocate % ALIGNOF(struct insert));
 /* "headers" version */
 // 	if (*p_alignment > sizeof (void*))
 // 	{

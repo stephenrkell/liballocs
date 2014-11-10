@@ -959,7 +959,10 @@ __liballocs_get_alloc_info
 			if (__builtin_expect(heap_info->alloc_site_flag, 1))
 			{
 				if (out_alloc_site) *out_alloc_site = NULL;
-				alloc_uniqtype = (struct uniqtype *)(uintptr_t)(heap_info->alloc_site);
+				/* Clear the low-order bit, which is available as an extra flag 
+				 * bit. libcrunch uses this to track whether an object is "loose"
+				 * or not. Loose objects have */
+				alloc_uniqtype = (struct uniqtype *)((uintptr_t)(heap_info->alloc_site) & ~0x1ul);
 			}
 			else
 			{
@@ -977,8 +980,13 @@ __liballocs_get_alloc_info
 #ifdef NDEBUG
 				// install it for future lookups
 				// FIXME: make this atomic using a union
+				// Is this in a loose state? NO. We always make it strict.
+				// The client might override us by noticing that we return
+				// it a dynamically-sized alloc with a uniqtype.
+				// This means we're the first query to rewrite the alloc site,
+				// and is the client's queue to go poking in the insert.
 				heap_info->alloc_site_flag = 1;
-				heap_info->alloc_site = (uintptr_t) alloc_uniqtype;
+				heap_info->alloc_site = (uintptr_t) alloc_uniqtype /* | 0x0ul */;
 #endif
 			}
 			
