@@ -395,8 +395,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
                     ret2 = 42
                     with self.makeErrFile(errfilename, "w+") as errfile:
-                        ret2 = subprocess.call(["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
-                            "-f", "Makefile.allocsites"] +  targetNames, stderr=errfile, stdout=errfile)
+                        cmd = ["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
+                            "-f", "Makefile.allocsites"] +  targetNames
+                        errfile.write("Running: " + " ".join(cmd) + "\n")
+                        ret2 = subprocess.call(cmd, stderr=errfile, stdout=errfile)
+                        errfile.write("Exit status was %d\n" % ret2)
                         if (ret2 != 0 or "DEBUG_CC" in os.environ):
                             self.print_errors(errfile)
                     return ret2

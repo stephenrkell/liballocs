@@ -223,8 +223,9 @@ class CompilerWrapper:
         # (e.g. push/pop as-needed)
         commandAndArgs = self.getUnderlyingCompilerCommand(sourceFiles) + \
             otherOptions # nonLibraryArgs + libraryArgs
-        self.debugMsg("Running " + " ".join(commandAndArgs) + "\n")
+        self.debugMsg("Running underlying compiler: " + " ".join(commandAndArgs) + "\n")
         ret1 = subprocess.call(commandAndArgs)
+        self.debugMsg("Exit status was %d\n" % ret1)
         return ret1
 
     def makeDotOAndPassThrough(self, argv, customArgs, sourceInputFiles):
