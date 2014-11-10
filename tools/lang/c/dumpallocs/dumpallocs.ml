@@ -638,7 +638,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Some(Existing(ts)) -> printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts); SkipChildren
               |  Some(Synthetic(tss)) -> printAllocFn fileAndLine chan maybeFunvar (dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine))) ); SkipChildren
               |  Some(Undet) -> (* it is an allocation function, but... *)
-                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype_00000000_void"; SkipChildren
+                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype__void"; SkipChildren
               |  None -> 
                   (* (debug_print 1 (
                      "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
