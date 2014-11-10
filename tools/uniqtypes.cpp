@@ -286,11 +286,11 @@ struct uniqtype \n\
 		{
 			out << "const char *" << mangle_typename(make_pair(string(""), string("void")))
 				<< "_subobj_names[] "
-				<< " __attribute__((weak,section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
+				<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
 				<< "= { (void*)0 };\n";
 		}
 		out << "struct uniqtype " << mangle_typename(make_pair(string(""), string("void")))
-			<< " __attribute__((weak,section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
+			<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
 			<< " = {\n\t" 
 			<< "{ 0, 0, 0 },\n\t"
 			<< "\"void\"" << ",\n\t"
@@ -394,7 +394,7 @@ struct uniqtype \n\
 		);
 		string s = mangle_typename(k);
 
-		out << "extern struct uniqtype " << s << ";" << endl;
+		out << "extern struct uniqtype " << s << " __attribute__((weak));" << endl;
 	}
 
 	/* Output the canonical definitions. */
@@ -729,7 +729,7 @@ struct uniqtype \n\
 					const char **compl_equiv = is_unsigned ? found_equiv[-1]  : found_equiv[+1];
 					auto complement_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
 					out << "extern struct uniqtype " << mangle_typename(complement_name_pair)
-						<< " __attribute__((alias(\"" << mangle_typename(k) << "\")));" << endl;
+						<< " __attribute__((weak,alias(\"" << mangle_typename(k) << "\")));" << endl;
 					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
 				}
 			}
@@ -741,7 +741,7 @@ struct uniqtype \n\
 			++i_alias)
 		{
 			out << "extern struct uniqtype " << mangle_typename(make_pair(i_vert->first.first, *i_alias)) 
-				<< " __attribute__((alias(\"" << mangle_typename(i_vert->first) << "\")));" << endl;
+				<< " __attribute__((weak,alias(\"" << mangle_typename(i_vert->first) << "\")));" << endl;
 			types_by_name[*i_alias].insert(i_vert->second);
 			name_pairs_by_name[*i_alias].insert(i_vert->first);
 		}
