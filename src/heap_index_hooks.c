@@ -1133,7 +1133,8 @@ static int cache_clear_deepest_flag_and_update_ins(void *object_start,
 	struct insert *new_ins)
 {
 	unsigned ncleared = 0;
-	check_cache_sanity();
+	// we might be used to restore the cache invariant, so don't check
+	// check_cache_sanity();
 	assert(ins);
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
@@ -1555,10 +1556,14 @@ static struct suballocated_chunk_rec *make_suballocated_chunk(void *chunk_base, 
 			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
 	assert(p_rec->metadata_recs != MAP_FAILED);
 	
-	/* Update the old insert with our info. */
+	/* Update the old insert with our info. We have to remove it from the 
+	 * cache if it's there.  */
 	check_cache_sanity();
 	chunk_existing_ins->alloc_site = free_index;
 	chunk_existing_ins->alloc_site_flag = 0;
+	cache_clear_deepest_flag_and_update_ins(
+		chunk_base, (1u<<0)|(1u<<1), NULL, chunk_existing_ins, 1,
+		&p_rec->higherlevel_ins);
 	// NO! WE DON'T do this because we need to leave the l1 linked list intact! 
 	// chunk_existing_ins->un.bits = 0;
 	check_cache_sanity();
