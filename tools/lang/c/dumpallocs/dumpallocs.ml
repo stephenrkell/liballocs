@@ -345,24 +345,60 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctio
          end
       | _ -> raise (Failure "impossible function type")
 
-let functionNameMatchesSignature fname signature = 
-    let signatureFunction = 
-           if string_match (regexp "[^\\(]+") signature 0 
-           then (debug_print 1 ("Info: signature " ^ signature ^ " did contain a function name: " ^ (matched_string signature) ^ "\n"); flush Pervasives.stderr; matched_string signature )
-           else (debug_print 1 ("Warning: signature " ^ signature ^ " did not contain a function name\n"); flush Pervasives.stderr; "" )
+let explodeString s = 
+  let rec expl i l =
+    if i < 0 then l else expl (i - 1) (s.[i] :: l) in
+  expl (String.length s - 1) []
+
+let parseSignature signature = 
+    let matched = string_match (regexp "[^\\(]+") signature 0 
     in 
-    fname = signatureFunction
+    let rawName = if matched then matched_string signature else ""
+    in
+    let friendlyName = if matched then Some(matched_string signature) else None
+    in 
+    (* skip the bracket if there was one *)
+    let argCharsOffset = if matched then 1 + (String.length rawName) else 0
+    in
+    let argCharsMatched = string_match (regexp "[^\\)]+") signature argCharsOffset
+    in
+    let rawArgChars = if argCharsMatched then matched_string signature else ""
+    in
+    let friendlyArgChars = explodeString rawArgChars
+    in (friendlyName, friendlyArgChars)
+    
+let functionNameMatchesSignature fname signature = 
+    let (friendlyName, friendlyArgChars) = parseSignature signature
+    in
+    match friendlyName with 
+      Some(s) -> 
+        (debug_print 1 ("Info: signature " ^ signature ^ " did contain a function name: " ^ s ^ "\n"); 
+        flush Pervasives.stderr; 
+        fname = s )
+    | None -> (debug_print 1 ("Warning: signature " ^ signature ^ " did not contain a function name\n"); 
+        flush Pervasives.stderr; false )
+
+let functionArgCountMatchesSignature arglist signature = 
+    let (friendlyName, friendlyArgChars) = parseSignature signature
+    in
+    debug_print 1 ("Signature " ^ signature ^ " has argcount " ^ (string_of_int (List.length friendlyArgChars)) ^ "\n"); 
+    (List.length arglist) = (List.length friendlyArgChars)
 
 let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env calledFunctionType : sz option = 
  (* destruct the signature string *)
- (* (debug_print 1 ("Warning: matching against signature " ^ signature ^ "\n"); flush Pervasives.stderr;  *)
+ debug_print 1 ("Warning: matching against signature " ^ signature ^ " when argcount is " 
+    ^ (string_of_int (List.length arglist)) ^ "\n"); 
+ flush Pervasives.stderr;
  match maybeFunName with 
-   Some(fname) when functionNameMatchesSignature fname signature
+   Some(fname) 
+    when functionNameMatchesSignature fname signature 
+     && functionArgCountMatchesSignature arglist signature
     -> Some(matchUserAllocArgs i arglist signature env (Some(fname)) calledFunctionType)
  | Some(_) ->     (* (debug_print 1 ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) 
                     None 
                   (* ) *)
- | None -> Some(matchUserAllocArgs i arglist signature env None calledFunctionType)
+ | None when functionArgCountMatchesSignature arglist signature -> Some(matchUserAllocArgs i arglist signature env None calledFunctionType)
+ | None -> None
  (* ) *)
 
 let userAllocFunctions () : string list = 
@@ -397,9 +433,14 @@ let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp 
          in match extracted with
              (* None means it didn't match. 
                 Some(_) might still be Some(Undet), meaning it matched but we couldn't 
-                figure out anything from the size expression. *)
-           None -> (debug_print 1 ("Warning: signature " ^ s ^ " did not match function " ^ funNameString ^ "\n"); firstMatchingSignature ss )
-         | Some(s) -> Some(s)
+                figure out anything from the size expression. 
+                If that happens and it's a direct call, we can return right away.
+                If it happens *and* it's an indirect call (i.e. we don't have a function name), 
+                we have to try the next candidate, as if it didn't match. *)
+         | Some(something) when something != Undet -> Some(something)
+         | Some(Undet) when maybeFunName != None -> Some(Undet)
+         | _ -> (debug_print 1 ("Warning: signature " ^ s ^ " did not match function " ^ funNameString ^ "; trying other candidates\n"); 
+            firstMatchingSignature ss )
         end
     in 
     firstMatchingSignature candidates
