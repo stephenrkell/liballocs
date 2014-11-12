@@ -944,8 +944,8 @@ __liballocs_get_alloc_info
 			}
 			assert(get_object_memory_kind(heap_info) == HEAP
 				|| get_object_memory_kind(heap_info) == UNKNOWN); // might not have seen that maps yet
-			assert(
-				__liballocs_get_memory_kind((void*)(uintptr_t)(heap_info->alloc_site)) == STATIC
+			assert(!heap_info->alloc_site
+				|| __liballocs_get_memory_kind((void*)(uintptr_t)(heap_info->alloc_site)) == STATIC
 				|| (__liballocs_add_missing_maps(),
 					 __liballocs_get_memory_kind((void*)(uintptr_t)(heap_info->alloc_site)) == STATIC));
 
