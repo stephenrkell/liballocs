@@ -1221,6 +1221,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 				assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
 
 				if (out_object_start) *out_object_start = lookup_cache[i].object_start;
+				if (out_object_size) *out_object_size = lookup_cache[i].usable_size;
 				if (out_containing_chunk) *out_containing_chunk = lookup_cache[i].containing_chunk;
 				// ... so ensure we're not about to evict this guy
 				if (next_to_evict - &lookup_cache[0] == i)
@@ -1240,7 +1241,9 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 	unsigned short depth = 1;
 	if (found_l01)
 	{
-		found = found_l01;
+		/* CARE: the cache's p_ins points to the alloc's insert, even if it's been
+		 * moved (in the suballocated case). So we re-lookup the physical insert here. */
+		found = insert_for_chunk(l01_object_start);
 		object_start = l01_object_start;
 	}
 	else
@@ -1993,6 +1996,7 @@ struct insert *lookup_deep_alloc(const void *ptr, int max_levels,
 				{
 					// hit!
 					if (out_object_start) *out_object_start = object_start_addr;
+					if (out_object_size) *out_object_size = object_size_in_this_bucket;
 					if (out_containing_chunk) *out_containing_chunk = p_rec;
 					return p_ins;
 				}
