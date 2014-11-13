@@ -483,7 +483,7 @@ __liballocs_walk_subobjects_spanning_rec(
 					--lower_ind);
 			// now we have the lowest lower_ind
 			// scan forwards!
-			for (int i_ind = lower_ind; lower_ind < u->nmemb
+			for (int i_ind = lower_ind; i_ind < u->nmemb
 					&& u->contained[i_ind].offset == offset;
 					++i_ind)
 			{
