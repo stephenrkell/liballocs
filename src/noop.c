@@ -16,7 +16,7 @@ const void *__liballocs_typestr_to_uniqtype(const void *r)
 	return NULL;
 }
 
-void __index_deep_alloc(void *ptr, int level, unsigned size_bytes) {}
+int __index_deep_alloc(void *ptr, int level, unsigned size_bytes) { return 2; }
 void __unindex_deep_alloc(void *ptr, int level) {}
 
 _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
