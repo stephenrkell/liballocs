@@ -390,7 +390,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     baseDir = "/usr/lib/allocsites"
                 if os.path.exists(os.path.realpath(outputFile)):
                     targetNames = [baseDir + os.path.realpath(outputFile) + ext \
-                        for ext in [".allocs", "-types.c", "-types.o", "-types.so", "-allocsites.c", "-allocsites.so"]]
+                        for ext in [".allocs", "-types.c", "-types.so", "-allocsites.c", "-allocsites.so"]]
                     errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
 
                     ret2 = 42
