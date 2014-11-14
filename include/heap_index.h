@@ -16,7 +16,7 @@ struct insert;
 #define IS_L0_ENTRY(e) (!(e)->present && (e)->removed && (e)->distance == 63)
 #define IS_EMPTY_ENTRY(e) (!(e)->present && !(e)->removed)
 
-#define BIGGEST_SENSIBLE_OBJECT (256*1024*1024)
+extern unsigned long biggest_l1_object __attribute__((weak,visibility("protected")));
 #define MINIMUM_USER_ADDRESS  ((char*)0x400000) /* FIXME: less {x86-64,GNU/Linux}-specific please */
 #define MAX_SUBALLOCATED_CHUNKS ((unsigned long) MINIMUM_USER_ADDRESS)
 /* Inserts describing objects have user addresses. They may have the flag set or unset. */
@@ -106,7 +106,7 @@ static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins)
 {
 	bool is_l0 = __lookup_l0 && __lookup_l0(ptr, NULL) == ins;
 	bool is_sane_l01 = is_l0 || ((char*)(ins) - (char*)(ptr) >= 0
-			&& (char*)(ins) - (char*)(ptr) < BIGGEST_SENSIBLE_OBJECT);
+			&& (char*)(ins) - (char*)(ptr) < biggest_l1_object);
 	return is_sane_l01 && INSERT_IS_SUBALLOC_CHAIN(ins);
 }
 struct insert *__liballocs_insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);

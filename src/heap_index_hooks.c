@@ -106,9 +106,10 @@ static void *recently_freed[RECENTLY_FREED_SIZE];
 static void **next_recently_freed_to_replace = &recently_freed[0];
 #endif
 
-struct entry *index_region;
-int safe_to_call_malloc;
+struct entry *index_region __attribute__((aligned(64))) /* HACK for cacheline-alignedness */;
+unsigned long biggest_l1_object __attribute__((visibility("protected")));
 void *index_max_address;
+int safe_to_call_malloc;
 
 #define entry_coverage_in_bytes 512
 typedef struct entry entry_type;
@@ -431,6 +432,9 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 			return;
 		}
 	}
+	
+	/* if we got here, it's going in l1 */
+	if (modified_size > biggest_l1_object) biggest_l1_object = modified_size;
 
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(new_userchunkaddr);
 	
@@ -1009,7 +1013,7 @@ static inline _Bool find_next_nonempty_bin(struct entry **p_cur,
 		size_t *p_object_minimum_size
 		)
 {
-	size_t max_nbytes_coverage_to_scan = BIGGEST_SENSIBLE_OBJECT - *p_object_minimum_size;
+	size_t max_nbytes_coverage_to_scan = biggest_l1_object - *p_object_minimum_size;
 	size_t max_nbuckets_to_scan = 
 			(max_nbytes_coverage_to_scan % entry_coverage_in_bytes) == 0 
 		?    max_nbytes_coverage_to_scan / entry_coverage_in_bytes
@@ -1244,7 +1248,6 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 		/* CARE: the cache's p_ins points to the alloc's insert, even if it's been
 		 * moved (in the suballocated case). So we re-lookup the physical insert here. */
 		found = insert_for_chunk(l01_object_start);
-		object_start = l01_object_start;
 	}
 	else
 	{
@@ -1404,7 +1407,7 @@ struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object
 #ifndef NDEBUG
 			/* Sanity check on the insert. */
 			if ((char*) cur_insert < (char*) cur_userchunk
-				|| (char*) cur_insert - (char*) cur_userchunk > BIGGEST_SENSIBLE_OBJECT)
+				|| (char*) cur_insert - (char*) cur_userchunk > biggest_l1_object)
 			{
 				fprintf(stderr, "Saw insane insert address %p for chunk beginning %p "
 					"(usable size %zu, allocptr %p); memory corruption?\n", 
