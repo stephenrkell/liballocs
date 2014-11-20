@@ -389,7 +389,7 @@ __liballocs_walk_subobjects_spanning(
 	)
 __attribute__((always_inline,gnu_inline));
 
-static inline int 
+inline int 
 __liballocs_walk_subobjects_spanning_rec(
 	signed accum_offset, unsigned accum_depth,
 	const signed target_offset_within_u,
@@ -414,7 +414,7 @@ __liballocs_walk_subobjects_spanning(
 		target_offset_within_u, u, cb, arg);
 }
 
-static inline int 
+inline int 
 __liballocs_walk_subobjects_spanning_rec(
 	signed accum_offset, unsigned accum_depth,
 	const signed target_offset_within_u,

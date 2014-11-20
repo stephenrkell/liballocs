@@ -67,7 +67,7 @@ static const char *filename_for_fd(int fd)
 
 /* Stop gcc from tail-call-opt'ing the __mallochooks_ call, because 
  * it has made it impossible to debug linkage problems. */
-#pragma GCC optimize(push)
+#pragma GCC push_options
 #pragma GCC optimize("no-optimize-sibling-calls")
 
 size_t __wrap_malloc_usable_size (void *ptr) __attribute__((visibility("protected")));
@@ -109,7 +109,7 @@ size_t __wrap_malloc_usable_size (void *ptr)
 	else return //__real_malloc_usable_size(ptr);
        	__mallochooks_malloc_usable_size(ptr);
 }
-#pragma GCC optimize(pop)
+#pragma GCC pop_options
 
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)

@@ -24,14 +24,14 @@ CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS)
 # what about this one? same or slightly slower
 #DEFAULT_EXTRA_CFLAGS := -fPIC -Os -flto -DNDEBUG
 # what about this one? slightly faster
-DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -DNDEBUG
+#DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -DNDEBUG
 # what about this one?  among the fastest (4.52, 4.50, 4.51)
 #DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
 # really double-check that the following isn't faster? nope (4.64, 4.64, 4.59)
 #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
 
 # Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
-#DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
 
 default: liballocs_preload.so liballocs_nonshared.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
 

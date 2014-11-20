@@ -9,6 +9,10 @@
 #if !defined(__x86_64__) && !defined(X86_64)
 #error Unsupported architecture.
 #endif
+/* FIXME: more portable */
+#define PAGE_SIZE 4096
+#define LOG_PAGE_SIZE 12
+#define PAGE_MASK ~((PAGE_SIZE - 1))
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,13 +25,7 @@ typedef bool _Bool;
 #include <link.h>
 #include <stdint.h>
 
-// #define VIS(str) __attribute__((visibility( #str )))
 #include "liballocs.h"
-
-/* FIXME: more portable */
-#define PAGE_SIZE 4096
-#define LOG_PAGE_SIZE 12
-#define PAGE_MASK ~((PAGE_SIZE - 1))
 
 #define ROUND_DOWN_TO_PAGE_SIZE(n) \
 	(assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE), ((n)>>LOG_PAGE_SIZE)<<LOG_PAGE_SIZE)
@@ -105,91 +103,6 @@ struct addrlist
 	unsigned allocsz;
 	void **addrs;
 };
-
-// extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((visibility("hidden")));
-// extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite)
-// {
-// 	assert(__liballocs_allocsmt != NULL);
-// 	struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, allocsite);
-// 	struct allocsite_entry *bucket = *bucketpos;
-// 	for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
-// 	{
-// 		if (p->allocsite == allocsite)
-// 		{
-// 			return p->uniqtype;
-// 		}
-// 	}
-// 	return NULL;
-// }
-// 
-// #define maximum_vaddr_range_size (4*1024) // HACK
-// extern inline struct uniqtype *vaddr_to_uniqtype(const void *vaddr) __attribute__((visibility("hidden")));
-// extern inline struct uniqtype *vaddr_to_uniqtype(const void *vaddr)
-// {
-// 	assert(__liballocs_allocsmt != NULL);
-// 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)vaddr | STACK_BEGIN));
-// 	struct allocsite_entry **bucketpos = initial_bucketpos;
-// 	_Bool might_start_in_lower_bucket = 1;
-// 	do 
-// 	{
-// 		struct allocsite_entry *bucket = *bucketpos;
-// 		for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
-// 		{
-// 			/* NOTE that in this memtable, buckets are sorted by address, so 
-// 			 * we would ideally walk backwards. We can't, so we peek ahead at
-// 			 * p->next. */
-// 			if (p->allocsite <= vaddr && 
-// 				(!p->next || ((struct allocsite_entry *) p->next)->allocsite > vaddr))
-// 			{
-// 				return p->uniqtype;
-// 			}
-// 			might_start_in_lower_bucket &= (p->allocsite > vaddr);
-// 		}
-// 		/* No match? then try the next lower bucket *unless* we've seen 
-// 		 * an object in *this* bucket which starts *before* our target address. 
-// 		 * In that case, no lower-bucket object can span far enough to reach our
-// 		 * static_addr, because to do so would overlap the earlier-starting object. */
-// 		--bucketpos;
-// 	} while (might_start_in_lower_bucket && 
-// 	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_vaddr_range_size);
-// 	return NULL;
-// }
-// #undef maximum_vaddr_range_size
-// 
-// #define maximum_static_obj_size (256*1024) // HACK
-// extern inline struct uniqtype *static_addr_to_uniqtype(const void *static_addr, void **out_object_start) __attribute__((visibility("hidden")));
-// extern inline struct uniqtype *static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
-// {
-// 	assert(__liballocs_allocsmt != NULL);
-// 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)static_addr | (STACK_BEGIN<<1)));
-// 	struct allocsite_entry **bucketpos = initial_bucketpos;
-// 	_Bool might_start_in_lower_bucket = 1;
-// 	do 
-// 	{
-// 		struct allocsite_entry *bucket = *bucketpos;
-// 		for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
-// 		{
-// 			/* NOTE that in this memtable, buckets are sorted by address, so 
-// 			 * we would ideally walk backwards. We can't, so we peek ahead at
-// 			 * p->next. */
-// 			if (p->allocsite <= static_addr && 
-// 				(!p->next || ((struct allocsite_entry *) p->next)->allocsite > static_addr)) 
-// 			{
-// 				if (out_object_start) *out_object_start = p->allocsite;
-// 				return p->uniqtype;
-// 			}
-// 			might_start_in_lower_bucket &= (p->allocsite > static_addr);
-// 		}
-// 		/* No match? then try the next lower bucket *unless* we've seen 
-// 		 * an object in *this* bucket which starts *before* our target address. 
-// 		 * In that case, no lower-bucket object can span far enough to reach our
-// 		 * static_addr, because to do so would overlap the earlier-starting object. */
-// 		--bucketpos;
-// 	} while (might_start_in_lower_bucket && 
-// 	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_static_obj_size);
-// 	return NULL;
-// }
-// #undef maximum_vaddr_range_size
 
 /* avoid dependency on libc headers (in this header only) */
 void __assert_fail(const char *assertion, 
