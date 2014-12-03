@@ -5,6 +5,7 @@
 #include <string>
 #include <cctype>
 #include <cstdlib>
+#include <cstddef>
 #include <memory>
 #include <boost/regex.hpp>
 #include <boost/algorithm/string.hpp>
@@ -17,6 +18,7 @@
 #include <fileno.hpp>
 
 #include "uniqtypes.hpp"
+#include "uniqtype.h" /* for UNIQTYPE_DECL which we stringify */
 
 using std::cin;
 using std::cout;
@@ -237,7 +239,15 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 		previous_offset = i.offset_here();
 	}
 }	
-
+string ensure_contained_length(const string& mangled_name, unsigned contained_length)
+{
+	ostringstream s;
+	s << "__asm__(\".size " << mangled_name << ", "
+		<< (offsetof(uniqtype, contained) + contained_length * sizeof (contained))
+		<< "\");" << endl;
+	
+	return s.str();
+}
 void write_master_relation(master_relation_t& r, dwarf::core::root_die& root, 
 	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def, 
 	std::set< std::string >& names_emitted,
@@ -246,27 +256,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	bool emit_subobject_names /* = false */)
 {
 	/* Keep in sync with liballocs_private.h! */
-	if (emit_struct_def) cout << "struct uniqtype_cache_word \n\
-{\n\
-	unsigned long addr:47;\n\
-	unsigned flag:1;\n\
-	unsigned bits:16;\n\
-};\n\
-\n\
-struct uniqtype \n\
-{ \n\
-	struct uniqtype_cache_word cache_word; \n\
-	const char *name; \n\
-	unsigned short pos_maxoff; \n\
-	unsigned short neg_maxoff; \n\
-	unsigned nmemb:12;         // 12 bits -- number of `contained's\n\
-	unsigned is_array:1;       // 1 bit\n\
-	unsigned array_len:19;\n\
-	struct contained { \n\
-		signed offset; \n\
-		struct uniqtype *ptr; \n\
-	} contained[]; \n\
-};\n";
+	if (emit_struct_def) cout << UNIQTYPE_DECLSTR;
 
 	std::map< std::string, std::set< pair<string, string> > > name_pairs_by_name;
 	
@@ -526,6 +516,7 @@ struct uniqtype \n\
 			<< array_len << " /* array_len */,\n\t"
 			<< /* contained[0] */ "/* contained */ {\n\t\t";
 
+		unsigned contained_length = 1;
 		if (i_vert->second.is_a<array_type_die>())
 		{
 			// array: write a single entry, for the element type
@@ -540,6 +531,7 @@ struct uniqtype \n\
 
 			// end the struct
 			out << " }";
+			contained_length = 1;
 		}
 		else if (i_vert->second.is_a<address_holding_type_die>())
 		{
@@ -553,6 +545,7 @@ struct uniqtype \n\
 
 			// end the struct
 			out << " }";
+			contained_length = 1;
 		}
 		else if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
@@ -579,6 +572,8 @@ struct uniqtype \n\
 
 				// end the struct
 				out << " }";
+				
+				++contained_length;
 			}
 		}
 		else // non-array non-subprogram -- use real members
@@ -591,8 +586,10 @@ struct uniqtype \n\
 			// we *always* output at least one array element
 			if (members_count > 0)
 			{
+				contained_length = 0;
 				for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
 				{
+					++contained_length;
 					auto i_edge = i_i_edge->as_a<member_die>();
 
 					/* if we're not the first, write a comma */
@@ -659,6 +656,7 @@ struct uniqtype \n\
 		
 		out << "\n\t}"; /* end contained */
 		out << "\n};\n"; /* end struct uniqtype */
+		out << ensure_contained_length(mangled_name, contained_length);
 		
 		/* Output a synthetic complement if we need one. */
 		if (synthesise_complements.find(i_vert->second) != synthesise_complements.end())
@@ -691,6 +689,7 @@ struct uniqtype \n\
 				<< " }";
 			out << "\n\t}"; /* end contained */
 			out << "\n};\n"; /* end struct uniqtype */
+			out << ensure_contained_length(compl_name, 1);
 			
 			/* If our actual type has a C-style name, output a C-style alias for the 
 			 * complement we just output. FIXME: how *should* this work? Who consumes 
