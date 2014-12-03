@@ -26,7 +26,9 @@ OBJCOPY=${OBJCOPY:-$(which objcopy)}
 compile () {
    src="$1"
    dest="$2"
-   ${CC} -c -x c -o "$dest" "$src" && \
+   asm="$( mktemp --suffix=.s )"
+   ${CC} -S -x c -o "$asm" "$src" && \
+   ${CC} -c -o "$dest" "$asm" && \
    echo "Compiler generated $dest" 1>&2
 }
 
