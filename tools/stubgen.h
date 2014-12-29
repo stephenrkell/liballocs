@@ -37,7 +37,7 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
 	arg ## num
 
 #define make_wrapper(name, retchar) \
-	type_for_argchar_ ## retchar ( __attribute__((weak)) __real_ ## name ) ( arglist_ ## name (make_argdecl) ); \
+	type_for_argchar_ ## retchar __real_ ## name ( arglist_ ## name (make_argdecl) ); \
 	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
 		if (&__current_allocfn && !__current_allocfn) \
@@ -67,7 +67,7 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
  * "Action-only" and "normal" wrappers are the same case: 
  * */
 #define make_size_wrapper(name, retchar) \
-	type_for_argchar_ ## retchar ( __attribute__((weak)) __real_ ## name ) ( arglist_ ## name (make_argdecl) ); \
+	type_for_argchar_ ## retchar __real_ ## name( arglist_ ## name (make_argdecl) ); \
 	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
 		if (&__current_allocsite && !__current_allocsite) \
@@ -92,7 +92,7 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
  * we're a nested allocator. */
 #define make_suballocator_alloc_wrapper(name, retchar) \
 	static int name ## _alloclevel; /* FIXME: thread-safety for access to this. */\
-	type_for_argchar_ ## retchar ( __attribute__((weak)) __real_ ## name ) ( arglist_ ## name (make_argdecl) ); \
+	type_for_argchar_ ## retchar __real_ ## name ( arglist_ ## name (make_argdecl) ); \
 	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
 		_Bool have_caller_allocfn; \
@@ -141,7 +141,7 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
 	}
 
 #define make_free_wrapper(name) /* HACK: assume void-returning for now */ \
-	void ( __attribute__((weak)) __real_ ## name ) ( arglist_ ## name (make_argdecl) ); \
+	void __real_ ## name( arglist_ ## name (make_argdecl) ); \
 	void __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
 		_Bool we_are_toplevel_free; \
@@ -153,7 +153,7 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
 	}
 
 #define make_suballocator_free_wrapper(name, alloc_name) /* HACK: assume void-returning for now */ \
-	void ( __attribute__((weak)) __real_ ## name ) ( arglist_ ## name (make_argdecl) ); \
+	void __real_ ## name( arglist_ ## name (make_argdecl) ); \
 	void __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
 		assert(alloc_name ## _alloclevel); \
