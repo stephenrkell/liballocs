@@ -13,31 +13,37 @@ HOOKS_WRAP_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_wrap_fast.o event_h
 
 CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS)
 
-# STRANGE: this
-#DEFAULT_EXTRA_CFLAGS := -fPIC -flto -O4 # note! no -DNDEBUG
-# is slower than the following (4.61, 4.54, 4.60)
-#DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -finline-functions
-# ; what about this? it's the same or slightly slower
-#DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -finline-functions -DNDEBUG
-# what about this one? makes little difference
-#DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
-# what about this one? same or slightly slower
-#DEFAULT_EXTRA_CFLAGS := -fPIC -Os -flto -DNDEBUG
-# what about this one? slightly faster
-#DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -DNDEBUG
-# what about this one?  among the fastest (4.52, 4.50, 4.51)
-#DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
-# really double-check that the following isn't faster? nope (4.64, 4.64, 4.59)
-#DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
+ifeq ($(DEBUG),1)
+    DEFAULT_EXTRA_CFLAGS := -fPIC -g
+else
+    # STRANGE: this
+    #DEFAULT_EXTRA_CFLAGS := -fPIC -flto -O4 # note! no -DNDEBUG
+    # is slower than the following (4.61, 4.54, 4.60)
+    #DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -finline-functions
+    # ; what about this? it's the same or slightly slower
+    #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -finline-functions -DNDEBUG
+    # what about this one? makes little difference
+    #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
+    # what about this one? same or slightly slower
+    #DEFAULT_EXTRA_CFLAGS := -fPIC -Os -flto -DNDEBUG
+    # what about this one? slightly faster
+    #DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -DNDEBUG
+    # what about this one?  among the fastest (4.52, 4.50, 4.51)
+    #DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+    # really double-check that the following isn't faster? nope (4.64, 4.64, 4.59)
+    #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
 
-# Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
-DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+    # Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
+    DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+endif
 
 default: liballocs_preload.so liballocs_nonshared.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
 
 NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
-FAST_CFLAGS += -fpic -flto -ffat-lto-objects -O4 -DNDEBUG
-#FAST_CFLAGS += -fpic -O3 -DNDEBUG
+FAST_CFLAGS += -fpic -flto -ffat-lto-objects
+ifneq ($(DEBUG),1)
+    FAST_CFLAGS += -O4 -DNDEBUG
+endif
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
 LDFLAGS += -Wl,-O2 -flto -Bsymbolic-functions -fPIC 
