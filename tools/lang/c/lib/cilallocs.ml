@@ -55,6 +55,15 @@ end
 
 module UniqtypeMap = Map.Make(CilTypeSig)
 
+let expToString e                  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp e))
+let instToString i                 = (Pretty.sprint 80 (Pretty.dprintf "%a" d_instr i))
+let lvalToString lv                = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv))
+let typToString t                  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
+
+let stringEndsWith (s : string) (e : string) : bool = 
+    String.sub s ((String.length s) - (String.length e)) (String.length s) = e
+
+
 let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
 
 let isStaticallyZero e = isZero (foldConstants e) 

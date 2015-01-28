@@ -87,7 +87,7 @@ uniqtypes.o: uniqtypes.c
 	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
 	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
-UTIL_OBJS := l0index.o maps.o addrmap.o addrlist.o uniqtypes.o
+UTIL_OBJS := l0index.o maps.o addrmap.o addrlist.o uniqtypes.o uniqtype-bfs.o
 MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ)
 MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS)
 PRELOAD_OBJS := preload.o

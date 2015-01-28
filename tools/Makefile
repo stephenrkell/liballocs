@@ -7,7 +7,7 @@ LDLIBS += -lallocstool -ldwarfidl -lantlr3c -lcxxgen -ldwarfpp -ldwarf -lboost_r
 
 CPP_SRC := $(wildcard *.cpp)
 
-default: liballocstool.a dumptypes allocsites usedtypes find-allocated-type-size lang
+default: liballocstool.a dumptypes allocsites usedtypes ifacetypes find-allocated-type-size lang
 
 .PHONY: lang
 lang:
@@ -39,3 +39,4 @@ liballocstool.a: helpers.o uniqtypes.o
 dumptypes: dumptypes.cpp liballocstool.a
 allocsites: allocsites.cpp liballocstool.a
 usedtypes: usedtypes.cpp liballocstool.a
+ifacetypes: ifacetypes.cpp liballocstool.a

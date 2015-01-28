@@ -1,0 +1,1 @@
+export LDLIBS += -lallocs
