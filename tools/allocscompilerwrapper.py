@@ -293,7 +293,10 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         self.debugMsg("Compiling stubs file %s: compiler said \"%s\"\n" \
                             % (stubs_pp, stubs_output))
 
-                    linkArgs += [stubs_bin]
+                    # CARE: we must insert the wrapper object on the cmdline *before* any 
+                    # archive that is providing the wrapped functions. The easiest way
+                    # is to insert it first, it appears.
+                    linkArgs = [stubs_bin] + linkArgs
                     linkArgs += ["-L" + self.getLinkPath()]
                     if not "-static" in passedThroughArgs and not "-Bstatic" in passedThroughArgs \
                         and not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:

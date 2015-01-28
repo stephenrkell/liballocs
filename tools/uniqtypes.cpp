@@ -307,14 +307,20 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	/* Emit forward declarations, building the complement relation as we go. */
 	for (auto i_pair = r.begin(); i_pair != r.end(); ++i_pair)
 	{
-		string s = mangle_typename(i_pair->first);
+		auto name = i_pair->first;
+		string s = mangle_typename(name);
 		names_emitted.insert(s);
-		types_by_name[i_pair->first.second].insert(i_pair->second);
-		name_pairs_by_name[i_pair->first.second].insert(i_pair->first);
-		if (i_pair->second.is_a<base_type_die>())
+		iterator_df<type_die> t = i_pair->second;
+		if (t && t != t->get_concrete_type())
+		{
+			cerr << "Warning: master relation contained non-concrete: " << t << endl;
+		}
+		types_by_name[name.second].insert(t);
+		name_pairs_by_name[name.second].insert(name);
+		if (t.is_a<base_type_die>())
 		{
 			/* Are we an integer? */
-			auto base_t = i_pair->second.as_a<base_type_die>();
+			auto base_t = t.as_a<base_type_die>();
 			if (needs_complement(base_t))
 			{
 				unsigned size = *base_t->get_byte_size();
@@ -342,7 +348,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	}
 	/* Declare any signedness-complement base types that we didn't see. 
 	 * We will emit these specially. */
-
 	set< iterator_df<base_type_die> > synthesise_complements;
 	for (auto i_size = integer_base_types_by_size_and_signedness.begin(); 
 		i_size != integer_base_types_by_size_and_signedness.end(); ++i_size)
@@ -364,6 +369,10 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		if (!have_unsigned || !have_signed) // the "count == 1" case
 		{
 			// we have to synthesise the other-signedness version
+			cerr << "We have " 
+				<< (have_signed ? have_signed : have_unsigned)
+				<< " but not its complement, so will synthesise it." << endl;
+				
 			synthesise_complements.insert(have_signed ? have_signed : have_unsigned);
 		}
 		// else the "count == 2" case: no need to synthesise
@@ -384,7 +393,9 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		);
 		string s = mangle_typename(k);
 
-		out << "extern struct uniqtype " << s << " __attribute__((weak));" << endl;
+		out << "extern struct uniqtype " << s << " __attribute__((weak)); "
+			<< "/* synthetic signedness complement of " << name_for_base_type(*i_need_comp) 
+			<< " */" << endl;
 	}
 
 	/* Output the canonical definitions. */
@@ -392,13 +403,12 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	{
 		if (i_vert->first.second == string("void"))
 		{
-			err << "Warning: skipping explicitly declared void type from CU "
+			if (i_vert->second) err << "Warning: skipping explicitly declared void type from CU "
 				<< *i_vert->second.enclosing_cu().name_here()
 				<< endl;
 			continue;
 		}
 		auto opt_sz = i_vert->second->calculate_byte_size();
-
 		
 		out << "\n/* uniqtype for \"" << i_vert->first.second 
 			<< "\" with summary code " << i_vert->first.first << " */\n";
@@ -607,7 +617,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 					string mangled_name = mangle_typename(k);
 					if (names_emitted.find(mangled_name) == names_emitted.end())
 					{
-						out << "Type " << i_edge->get_type()
+						out << "Type named " << mangled_name << ", " << i_edge->get_type()
 							<< ", concretely " << i_edge->get_type()->get_concrete_type()
 							<< " was not emitted previously." << endl;
 						for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
