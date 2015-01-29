@@ -10,22 +10,21 @@ typedef struct node_rec_s
 	struct node_rec_s *next;
 } node_rec; 
 
-typedef node_rec *make_node_fn(void*, struct uniqtype*, void *arg);
-typedef void on_blacken_fn(node_rec *, void *);
+typedef void follow_ptr_fn(void**, struct uniqtype**, void *);
+typedef void on_blacken_fn(void *obj, struct uniqtype *t, void *);
+
+void __uniqtype_default_follow_ptr(void**, struct uniqtype**, void *);
 
 void __uniqtype_walk_bfs_from_object(
 	void *object, struct uniqtype *t,
-	make_node_fn *make_node, void *mn_arg,
+	follow_ptr_fn *follow_ptr, void *fp_arg,
 	on_blacken_fn *on_blacken, void *ob_arg);
 
 void __uniqtype_process_bfs_queue(
 	node_rec **p_q_head,
 	node_rec **p_q_tail,
-	make_node_fn *make_node, void *mn_arg,
+	follow_ptr_fn *follow_ptr, void *fp_arg,
 	on_blacken_fn *on_blacken, void *ob_arg);
 
-node_rec *__uniqtype_default_make_node(void *obj, struct uniqtype *t, void *arg);
-
-void __uniqtype_default_on_blacken(node_rec *node, void *arg);
 
 #endif

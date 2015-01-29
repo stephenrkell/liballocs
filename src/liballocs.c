@@ -1074,3 +1074,9 @@ __liballocs_get_alloc_type(void *obj)
 	
 	return out;
 }
+
+struct uniqtype * 
+__liballocs_get_outermost_type(void *obj)
+{
+	return __liballocs_get_alloc_type(obj);
+}
