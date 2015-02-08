@@ -943,7 +943,10 @@ static void *typeobj_handle_for_addr(void *caller)
 	// dlopen the typeobj
 	const char *types_libname = helper_libfile_name(dynobj_name_from_dlpi_name(info.dli_fname, info.dli_fbase), "-types.so");
 	assert(types_libname != NULL);
-	return dlopen(types_libname, RTLD_NOW | RTLD_NOLOAD);
+	void *handle = dlopen(types_libname, RTLD_NOW | RTLD_NOLOAD);
+	if (handle == NULL)
+		printf("Error: %s\n", dlerror());
+	return handle;
 }
 
 void *__liballocs_my_typeobj(void) __attribute__((visibility("protected")));

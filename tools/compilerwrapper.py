@@ -168,8 +168,11 @@ class CompilerWrapper:
                 if cp_ret != 0:
                     self.print_errors(errfile)
                     return cp_ret
-                unbind_pairs = [["--unbind-sym", sym] for sym in wrappedFns]
-                unbind_cmd = ["objcopy", "--prefer-non-section-relocs"] \
+                # Remove patched-in objcopy options as I can't build it.
+                #unbind_pairs = [["--unbind-sym", sym] for sym in wrappedFns]
+                #unbind_cmd = ["objcopy", "--prefer-non-section-relocs"]
+                unbind_pairs = []
+                unbind_cmd = ["objcopy"] \
                  + [opt for pair in unbind_pairs for opt in pair] \
                  + [filename]
                 self.debugMsg("cmdstring is " + " ".join(unbind_cmd) + "\n")
@@ -182,7 +185,9 @@ class CompilerWrapper:
                     self.debugMsg("Renaming __def_ and __ref_ alloc symbols\n")
                     def_ref_args = [["--redefine-sym", "__def_" + sym + "=" + sym, \
                        "--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in wrappedFns]
-                    objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
+                    # Remove patched-in objcopy options as I can't build it.
+                    #objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"]
+                    objcopy_ret = subprocess.call(["objcopy"] \
                      + [opt for seq in def_ref_args for opt in seq] \
                      + [filename], stderr=errfile)
                     if objcopy_ret != 0:
