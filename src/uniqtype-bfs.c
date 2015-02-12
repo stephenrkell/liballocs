@@ -17,6 +17,8 @@ FILE* debug_out = NULL;
 const char *debugging_output_filename = DEBUGGING_OUTPUT_FILENAME;
 #define DEBUG_GUARD(stmt) do { if (debug_out != NULL) { stmt; } } while(0)
 
+typedef __uniqtype_node_rec node_rec;
+
 static void build_adjacency_list_recursive(
 	node_rec **p_adj_u_head, node_rec **p_adj_u_tail, 
 	void *obj_start, struct uniqtype *obj_t, 
@@ -26,40 +28,6 @@ static void build_adjacency_list_recursive(
 enum node_colour { WHITE, GREY, BLACK }; // WHITE == 0, so "absent" pair->v 0 means WHITE
 
 static node_rec *make_node(void *obj, struct uniqtype *t);
-
-static _Bool queue_empty(void *q_head)
-{
-	return !q_head;
-}
-
-static void queue_push_tail(node_rec **q_head, node_rec **q_tail, node_rec *to_enqueue)
-{
-	node_rec *old_head_node = *q_head;
-	node_rec *old_tail_node = *q_tail;
-	assert(!to_enqueue->next);
-	*q_tail = to_enqueue;
-	if (old_tail_node) old_tail_node->next = to_enqueue;
-	else
-	{
-		assert(!old_head_node);
-		/* If we just went from 0 elements to 1, update the head */
-		*q_head = to_enqueue;
-	}
-}
-
-static node_rec *queue_pop_head(node_rec **q_head, node_rec **q_tail)
-{
-	node_rec *old_head_node = *q_head;
-	if (old_head_node)
-	{
-		*q_head = old_head_node->next;
-		/* If we just went from 1 element to 0, clear the tail. */
-		if (!*q_head) *q_tail = NULL;
-		/* Clear the "next" pointer, since it's not in the queue any more. */
-		old_head_node->next = NULL;
-	}
-	return old_head_node;
-}
 
 struct pair
 {
@@ -148,7 +116,7 @@ static void build_adjacency_list_recursive(
 
 	/* The way we iterate through structs and arrays is different. */
 	struct contained *contained = &t_at_offset->contained[0];
-	unsigned nmemb; 
+	unsigned nmemb;
 	_Bool is_array;
 
 	if (UNIQTYPE_HAS_DATA_MEMBERS(t_at_offset))
@@ -187,7 +155,7 @@ static void build_adjacency_list_recursive(
 				if (ptr)
 				{
 					to_enqueue = make_node(ptr, t);
-					queue_push_tail(p_adj_u_head, p_adj_u_tail, to_enqueue);
+					__uniqtype_node_queue_push_tail(p_adj_u_head, p_adj_u_tail, to_enqueue);
 
 					DEBUG_GUARD(fprintf(debug_out, "\t%s_at_%p -> %s_at_%p;\n", 
 						NAME_FOR_UNIQTYPE(obj_t), obj_start,
@@ -233,9 +201,9 @@ static void process_bfs_queue_and_maps(
 	follow_ptr_fn *follow_ptr, void *fp_arg,
 	on_blacken_fn *on_blacken, void *ob_arg)
 {
-	while (!queue_empty(*p_q_head))
+	while (!__uniqtype_node_queue_empty(*p_q_head))
 	{
-		node_rec *u = queue_pop_head(p_q_head, p_q_tail);
+		node_rec *u = __uniqtype_node_queue_pop_head(p_q_head, p_q_tail);
 	
 		treemap_set(p_colours_root, u->obj, GREY);
 		
@@ -252,7 +220,7 @@ static void process_bfs_queue_and_maps(
 
 		/* now that we have the adjacency list, enqueue any adjacent nodes that are white */
 		node_rec *v;
-		while ((v = queue_pop_head(&adj_u_head, &adj_u_tail)) != NULL)
+		while ((v = __uniqtype_node_queue_pop_head(&adj_u_head, &adj_u_tail)) != NULL)
 		{
 			/* We initialise all nodes' colours to NULL a.k.a. WHITE */
 			uintptr_t colour = treemap_get(p_colours_root, v->obj);
@@ -268,15 +236,15 @@ static void process_bfs_queue_and_maps(
 				treemap_set(p_predecessors_root, v->obj, (uintptr_t) v->obj);
 				fprintf(stderr, "Enqueued object at %p, type %s\n", 
 					v->obj, NAME_FOR_UNIQTYPE(v->t));
-				queue_push_tail(p_q_head, p_q_tail, v); // the queue takes our copy of v, which we're finished with
+				__uniqtype_node_queue_push_tail(p_q_head, p_q_tail, v); // the queue takes our copy of v, which we're finished with
 			}
-			else free(v);
+			else v->free(v);
 		}
 
 		/* blacken u, and call the function for it */
 		treemap_set(p_colours_root, u->obj, BLACK);
 		on_blacken(u->obj, u->t, ob_arg);
-		free(u);
+		u->free(u);
 		
 		/* Note that it doesn't matter if u's address gets recycled, because 
 		 * we don't use it as a key in a map -- object addresses are keys. */
@@ -325,7 +293,7 @@ void __uniqtype_walk_bfs_from_object(
 	
 	/* Make an initial node. Don't adjust the pointer. */
 	node_rec *to_enqueue = make_node(object, t);
-	queue_push_tail(&q_head, &q_tail, to_enqueue);
+	__uniqtype_node_queue_push_tail(&q_head, &q_tail, to_enqueue);
 	
 	/* Sanity check: assert that our object's start is non-null and within 128MB of our pointer. */
 	assert(!to_enqueue || ((char*) to_enqueue->obj <= (char*) object
@@ -342,6 +310,7 @@ static node_rec *make_node(void *obj, struct uniqtype *t)
 	if (!node) { warn("insufficient memory"); abort(); }
 	node->obj = obj;
 	node->t = t;
+	node->free = free;
 	return node;
 }
 

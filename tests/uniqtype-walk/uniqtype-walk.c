@@ -51,7 +51,27 @@ int main(void)
 	 to avoid the ambiguity of unadorned pointers.
 	 But then each subobject becomes a logically distinct object!
 	 Is that what we want? 
-	 I suppose it is the logical extension. */
+	 I suppose it is the logical extension.
+	 It raises problems when we have ambiguous views of an object:
+	 - is an array[20] also an array[0]? 
+	 - is the address of the second element in an array[20] also an array[19]?
+	 - what about the hypothetical "null-terminated char array" uniqtype,
+	   that dynamically refines itself into a known-length type? 
+	 Perhaps the answer is to mark as special ("ground") uniqtypes
+	 the ones which don't generate redundant views of memory.
+	 Then when we want to iterate over a minimal covering set of 
+	 precise views of all memory, we only use ground uniqtypes.
+	 It's still unclear, with the null-terminated char array case,
+	 how to decompose the memory into ground instances. Perhaps
+	 the null-terminated portion as one char[], then the remainding tail
+	 as another? Or iteratively decomposed into null-term'd char[]s? 
+	 Or just see the tail as allocation padding, like the spare bytes
+	 at the end of a malloc()'d chunk?
+	 In reality it depends: an ELF strtab is a sequence of char[]s,
+	 while a single null-term'd array with some trailing bytes is 
+	 one array with padding. So there is some framing intent that
+	 we need to capture at the allocation level.
+	*/
 
 	return 0;
 }

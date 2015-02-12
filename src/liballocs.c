@@ -130,14 +130,15 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	/* Don't use dladdr() to iterate -- too slow! Instead, iterate 
 	 * directly over the dynsym section. */
 	unsigned char *load_addr = (unsigned char *) ((struct link_map *) typelib_handle)->l_addr;
+	
+	/* If load address is greater than STACK_BEGIN, it means it's the vdso --
+	 * skip it, because it doesn't contain any uniqtypes and we may fault
+	 * trying to read its dynsym. */
+	if (!load_addr || (uintptr_t) load_addr > STACK_BEGIN) return 0;
+	
 	/* We don't have to add load_addr, because ld.so has already done it. */
 	ElfW(Sym) *dynsym = (ElfW(Sym) *) get_dynamic_entry_from_handle(typelib_handle, DT_SYMTAB)->d_un.d_ptr;
 	assert(dynsym);
-	
-	/* If dynsym is greater than STACK_BEGIN, it means it's the vdso --
-	 * skip it, because it doesn't contain any uniqtypes and we may fault
-	 * trying to read its dynsym. */
-	if ((uintptr_t) dynsym > STACK_BEGIN) return 0;
 	
 	// check that we start with a null symtab entry
 	static const ElfW(Sym) nullsym = { 0, 0, 0, 0, 0, 0 };
