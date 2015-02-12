@@ -119,4 +119,6 @@ default:
 # generic clean rule that we can run from test dirs too (with $(MAKE) -f ../Makefile)
 clean: # (delete anything whose name is a prefix of a .c file's and doesn't contain a dot)
 	rm -f $(filter-out .,$(patsubst %.c,%,$(shell find -name '*.c')))
-	find -name '*.cil.*'  -o -name '*.i' -o -name '*.o' -o -name '*.s' -o -name '*.allocs' | xargs rm -f
+	find -name '*.cil.*' -o -name '*.i' -o -name '*.o' -o \
+	     -name '*.s' -o -name '*.allocs' -o -name '*.so' -o \
+	     -name '*.allocstubs.c' -o -name '*.fixuplog' | xargs rm -f
