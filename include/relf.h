@@ -24,9 +24,10 @@ TODO:
 - outsource filename issues (i.e. don't read /proc/pid/maps) ? HMM. actually, implement this
 - grep -rl ElfW liballocs.hg node/src libcrunch.hg/ rsem/ppcmem/system-call-plumbing/trap-syscalls/src
 
-NOT POSSIBLE without syscalls, libdl/allocation or nonportable logic
+BARELY POSSIBLE without syscalls, libdl/allocation: or nonportable logic
 - get auxv
-- get phdrs
+=> get phdrs
+... we use a hacky "likely to work, vaguely portable" method to get auxv
 
 */
 
@@ -64,7 +65,7 @@ struct R_DEBUG_STRUCT_TAG
 	ElfW(Addr) r_ldbase;
 };
 
-extern ElfW(Dyn) _DYNAMIC[];
+extern ElfW(Dyn) _DYNAMIC[] __attribute__((weak));
 extern struct R_DEBUG_STRUCT_TAG _r_debug __attribute__((weak));
 
 static inline
@@ -87,7 +88,7 @@ ElfW(auxv_t) *get_auxv(const char **environ, void *stackptr)
 	 *   will be treated as a pointer into the auxv env, and used
 	 *   as a basis for search. For sanity, we check that no loaded object
 	 *   has a *higher* base address. */
-	struct link_map *found = get_lowest_loaded_object_above(stackptr);
+	struct LINK_MAP_STRUCT_TAG *found = get_lowest_loaded_object_above(stackptr);
 	if (found)
 	{
 		__assert_fail("no object loaded above stack", __FILE__, __LINE__, __func__);
@@ -97,20 +98,70 @@ ElfW(auxv_t) *get_auxv(const char **environ, void *stackptr)
 	{
 		if (*p_str > (const char*) stackptr)
 		{
-			/* We're pointing at chars high on the stack. 
-			 * Search *downwards* for a zero word followed by a nonzero word. 
-			 * This is the boundary between the AT_NULL record and the last
-			 * non-terminator record in the auxv.
-			 *  
-			 * We assume that if there is padding between the auxv and asciiz, it is all zeroes,
-			 * and that the asciiz data does not contain all-zero words. */
-			uintptr_t *searchp = (uintptr_t*) ((uintptr_t) stackptr & ~(sizeof (uintptr_t) - 1));
-			while (!(!*searchp && *(searchp-1))) --searchp;
+			uintptr_t search_addr = (uintptr_t) *p_str;
+			/* We're pointing at chars in an asciiz blob high on the stack. 
+			 * The auxv is somewhere below us. */
+			 
+			/* 1. Down-align our pointer to alignof auxv_t. */
+			search_addr &= ~(_Alignof (ElfW(auxv_t)) - 1);
 			
-			/* Now searchp points to the last word of the entry preceding the AT_NULL. So... */
-			ElfW(auxv_t) *at_null = (ElfW(auxv_t) *) (searchp + 1);
+			/* 2. Search *downwards* for a full auxv_t's worth of zeroes
+			 * s.t. the next-lower word is a non-zero blob of the same size. 
+			 * This is the AT_NULL record; we shouldn't have such a blob
+			 * of zeroes elsewhere in this region, because even if we have
+			 * 16 bytes of padding between asciiz and auxv, that will only
+			 * account for one auxv_t's blob. We assume that what padding
+			 * there is is all zeroes, and that asciiz data does not contain 
+			 * all-zero chunks.
+			 * 
+			 * NOTE: not portable to (hypothetical) platforms where AT_NULL 
+			 * has a nonzero (but ignored) a_val.
+			 */
+			
+			ElfW(auxv_t) *searchp = (ElfW(auxv_t) *) search_addr;
+			/* NOTE: we adjust searchp by _Alignof (auxv_t), *not* its size. */
+			#define IS_AT_NULL(p) ((p)->a_type == AT_NULL && (p)->a_un.a_val == 0)
+			/* PROBLEM: we might be seeing a misaligned view: the last word
+			 * of AT_NULL, then some padding (zeroes); the searchp-1 will also
+			 * be a misaligned view of auxv that easily passes the not-AT_NULL check.
+			 * This means we've exited the loop too eagerly! We need to go as far as 
+			 * we can, i.e. get the *last* plausible location (this is more robust
+			 * than it sounds :-). */
+			#define NEXT_SEARCHP(p) ((ElfW(auxv_t) *) ((uintptr_t) (p) - _Alignof (ElfW(auxv_t))))
+			while (!(
+				(IS_AT_NULL(searchp) && !IS_AT_NULL(searchp - 1))
+					&& !(IS_AT_NULL(NEXT_SEARCHP(searchp)) && !IS_AT_NULL(NEXT_SEARCHP(searchp) - 1))
+			))
+			{
+				searchp = NEXT_SEARCHP(searchp);
+			}
+			#undef IS_AT_NULL
+			ElfW(auxv_t) *at_null = searchp;
+			assert(at_null->a_type == AT_NULL && !at_null->a_un.a_val);
+			
+			/* Search downwards for the beginning of the auxv. How can we
+			 * recognise this? for a zero word. CARE: some auxv entries are
+			 * zero words! How can we distinguish this? Immediately below
+			 * auxv is envp, which ends with a NULL word preceded by some 
+			 * pointer. All pointer values are higher than auxv tag values, so
+			 * we can use that (NASTY HACK) to identify it. 
+			 * 
+			 * In the very unlikely case that the envp is empty, we will see 
+			 * another NULL instead of a pointer. So we can handle that too. */
+#ifndef AT_MAX
+#define AT_MAX 0x1000
+#endif
 			ElfW(auxv_t) *at_search = at_null;
-			while (*(((uintptr_t *) at_search - 1))) --at_search;
+			while (!(
+					((void**) at_search)[-1] == NULL
+				&&  (
+						((void**) at_search)[-2] > (void*) AT_MAX
+					||  ((void**) at_search)[-2] == NULL
+					)
+				))
+			{
+				--at_search;
+			}
 			/* Now at_search points to the first word after envp's null terminator, i.e. auxv[0]! */
 			ElfW(auxv_t) *auxv = at_search;
 			return auxv;
@@ -140,6 +191,22 @@ ElfW(auxv_t) *auxv_xlookup(ElfW(auxv_t) *a, ElfW(Addr) tag)
 	if (!found) __assert_fail("found expected auxv tag", __FILE__, __LINE__, __func__);
 	return found;
 }
+
+static inline
+ElfW(Dyn) *find_dynamic(const char **environ, void *stackptr)
+{
+	if (&_DYNAMIC[0]) return &_DYNAMIC[0];
+	else
+	{
+		ElfW(auxv_t) *auxv = get_auxv(environ, stackptr);
+		if (auxv)
+		{
+			// ElfW(auxv_t) found_phdr = auxv
+			assert(0); // FIXME: Complete
+		}
+	}
+}
+
 
 static inline
 ElfW(Dyn) *dynamic_lookup(ElfW(Dyn) *d, ElfW(Addr) tag)
@@ -180,7 +247,7 @@ static inline
 struct R_DEBUG_STRUCT_TAG *find_r_debug(void)
 {
 	/* If we have DT_DEBUG in our _DYNAMIC, try that. */
-	ElfW(Dyn) *found = dynamic_lookup(_DYNAMIC, DT_DEBUG);
+	ElfW(Dyn) *found = &_DYNAMIC ? dynamic_lookup(_DYNAMIC, DT_DEBUG) : NULL;
 	if (found) return (struct R_DEBUG_STRUCT_TAG *) found->d_un.d_ptr;
 	else
 	{
@@ -214,7 +281,7 @@ get_highest_loaded_object_below(void *ptr)
 	return highest_seen;
 }
 static inline
-struct LINK_MAP_STRUCT_TAG*
+struct LINK_MAP_STRUCT_TAG *
 get_lowest_loaded_object_above(void *ptr)
 {
 	/* Walk all the loaded objects' load addresses. 
@@ -222,9 +289,9 @@ get_lowest_loaded_object_above(void *ptr)
 	struct LINK_MAP_STRUCT_TAG *lowest_higher_seen = NULL;
 	for (struct LINK_MAP_STRUCT_TAG *l = find_r_debug()->r_map; l; l = l->l_next)
 	{
-		if (!lowest_higher_seen || 
-				((char*) l->l_addr < (char*) lowest_higher_seen->l_addr
-					&& (char*) l->l_addr > (char*) ptr))
+		if ((char*) l->l_addr > (char*) ptr
+				&& (!lowest_higher_seen || 
+					(char*) l->l_addr < (char*) lowest_higher_seen->l_addr))
 		{
 			lowest_higher_seen = l;
 		}
