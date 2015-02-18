@@ -318,8 +318,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
                             linkArgs += [self.getLdLibBase()]
                         else:
                             # no load-time overriding; do link-time overriding 
-                            # by using the full, preloaded library in archive form
-                            linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + "_preload.a"]
+                            # by using the full liballocs library in archive form
+                            linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + ".a"]
                     
             else:
                 if not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
