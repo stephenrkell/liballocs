@@ -87,20 +87,22 @@ ElfW(auxv_t) *get_auxv(const char **environ, void *stackptr)
 	 *   array comes from the actual auxv, rather than being modified.
 	 *   So, e.g. a process which empties out its environment on startup
 	 *   would not be able to find the auxv this way after doing the emptying.
+	 * 
 	 * - The caller also supplies a pointer to the initial stack.
 	 *   any environment pointer which is *greater* than this value
 	 *   will be treated as a pointer into the auxv env, and used
-	 *   as a basis for search. For sanity, we check that no loaded object
-	 *   has a *higher* base address. */
+	 *   as a basis for search. For sanity, we check for any loaded object
+	 *   at a *higher* base address (sometimes the vdso gets loaded here),
+	 *   and use its load address as an upper bound
+	 */
 	struct LINK_MAP_STRUCT_TAG *found = get_lowest_loaded_object_above(stackptr);
-	if (found)
-	{
-		__assert_fail("no object loaded above stack", __FILE__, __LINE__, __func__);
-	}
+	void *stack_upper_bound;
+	if (found) stack_upper_bound = (void*) found->l_addr;
+	else stack_upper_bound = (void*) -1;
 	
 	for (const char **p_str = &environ[0]; *p_str; ++p_str)
 	{
-		if (*p_str > (const char*) stackptr)
+		if (*p_str > (const char*) stackptr && *p_str < stack_upper_bound)
 		{
 			uintptr_t search_addr = (uintptr_t) *p_str;
 			/* We're pointing at chars in an asciiz blob high on the stack. 
@@ -122,39 +124,48 @@ ElfW(auxv_t) *get_auxv(const char **environ, void *stackptr)
 			 * has a nonzero (but ignored) a_val.
 			 */
 			
+#ifndef AT_MAX
+#define AT_MAX 0x1000
+#endif
 			ElfW(auxv_t) *searchp = (ElfW(auxv_t) *) search_addr;
-			/* NOTE: we adjust searchp by _Alignof (auxv_t), *not* its size. */
 			#define IS_AT_NULL(p) ((p)->a_type == AT_NULL && (p)->a_un.a_val == 0)
+			#define IS_PLAUSIBLE_NONNULL_AT(p) \
+				((p)->a_type != AT_NULL && (p)->a_type < AT_MAX)
+			/* NOTE: we decrement searchp by _Alignof (auxv_t), *not* its size. */
+			#define NEXT_SEARCHP(p) ((ElfW(auxv_t) *) ((uintptr_t) (p) - ALIGNOF(ElfW(auxv_t))))
 			/* PROBLEM: we might be seeing a misaligned view: the last word
 			 * of AT_NULL, then some padding (zeroes); the searchp-1 will also
 			 * be a misaligned view of auxv that easily passes the not-AT_NULL check.
 			 * This means we've exited the loop too eagerly! We need to go as far as 
 			 * we can, i.e. get the *last* plausible location (this is more robust
-			 * than it sounds :-). */
-			#define NEXT_SEARCHP(p) ((ElfW(auxv_t) *) ((uintptr_t) (p) - ALIGNOF(ElfW(auxv_t))))
+			 * than it sounds :-). 
+			 * 
+			 * OH, but we might *still* be seeing a misaligned view: if the previous
+			 * auxv record has a zero a_val, then we'll go back one too far.
+			 * So add in the plausibility condition: the a_type field should
+			 * be nonzero and less than AT_MAX (HACK: which we make a guess at). */
 			while (!(
-				(IS_AT_NULL(searchp) && !IS_AT_NULL(searchp - 1))
-					&& !(IS_AT_NULL(NEXT_SEARCHP(searchp)) && !IS_AT_NULL(NEXT_SEARCHP(searchp) - 1))
+					    (IS_AT_NULL(searchp)               && IS_PLAUSIBLE_NONNULL_AT(searchp - 1))
+					&& !(IS_AT_NULL(NEXT_SEARCHP(searchp)) && IS_PLAUSIBLE_NONNULL_AT(NEXT_SEARCHP(searchp) - 1))
 			))
 			{
 				searchp = NEXT_SEARCHP(searchp);
 			}
 			#undef IS_AT_NULL
+			#undef NEXT_SEARCHP
 			ElfW(auxv_t) *at_null = searchp;
 			assert(at_null->a_type == AT_NULL && !at_null->a_un.a_val);
 			
 			/* Search downwards for the beginning of the auxv. How can we
-			 * recognise this? for a zero word. CARE: some auxv entries are
-			 * zero words! How can we distinguish this? Immediately below
+			 * recognise this? It's preceded by the envp's terminating zero word. 
+			 * BUT CARE: some auxv entries are zero words! 
+			 * How can we distinguish this? Immediately below
 			 * auxv is envp, which ends with a NULL word preceded by some 
-			 * pointer. All pointer values are higher than auxv tag values, so
+			 * pointer. All pointer values are higher than auxv tag values! so
 			 * we can use that (NASTY HACK) to identify it. 
 			 * 
 			 * In the very unlikely case that the envp is empty, we will see 
 			 * another NULL instead of a pointer. So we can handle that too. */
-#ifndef AT_MAX
-#define AT_MAX 0x1000
-#endif
 			ElfW(auxv_t) *at_search = at_null;
 			while (!(
 					((void**) at_search)[-1] == NULL
