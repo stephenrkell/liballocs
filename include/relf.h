@@ -72,6 +72,10 @@ static inline
 struct LINK_MAP_STRUCT_TAG*
 get_lowest_loaded_object_above(void *ptr);
 
+#ifndef ALIGNOF
+#define ALIGNOF(t) offsetof (struct { char c; t memb; }, member)
+#endif
+
 static inline
 ElfW(auxv_t) *get_auxv(const char **environ, void *stackptr)
 {
@@ -103,7 +107,7 @@ ElfW(auxv_t) *get_auxv(const char **environ, void *stackptr)
 			 * The auxv is somewhere below us. */
 			 
 			/* 1. Down-align our pointer to alignof auxv_t. */
-			search_addr &= ~(_Alignof (ElfW(auxv_t)) - 1);
+			search_addr &= ~(ALIGNOF(ElfW(auxv_t)) - 1);
 			
 			/* 2. Search *downwards* for a full auxv_t's worth of zeroes
 			 * s.t. the next-lower word is a non-zero blob of the same size. 
@@ -127,7 +131,7 @@ ElfW(auxv_t) *get_auxv(const char **environ, void *stackptr)
 			 * This means we've exited the loop too eagerly! We need to go as far as 
 			 * we can, i.e. get the *last* plausible location (this is more robust
 			 * than it sounds :-). */
-			#define NEXT_SEARCHP(p) ((ElfW(auxv_t) *) ((uintptr_t) (p) - _Alignof (ElfW(auxv_t))))
+			#define NEXT_SEARCHP(p) ((ElfW(auxv_t) *) ((uintptr_t) (p) - ALIGNOF(ElfW(auxv_t))))
 			while (!(
 				(IS_AT_NULL(searchp) && !IS_AT_NULL(searchp - 1))
 					&& !(IS_AT_NULL(NEXT_SEARCHP(searchp)) && !IS_AT_NULL(NEXT_SEARCHP(searchp) - 1))
@@ -205,6 +209,7 @@ ElfW(Dyn) *find_dynamic(const char **environ, void *stackptr)
 			assert(0); // FIXME: Complete
 		}
 	}
+	return NULL; /* shuts up frontc */
 }
 
 
@@ -311,8 +316,9 @@ ElfW(Sym) *hash_lookup(ElfW(Word) *hash, ElfW(Sym) *symtab, const char *strtab, 
 	ElfW(Sym) *found_sym = NULL;
 	ElfW(Word) nbucket = hash[0];
 	ElfW(Word) nchain = hash[1];
-	ElfW(Word) (*buckets)[nbucket] = (void*) &hash[2];
-	ElfW(Word) (*chains)[nchain] = (void*) &hash[2 + nbucket];
+	/* gcc accepts these funky "dependent types", but frontc doesn't */
+	ElfW(Word) (*buckets)[/*nbucket*/] = (void*) &hash[2];
+	ElfW(Word) (*chains)[/*nchain*/] = (void*) &hash[2 + nbucket];
 
 	unsigned long h = elf64_hash((const unsigned char *) sym);
 	ElfW(Word) first_symind = (*buckets)[h % nbucket];
