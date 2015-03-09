@@ -14,6 +14,7 @@
 #ifdef USE_REAL_LIBUNWIND
 #include <libunwind.h>
 #endif
+#include "relf.h"
 #include "liballocs.h"
 #include "liballocs_private.h"
 
@@ -105,31 +106,13 @@ static int print_type_cb(struct uniqtype *t, void *ignored)
 	return 0;
 }
 
-static ElfW(Dyn) *get_dynamic_section(void *handle)
-{
-	return ((struct link_map *) handle)->l_ld;
-}
-
-static ElfW(Dyn) *get_dynamic_entry_from_section(void *dynsec, unsigned long tag)
-{
-	ElfW(Dyn) *dynamic_section = dynsec;
-	while (dynamic_section->d_tag != DT_NULL
-		&& dynamic_section->d_tag != tag) ++dynamic_section;
-	if (dynamic_section->d_tag == DT_NULL) return NULL;
-	return dynamic_section;
-}
-
-static ElfW(Dyn) *get_dynamic_entry_from_handle(void *handle, unsigned long tag)
-{
-	return get_dynamic_entry_from_section(((struct link_map *) handle)->l_ld, tag);
-}
-
 int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg) __attribute__((visibility("protected")));
 int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg)
 {
 	/* Don't use dladdr() to iterate -- too slow! Instead, iterate 
 	 * directly over the dynsym section. */
-	unsigned char *load_addr = (unsigned char *) ((struct link_map *) typelib_handle)->l_addr;
+	struct link_map *h = typelib_handle;
+	unsigned char *load_addr = (unsigned char *) h->l_addr;
 	
 	/* If load address is greater than STACK_BEGIN, it means it's the vdso --
 	 * skip it, because it doesn't contain any uniqtypes and we may fault
@@ -137,22 +120,46 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	if (!load_addr || (uintptr_t) load_addr > STACK_BEGIN) return 0;
 	
 	/* We don't have to add load_addr, because ld.so has already done it. */
-	ElfW(Sym) *dynsym = (ElfW(Sym) *) get_dynamic_entry_from_handle(typelib_handle, DT_SYMTAB)->d_un.d_ptr;
+	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynamic_lookup(h->l_ld, DT_SYMTAB)->d_un.d_ptr;
 	assert(dynsym);
-	
+	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(h->l_ld, DT_HASH);
+	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
 	// check that we start with a null symtab entry
 	static const ElfW(Sym) nullsym = { 0, 0, 0, 0, 0, 0 };
 	assert(0 == memcmp(&nullsym, dynsym, sizeof nullsym));
-	assert((unsigned char *) dynsym > load_addr);
-	unsigned char *dynstr = (unsigned char *) get_dynamic_entry_from_handle(typelib_handle, DT_STRTAB)->d_un.d_ptr;
-	assert(dynstr > (unsigned char *) dynsym);
-	size_t dynsym_size = dynstr - (unsigned char *) dynsym;
-	// round down, because dynstr might be padded
-	dynsym_size = (dynsym_size / sizeof (ElfW(Sym))) * sizeof (ElfW(Sym));
+	if ((intptr_t) dynsym < 0 || (intptr_t) hash < 0)
+	{
+		/* We've got a pointer to kernel memory, probably vdso. 
+		 * On some kernels, the vdso mapping address is randomized
+		 * but its contents are not fixed up appropriately. This 
+		 * means that addresses read from the vdso can't be trusted
+		 * and will probably segfault.
+		 */
+		debug_printf(2, "detected risk of buggy VDSO with unrelocated (kernel-address) content... skipping\n");
+		return 0;
+	}
+	if ((dynsym && (char*) dynsym < MINIMUM_USER_ADDRESS) || (hash && (char*) hash < MINIMUM_USER_ADDRESS))
+	{
+		/* We've got a pointer to a very low address, probably from
+		 * an unrelocated .dynamic section entry. This happens most
+		 * often with the VDSO. The ld.so is supposed to relocate these
+		 * addresses, but when VDSO handling changed in Linux
+		 * (some time between 3.8.0 and 3.18.0) to use load-relative addresses
+		 * instead of pre-relocated addresses, ld.so still hadn't caught on
+		 * that it now needed to relocate these. 
+		 */
+		debug_printf(2, "detected likely-unrelocated (load-relative) .dynamic content... skipping\n");
+		return 0;
+	}
+	// get the symtab size
+	unsigned long nsyms = dynamic_symbol_count(h->l_ld);
+	ElfW(Dyn) *dynstr_ent = dynamic_lookup(h->l_ld, DT_STRTAB);
+	assert(dynstr_ent);
+	char *dynstr = (char*) dynstr_ent->d_un.d_ptr;
+
 	int cb_ret = 0;
 
-	for (ElfW(Sym) *p_sym = dynsym; (unsigned char *) p_sym < (unsigned char *) dynsym + dynsym_size; 
-		++p_sym)
+	for (ElfW(Sym) *p_sym = dynsym; p_sym <  dynsym + nsyms; ++p_sym)
 	{
 		if (ELF64_ST_TYPE(p_sym->st_info) == STT_OBJECT && 
 			p_sym->st_shndx != SHN_UNDEF &&
@@ -343,7 +350,7 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 	void *handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	if (!handle)
 	{
-		debug_printf(1, "loading types object: %s", dlerror());
+		debug_printf(1, "loading types object: %s\n", dlerror());
 		return 0;
 	}
 	
@@ -428,7 +435,7 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 	void *allocsites_handle = dlopen(libfile_name, RTLD_NOW);
 	if (!allocsites_handle)
 	{
-		debug_printf(1, "loading allocsites object: %s", dlerror());
+		debug_printf(1, "loading allocsites object: %s\n", dlerror());
 		return 0;
 	}
 	
