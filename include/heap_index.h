@@ -21,7 +21,7 @@ extern unsigned long biggest_l1_object __attribute__((weak,visibility("protected
 #define MAX_SUBALLOCATED_CHUNKS ((unsigned long) MINIMUM_USER_ADDRESS)
 /* Inserts describing objects have user addresses. They may have the flag set or unset. */
 #define INSERT_DESCRIBES_OBJECT(ins) \
-	(!((ins)->alloc_site) || (char*)((uintptr_t)(ins)->alloc_site) >= MINIMUM_USER_ADDRESS)
+	(!((ins)->alloc_site) || (char*)((uintptr_t)((unsigned long long)((ins)->alloc_site))) >= MINIMUM_USER_ADDRESS)
 /* Inserts describing chained suballocated regions have non-user addresses
  * and the flag *unset*. (If they have the flag set, they're continuation records.) */
 #define INSERT_IS_SUBALLOC_CHAIN(ins) \
