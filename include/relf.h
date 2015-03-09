@@ -1,6 +1,7 @@
 #ifndef RELF_H_
 #define RELF_H_
 
+#include <stddef.h> /* for offsetof */
 #include <elf.h>
 #include <string.h>
 
@@ -43,6 +44,11 @@ BARELY POSSIBLE without syscalls, libdl/allocation: or nonportable logic
 #define R_DEBUG_STRUCT_TAG r_debug
 #endif
 
+#ifndef R_DEBUG_MAKE_ENUMERATOR
+#define R_DEBUG_MAKE_ENUMERATOR(p) p
+#endif
+
+#ifdef RELF_DECLARE_STRUCTURES
 struct LINK_MAP_STRUCT_TAG
 {
 	ElfW(Addr) l_addr;
@@ -58,12 +64,13 @@ struct R_DEBUG_STRUCT_TAG
 	struct LINK_MAP_STRUCT_TAG *r_map;
 	ElfW(Addr) r_brk;
 	enum {
-		RT_CONSISTENT,
-		RT_ADD,
-		RT_DELETE
+		R_DEBUG_MAKE_ENUMERATOR(RT_CONSISTENT),
+		R_DEBUG_MAKE_ENUMERATOR(RT_ADD),
+		R_DEBUG_MAKE_ENUMERATOR(RT_DELETE)
 	} r_state;
 	ElfW(Addr) r_ldbase;
 };
+#endif
 
 extern ElfW(Dyn) _DYNAMIC[] __attribute__((weak));
 extern struct R_DEBUG_STRUCT_TAG _r_debug __attribute__((weak));
@@ -73,7 +80,7 @@ struct LINK_MAP_STRUCT_TAG*
 get_lowest_loaded_object_above(void *ptr);
 
 #ifndef ALIGNOF
-#define ALIGNOF(t) offsetof (struct { char c; t memb; }, member)
+#define ALIGNOF(t) offsetof (struct { char c; t memb; }, memb)
 #endif
 
 static inline
@@ -102,7 +109,7 @@ ElfW(auxv_t) *get_auxv(const char **environ, void *stackptr)
 	
 	for (const char **p_str = &environ[0]; *p_str; ++p_str)
 	{
-		if (*p_str > (const char*) stackptr && *p_str < stack_upper_bound)
+		if (*p_str > (const char*) stackptr && *p_str < (const char *) stack_upper_bound)
 		{
 			uintptr_t search_addr = (uintptr_t) *p_str;
 			/* We're pointing at chars in an asciiz blob high on the stack. 
@@ -389,6 +396,44 @@ ElfW(Sym) *symbol_lookup_linear_local(const char *sym)
 	/* Round down to the alignment of ElfW(Sym). */
 	ElfW(Sym) *symtab_end = ROUND_DOWN_PTR(strtab, sizeof (ElfW(Sym)));
 	return symbol_lookup_linear(symtab, symtab_end, strtab, strtab_end, sym);
+}
+
+static inline
+unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn)
+{
+	unsigned long nsyms = 0;
+	ElfW(Dyn) *dynstr_ent = NULL;
+	unsigned char *dynstr = NULL;
+	ElfW(Dyn) *dynsym_ent = dynamic_lookup(dyn, DT_SYMTAB);
+	if (!dynsym_ent) return 0;
+	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
+	
+	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_HASH);
+	ElfW(Word) *hash = NULL;
+	if (hash_ent)
+	{
+		/* Got the SysV-style hash table. */
+		hash = (ElfW(Word) *) hash_ent->d_un.d_ptr;
+		nsyms = hash[1]; /* nchain, which equals the number of symbols */
+	}
+	else if (NULL != (hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_GNU_HASH)))
+	{
+		/* Got the GNU-style hash table. 
+		 * GAH. Unlike the SysV one, this doesn't tell us the size of the symtab. */
+		goto dynsym_nasty_hack;
+	}
+	else
+	{
+dynsym_nasty_hack:
+		/* Take a wild guess, by assuming dynstr directly follows dynsym. */
+		dynstr_ent = dynamic_lookup(dyn, DT_STRTAB);
+		assert(dynstr_ent);
+		dynstr = (unsigned char *) dynstr_ent->d_un.d_ptr;
+		assert((unsigned char *) dynstr > (unsigned char *) dynsym);
+		// round down, because dynsym might be padded
+		nsyms = (dynstr - (unsigned char *) dynsym) / sizeof (ElfW(Sym));
+	}
+	return nsyms;
 }
 
 /* preserve NULLs */
