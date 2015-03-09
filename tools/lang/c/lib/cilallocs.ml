@@ -61,8 +61,8 @@ let lvalToString lv                = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lv
 let typToString t                  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
 
 let stringEndsWith (s : string) (e : string) : bool = 
+    (String.length s) >= (String.length e) &&
     String.sub s ((String.length s) - (String.length e)) (String.length s) = e
-
 
 let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
 
@@ -85,20 +85,24 @@ let debug_print lvl s =
 let abspath f =
    if String.get f 0 = '/' then f else (getcwd ()) ^ "/" ^ f
 
-(* stolen from StackOverflow:  http://stackoverflow.com/questions/1584758/
-   -- eventually want to change to use Ocaml Batteries Included *)
-let trim str =   if str = "" then "" else   let search_pos init p next =
-    let rec search i =
-      if p i then raise(Failure "empty") else
-      match str.[i] with
-      | ' ' | '\n' | '\r' | '\t' -> search (next i)
-      | _ -> i
-    in
-    search init   in   let len = String.length str in   try
-    let left = search_pos 0 (fun i -> i >= len) (succ)
-    and right = search_pos (len - 1) (fun i -> i < 0) (pred)
-    in
-    String.sub str left (right - left + 1)   with   | Failure "empty" -> "" ;;
+(* stolen from StackOverflow:  http://stackoverflow.com/questions/1584758/ *)
+let trim str =   
+    if str = "" then "" 
+    else   
+        let search_pos init p next =
+            let rec search i = if p i then raise(Failure "empty") else match str.[i] with
+              | ' ' | '\n' | '\r' | '\t' -> search (next i)
+              | _ -> i
+            in
+            search init   
+        in   
+        let len = String.length str in   
+        try
+            let left = search_pos 0 (fun i -> i >= len) (succ)
+            and right = search_pos (len - 1) (fun i -> i < 0) (pred)
+            in
+            String.sub str left (right - left + 1)   
+        with Failure "empty" -> ""
 
 let identFromString s = Str.global_replace (Str.regexp "[^a-zA-Z0-9_]") "_" s
 
