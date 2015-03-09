@@ -73,7 +73,9 @@ INLINE_DECL int INLINE_ATTRS nlz1(unsigned long x)
 #define TOP_N_BITS_CLEAR(n)    (BOTTOM_N_BITS_SET(8*(sizeof(uintptr_t))-((n))))
 #define NBITS(t) ((sizeof (t))<<3)
 /* Thanks to Martin Buchholz -- <http://www.wambold.com/Martin/writings/alignof.html> */
+#ifndef ALIGNOF
 #define ALIGNOF(type) offsetof (struct { char c; type member; }, member)
+#endif
 #define PAD_TO_ALIGN(n, a) 	((0 == ((n) % (a))) ? (n) : (n) + (a) - ((n) % (a)))
 
 INLINE_DECL int next_power_of_two_ge(size_t i) INLINE_ATTRS;
