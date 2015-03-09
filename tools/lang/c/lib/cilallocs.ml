@@ -62,7 +62,7 @@ let typToString t                  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_ty
 
 let stringEndsWith (s : string) (e : string) : bool = 
     (String.length s) >= (String.length e) &&
-    String.sub s ((String.length s) - (String.length e)) (String.length s) = e
+    String.sub s ((String.length s) - (String.length e)) (String.length e) = e
 
 let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
 
