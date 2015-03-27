@@ -52,7 +52,7 @@ cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
         esac
         cu_language_num="$( echo "$cu_language_fullstr" | tr -s '[[:blank:]]' '\t' | cut -f1 )"
         case "$cu_language_num" in
-            (1|2) # DW_LANG_C89, DW_LANG_C
+            (1|2|12) # DW_LANG_C89, DW_LANG_C, DW_LANG_C99
                 $(dirname "$0")/lang/c/bin/c-gather-srcallocs "$cu_sourcepath" "$obj" "$cu_fname" "$cu_compdir"
             ;;
             (*) # unknown
