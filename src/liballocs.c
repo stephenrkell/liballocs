@@ -1148,6 +1148,104 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	}
 }
 
+int
+__liballocs_walk_subobjects_spanning_rec(
+	signed accum_offset, unsigned accum_depth,
+	const signed target_offset_within_u,
+	struct uniqtype *u, 
+	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth, 
+		struct uniqtype *containing, struct contained *contained_pos, void *arg),
+	void *arg
+	)
+{
+	signed ret = 0;
+	/* Calculate the offset to descend to, if any. This is different for 
+	 * structs versus arrays. */
+	if (u->is_array)
+	{
+		struct contained *element_contained_in_u = &u->contained[0];
+		struct uniqtype *element_uniqtype = element_contained_in_u->ptr;
+		signed div = target_offset_within_u / element_uniqtype->pos_maxoff;
+		signed mod = target_offset_within_u % element_uniqtype->pos_maxoff;
+		if (element_uniqtype->pos_maxoff != 0 && u->array_len > div)
+		{
+			signed skip_sz = div * element_uniqtype->pos_maxoff;
+			__liballocs_private_assert(target_offset_within_u < u->pos_maxoff,
+				"offset not within subobject", __FILE__, __LINE__, __func__);
+			int ret = cb(element_uniqtype, accum_offset + skip_sz, accum_depth + 1u, 
+				u, element_contained_in_u, arg);
+			if (ret) return ret;
+			// tail-recurse
+			else return __liballocs_walk_subobjects_spanning_rec(
+				accum_offset + div, accum_depth + 1u,
+				mod, element_uniqtype, cb, arg);
+		} 
+		else // element's pos_maxoff == 0 || num_contained <= target_offset / element's pos_maxoff 
+		{}
+	}
+	else // struct/union case
+	{
+		signed num_contained = u->nmemb;
+		int lower_ind = 0;
+		int upper_ind = num_contained;
+		while (lower_ind + 1 < upper_ind) // difference of >= 2
+		{
+			/* Bisect the interval */
+			int bisect_ind = (upper_ind + lower_ind) / 2;
+			__liballocs_private_assert(bisect_ind > lower_ind, "progress", __FILE__, __LINE__, __func__);
+			if (u->contained[bisect_ind].offset > target_offset_within_u)
+			{
+				/* Our solution lies in the lower half of the interval */
+				upper_ind = bisect_ind;
+			} else lower_ind = bisect_ind;
+		}
+
+		if (lower_ind + 1 == upper_ind)
+		{
+			/* We found one offset */
+			__liballocs_private_assert(u->contained[lower_ind].offset <= target_offset_within_u,
+				"offset underapproximates", __FILE__, __LINE__, __func__);
+
+			/* ... but we might not have found the *lowest* index, in the 
+			 * case of a union. Scan backwards so that we have the lowest. 
+			 * FIXME: need to account for the element size? Or here are we
+			 * ignoring padding anyway? */
+			signed offset = u->contained[lower_ind].offset;
+			for (;
+					lower_ind > 0 && u->contained[lower_ind-1].offset == offset;
+					--lower_ind);
+			// now we have the lowest lower_ind
+			// scan forwards!
+			for (int i_ind = lower_ind; i_ind < u->nmemb
+					&& u->contained[i_ind].offset == offset;
+					++i_ind)
+			{
+				if (target_offset_within_u < u->pos_maxoff)
+				{
+					int ret = cb(u->contained[i_ind].ptr, accum_offset + offset,
+							accum_depth + 1u, u, &u->contained[i_ind], arg);
+					if (ret) return ret;
+					else
+					{
+						ret = __liballocs_walk_subobjects_spanning_rec(
+							accum_offset + offset, accum_depth + 1u,
+							target_offset_within_u - offset, u->contained[i_ind].ptr, cb, arg);
+						if (ret) return ret;
+					}
+				}
+			}
+		}
+		else /* lower_ind >= upper_ind */
+		{
+			// this should mean num_contained == 0
+			__liballocs_private_assert(num_contained == 0,
+				"no contained objects", __FILE__, __LINE__, __func__);
+		}
+	}
+	
+	return ret;
+}
+
 struct uniqtype * 
 __liballocs_get_alloc_type(void *obj)
 {
