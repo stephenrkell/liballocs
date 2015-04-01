@@ -376,7 +376,6 @@ __liballocs_walk_subobjects_spanning_rec(
 		signed mod = target_offset_within_u % element_uniqtype->pos_maxoff;
 		if (element_uniqtype->pos_maxoff != 0 && u->array_len > div)
 		{
-			signed modulus = target_offset_within_u % element_uniqtype->pos_maxoff;
 			signed skip_sz = div * element_uniqtype->pos_maxoff;
 			__liballocs_private_assert(target_offset_within_u < u->pos_maxoff,
 				"offset not within subobject", __FILE__, __LINE__, __func__);
@@ -676,6 +675,7 @@ __liballocs_get_alloc_info
 	struct suballocated_chunk_rec *containing_suballoc;
 	size_t alloc_chunksize;
 	struct insert *heap_info;
+	uintptr_t alloc_site_addr = 0;
 	switch(k)
 	{
 		case STACK:
@@ -885,7 +885,7 @@ __liballocs_get_alloc_info
 			}
 			assert(get_object_memory_kind(heap_info) == HEAP
 				|| get_object_memory_kind(heap_info) == UNKNOWN); // might not have seen that maps yet
-			uintptr_t alloc_site_addr = heap_info->alloc_site;
+			alloc_site_addr = heap_info->alloc_site;
 			assert(!alloc_site_addr
 				|| __liballocs_get_memory_kind((void*) alloc_site_addr) == STATIC
 				|| (__liballocs_add_missing_maps(),
