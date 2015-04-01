@@ -106,7 +106,7 @@ static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins)
 {
 	bool is_l0 = __lookup_l0 && __lookup_l0(ptr, NULL) == ins;
 	bool is_sane_l01 = is_l0 || ((char*)(ins) - (char*)(ptr) >= 0
-			&& (char*)(ins) - (char*)(ptr) < biggest_l1_object);
+			&& (char*)(ins) - (char*)(ptr) < (signed long) biggest_l1_object);
 	return is_sane_l01 && INSERT_IS_SUBALLOC_CHAIN(ins);
 }
 struct insert *__liballocs_insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);
