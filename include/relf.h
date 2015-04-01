@@ -232,7 +232,7 @@ ElfW(Dyn) *find_dynamic(const char **environ, void *stackptr)
 
 
 static inline
-ElfW(Dyn) *dynamic_lookup(ElfW(Dyn) *d, ElfW(Addr) tag)
+ElfW(Dyn) *dynamic_lookup(ElfW(Dyn) *d, ElfW(Sxword) tag)
 {
 	for (ElfW(Dyn) *dyn = d; dyn->d_tag != DT_NULL; ++dyn)
 	{
