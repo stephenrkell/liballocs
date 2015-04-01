@@ -152,7 +152,7 @@ is_unindexed(void *begin, void *end)
 	
 	if (pos == l0index + PAGENUM(end)) return 1;
 	
-	debug_printf(3, "Found already-indexed position %p (mapping %d)\n", 
+	debug_printf(6, "Found already-indexed position %p (mapping %d)\n", 
 			ADDR_OF_PAGENUM(pos - l0index), *pos);
 	return 0;
 }
@@ -165,7 +165,7 @@ is_unindexed_or_heap(void *begin, void *end)
 	
 	if (pos == l0index + PAGENUM(end)) return 1;
 	
-	debug_printf(3, "Found already-indexed non-heap position %p (mapping %d)\n", 
+	debug_printf(6, "Found already-indexed non-heap position %p (mapping %d)\n", 
 			ADDR_OF_PAGENUM(pos - l0index), *pos);
 	return 0;
 }
@@ -204,7 +204,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 	assert((uintptr_t) base % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	assert(s % sysconf(_SC_PAGE_SIZE) == 0); // else something strange is happening
 	
-	debug_printf(3, "%s: creating mapping base %p, size %lu, kind %u, info %p\n", 
+	debug_printf(6, "%s: creating mapping base %p, size %lu, kind %u, info %p\n", 
 		__func__, base, (unsigned long) s, f.kind, p_info);
 	
 	/* In the case of heap regions, libc can munmap them without our seeing it. 
@@ -247,7 +247,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 				char *overlap_begin = MAXPTR((char*) mappings[i_map].begin, (char*) base);
 				char *overlap_end = MINPTR((char*) mappings[i_map].end, (char*) base + s);
 				
-				debug_printf(3, "%s: forcing unmapping of %p-%p (from mapping number %d), overlapping %p-%p\n", 
+				debug_printf(6, "%s: forcing unmapping of %p-%p (from mapping number %d), overlapping %p-%p\n", 
 					__func__, overlap_begin, overlap_end, i_map,  base, (char*) base + s);
 				mapping_del(overlap_begin, overlap_end - overlap_begin);
 				bytes_unmapped += overlap_end - overlap_begin;
@@ -265,7 +265,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 							&& mapping_flags_equal(mappings[i_map].n.f, f)
 							&& mapping_info_equal(f, &mappings[i_map].n, p_info))
 				{
-					debug_printf(3, "%s: mapping already present\n", __func__);
+					debug_printf(6, "%s: mapping already present\n", __func__);
 					// if we're STATIC and have a data pt, we borrow the new data_ptr 
 					// because it's more likely to be up-to-date
 					if (f.kind == STATIC && p_info->what == DATA_PTR)
@@ -417,9 +417,9 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 	}
 	assert(is_unindexed_or_heap(base, (char*) base + s));
 	
-	debug_printf(3, "node info is %p\n", p_info);
+	debug_printf(6, "node info is %p\n", p_info);
 	
-	debug_printf(3, "%s: abuts_existing_start: %d, abuts_existing_end: %d\n",
+	debug_printf(6, "%s: abuts_existing_start: %d, abuts_existing_end: %d\n",
 			__func__, abuts_existing_start, abuts_existing_end);
 
 	_Bool flags_matches = 1;
@@ -431,7 +431,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 	_Bool can_coalesce_before = abuts_existing_end
 				&& (flags_matches = (mapping_flags_equal(mappings[abuts_existing_end].n.f, f)))
 				&& (node_matches = (mapping_info_equal(f, &mappings[abuts_existing_end].n, p_info)));
-	debug_printf(3, "%s: can_coalesce_after: %s, can_coalesce_before: %s, "
+	debug_printf(6, "%s: can_coalesce_after: %s, can_coalesce_before: %s, "
 			"flags_matches: %s, node_matches: %s \n",
 			__func__, can_coalesce_after ? "true" : "false", can_coalesce_before ? "true" : "false", 
 			flags_matches ? "true": "false", node_matches ? "true": "false" );
@@ -445,13 +445,13 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 		mappings[abuts_existing_start].begin = 
 			mappings[abuts_existing_start].end =
 				NULL;
-		debug_printf(3, "%s: bumped up size to join two mappings\n", __func__);
+		debug_printf(6, "%s: bumped up size to join two mappings\n", __func__);
 		can_coalesce_after = 0;
 	}
 	
 	if (can_coalesce_before)
 	{
-		debug_printf(3, "%s: post-extending existing mapping ending at %p\n", __func__,
+		debug_printf(6, "%s: post-extending existing mapping ending at %p\n", __func__,
 				mappings[abuts_existing_end].end);
 		memset_mapping(l0index + PAGENUM(mappings[abuts_existing_end].end), abuts_existing_end, 
 			s >> LOG_PAGE_SIZE);
@@ -461,7 +461,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 	}
 	if (can_coalesce_after)
 	{
-		debug_printf(3, "%s: pre-extending existing mapping at %p-%p\n", __func__,
+		debug_printf(6, "%s: pre-extending existing mapping at %p-%p\n", __func__,
 				mappings[abuts_existing_start].begin, mappings[abuts_existing_start].end);
 		mappings[abuts_existing_start].begin = (char*) base;
 		memset_mapping(l0index + PAGENUM(base), abuts_existing_start, s >> LOG_PAGE_SIZE);
@@ -469,7 +469,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 		return &mappings[abuts_existing_start];
 	}
 	
-	debug_printf(3, "%s: forced to assign new mapping\n", __func__);
+	debug_printf(6, "%s: forced to assign new mapping\n", __func__);
 	
 	// else create new
 	struct mapping *found = find_free_mapping();
@@ -1006,8 +1006,8 @@ void *__try_index_l0(const void *ptr, size_t modified_size, const void *caller)
 			{
 				size_t s = chunk_end - (char*) m->end;
 				mapping_del(m->end, s);
-				debug_printf(3, "mapping_info is %p\n,",&m->n ); 
-				debug_printf(3, "We want to extend our bottom mapping number %ld (%p-%p) "
+				debug_printf(6, "mapping_info is %p\n,",&m->n ); 
+				debug_printf(6, "We want to extend our bottom mapping number %ld (%p-%p) "
 					"to include %ld bytes from %p\n", 
 					(long)(m - &mappings[0]), m->begin, m->end, s, m->end); 
 				assert(l0index[PAGENUM((char*) m->end - 1)] == m - &mappings[0]);
