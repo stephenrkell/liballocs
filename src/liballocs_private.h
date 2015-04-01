@@ -75,6 +75,13 @@ enum object_memory_kind __liballocs_get_memory_kind(const void *obj) VIS(protect
 void __liballocs_print_mappings_to_stream_err(void) VIS(protected);
 _Bool mapping_info_has_data_ptr_equal_to(mapping_flags_t f, const struct mapping_info *info, const void *data_ptr) __attribute((visibility("hidden")));
 
+int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
+int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
+int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
+void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
+int dl_for_one_object_phdrs(void *handle,
+	int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
+	void *data) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 
 struct mapping_info *

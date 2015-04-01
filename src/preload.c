@@ -217,10 +217,10 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 // HACK: call out to libcrunch if it's linked in
 extern void  __attribute__((weak)) __libcrunch_scan_lazy_typenames(void*);
 
+void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
 void *dlopen(const char *filename, int flag)
 {
-	static void *(*orig_dlopen)(const char *, int);
-	if (!orig_dlopen)
+	if (!orig_dlopen) // happens if we're called before liballocs init
 	{
 		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
 		assert(orig_dlopen);
@@ -244,7 +244,19 @@ void *dlopen(const char *filename, int flag)
 			int dlpi_ret = dl_iterate_phdr(__liballocs_add_all_mappings_cb, 
 				((struct link_map *) ret)->l_name);
 			assert(dlpi_ret != 0);
+		
+			/* Also load the types and allocsites for this object. These callbacks
+			 * also have to be tolerant of already-loadedness. */
+			int ret_types = dl_for_one_object_phdrs(ret, load_types_for_one_object, NULL);
+			assert(ret_types == 0);
+		#ifndef NO_MEMTABLE
+			int ret_allocsites = dl_for_one_object_phdrs(ret, load_and_init_allocsites_for_one_object, NULL);
+			assert(ret_allocsites == 0);
+			int ret_stackaddr = dl_for_one_object_phdrs(ret, link_stackaddr_and_static_allocs_for_one_object, NULL);
+			assert(ret_stackaddr == 0);
+		#endif
 		}
+
 		return ret;
 	}
 }

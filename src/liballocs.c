@@ -96,6 +96,36 @@ struct blacklist_ent
 static _Bool check_blacklist(const void *obj);
 static void consider_blacklisting(const void *obj);
 
+struct dl_for_one_phdr_cb_args
+{
+	struct link_map *link_map_to_match;
+	int (*actual_callback) (struct dl_phdr_info *info, size_t size, void *data);
+	void *actual_arg;
+};
+
+static int dl_for_one_phdr_cb(struct dl_phdr_info *info, size_t size, void *data)
+{
+	struct dl_for_one_phdr_cb_args *args = (struct dl_for_one_phdr_cb_args *) data;
+	/* Only call the callback if the link map matches. */
+	if (args->link_map_to_match->l_addr == info->dlpi_addr)
+	{
+		return args->actual_callback(info, size, args->actual_arg);
+	} else return 0; // keep going
+}
+
+int dl_for_one_object_phdrs(void *handle,
+	int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
+	void *data)
+{
+	struct dl_for_one_phdr_cb_args args = {
+		(struct link_map *) handle, 
+		callback,
+		data
+	};
+	dl_iterate_phdr(dl_for_one_phdr_cb, &args);
+}
+
+
 static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg);
 
 static int print_type_cb(struct uniqtype *t, void *ignored)
@@ -327,7 +357,7 @@ static const char *helper_libfile_name(const char *objname, const char *suffix)
 // HACK
 extern void __libcrunch_scan_lazy_typenames(void *handle) __attribute__((weak));
 
-static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
+int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
@@ -347,15 +377,21 @@ static int load_types_cb(struct dl_phdr_info *info, size_t size, void *data)
 	// fprintf(stream_err, "liballocs: trying to open %s\n", libfile_name);
 
 	dlerror();
-	void *handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL);
+	// load with NOLOAD first, so that duplicate loads are harmless
+	void *handle = (orig_dlopen ? orig_dlopen :dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+	if (handle) return 0;
+	
+	dlerror();
+	handle = (orig_dlopen ? orig_dlopen :dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	if (!handle)
 	{
 		debug_printf(1, "loading types object: %s\n", dlerror());
 		return 0;
 	}
+	debug_printf(3, "loaded types object: %s\n", libfile_name);
 	
 	// if we want maximum output, print it
-	if (__liballocs_debug_level >= 5)
+	if (__liballocs_debug_level >= 6)
 	{
 		__liballocs_iterate_types(handle, print_type_cb, NULL);
 	}
@@ -413,7 +449,7 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 #undef FIXADDR
 }
 
-static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, void *data)
+int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
@@ -431,13 +467,19 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 	}
 
 	// fprintf(stream_err, "liballocs: trying to open %s\n", libfile_name);
+	// load with NOLOAD first, so that duplicate loads are harmless
 	dlerror();
-	void *allocsites_handle = dlopen(libfile_name, RTLD_NOW);
+	void *allocsites_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_NOLOAD);
+	if (allocsites_handle) return 0;
+	
+	dlerror();
+	allocsites_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW);
 	if (!allocsites_handle)
 	{
 		debug_printf(1, "loading allocsites object: %s\n", dlerror());
 		return 0;
 	}
+	debug_printf(1, "loaded allocsites object: %s\n", libfile_name);
 	
 	dlerror();
 	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(allocsites_handle, "allocsites");
@@ -464,7 +506,7 @@ static int load_and_init_allocsites_cb(struct dl_phdr_info *info, size_t size, v
 	return 0;
 }
 
-static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t size, void *data)
+int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
@@ -482,10 +524,10 @@ static int link_stackaddr_and_static_allocs_cb(struct dl_phdr_info *info, size_t
 	}
 
 	dlerror();
-	void *types_handle = dlopen(libfile_name, RTLD_NOW | RTLD_NOLOAD);
+	void *types_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_NOLOAD);
 	if (!types_handle)
 	{
-		debug_printf(1, "re-loading types object: %s", dlerror());
+		debug_printf(1, "re-loading types object: %s\n", dlerror());
 		return 0;
 	}
 	
@@ -801,6 +843,12 @@ int __liballocs_global_init(void)
 	const char *debug_level_str = getenv("LIBALLOCS_DEBUG_LEVEL");
 	if (debug_level_str) __liballocs_debug_level = atoi(debug_level_str);
 
+	if (!orig_dlopen) // might have been done by a pre-init call to our preload dlopen
+	{
+		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
+		assert(orig_dlopen);
+	}
+
 	/* NOTE that we get called during allocation. So we should avoid 
 	 * doing anything that causes more allocation, or else we should
 	 * handle the reentrancy gracefully. Calling the dynamic linker
@@ -834,7 +882,7 @@ int __liballocs_global_init(void)
 		exe_basename[sizeof exe_basename - 1] = '\0';
 	}
 	
-	int ret_types = dl_iterate_phdr(load_types_cb, NULL);
+	int ret_types = dl_iterate_phdr(load_types_for_one_object, NULL);
 	assert(ret_types == 0);
 	
 #ifndef NO_MEMTABLE
@@ -849,10 +897,10 @@ int __liballocs_global_init(void)
 		(void*) 0, (void*) (STACK_BEGIN << 2));
 	assert(__liballocs_allocsmt != MAP_FAILED);
 	
-	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_cb, NULL);
+	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_for_one_object, NULL);
 	assert(ret_allocsites == 0);
 
-	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_cb, NULL);
+	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_for_one_object, NULL);
 	assert(ret_stackaddr == 0);
 #endif
 	// grab the maximum stack size
@@ -951,7 +999,7 @@ static void *typeobj_handle_for_addr(void *caller)
 	// dlopen the typeobj
 	const char *types_libname = helper_libfile_name(dynobj_name_from_dlpi_name(info.dli_fname, info.dli_fbase), "-types.so");
 	assert(types_libname != NULL);
-	void *handle = dlopen(types_libname, RTLD_NOW | RTLD_NOLOAD);
+	void *handle = (orig_dlopen ? orig_dlopen : dlopen)(types_libname, RTLD_NOW | RTLD_NOLOAD);
 	if (handle == NULL)
 		printf("Error: %s\n", dlerror());
 	return handle;
