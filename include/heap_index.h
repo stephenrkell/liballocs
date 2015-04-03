@@ -2,6 +2,7 @@
 #define __HEAP_INDEX_H
 
 #include <stdbool.h>
+#define USE_SYSCALL_FOR_MMAP
 #include "memtable.h"
 
 struct entry

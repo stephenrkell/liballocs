@@ -19,8 +19,7 @@ extern "C" {
 typedef bool _Bool;
 #endif
 
-#include "memtable.h"
-#include "heap_index.h"
+#include "heap_index.h" /* includes memtable */
 #include "allocsmt.h"
 #include <link.h>
 #include <stdint.h>

@@ -18,6 +18,15 @@ extern "C" {
 // go with 1/4 of the address space if we're not sure (x86-64 is special)
 #endif
 
+#ifdef USE_SYSCALL_FOR_MMAP
+#include <unistd.h>
+#include <sys/syscall.h>
+#define MEMTABLE_MMAP(addr, length, prot, flags, fd, offset) \
+	(void*) syscall(__NR_mmap, (addr), (length), (prot), (flags), (fd), (offset))
+#else
+#define MEMTABLE_MMAP mmap
+#endif
+
 #include <assert.h>
 /* #include <math.h> */
 #include <sys/mman.h>
@@ -150,7 +159,7 @@ INLINE_DECL void *INLINE_ATTRS memtable_new(
 	size_t mapping_size = memtable_mapping_size(entry_size_in_bytes,
 		entry_coverage_in_bytes, addr_begin, addr_end);
 	assert(mapping_size <= BIGGEST_MMAP_ALLOWED);
-	void *ret = mmap(NULL, mapping_size, PROT_READ|PROT_WRITE, 
+	void *ret = MEMTABLE_MMAP(NULL, mapping_size, PROT_READ|PROT_WRITE, 
 		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
 	return ret; /* MAP_FAILED on error */
 }
@@ -191,7 +200,7 @@ INLINE_DECL char *INLINE_ATTRS memtable_new_l1_page_bitmap(
  *    But traversing it is still a no-no.
  */
 	size_t bitmap_mapping_size = table_mapping_size / (sysconf(_SC_PAGE_SIZE) << 3);
-	void *ret = mmap(NULL, bitmap_mapping_size, PROT_READ|PROT_WRITE, 
+	void *ret = MEMTABLE_MMAP(NULL, bitmap_mapping_size, PROT_READ|PROT_WRITE, 
 		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
 	return (char*) ret; /* MAP_FAILED on error */
 }
@@ -219,7 +228,7 @@ INLINE_DECL char *INLINE_ATTRS memtable_new_l2_page_bitmap(
  *    Traversing it is not great.
  *    For smaller memtables, this might be a nice size e.g. a few dozens of bytes.
  */
-	void *ret = mmap(NULL, l2_bitmap_mapping_size, PROT_READ|PROT_WRITE, 
+	void *ret = MEMTABLE_MMAP(NULL, l2_bitmap_mapping_size, PROT_READ|PROT_WRITE, 
 		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
 	return (char*) ret; /* MAP_FAILED on error */
 }
