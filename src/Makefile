@@ -14,35 +14,36 @@ HOOKS_WRAP_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_wrap_fast.o event_h
 CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS)
 
 ifeq ($(DEBUG),1)
-    DEFAULT_EXTRA_CFLAGS := -fPIC -g
+    DEFAULT_EXTRA_CFLAGS := -g
 else
     # STRANGE: this
-    #DEFAULT_EXTRA_CFLAGS := -fPIC -flto -O4 # note! no -DNDEBUG
+    #DEFAULT_EXTRA_CFLAGS := -flto -O4 # note! no -DNDEBUG
     # is slower than the following (4.61, 4.54, 4.60)
-    #DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -finline-functions
+    #DEFAULT_EXTRA_CFLAGS := -O0 -finline-functions
     # ; what about this? it's the same or slightly slower
-    #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -finline-functions -DNDEBUG
+    #DEFAULT_EXTRA_CFLAGS := -O4 -flto -finline-functions -DNDEBUG
     # what about this one? makes little difference
-    #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
+    #DEFAULT_EXTRA_CFLAGS := -O4 -flto -DNDEBUG
     # what about this one? same or slightly slower
-    #DEFAULT_EXTRA_CFLAGS := -fPIC -Os -flto -DNDEBUG
+    #DEFAULT_EXTRA_CFLAGS := -Os -flto -DNDEBUG
     # what about this one? slightly faster
-    #DEFAULT_EXTRA_CFLAGS := -fPIC -O0 -DNDEBUG
+    #DEFAULT_EXTRA_CFLAGS := -O0 -DNDEBUG
     # what about this one?  among the fastest (4.52, 4.50, 4.51)
-    #DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+    #DEFAULT_EXTRA_CFLAGS := -O3 -DNDEBUG
     # really double-check that the following isn't faster? nope (4.64, 4.64, 4.59)
-    #DEFAULT_EXTRA_CFLAGS := -fPIC -O4 -flto -DNDEBUG
+    #DEFAULT_EXTRA_CFLAGS := -O4 -flto -DNDEBUG
 
-    # Summary of the above: -fPIC -O3 -DNDEBUG is the fastest
-    DEFAULT_EXTRA_CFLAGS := -fPIC -O3 -DNDEBUG
+    # Summary of the above: -O3 -DNDEBUG is the fastest
+    FAST_EXTRA_CFLAGS := -O3 -DNDEBUG
+	DEBUG_EXTRA_CFLAGS := -O0
 endif
 
 default: liballocs_preload.so liballocs_nonshared.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
 
-NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
-FAST_CFLAGS += -fpic -flto -ffat-lto-objects
+HOOKS_NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
+HOOKS_FAST_CFLAGS += -fpic -flto -ffat-lto-objects
 ifneq ($(DEBUG),1)
-    FAST_CFLAGS += -O4 -DNDEBUG
+    HOOKS_FAST_CFLAGS += -O4 -DNDEBUG
 endif
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
@@ -115,12 +116,16 @@ $(CC_DEPS): .%.d : %.cc
 %_fast.o: %.c
 	$(CC) $(CFLAGS) -c -o "$@" "$<"
 
-$(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += $(DEFAULT_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+ifeq ($(DEBUG),1)
+$(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(DEBUG_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+else
+$(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(FAST_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+endif 
 .SECONDARY: heap_index_hooks_fast.c
-heap_index_hooks_fast.o: CFLAGS += $(FAST_CFLAGS)
-heap_index_hooks.o: CFLAGS += $(NON_FAST_CFLAGS)
-event_hooks_fast.o: CFLAGS += $(FAST_CFLAGS)
-event_hooks.o: CFLAGS += $(NON_FAST_CFLAGS)
+heap_index_hooks_fast.o: CFLAGS += $(HOOKS_FAST_CFLAGS)
+heap_index_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
+event_hooks_fast.o: CFLAGS += $(HOOKS_FAST_CFLAGS)
+event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 
 # HACK override the rule for *.c -> *.o as a possible fix for debug info non-findy (does it work?)
 %.o: %.c
