@@ -37,6 +37,9 @@ size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("pr
 #define safe_to_use_mappings (l0index)
 #define safe_to_call_dlsym (safe_to_call_malloc)
 
+/* some signalling to malloc hooks */
+_Bool __avoid_calling_dl_functions;
+
 static const char *filename_for_fd(int fd)
 {
 	/* We read from /proc into a thread-local buffer. */
@@ -222,14 +225,19 @@ void *dlopen(const char *filename, int flag)
 {
 	if (!orig_dlopen) // happens if we're called before liballocs init
 	{
+		__avoid_calling_dl_functions = 1;
 		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
+		__avoid_calling_dl_functions = 0;
 		assert(orig_dlopen);
 	}
 	
 	if (!__liballocs_is_initialized) return orig_dlopen(filename, flag);
 	else
 	{
+		__avoid_calling_dl_functions = 1;
 		void *ret = orig_dlopen(filename, flag);
+		__avoid_calling_dl_functions = 0;
+		
 		/* Have we just opened a new object? If filename was null, 
 		 * we haven't; if ret is null; we haven't; if NOLOAD was passed,
 		 * we haven't. Otherwise we *might* have done, but we still
