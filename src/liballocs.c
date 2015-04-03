@@ -144,14 +144,19 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	struct link_map *h = typelib_handle;
 	unsigned char *load_addr = (unsigned char *) h->l_addr;
 	
-	/* If load address is greater than STACK_BEGIN, it means it's the vdso --
-	 * skip it, because it doesn't contain any uniqtypes and we may fault
-	 * trying to read its dynsym. */
+	/* If load address is greater than STACK_BEGIN, it's suspicious -- 
+	 * perhaps a vdso-like thing. Skip it. The vdso itself is detected
+	 * below (it lives in user memory, but points into kernel memory). */
 	if (!load_addr || (uintptr_t) load_addr > STACK_BEGIN) return 0;
 	
 	/* We don't have to add load_addr, because ld.so has already done it. */
-	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynamic_lookup(h->l_ld, DT_SYMTAB)->d_un.d_ptr;
+	ElfW(Dyn) *dynsym_ent = dynamic_lookup(h->l_ld, DT_SYMTAB);
+	assert(dynsym_ent);
+	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
 	assert(dynsym);
+	/* Catch the vdso case. */
+	if (!dynsym || (uintptr_t) dynsym > STACK_BEGIN) return 0;
+	
 	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(h->l_ld, DT_HASH);
 	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
 	// check that we start with a null symtab entry
@@ -843,7 +848,7 @@ int __liballocs_global_init(void)
 	const char *debug_level_str = getenv("LIBALLOCS_DEBUG_LEVEL");
 	if (debug_level_str) __liballocs_debug_level = atoi(debug_level_str);
 
-	if (!orig_dlopen) // might have been done by a pre-init call to our preload dlopen
+	if (!orig_dlopen && safe_to_call_malloc) // might have been done by a pre-init call to our preload dlopen
 	{
 		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
 		assert(orig_dlopen);
@@ -868,11 +873,34 @@ int __liballocs_global_init(void)
 	// grab the executable's end address
 	// we used to try dlsym()'ing "_end" but this doesn't work! 
 	// Not all executables have _end and _begin exported as dynamic syms
-	void *executable_handle = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
+	// Also, we don't want to call dlsym since it might not be safe to malloc.
+	// Get the phdrs directly from the auxv.
+	/* void *executable_handle = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
 	assert(executable_handle != NULL);
-	__addrmap_executable_end_addr = biggest_vaddr_in_obj(executable_handle);
+	__addrmap_executable_end_addr = biggest_vaddr_in_obj(executable_handle);*/
+	
+	char dummy;
+	ElfW(auxv_t) *auxv = get_auxv((const char **) environ, &dummy);
+	assert(auxv);
+	ElfW(auxv_t) *ph_auxv = auxv_lookup(auxv, AT_PHDR);
+	ElfW(auxv_t) *phnum_auxv = auxv_lookup(auxv, AT_PHNUM);
+	assert(ph_auxv);
+	assert(phnum_auxv);
+	uintptr_t biggest_seen = 0;
+	for (int i = 0; i < phnum_auxv->a_un.a_val; ++i)
+	{
+		ElfW(Phdr) *phdr = ((ElfW(Phdr)*) ph_auxv->a_un.a_val) + i;
+		if (phdr->p_type == PT_LOAD)
+		{
+			/* We can round down to int because vaddrs *within* an object 
+			 * will not be more than 2^31 from the object base. */
+			uintptr_t max_plus_one = (int) (phdr->p_vaddr + phdr->p_memsz);
+			if (max_plus_one > biggest_seen) biggest_seen = max_plus_one;
+		}
+	}
+	__addrmap_executable_end_addr = (void*) biggest_seen;
 	assert(__addrmap_executable_end_addr != 0);
-	assert(__addrmap_executable_end_addr < BIGGEST_SANE_EXECUTABLE_VADDR);
+	assert((char*) __addrmap_executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
 	
 	// grab the executable's basename
 	ssize_t readlink_ret = readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);
