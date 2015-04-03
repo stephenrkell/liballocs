@@ -161,9 +161,6 @@ void __liballocs_add_missing_maps(void)
 	assert(ret > 0);
 	FILE *maps = fopen(proc_buf, "r");
 	assert(maps);
-
-	struct link_map *executable_handle = dlopen(NULL, RTLD_NOW|RTLD_NOLOAD);
-	assert(executable_handle);
 	
 	/* We used to use getline(), but in some deployments it's not okay to 
 	 * use malloc when we're called early during initialization. So we write
