@@ -52,7 +52,7 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_filesz);
 				uintptr_t rounded_up_end_of_mem = MAPPING_END_FROM_PHDR_VADDR(info->dlpi_addr, 
 						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_memsz);
-				// add it to the tree
+
 				const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, 
 					(void*) info->dlpi_addr);
 				// HACK HACK HACK HACK: memory leak: please don't strdup
@@ -83,15 +83,83 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 					.w = (_Bool) (info->dlpi_phdr[i].p_flags & PF_W), 
 					.x = (_Bool) (info->dlpi_phdr[i].p_flags & PF_X)
 				};
+				 
+				/* Look for a PT_GNU_RELRO entry covering any part of this 
+				 * mapping. If there is one, we create *two* mappings. This
+				 * is so that we don't confuse l0index by mapping a single
+				 * big mapping over distinct-permission mappings that we got
+				 * from /proc/pid/maps. */
+				for (int j = 0; j < info->dlpi_phnum; ++j)
+				{
+					// if this phdr's a PT_GNU_RELRO
+					if (info->dlpi_phdr[j].p_type == PT_GNU_RELRO)
+					{
+						/* Does it fall within our mapping? */
+						// adjust start/end to be multiples of the page size
+						uintptr_t relro_rounded_down_base
+						 = MAPPING_BASE_FROM_PHDR_VADDR(info->dlpi_addr, info->dlpi_phdr[j].p_vaddr);
+						uintptr_t relro_rounded_up_end_of_file = MAPPING_END_FROM_PHDR_VADDR(
+							info->dlpi_addr, info->dlpi_phdr[j].p_vaddr, info->dlpi_phdr[j].p_filesz);
+						uintptr_t relro_rounded_up_end_of_mem = MAPPING_END_FROM_PHDR_VADDR(
+							info->dlpi_addr, info->dlpi_phdr[j].p_vaddr, info->dlpi_phdr[j].p_memsz);
+						
+						if (relro_rounded_down_base >= rounded_down_base
+							&& relro_rounded_up_end_of_mem <= rounded_up_end_of_mem)
+						{
+							/* First add a ro mapping for any *whole pages* 
+							 * that the RO span includes. 
+							 * This means we need to do the *opposite* rounding. */
+							uintptr_t relro_rounded_up_base
+							 = MAPPING_NEXT_PAGE_START_FROM_PHDR_BEGIN_VADDR(
+									info->dlpi_addr, info->dlpi_phdr[j].p_vaddr);
+							uintptr_t relro_rounded_down_end_of_mem = MAPPING_PRECEDING_PAGE_START_FROM_PHDR_END_VADDR(
+								info->dlpi_addr, info->dlpi_phdr[j].p_vaddr, info->dlpi_phdr[j].p_memsz);
+							
+							/* Add a mapping in this region. Do we need to handle the file/mem
+							 * distinction? HMM. Try without for now. If the ro span covers
+							 * some of the mem-but-not-file region, I don't think the boundary
+							 * will be in the l0index already (because it got indexed from maps
+							 * or from this code). Not sure though -- in which circumstances did 
+							 * the distinction matter in the non-RO case? Maybe the memsz bit 
+							 * got created as an anonymous section? Why wouldn't that happen here? */
+							mapping_flags_t ro_f = f;
+							ro_f.w = 0;
+							struct mapping_info *added = mapping_add(
+								(void*) relro_rounded_up_base, 
+								relro_rounded_down_end_of_mem - relro_rounded_up_base,
+								ro_f, data_ptr);
+							// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
+							if (added && added->f.kind != STATIC) added->f.kind = STATIC;
+							
+							/* Add a pre-mapping if we have to. */
+							if (relro_rounded_up_base > rounded_down_base)
+							{
+								struct mapping_info *added = mapping_add(
+									(void*) rounded_down_base, 
+									relro_rounded_up_base - rounded_down_base,
+									f, data_ptr);
+								// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
+								if (added && added->f.kind != STATIC) added->f.kind = STATIC;
+							}
+							
+							/* Proceed with just the tail end of the mapping. */
+							rounded_down_base = relro_rounded_down_end_of_mem;
+						}
+					}
+				}
 				
-				struct mapping_info *added = mapping_add(
-					(void*) rounded_down_base, 
-					rounded_up_end_of_file - rounded_down_base,
-					f, data_ptr);
-				// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
-				if (added && added->f.kind != STATIC) added->f.kind = STATIC;
+				if (rounded_down_base < rounded_up_end_of_file)
+				{
+					struct mapping_info *added = mapping_add(
+						(void*) rounded_down_base, 
+						rounded_up_end_of_file - rounded_down_base,
+						f, data_ptr);
+					// bit of a HACK: if it was added earlier by our mmap() wrapper, fix up its kind
+					if (added && added->f.kind != STATIC) added->f.kind = STATIC;
+				}
 				
-				if (rounded_up_end_of_mem > rounded_up_end_of_file)
+				if (rounded_up_end_of_mem > rounded_up_end_of_file
+						&& rounded_up_end_of_mem > rounded_down_base)
 				{
 					struct mapping_info *added = mapping_add(
 						(void*) rounded_up_end_of_file, 

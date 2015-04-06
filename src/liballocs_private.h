@@ -38,6 +38,12 @@ typedef bool _Bool;
 #define MAPPING_END_FROM_PHDR_VADDR(base_addr, vaddr, memsz) \
 	(ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
 
+/* We use these for PT_GNU_RELRO mappings. */
+#define MAPPING_NEXT_PAGE_START_FROM_PHDR_BEGIN_VADDR(base_addr, vaddr) \
+   (ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr)))
+#define MAPPING_PRECEDING_PAGE_START_FROM_PHDR_END_VADDR(base_addr, vaddr, memsz) \
+	(ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
+
 /* The biggest virtual address that we might find in an executable image. */
 #define BIGGEST_SANE_EXECUTABLE_VADDR  (1ull<<31)
 
