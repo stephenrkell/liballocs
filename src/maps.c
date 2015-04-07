@@ -8,6 +8,7 @@
 #include <string.h>
 #include <dlfcn.h>
 #include <link.h>
+#include "relf.h"
 #include "liballocs_private.h"
 
 _Bool initialized_maps __attribute__((visibility("hidden")));
@@ -281,25 +282,39 @@ void __liballocs_add_missing_maps(void)
 					{
 						kind = STATIC;
 						data_ptr = exe_fullname;
+						break;
 					} 
 					else
 					{
-						void *handle = dlopen(rest, RTLD_NOW|RTLD_NOLOAD);
-						if (handle)
+						/* PROBLEM: if the file is a memory-mapped device file, dlopen() might
+						 * block indefinitely trying to open it. We need some other way to
+						 * figure out whether it's a shared library, *first*, before we try
+						 * to open it. Walk the link map. */
+						struct r_debug *r = find_r_debug();
+						if (r) 
 						{
-							kind = STATIC; // FIXME FIXME FIXME FIXME FIXME
-							data_ptr = strdup(realpath_quick(((struct link_map *) handle)->l_name));
+							struct link_map *handle = r->r_map;
+							assert(handle);
+							for (; handle; handle = handle->l_next)
+							{
+								const char *real_name = handle->l_name ? realpath_quick(handle->l_name) : NULL;
+								if (real_name && 0 == strcmp(real_name, rest))
+								{
+									kind = STATIC; // FIXME FIXME FIXME FIXME FIXME
+									data_ptr = strdup(real_name);
+									break;
+								}
+							}
+							// if we got here, it's not in the link map, so fall through
 						}
-						else
-						{
-							kind = MAPPED_FILE;
-							/* How can we get the filename with static storage duration? 
-							 * Does it even exist? I don't want to have to strdup() / free() 
-							 * these things. */
-							data_ptr = strdup(rest); // FIXME FIXME FIXME FIXME FIXME
-						}
+						kind = MAPPED_FILE;
+						/* How can we get the filename with static storage duration? 
+						 * Does it even exist? I don't want to have to strdup() / free() 
+						 * these things. */
+						data_ptr = strdup(rest); // FIXME FIXME FIXME FIXME FIXME
+						break;
 					}
-					break;
+					assert(false); // we've break'd already
 				case '[':
 					if (0 == strncmp(rest, "[stack", 6))
 					{
