@@ -159,9 +159,6 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	
 	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(h->l_ld, DT_HASH);
 	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
-	// check that we start with a null symtab entry
-	static const ElfW(Sym) nullsym = { 0, 0, 0, 0, 0, 0 };
-	assert(0 == memcmp(&nullsym, dynsym, sizeof nullsym));
 	if ((intptr_t) dynsym < 0 || (intptr_t) hash < 0)
 	{
 		/* We've got a pointer to kernel memory, probably vdso. 
@@ -173,6 +170,9 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 		debug_printf(2, "detected risk of buggy VDSO with unrelocated (kernel-address) content... skipping\n");
 		return 0;
 	}
+	// check that we start with a null symtab entry
+	static const ElfW(Sym) nullsym = { 0, 0, 0, 0, 0, 0 };
+	assert(0 == memcmp(&nullsym, dynsym, sizeof nullsym));
 	if ((dynsym && (char*) dynsym < MINIMUM_USER_ADDRESS) || (hash && (char*) hash < MINIMUM_USER_ADDRESS))
 	{
 		/* We've got a pointer to a very low address, probably from
