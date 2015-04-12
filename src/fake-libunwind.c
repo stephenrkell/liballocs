@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <errno.h>
+#include <stdint.h>
 #include "fake-libunwind.h"
 
 long local_addr_space;
@@ -108,9 +109,8 @@ int unw_step(unw_cursor_t *cp)
 		/* context ip = */ (unw_word_t) return_addr
 	};
 		
-	// sanity check the results
-	if (new_ctxt.frame_sp >= BEGINNING_OF_STACK
-	||  new_ctxt.frame_sp <= (BEGINNING_OF_STACK - 0x100000000))
+	// sanity check the results -- should move down in memory, but not more than 256MB
+	if (new_ctxt.frame_sp > (uintptr_t) sp || new_ctxt.frame_sp <= ((uintptr_t) sp - 0x10000000ul))
 	{
 		// looks dodgy -- say we failed
 		return -1;
