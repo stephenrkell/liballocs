@@ -140,71 +140,10 @@ class CompilerWrapper:
         if outputFile == None and self.isLinkCommand() and not "-shared" in args:
             outputFile = "a.out"
         return (sourceInputFiles, objectInputFiles, outputFile)
-    
+
+    # by default, fixup does nothing
     def fixupDotO(self, filename, errfile):
-        if self.commandStopsBeforeObjectOutput():
-            return
-        # do we need to unbind? 
-        # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
-        # This is needed e.g. for SPEC benchmark bzip2
-        with (self.makeErrFile(filename + ".fixuplog", "w+") if not errfile else errfile) as errfile:
-
-            wrappedFns = self.allWrappedSymNames()
-            self.debugMsg("Looking for wrapped functions that need unbinding\n")
-            cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"; exit $?" \
-                % (filename, "|".join(wrappedFns))
-            self.debugMsg("cmdstring is " + cmdstring + "\n")
-            grep_ret = subprocess.call(["sh", "-c", cmdstring], stdout=errfile, stderr=errfile)
-            if grep_ret == 0:
-                # we need to unbind. We unbind the allocsite syms
-                # *and* --prefer-non-section-relocs. 
-                # This will give us a file with __def_ and __ref_ symbols
-                # for the allocation function. We then rename these to 
-                # __real_ and __wrap_ respectively. 
-                backup_filename = os.path.splitext(filename)[0] + ".backup.o"
-                self.debugMsg("Found that we need to unbind some or all of symbols [%s]... making backup as %s\n" % \
-                    (", ".join(wrappedFns), backup_filename))
-                cp_ret = subprocess.call(["cp", filename, backup_filename], stderr=errfile)
-                if cp_ret != 0:
-                    self.print_errors(errfile)
-                    return cp_ret
-                unbind_pairs = [["--unbind-sym", sym] for sym in wrappedFns]
-                unbind_cmd = ["objcopy", "--prefer-non-section-relocs"] \
-                 + [opt for pair in unbind_pairs for opt in pair] \
-                 + [filename]
-                self.debugMsg("cmdstring is " + " ".join(unbind_cmd) + "\n")
-                objcopy_ret = subprocess.call(unbind_cmd, stderr=errfile)
-                if objcopy_ret != 0:
-                    self.print_errors(errfile)
-                    return objcopy_ret
-                else:
-                    # one more objcopy to rename the __def_ and __ref_ symbols
-                    self.debugMsg("Renaming __def_ and __ref_ alloc symbols\n")
-                    def_ref_args = [["--redefine-sym", "__def_" + sym + "=" + sym, \
-                       "--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in wrappedFns]
-                    objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
-                     + [opt for seq in def_ref_args for opt in seq] \
-                     + [filename], stderr=errfile)
-                    if objcopy_ret != 0:
-                        self.print_errors(errfile)
-                        return objcopy_ret
-
-            self.debugMsg("Looking for wrapped functions that need globalizing\n")
-            # grep for local symbols -- a lower-case letter after the symname is the giveaway
-            cmdstring = "nm -fposix --defined-only \"%s\" | egrep \"^(%s) [a-z] \"" \
-                % (filename, "|".join(wrappedFns))
-            self.debugMsg("cmdstring is %s\n" % cmdstring)
-            grep_ret = subprocess.call(["sh", "-c", cmdstring], stderr=errfile)
-            if grep_ret == 0:
-                self.debugMsg("Found that we need to globalize\n")
-                globalize_pairs = [["--globalize-symbol", sym] for sym in wrappedFns]
-                objcopy_ret = subprocess.call(["objcopy"] \
-                 + [opt for pair in globalize_pairs for opt in pair] \
-                 + [filename])
-                return objcopy_ret
-            # no need to objcopy; all good
-            self.debugMsg("No need to globalize\n")
-            return 0
+        return 0
 
     def optionsToBuildOneObjectFile(self, sourceFile, outputFilename, argvWithoutOutputOptions):
         return argvWithoutOutputOptions + ["-c", "-o", outputFilename, sourceFile]
