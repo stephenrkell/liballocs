@@ -47,6 +47,14 @@ open Pretty
 open Cil
 module NamedTypeMap = Map.Make(String)
 
+let expToString e      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp e))
+let instToString i     = (Pretty.sprint 80 (Pretty.dprintf "%a" d_instr i))
+let lvalToString lv    = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv))
+let typToString t      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
+
+let expToCilString e   = (Pretty.sprint 80 (printExp  (new plainCilPrinterClass) () e))
+let lvalToCilString lv = (Pretty.sprint 80 (printLval (new plainCilPrinterClass) () lv))
+
 (* Module-ify Cil.typSig *)
 module CilTypeSig = struct
    type t = Cil.typsig
@@ -55,10 +63,48 @@ end
 
 module UniqtypeMap = Map.Make(CilTypeSig)
 
-let expToString e                  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp e))
-let instToString i                 = (Pretty.sprint 80 (Pretty.dprintf "%a" d_instr i))
-let lvalToString lv                = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv))
-let typToString t                  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
+(* Module-ify Cil.varinfo *)
+module CilVarinfo = struct
+   type t = Cil.varinfo
+   let compare vi1 vi2 = String.compare vi1.vname vi2.vname
+end
+
+module VarinfoMap = Map.Make(CilVarinfo)
+
+(* Module-ify Cil.lval *)
+module CilLval = struct
+   type t = Cil.lval
+   (* HACK *)
+   let compare lv1 lv2 = String.compare (lvalToCilString lv1) (lvalToCilString lv2)
+end
+
+module LvalMap = Map.Make(CilLval)
+
+let rec offsetToList (o : offset) = 
+    match o with
+        NoOffset -> []
+      | Field(fi, rest) -> Field(fi, NoOffset) :: (offsetToList rest)
+      | Index(intExp, rest) -> Index(intExp, NoOffset) :: (offsetToList rest)
+
+let rec offsetFromList (ol : offset list) = 
+    match ol with
+        [] -> NoOffset
+      | Field(fi, _) :: rest -> Field(fi, offsetFromList rest)
+      | Index(intExp, _) :: rest -> Index(intExp, offsetFromList rest)
+
+let rec offsetPrefixAsList (o : offset) (suffix : offset) = 
+    match o with
+        suffix -> []
+      | NoOffset -> failwith "didn't find offset suffix"
+      | Field(fi, rest) -> Field(fi, NoOffset) :: (offsetPrefixAsList rest suffix)
+      | Index(intExp, rest) -> Index(intExp, NoOffset) :: (offsetPrefixAsList rest suffix)
+
+let rec offsetPrefix (o : offset) (suffix : offset) = 
+    match o with
+        suffix -> NoOffset
+      | NoOffset -> failwith "didn't find offset suffix"
+      | Field(fi, rest) -> Field(fi, (offsetPrefix rest suffix))
+      | Index(intExp, rest) -> Index(intExp, (offsetPrefix rest suffix))
 
 let stringEndsWith (s : string) (e : string) : bool = 
     (String.length s) >= (String.length e) &&
@@ -71,6 +117,8 @@ let isStaticallyZero e = isZero (foldConstants e)
 let isStaticallyNullPtr e = match (typeSig (typeOf e)) with
     TSPtr(_) -> isStaticallyZero(e)
   | _ -> false
+
+let nullPtr = CastE( TPtr(TVoid([]), []) , Const(CInt64((Int64.of_int 0), IInt, None)) )
 
 let debug_print lvl s = 
   try begin 
@@ -194,8 +242,9 @@ let symnameFromSig ts = "__uniqtype_" ^ "" ^ "_" ^ (barenameFromSig ts)
 
 (* CIL doesn't give us a const void * type builtin, so we define one. *)
 let voidConstPtrType = TPtr(TVoid([Attr("const", [])]),[])
-(* ditto for unsigned long * *)
+(* ditto for some more * *)
 let ulongPtrType = TPtr(TInt(IULong, []),[])
+let voidPtrPtrType = TPtr(TPtr(TVoid([]),[]),[])
 
 (* Returns true if the given lvalue offset ends in a bitfield access. *) 
 let rec is_bitfield lo = match lo with
@@ -246,8 +295,9 @@ let rec getConcreteType ts =
  | TSBase(TFloat(kind,attrs)) -> TSBase(TFloat(kind, []))
  | _ -> ts
 
- 
- let matchIgnoringLocation g1 g2 = match g1 with 
+let exprConcreteType e = getConcreteType (Cil.typeSig (Cil.typeOf e))
+
+let matchIgnoringLocation g1 g2 = match g1 with 
     GType(ti, loc) ->        begin match g2 with GType(ti2, _)        -> ti = ti2 | _ -> false end
   | GCompTag(ci, loc) ->     begin match g2 with GCompTag(ci2, _)     -> ci = ci2 | _ -> false end
   | GCompTagDecl(ci, loc) -> begin match g2 with GCompTagDecl(ci2, _) -> ci = ci2 | _ -> false end
@@ -264,6 +314,15 @@ let isFunction g = match g with
   GFun(_, _) -> true
 | _ -> false
 
+let isNonVoidPointerType t = match (getConcreteType (typeSig t)) with
+    TSPtr(TSBase(TVoid(_)), _) -> false
+  | TSPtr(_) -> true
+  | _ -> false
+
+let isPointerType t = match (getConcreteType (typeSig t)) with
+    TSPtr(_, _) -> true
+  | _ -> false
+
 let newGlobalsList globals toAdd insertBeforePred = 
   let (preList, postList) = 
       let rec buildPre l accumPre = match l with 
@@ -274,7 +333,17 @@ let newGlobalsList globals toAdd insertBeforePred =
   in
   preList @ toAdd @ postList
 
-let getOrCreateUniqtypeGlobal m typename concreteType globals = 
+let rec findStructTypeByName gs n = match gs with 
+    [] -> raise Not_found
+  | g :: rest -> match g with 
+        GCompTagDecl(c, _) when c.cstruct && c.cname = n -> TComp(c, [])
+      | GCompTag(c, _) when c.cstruct && c.cname = n -> 
+            (* debug_print 1 "strange; uniqtype is defined\n"; *) TComp(c, [])
+      | _ -> findStructTypeByName rest n
+
+let getOrCreateUniqtypeGlobal m concreteType globals = 
+  let typename = symnameFromSig concreteType
+  in
   try 
       let found = UniqtypeMap.find concreteType m
       in
@@ -284,15 +353,7 @@ let getOrCreateUniqtypeGlobal m typename concreteType globals =
       in 
       (m, foundVar, globals)
   with Not_found -> 
-     let rec findStructUniqtype gs = match gs with 
-            [] -> raise Not_found
-          | g :: rest -> match g with 
-                GCompTagDecl(c, _) when c.cstruct && c.cname = "uniqtype" -> TComp(c, [])
-              | GCompTag(c, _) when c.cstruct && c.cname = "uniqtype" -> 
-                    debug_print 1 "strange; uniqtype is defined\n"; TComp(c, [])
-              | _ -> findStructUniqtype rest
-     in
-     let typeStructUniqtype = try findStructUniqtype globals
+     let typeStructUniqtype = try findStructTypeByName globals "uniqtype" 
         with Not_found -> failwith "no struct uniqtype in file; why is libcrunch_cil_inlines not included?"
      in
      let newGlobal = 
@@ -310,6 +371,13 @@ let getOrCreateUniqtypeGlobal m typename concreteType globals =
      in
      (newMap, newGlobal, newGlobals)
 
+let ensureUniqtypeGlobal concreteType enclosingFile (uniqtypeGlobals : Cil.global UniqtypeMap.t ref) = 
+    let (updatedMap, uniqtypeGlobalVar, updatedGlobals)
+     = getOrCreateUniqtypeGlobal !uniqtypeGlobals concreteType enclosingFile.globals
+    in 
+    enclosingFile.globals <- updatedGlobals; 
+    uniqtypeGlobals := updatedMap;
+    uniqtypeGlobalVar
 
 let findCompDefinitionInFile isStruct name wholeFile = 
     let rec findCompGlobal iss n globals = 
