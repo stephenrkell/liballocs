@@ -60,6 +60,8 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 ((u)->pos_maxoff == 0) && \
 ((u)->neg_maxoff == 0) && !(u)->is_array)
 
+#define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) (u)->array_len
+
 #define MAGIC_LENGTH_POINTER ((1u << 19) - 1u)
 #define UNIQTYPE_IS_POINTER_TYPE(u) \
 (!((u)->is_array) && (u)->array_len == MAGIC_LENGTH_POINTER)
@@ -78,6 +80,20 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 
 #define UNIQTYPE_HAS_KNOWN_LENGTH(u) \
 ((u)-> pos_maxoff != ((unsigned short) -1))
+
+#define UNIQTYPE_IS_BASE_TYPE(u) \
+(((u) != (struct uniqtype *) &__uniqtype__void) && \
+((u)->pos_maxoff > 0) && \
+((u)->neg_maxoff == 0) && !(u)->is_array && (u)->nmemb == 0)
+
+/* FIXME: does anybody use this one? it used to enumerate all the builtin base type,
+ * but now define it to the proper */
+#define UNIQTYPE_IS_BASE(u) UNIQTYPE_IS_BASE_TYPE(u)
+
+/* HACK HACK HACK! */
+#define UNIQTYPE_IS_2S_COMPL_INTEGER_TYPE(u) \
+(UNIQTYPE_IS_BASE_TYPE(u) && (u) != (struct uniqtype *) &__uniqtype__float && \
+(u) != (struct uniqtype *) &__uniqtype__double)
 
 	/* Tentative improvement:
 	 * as we have pos_maxoff, neg_maxoff and (for structs) contained[],
@@ -120,13 +136,65 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 	 * (even in an out-of-process debugger, which likely has an instruction emulator).
 	 * 
 	 * We can also import a notion of allocations as framing:
-	 * if I have a char[], say, that is supposed to be NUL-temrinated,
+	 * if I have a char[], say, that is supposed to be NUL-terminated,
 	 * we can say it's terminated 
 	 * *either* by the extent of its containing allocation 
 	 * *or* by NUL, whichever comes first.
 	 * This generalises to a "proper nesting": an object never extends beyond 
 	 * its containing allocation.
-	 */
+	 
+	 
+	 // encode key-value or hashtable-like representations
+ typedef struct uniqtype *make_precise_fn_t(struct uniqtype *out, 
+     struct uniqtype *in, void *obj, void *ip, // struct mcontext *ctxt, ...
+  );
+     // can return `out' or another preexisting uniqtype, as it chooses
+ 
+ struct uniqtype {
+     // common fields
+     const char *name;            // friendly name 
+     unsigned pos_size, neg_size; // bound on extent forward/back from start address
+                                  // (unsigned) -1 means "no bound"
+     
+     // discriminated union
+     enum tag { BASE, ARRAY, ENUMERATION, ADDRESS, WITH_SUBOBJS, SUBPROGRAM };
+     unsigned tag:4;
+     union
+     {
+         struct //BASE
+          {   unsigned encoding:7;  // 2's complement, IEEE 754, ...
+             unsigned bit_size:10: // allows 31-bit integers, etc..
+             unsigned bit_off:9;   // ... needn't start at 0th bit.
+         } base;
+         struct //ARRAY
+          {   unsigned nmemb:28;
+         } array;
+         struct // ENUMERATION, ADDRESS, WITH_SUBOBJS, SUBPROGRAM
+         {  // ...
+         }  // ...;
+     } u;
+     
+     // mapping to a dynamically precise type
+     make_precise_fn_t *make_precise_fn;
+     
+     // links to related types: element type, pointee type, 
+     // arg/return types, member types, signedness-complement, ...
+     struct related_types {
+         struct uniqtype *ptr;
+		 union
+		 {
+             intptr_t info;        // offset, field name, ... 
+			 struct // BASE
+			 {
+			 }
+			 struct // ARRAY
+			 {
+				 
+			 }
+		 } u;
+     } rel[];
+
+ */
 
 
 #endif

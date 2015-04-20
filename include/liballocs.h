@@ -206,19 +206,6 @@ extern struct uniqtype __uniqtype____PTR_void;
 extern struct uniqtype __uniqtype____PTR_signed_char;
 extern struct uniqtype __uniqtype__float;
 extern struct uniqtype __uniqtype__double;
-/* FIXME: HACK HACK HACK */
-#define UNIQTYPE_IS_BASE(u) ( \
-	((u) == &__uniqtype__int) || \
-	((u) == &__uniqtype__unsigned_int) || \
-	((u) == &__uniqtype__signed_char) || \
-	((u) == &__uniqtype__unsigned_char) || \
-	((u) == &__uniqtype__long_int) || \
-	((u) == &__uniqtype__unsigned_long_int) || \
-	((u) == &__uniqtype__short_int) || \
-	((u) == &__uniqtype__short_unsigned_int) || \
-	((u) == &__uniqtype__float) || \
-	((u) == &__uniqtype__double) \
-	)
 
 struct liballocs_err;
 extern struct liballocs_err __liballocs_err_stack_walk_step_failure;
