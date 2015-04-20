@@ -143,6 +143,7 @@ inline string mangle_nonalphanums(const string& s)
 	replace(mangled.begin(), mangled.end(), '(', '_');
 	replace(mangled.begin(), mangled.end(), ')', '_');
 	replace(mangled.begin(), mangled.end(), '+', '_');
+	replace(mangled.begin(), mangled.end(), '=', '_');
 	return mangled;
 }
 
