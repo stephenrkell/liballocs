@@ -81,6 +81,14 @@ checkrun-simple-multi-alloc:
 	$(MAKE) cleanrun-simple-multi-alloc >/dev/null 2>&1
 checkrun-simple-client:
 	$(MAKE) cleanrun-simple-client >/dev/null 2>&1
+checkrun-nopreload-%:
+	$(MAKE) cleanrun-nopreload-$* >/dev/null 2>&1
+
+_onlyrun-nopreload-%:
+	./nopreload-$*
+
+_onlygdbrun-nopreload-%:
+	gdb --args ./nopreload-$* ./nopreload-$*
 
 _onlyrun-%:
 	LD_PRELOAD=$(PRELOAD) ./$*
