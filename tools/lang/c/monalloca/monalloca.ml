@@ -139,14 +139,18 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
              in 
              let labelString2 = mkLabel 2
              in
-             (* We also need a test for zeroness of the (weak) &__current_allocsite. *)
+             (* We also need a test for zeroness of the (weak, thread-local) &__current_allocsite.
+              * This is pretty hairy. If a thread-local is weak, it doesn't resolve to zero;
+              * it resolves to the current thread pointer. We really don't want to store
+              * anything into that! So load %fs:0x0 and compare against that. *)
              ChangeTo([Asm([(* attrs *)], 
                            [(* template strings *)
                                 "   callq "^ labelString1 ^"\n\
                                 "^ labelString1 ^": \n\
                                     pop %%rax\n\
-                                    test %0,%0\n\
-                                    jz "^ labelString2 ^"\n\
+                                    movq %%fs:0x0,%%rbx\n\
+                                    cmp %0,%%rbx\n\
+                                    je "^ labelString2 ^"\n\
                                     mov %%rax, 0(%0)\n\
                                 "^ labelString2 ^":"
                            ], 
@@ -157,7 +161,7 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
                                 (None, "r", mkAddrOf (Var(currentAllocsiteVar), NoOffset))
                            ], 
                            [(* clobbers: string *)
-                                "%rax"
+                                "%rax"; "%rbx"
                            ],
                            (* location *) l ); 
                 Call(tgt, Lval(Var(liballocsAllocaFun.svar), NoOffset), args @ [mkAddrOf (Var(v), NoOffset)], l)])
