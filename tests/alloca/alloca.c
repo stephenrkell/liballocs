@@ -10,7 +10,6 @@ extern __thread void *__current_allocsite __attribute__((weak));
 int main(void)
 {
 	void *a = alloca(42 * sizeof (int));
-	printf("&__current_allocsite is %p\n", &__current_allocsite);
 	struct uniqtype *got_type = __liballocs_get_alloc_type(a);
 	struct uniqtype *int_type = dlsym(RTLD_NEXT, "__uniqtype__int");
 	assert(int_type);

@@ -9,7 +9,6 @@ extern __thread void *__current_allocsite __attribute__((weak));
 
 int main(void)
 {
-	printf("&__current_allocsite is %p\n", &__current_allocsite);
 	int *a = alloca(42 * sizeof (int));
 	a[41] = 0;
 	printf("Saw address %p holding %d\n", &a[41], a[41]);

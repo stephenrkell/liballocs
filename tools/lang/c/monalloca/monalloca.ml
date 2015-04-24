@@ -118,9 +118,16 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
                  the fact that this frame does alloca
              * - in that local's destructor, call 
                     __liballocs_unindex_stack_objects_below(frame_addr)
-             * - before the call, create a fake call site for objdumpallocs to see...
+             * - __liballocs_alloca will create a fake call site before the call,
+             *   for objdumpallocs to see...
              * - ... which we also use to store the return addr, i.e. the alloc site addr, 
-             *       into __current_allocsite.
+             *       into __current_allocsite. The important thing is that the DWARF shows
+             *       that this is in the same file/line as the source-level alloca() call appears
+             *       to be in. That means our fake call must go in the file currently 
+             *       being instrumented, not in liballocs_cil_inlines.h. It follows that we have to 
+             *       put the call in *right now*, not from the helper CIL function.
+             *       And since that means we receive the call site in %rax,
+             *       we need to 
              
               callq UNIQUE_LABEL
             UNIQUE_LABEL: 
@@ -137,34 +144,23 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
              in
              let labelString1 = mkLabel 1
              in 
-             let labelString2 = mkLabel 2
+             let callSiteVar = makeTempVar enclosingFunction voidPtrType
              in
-             (* We also need a test for zeroness of the (weak, thread-local) &__current_allocsite.
-              * This is pretty hairy. If a thread-local is weak, it doesn't resolve to zero;
-              * it resolves to the current thread pointer. We really don't want to store
-              * anything into that! So load %fs:0x0 and compare against that. *)
              ChangeTo([Asm([(* attrs *)], 
                            [(* template strings *)
                                 "   callq "^ labelString1 ^"\n\
                                 "^ labelString1 ^": \n\
-                                    pop %%rax\n\
-                                    movq %%fs:0x0,%%rbx\n\
-                                    cmp %0,%%rbx\n\
-                                    je "^ labelString2 ^"\n\
-                                    mov %%rax, 0(%0)\n\
-                                "^ labelString2 ^":"
+                                    pop %0\n"
                            ], 
                            [(* outputs: (string option * string * lval) *)
-                                
+                                (None, "=r", (Var(callSiteVar), NoOffset))
                            ], 
-                           [(* inputs: (string option * string * exp) *)
-                                (None, "r", mkAddrOf (Var(currentAllocsiteVar), NoOffset))
-                           ], 
-                           [(* clobbers: string *)
-                                "%rax"; "%rbx"
-                           ],
+                           [(* inputs *) ], 
+                           [(* clobbers *)],
                            (* location *) l ); 
-                Call(tgt, Lval(Var(liballocsAllocaFun.svar), NoOffset), args @ [mkAddrOf (Var(v), NoOffset)], l)])
+                Call(tgt, Lval(Var(liballocsAllocaFun.svar), NoOffset), 
+                    args @ [mkAddrOf (Var(v), NoOffset); Lval(Var(callSiteVar), NoOffset)], l)
+            ])
         end
     | _ -> SkipChildren 
 end (* class monAllocaVisitor *)
@@ -179,7 +175,8 @@ class monAllocaFunVisitor = fun (fl: Cil.file) -> object(self)
         liballocsAllocaFun <- findOrCreateExternalFunctionInFile
                         fl "__liballocs_alloca" (TFun(voidPtrType, 
                         Some [ ("sz", ulongType, []);
-                               ("counter", ulongPtrType, []) ], 
+                               ("counter", ulongPtrType, []);
+                               ("caller", voidPtrType, []) ], 
                         false, [])) 
                         ;
         liballocsAllocaCleanupFun <- findOrCreateExternalFunctionInFile

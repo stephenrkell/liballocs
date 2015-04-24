@@ -42,8 +42,8 @@ extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_alloca
 }
 
 /* alloca helpers */
-extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter);
-extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter)
+extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller);
+extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller)
 {
 	/* Insert heap trailer etc..
 	 * Basically we have to do everything that our malloc hooks, allocator wrappers
@@ -59,15 +59,9 @@ extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloc
 	 * can see, and that is the code that will be consuming this value. */
 	*frame_counter += chunk_size;
 	
+	/* Note that we pass the caller directly; __current_allocsite is not required. */
 	void *userptr = (char*) alloc + ALLOCA_HEADER_SIZE;
-	
-	void *caller;
-	if (&__current_allocsite) caller = __current_allocsite;
-	else caller = (void*) 0;
-	
 	__liballocs_index_insert(userptr, chunk_size, caller);
-	
-	if (&__current_allocsite) __current_allocsite = (void*)0;
 	
 	return userptr;
 }
