@@ -280,6 +280,19 @@ all_names_for_type_t::all_names_for_type_t() :
 		}
 		return all;
 	}),
+	string_case([this](iterator_df<string_type_die> t) {
+		auto string_t = t.as_a<string_type_die>();
+		// get the name of whatever the element type is, and prepend a prefix
+		const Dwarf_Unsigned element_size = 1; /* FIXME: always 1? */
+		opt<Dwarf_Unsigned> opt_byte_size = string_t->fixed_length_in_bytes();
+		opt<Dwarf_Unsigned> element_count
+		 = opt_byte_size ? (*opt_byte_size / element_size ) : opt<Dwarf_Unsigned>();
+		ostringstream string_prefix;
+		string_prefix << "__STR" << (element_count ? *element_count : 0) << "_"
+			<< element_size;
+
+		return deque<string>(1, string_prefix.str());
+	}),
 	subroutine_case([this](iterator_df<type_die> t) {
 		// "__FUN_FROM_" ^ (labelledArgTs argTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (stringFromSig returnTs) 		
 		deque<string> working;
@@ -404,6 +417,7 @@ deque<string> all_names_for_type_t::operator()(iterator_df<type_die> t) const
 	if (t.is_a<base_type_die>()) return base_type_case(t.as_a<base_type_die>());
 	if (t.is_a<address_holding_type_die>()) return pointer_case(t.as_a<address_holding_type_die>());
 	if (t.is_a<array_type_die>()) return array_case(t.as_a<array_type_die>());
+	if (t.is_a<string_type_die>()) return string_case(t.as_a<string_type_die>());
 	if (t.is_a<subroutine_type_die>()
 	||  t.is_a<subprogram_die>()) return subroutine_case(t);
 	if (t.is_a<with_data_members_die>()) return with_data_members_case(t.as_a<with_data_members_die>());
@@ -537,6 +551,20 @@ canonical_key_from_type(iterator_df<type_die> t)
 		opt<Dwarf_Unsigned> element_count = array_t->element_count();
 		array_prefix << "__ARR" << (element_count ? *element_count : 0) << "_";
 		return make_pair(summary_string, array_prefix.str() + canonical_key_from_type(array_t->get_type()).second);
+	}
+	else if (t.is_a<string_type_die>())
+	{
+		auto string_t = t.as_a<string_type_die>();
+		// get the name of whatever the element type is, and prepend a prefix
+		const Dwarf_Unsigned element_size = 1; /* FIXME: always 1? */
+		opt<Dwarf_Unsigned> opt_byte_size = string_t->fixed_length_in_bytes();
+		opt<Dwarf_Unsigned> element_count
+		 = opt_byte_size ? (*opt_byte_size / element_size ) : opt<Dwarf_Unsigned>();
+		ostringstream string_prefix;
+		string_prefix << "__STR" << (element_count ? *element_count : 0) << "_"
+			<< element_size;
+
+		return make_pair(summary_string, string_prefix.str());
 	}
 	else // DW_TAG_pointer_type and friends
 	{

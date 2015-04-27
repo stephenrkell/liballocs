@@ -95,6 +95,7 @@ struct all_names_for_type_t : std::unary_function< core::iterator_df<core::type_
 	std::function< deque<string>(core::iterator_df<core::base_type_die>) > base_type_case;
 	std::function< deque<string>(core::iterator_df<core::address_holding_type_die>) > pointer_case;
 	std::function< deque<string>(core::iterator_df<core::array_type_die>) > array_case;
+	std::function< deque<string>(core::iterator_df<core::string_type_die>) > string_case;
 	std::function< deque<string>(core::iterator_df<core::subroutine_type_die>) > subroutine_case;
 	std::function< deque<string>(core::iterator_df<core::with_data_members_die>) > with_data_members_case;
 	std::function< deque<string>(core::iterator_df<core::type_die>) > default_case;

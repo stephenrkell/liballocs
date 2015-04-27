@@ -50,6 +50,7 @@ using dwarf::core::with_dynamic_location_die;
 using dwarf::core::address_holding_type_die;
 using dwarf::core::base_type_die;
 using dwarf::core::array_type_die;
+using dwarf::core::string_type_die;
 using dwarf::core::type_chain_die;
 using dwarf::core::subroutine_type_die;
 using dwarf::core::formal_parameter_die;
@@ -445,11 +446,19 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			auto opt_array_len = i_vert->second.as_a<array_type_die>()->element_count(root);
 			if (opt_array_len) array_len = *opt_array_len;
 			else array_len = 0;
-		} else if (i_vert->second.is_a<type_describing_subprogram_die>())
+		} 
+		else if  (i_vert->second.is_a<string_type_die>())
+		{
+			auto opt_fixed_size = i_vert->second.as_a<string_type_die>()->fixed_length_in_bytes();
+			if (opt_fixed_size) array_len = *opt_fixed_size;
+			else array_len = 0;
+		}
+		else if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
 			/* use array len to encode the number of fps */
 			array_len = fp_types.size();
-		} else if (i_vert->second.is_a<address_holding_type_die>())
+		} 
+		else if (i_vert->second.is_a<address_holding_type_die>())
 		{
 			/* HACK HACK HACK: encode the type's pointerness into array_len. 
 			 * We should rationalise struct uniqtype to require less of this
@@ -538,6 +547,17 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			 * I reckon so, but am not yet sure. */
 			string mangled_name = mangle_typename(k);
 			out << "&" << mangled_name;
+
+			// end the struct
+			out << " }";
+			contained_length = 1;
+		}
+		if (i_vert->second.is_a<string_type_die>())
+		{
+			// array: write a single entry, for the element type
+			out << "{ " << "0, ";
+
+			out << "&" << "__uniqtype__unsigned_char$8"; // HACK FIXME HACK FIXME
 
 			// end the struct
 			out << " }";
