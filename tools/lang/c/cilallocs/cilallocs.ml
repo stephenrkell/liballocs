@@ -452,3 +452,33 @@ let makeInlineFunctionInFile fl ourFun nm proto body referencedValues = begin
        any non-inlined calls creep through. *)
     ourFun
   end
+
+let tsIsPointer testTs = match testTs with 
+   TSPtr(_, _) -> true
+ | _ -> false
+      
+let tsIsFunction ts = 
+    match ts with
+        TSFun(_, _, _, _) -> true
+      | _ -> false
+
+let tsIsFunctionPointer ts = 
+    match ts with
+        TSPtr(nestedTs, _) when tsIsFunction nestedTs -> true
+      | _ -> false
+
+let rec indirectionLevel someTs = match someTs with
+    TSPtr(subTs, _) -> 1 + indirectionLevel subTs
+  | _ -> 0
+
+let rec ultimatePointeeTs someTs = match someTs with
+    TSPtr(subTs, _) -> ultimatePointeeTs subTs
+  | _ -> someTs
+
+let instrLoc (maybeInst : Cil.instr option) =
+   match maybeInst with 
+   Some(i) -> Cil.get_instrLoc i
+ | None -> locUnknown
+
+let tsIsMultiplyIndirectedVoid ts = 
+    ((ultimatePointeeTs ts) = Cil.typeSig(voidType)) && (indirectionLevel ts) > 1
