@@ -552,7 +552,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			out << " }";
 			contained_length = 1;
 		}
-		if (i_vert->second.is_a<string_type_die>())
+		else if (i_vert->second.is_a<string_type_die>())
 		{
 			// array: write a single entry, for the element type
 			out << "{ " << "0, ";
