@@ -81,18 +81,18 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 #define UNIQTYPE_HAS_KNOWN_LENGTH(u) \
 ((u)-> pos_maxoff != ((unsigned short) -1))
 
-#define UNIQTYPE_IS_BASE_TYPE(u) \
+#define UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u) \
 (((u) != (struct uniqtype *) &__uniqtype__void) && \
 ((u)->pos_maxoff > 0) && \
 ((u)->neg_maxoff == 0) && !(u)->is_array && (u)->nmemb == 0)
 
-/* FIXME: does anybody use this one? it used to enumerate all the builtin base type,
- * but now define it to the proper */
-#define UNIQTYPE_IS_BASE(u) UNIQTYPE_IS_BASE_TYPE(u)
+/* FIXME: does anybody use this one? it used to enumerate all the builtin base types,
+ * but now define it to the proper thing. Except (FIXME) it also matches enums! */
+// #define UNIQTYPE_IS_BASE(u) UNIQTYPE_IS_BASE_TYPE(u)
 
 /* HACK HACK HACK! */
 #define UNIQTYPE_IS_2S_COMPL_INTEGER_TYPE(u) \
-(UNIQTYPE_IS_BASE_TYPE(u) && (u) != (struct uniqtype *) &__uniqtype__float && \
+(UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u) && (u) != (struct uniqtype *) &__uniqtype__float && \
 (u) != (struct uniqtype *) &__uniqtype__double)
 
 	/* Tentative improvement:
