@@ -95,6 +95,43 @@ readelf_debug () {
     readelf ${args[@]}
 }
 
+get_cu_info () {
+    readelf_debug -wi "$1" | grep -A7 'DW_TAG_compile_unit' | tr '\n' '\f' | sed 's/\f--\f/\n/g'
+}
+
+read_cu_info () {
+    read cu_info
+    ret=$?
+    if [[ -n "$cu_info" ]]; then
+        cu_fname="$( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_name | head -n1 | sed 's/.*DW_AT_name[[:blank:]]*:[[:blank:]]*(.*, offset: 0x[0-9a-f]*): \(.*\)/\1/' | sed 's/[[:blank:]]*$//')"
+        cu_language_fullstr="$( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_language | head -n1 | sed 's/.*DW_AT_language[[:blank:]]*:[[:blank:]]*//' | sed 's/[[:blank:]]*$//')"
+        echo "Note: found CU $cu_fname" 1>&2
+        echo "CU info is: $cu_info" 1>&2
+        echo "language field of CU info is $( echo "$cu_language_fullstr" )" 1>&2
+        echo "comp_dir line of CU info is $( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_comp_dir )" 1>&2
+        cu_compdir="$( echo "$cu_info" | tr '\f' '\n'  | grep DW_AT_comp_dir | sed 's/.*DW_AT_comp_dir[[:blank:]]*:[[:blank:]]*(.*, offset: 0x[0-9a-f]*): \(.*\)/\1/' | sed 's/[[:blank:]]*$//' )"
+        echo "Note: found comp_dir $cu_compdir" 1>&2
+        # don't prepend compdir if cu_fname is fully-qualified
+        case "$cu_fname" in
+            (/*)
+                cu_sourcepath="${cu_fname}"
+                ;;
+            (*)
+                cu_sourcepath="${cu_compdir}/${cu_fname}"
+                ;;
+        esac
+        cu_language_num="$( echo "$cu_language_fullstr" | tr -s '[[:blank:]]' '\t' | cut -f1 )"
+    else
+        cu_fname=""
+        cu_language_fullstr=""
+        cu_compdir=""
+        cu_sourcepath=""
+        cu_language_num=""
+    fi
+
+    if [[ $ret -eq 0 ]]; then true; else false; fi
+}
+
 resolve_debuglink () {
     obj="$1"
     debuglink_value="$2"
