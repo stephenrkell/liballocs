@@ -103,13 +103,13 @@ read_cu_info () {
     read cu_info
     ret=$?
     if [[ -n "$cu_info" ]]; then
-        cu_fname="$( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_name | head -n1 | sed 's/.*DW_AT_name[[:blank:]]*:[[:blank:]]*(.*, offset: 0x[0-9a-f]*): \(.*\)/\1/' | sed 's/[[:blank:]]*$//')"
+        cu_fname="$( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_name | head -n1 | sed 's/.*DW_AT_name[[:blank:]]*:[[:blank:]]*\((.*, offset: 0x[0-9a-f]*): \)\?\(.*\)/\2/' | sed 's/[[:blank:]]*$//')"
         cu_language_fullstr="$( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_language | head -n1 | sed 's/.*DW_AT_language[[:blank:]]*:[[:blank:]]*//' | sed 's/[[:blank:]]*$//')"
         echo "Note: found CU $cu_fname" 1>&2
         echo "CU info is: $cu_info" 1>&2
         echo "language field of CU info is $( echo "$cu_language_fullstr" )" 1>&2
         echo "comp_dir line of CU info is $( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_comp_dir )" 1>&2
-        cu_compdir="$( echo "$cu_info" | tr '\f' '\n'  | grep DW_AT_comp_dir | sed 's/.*DW_AT_comp_dir[[:blank:]]*:[[:blank:]]*(.*, offset: 0x[0-9a-f]*): \(.*\)/\1/' | sed 's/[[:blank:]]*$//' )"
+        cu_compdir="$( echo "$cu_info" | tr '\f' '\n'  | grep DW_AT_comp_dir | sed 's/.*DW_AT_comp_dir[[:blank:]]*:[[:blank:]]*\((.*, offset: 0x[0-9a-f]*): \)\?\(.*\)/\2/' | sed 's/[[:blank:]]*$//' )"
         echo "Note: found comp_dir $cu_compdir" 1>&2
         # don't prepend compdir if cu_fname is fully-qualified
         case "$cu_fname" in
