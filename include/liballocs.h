@@ -23,7 +23,6 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 #include <assert.h>
 #endif
 
-/* Copied from dumptypes.cpp */
 #include "uniqtype.h"
 
 #define ALLOC_IS_DYNAMICALLY_SIZED(all, as) \
@@ -65,8 +64,6 @@ extern unsigned long __liballocs_aborted_unrecognised_allocsite;
  * ideally it will run even without the noop library (i.e. never branch
  * out of line), but the linker currently won't generate the right code
  * without the noop library being present.
- * 
- * FIXME: clean all this up.
  */
 
 // stuff for use by extenders only -- direct/weak clients shouldn't use this
@@ -188,6 +185,8 @@ void *__liballocs_my_typeobj(void) __attribute__((weak));
  * These are part of the API, BUT we don't want them to appear in the preload .so 
  * because then they can't be uniqued w.r.t. the executable.
  * So they go in a nasty .a, and the -lallocs .so is a linker script.
+ * That way, an executable linking -lallocs will get them, together with
+ * a reference to the liballocs .so. The .so does not define them.
  */
 
 extern struct uniqtype __uniqtype__void/* __attribute__((weak))*/;
