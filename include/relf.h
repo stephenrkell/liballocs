@@ -3,6 +3,9 @@
 
 #include <stddef.h> /* for offsetof */
 #include <elf.h>
+/* #include <link.h> -- we don't do this because it can pollute us with libc stuff
+ * when clients (like trap-syscalls) want to use us in sub-libc (asm-level) code. 
+ * Use RELF_DEFINE_STRUCTURES instead. */
 #include <string.h>
 
 extern void 
@@ -48,7 +51,7 @@ BARELY POSSIBLE without syscalls, libdl/allocation: or nonportable logic
 #define R_DEBUG_MAKE_ENUMERATOR(p) p
 #endif
 
-#ifdef RELF_DECLARE_STRUCTURES
+#ifdef RELF_DEFINE_STRUCTURES
 struct LINK_MAP_STRUCT_TAG
 {
 	ElfW(Addr) l_addr;
