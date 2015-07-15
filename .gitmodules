@@ -1,0 +1,3 @@
+[submodule "contrib/libmallochooks"]
+	path = contrib/libmallochooks
+	url = git@github.com:stephenrkell/libmallochooks.git
