@@ -51,5 +51,5 @@ AC_ARG_ENABLE([real-libunwind], AS_HELP_STRING([--enable-real-libunwind], [Use r
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])
 AM_CONDITIONAL(USE_REAL_LIBUNWIND, [test "x$enable_real-libunwind" = "xyes"])
 
-AC_CONFIG_FILES([Makefile liballocs.pc])
+AC_CONFIG_FILES([Makefile footprints/Makefile liballocs.pc])
 AC_OUTPUT

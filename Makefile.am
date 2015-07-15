@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = . src
+SUBDIRS = . src footprints
 
 AM_CXXFLAGS = -std=c++11 -ggdb3 -O0 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(DWARFIDL_CFLAGS)
 
@@ -14,7 +14,7 @@ pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = liballocs.pc
 
 liballocs_includedir = $(includedir)/liballocs
-liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/relf.h include/addrmap.h include/uniqtype.h include/memtable.h include/fake-libunwind.h
+liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/relf.h include/addrmap.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/footprints.h
 
 #lib_LTLIBRARIES = src/libdwarfidl.la
 #src_libdwarfidl_la_SOURCES = src/cxx_model.cpp src/dwarfidl_cxx_target.cpp src/dwarf_interface_walk.cpp src/create.cpp src/lang.cpp src/print.cpp parser/dwarfidlSimpleCLexer.c parser/dwarfidlSimpleCParser.c
