@@ -206,6 +206,28 @@ extern struct uniqtype __uniqtype____PTR_signed_char;
 extern struct uniqtype __uniqtype__float;
 extern struct uniqtype __uniqtype__double;
 
+#ifdef __GNUC__ // HACK. TODO: dollars are a good idea or not?
+
+	 extern struct uniqtype __uniqtype__float$32;
+	 extern struct uniqtype __uniqtype__float$64;
+	 extern struct uniqtype __uniqtype__int$16;
+	 extern struct uniqtype __uniqtype__int$32;
+	 extern struct uniqtype __uniqtype__int$64;
+	 extern struct uniqtype __uniqtype__uint$16;
+	 extern struct uniqtype __uniqtype__uint$32;
+	 extern struct uniqtype __uniqtype__uint$64;
+	 extern struct uniqtype __uniqtype__signed_char$8;
+	 extern struct uniqtype __uniqtype__unsigned_char$8;
+
+	 extern struct uniqtype __uniqtype____PTR_int$32;
+	 extern struct uniqtype __uniqtype____PTR_int$64;
+	 extern struct uniqtype __uniqtype____PTR_uint$32;
+	 extern struct uniqtype __uniqtype____PTR_uint$64;
+
+	 extern struct uniqtype __uniqtype____PTR_signed_char$8;
+	 
+#endif
+
 struct liballocs_err;
 extern struct liballocs_err __liballocs_err_stack_walk_step_failure;
 extern struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame;
