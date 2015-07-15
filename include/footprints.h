@@ -1,20 +1,9 @@
 #ifndef FOOTPRINTS_H_
 #define FOOTPRINTS_H_
 
-#include <assert.h>
+
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/types.h>
-
-#include <antlr3.h>
-#include <antlr3defs.h>
-#include <dwarfidl/dwarfidlSimpleCLexer.h>
-#include <dwarfidl/dwarfidlSimpleCParser.h>
-#include <liballocs.h>
-
 #include "uniqtype.h"
 
 ////////////////////////////////////////////////////////////
@@ -187,6 +176,20 @@ struct expr {
 	 };
 };
 
+enum footprint_direction {
+	 FOOTPRINT_READ,
+	 FOOTPRINT_WRITE,
+	 FOOTPRINT_READWRITE
+};
+
+struct footprint_node {
+	 char *name;
+	 char *arg_names[6];
+	 enum footprint_direction direction;
+	 struct union_node *exprs;
+	 struct footprint_node *next;
+};
+
 /*struct footprint {
   struct uniqtype *context;
   int type; // r, w, rw
@@ -225,8 +228,8 @@ struct expr *eval_ident(struct expr *e, struct env_node *env);
 struct expr *eval_union(struct expr *e, struct env_node *env);
 
 char *print_expr_tree(struct expr *e);
-struct expr *parse_antlr_tree(ANTLR3_BASE_TREE *ast);
-void print_tree_types(ANTLR3_BASE_TREE *ast);
+struct expr *parse_antlr_tree(void *ast);
+void print_tree_types(void *ast);
 
 ////////////////////////////////////////////////////////////
 // struct expr
@@ -262,6 +265,22 @@ struct union_node *union_objects_to_extents(struct union_node *head);
 struct union_node *sorted_union_merge_extents(struct union_node *head);
 
 #define union_free_node(node) (free(node), node = NULL)
+
+////////////////////////////////////////////////////////////
+// struct footprint_node
+////////////////////////////////////////////////////////////
+
+struct footprint_node *footprint_node_new();
+struct footprint_node *footprint_node_new_with(char *name, char *arg_names[6], struct union_node *exprs, struct footprint_node *next);
+void footprint_free(struct footprint_node *node);
+struct union_node *eval_footprint_with(struct footprint_node *footprint, struct uniqtype *func, long int arg_values[6]);
+struct footprint_node *get_footprint_for(struct footprint_node *footprints, char *name);
+struct footprint_node *parse_footprints_from_file(char *filename);
+struct union_node *eval_footprint_for(struct footprint_node *footprints, char *name, struct uniqtype *func, long int arg_values[6]);
+char *print_footprint_extents(struct union_node *extents);
+struct footprint_node *new_from_subprogram_DIE(void *subprogram, struct footprint_node *next);
+
+#define footprint_node_free(node) (free(node), node = NULL)
  
 #endif
 

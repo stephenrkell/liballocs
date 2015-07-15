@@ -1,5 +1,16 @@
 #define _GNU_SOURCE
 
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+
+#include <antlr3.h>
+#include <antlr3defs.h>
+#include <dwarfidl/dwarfidlSimpleCLexer.h>
+#include <dwarfidl/dwarfidlSimpleCParser.h>
+
+#include "liballocs.h"
 #include "footprints.h"
 
 ////////////////////////////////////////////////////////////
@@ -8,9 +19,6 @@
 
 struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 	 assert(e);
-	 if (!env) {
-		  env = env_new();
-	 }
 	 switch (e->type) {
 	 case EXPR_FOR: {
 		  return eval_for_loop(e, env);
@@ -45,14 +53,16 @@ struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 }
 
 int object_to_value(struct uniqtype *type, void *addr) {
-	 if (type == &__uniqtype__int$16) {
+/*	 if (type == &__uniqtype_int$16) {
 		  return *(int16_t*)addr;
-	 } else if (type == &__uniqtype__int$32) {
+		  } else*/
+
+     if (type == &__uniqtype__int$32) {
 		  return *(int32_t*)addr;
 	 } else if (type == &__uniqtype__int$64) {
 		  return *(int64_t*)addr;
-	 } else if (type == &__uniqtype__uint$16) {
-		  return *(uint16_t*)addr;
+/*} else if (type == &__uniqtype__uint$16) {
+  return *(uint16_t*)addr;*/
 	 } else if (type == &__uniqtype__uint$32) {
 		  return *(uint32_t*)addr;
 	 } else if (type == &__uniqtype__uint$64) {
@@ -946,7 +956,8 @@ int parse_int(ANTLR3_BASE_TREE *ast) {
 	 return 0;
 }
 
-struct expr *parse_antlr_tree(ANTLR3_BASE_TREE *ast) {
+struct expr *parse_antlr_tree(void *ptr) {
+	 ANTLR3_BASE_TREE *ast = (ANTLR3_BASE_TREE*)ptr;
 	 assert(ast);
 	 struct expr *e = expr_new();
 	 switch (GET_TYPE(ast)) {
@@ -1153,7 +1164,8 @@ struct expr *parse_antlr_tree(ANTLR3_BASE_TREE *ast) {
 	 return e;
 }
 
-void print_tree_types(ANTLR3_BASE_TREE *ast) {
+void print_tree_types(void *ptr) {
+	 ANTLR3_BASE_TREE *ast = (ANTLR3_BASE_TREE*)ptr;
 	 printf("(%d[%s] ", GET_TYPE(ast), CCP(GET_TEXT(ast)));
 	 _Bool first = true;
 	 FOR_ALL_CHILDREN(ast) {
@@ -1166,3 +1178,248 @@ void print_tree_types(ANTLR3_BASE_TREE *ast) {
 	 }
 	 printf(")");
 }
+
+////////////////////////////////////////////////////////////
+// struct footprint_node
+////////////////////////////////////////////////////////////
+
+struct footprint_node *footprint_node_new() {
+	 struct footprint_node *result = malloc(sizeof(struct footprint_node));
+	 memset(result, 0, sizeof(struct footprint_node));
+	 return result;
+}
+
+struct footprint_node *footprint_node_new_with(char *name, char *arg_names[static 6], struct union_node *exprs, struct footprint_node *next) {
+	 struct footprint_node *result = footprint_node_new();
+	 result->name = name;
+	 for (int i = 0; i < 6; i++) {
+		  result->arg_names[i] = arg_names[i];
+	 }
+	 result->exprs = exprs;
+	 result->next = next;
+}
+
+void footprint_free(struct footprint_node *head) {
+	 struct footprint_node *current = head;
+	 struct footprint_node *next = NULL;
+	 while (current != NULL) {
+		  next = current->next;
+		  footprint_node_free(current);
+		  current = next;
+	 }
+}
+
+struct union_node *eval_footprint_with(struct footprint_node *footprint, struct uniqtype *func, long int arg_values[6]) {
+	 struct env_node *env = NULL;
+	 for (int i = 0; i < 6; i++) {
+		  if (footprint->arg_names[i] == NULL) {
+			   break;
+		  } else {
+			   struct object o;
+			   o.type = func->contained[i+1].ptr;
+			   o.addr = &(arg_values[i]);
+			   env = env_new_with(footprint->arg_names[i], o, env);
+		  }
+	 }
+
+	 struct expr *evaled = eval_footprint_expr(construct_union(footprint->exprs), env);
+	 struct union_node *result;
+
+	 if (evaled->type != EXPR_UNION) {
+		  result = union_new_with(evaled, NULL);
+	 } else {
+		  result = evaled->unioned;
+	 }
+	 
+	 result = union_objects_to_extents(union_flatten(result));
+	 union_sort(&result);
+	 result = sorted_union_merge_extents(result);
+	 return result;
+}
+
+struct footprint_node *get_footprint_for(struct footprint_node *footprints, char *name) {
+	 struct footprint_node *current = footprints;
+	 while (current != NULL) {
+		  if (strcmp(name, current->name) == 0) {
+			   return current;
+		  }
+		  current = current->next;
+	 }
+
+	 // not found
+	 return NULL;
+}
+
+struct footprint_node *parse_footprints_from_file(char *filename) {
+	 pANTLR3_INPUT_STREAM in_fileobj = antlr3FileStreamNew((uint8_t *) filename,
+														   ANTLR3_ENC_UTF8);
+	 dwarfidlSimpleCLexer *lexer = dwarfidlSimpleCLexerNew(in_fileobj);
+	 ANTLR3_COMMON_TOKEN_STREAM *tokenStream = antlr3CommonTokenStreamSourceNew(
+		  ANTLR3_SIZE_HINT, TOKENSOURCE(lexer));
+	 dwarfidlSimpleCParser *parser = dwarfidlSimpleCParserNew(tokenStream); 
+	 ANTLR3_BASE_TREE *ast = parser->toplevel(parser).tree;
+
+	 struct footprint_node *prints = NULL;
+
+	 assert(GET_TYPE(ast) == DIES);
+
+	 for (int i = 0; i < GET_CHILD_COUNT(ast); i++) {
+		  ANTLR3_BASE_TREE *die = GET_CHILD(ast, i);
+		  if (GET_TYPE(die) == DIE &&
+			  GET_CHILD_COUNT(die) > 0 &&
+			  GET_TYPE(GET_CHILD(die, 0)) == KEYWORD_TAG &&
+			  strcmp(CCP(GET_TEXT(GET_CHILD(die, 0))), "subprogram") == 0) {
+			   prints = new_from_subprogram_DIE(die, prints);
+		  }
+	 }
+
+	 return prints;
+}
+
+struct footprint_node *new_from_subprogram_DIE(void *ptr, struct footprint_node *next) {
+	 ANTLR3_BASE_TREE *subprogram = (ANTLR3_BASE_TREE*)ptr;
+	 assert(subprogram);
+	 assert(GET_TYPE(subprogram) == DIE);
+	 assert(GET_CHILD_COUNT(subprogram) > 0);
+	 ANTLR3_BASE_TREE *tag_node = GET_CHILD(subprogram, 0);
+	 assert(GET_TYPE(tag_node) == KEYWORD_TAG);
+	 assert(strcmp(CCP(GET_TEXT(tag_node)), "subprogram") == 0);
+	 int n_arguments = 0;
+
+	 struct footprint_node *node = footprint_node_new();
+	 node->next = next;
+
+	 struct union_node *exprs = NULL;
+	 
+	 for (int i = 0; i < GET_CHILD_COUNT(subprogram); i++) {
+		  ANTLR3_BASE_TREE *child = GET_CHILD(subprogram, i);
+		  if (GET_TYPE(child) == ATTRS) {
+			   for (int j = 0; j < GET_CHILD_COUNT(child); j++) {
+					ANTLR3_BASE_TREE *attr = GET_CHILD(child, j);
+					if (GET_TYPE(attr) == ATTR &&
+						GET_CHILD_COUNT(attr) == 2) {
+						 ANTLR3_BASE_TREE *key = GET_CHILD(attr, 0);
+						 ANTLR3_BASE_TREE *value = GET_CHILD(attr, 1);
+						 if (GET_TYPE(key) == NAME) {
+							  
+							  assert(GET_TYPE(value) == IDENTS);
+							  node->name = parse_ident(value);
+							  
+						 } else if (GET_TYPE(key) == FOOTPRINT) {
+							  
+							  assert(GET_TYPE(value) == FP_CLAUSES);
+							  for (int k = 0; k < GET_CHILD_COUNT(value); k++) {
+
+								   ANTLR3_BASE_TREE *clause = GET_CHILD(value, k);
+								   assert(GET_TYPE(clause) == FP_CLAUSE);
+								   // FIXME TODO: direction!!
+								   exprs = union_new_with(parse_antlr_tree(GET_CHILD(clause, 1)), exprs);
+							  }
+							  
+						 } else {
+							  // something we don't care about
+							  continue;
+						 }
+					} else {
+						 continue;
+					}
+			   }
+		  } else if (GET_TYPE(child) == CHILDREN) {
+			   for (int j = 0; j < GET_CHILD_COUNT(child); j++) {
+					ANTLR3_BASE_TREE *subdie = GET_CHILD(child, j);
+					if (GET_TYPE(subdie) == DIE &&
+						GET_CHILD_COUNT(subdie) > 0 &&
+						GET_TYPE(GET_CHILD(subdie, 0)) == KEYWORD_TAG &&
+						strcmp(CCP(GET_TEXT(GET_CHILD(subdie, 0))), "formal_parameter") == 0) {
+						 // an argument!
+						 _Bool have_name = false;
+
+						 for (int k = 0; k < GET_CHILD_COUNT(subdie); k++) {
+							  ANTLR3_BASE_TREE *sub_child = GET_CHILD(subdie, k);
+							  if (GET_TYPE(sub_child) == ATTRS) {
+								   for (int l = 0; l < GET_CHILD_COUNT(sub_child); l++) {
+										ANTLR3_BASE_TREE *sub_attr = GET_CHILD(sub_child, l);
+										if (GET_TYPE(sub_attr) == ATTR &&
+											GET_CHILD_COUNT(sub_attr) == 2) {
+											 ANTLR3_BASE_TREE *sub_key = GET_CHILD(sub_attr, 0);
+											 ANTLR3_BASE_TREE *sub_value = GET_CHILD(sub_attr, 1);
+											 if (GET_TYPE(sub_key) == NAME) {
+												  assert(GET_TYPE(sub_value) == IDENTS);
+												  node->arg_names[n_arguments] = parse_ident(sub_value);
+												  have_name = true;
+											 } else {
+												  continue;
+											 }
+										} else {
+											 continue;
+										}
+								   }
+							  } else {
+								   continue;
+							  }
+						 }
+						 
+						 if (!have_name) {
+							  node->arg_names[n_arguments] = "(no name)";
+						 }
+						 n_arguments++;
+					} else {
+						 // something we don't care about
+						 continue;
+					}
+			   }
+		  } else {
+			   continue;
+		  }
+	 }
+
+	 node->exprs = exprs;
+	 return node;
+}
+
+struct union_node *eval_footprint_for(struct footprint_node *footprints, char *name, struct uniqtype *func, long int arg_values[6]) {
+	 struct footprint_node *fp = get_footprint_for(footprints, name);
+	 if (fp != NULL) {
+		  return eval_footprint_with(fp, func, arg_values);
+	 } else {
+		  return NULL;
+	 }
+}
+
+char *print_footprint_extents(struct union_node *extents) {
+	 int n_nodes = 0;
+	 struct union_node *current = extents;
+	 while (current != NULL) {
+		  n_nodes++;
+		  current = current->next;
+	 }
+	 
+	 char *union_str[n_nodes];
+	 int total_strlen = n_nodes; // n-1 newlines and \0
+
+	 char *direction = "(unknown direction)";
+	 
+	 current = extents;
+	 int i = 0;
+	 while (current != NULL) {
+		  assert(current->expr->type == EXPR_EXTENT);
+		  asprintf(&(union_str[i]), "Allowed footprint: %s n=0x%lx base=0x%p", direction, current->expr->extent.length, current->expr->extent.base);
+		  assert(union_str[i]);
+		  total_strlen += strlen(union_str[i]);
+		  i++;
+		  current = current->next;
+	 }
+	 
+	 char *union_body = malloc(total_strlen);
+	 char *cur_char = union_body;
+	 
+	 for (i = 0; i < n_nodes; i++) {
+		  if (i > 0) {
+			   cur_char = stpcpy(cur_char, "\n");
+		  }
+		  cur_char = stpcpy(cur_char, union_str[i]);
+	 }
+	 
+	 return union_body;
+}
+

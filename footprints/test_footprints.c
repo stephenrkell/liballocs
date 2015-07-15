@@ -1,5 +1,16 @@
 #define _GNU_SOURCE
 
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+
+#include <antlr3.h>
+#include <antlr3defs.h>
+#include <dwarfidl/dwarfidlSimpleCLexer.h>
+#include <dwarfidl/dwarfidlSimpleCParser.h>
+
+#include "liballocs.h"
 #include "footprints.h"
 
 typedef ANTLR3_TOKEN_SOURCE TokenSource;
