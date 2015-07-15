@@ -39,6 +39,7 @@ else
 endif
 
 default: liballocs_preload.so liballocs_nonshared.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
+all: default
 
 HOOKS_NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
 HOOKS_FAST_CFLAGS += -fpic -flto -ffat-lto-objects
@@ -153,7 +154,7 @@ event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 
 liballocs_preload.so: liballocs_preload.a
 	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
-	
+
 liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
 
@@ -204,3 +205,8 @@ liballocs_nomemtable.o: liballocs.c
 # liballocs.so is a linker script, so don't remove it
 clean: 
 	rm -f *.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d *.a *_fast.c
+
+
+install: all
+	${INSTALL} liballocs_preload.so liballocs.so liballocs_noop.so ${libdir}
+	${INSTALL_DATA} liballocs_preload.a liballocs_nonshared.a liballocs.a liballocs_noop.a ${libdir}
