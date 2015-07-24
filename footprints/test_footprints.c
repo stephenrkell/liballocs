@@ -44,7 +44,24 @@ int main(int argc, char **argv) {
 	struct expr *parsed = parse_antlr_tree(tree);
 	printf("parsed: %s\n", print_expr_tree(parsed));
 
-	struct expr *evaled = eval_footprint_expr(parsed, env);
+	struct data_extent_node fake_extent = {
+		(struct data_extent) {
+			(size_t) &test_int, sizeof(test_int), &test_int
+		},
+		NULL
+	};
+	
+	struct evaluator_state state = {
+		parsed,
+		env,
+		NULL,
+		&fake_extent,
+		NULL,
+		false
+	};
+	
+	struct expr *evaled = eval_footprint_expr(&state, parsed, env);
+
 	printf("evaled: %s\n", print_expr_tree(evaled));
 
 	if (evaled->type == EXPR_UNION) {

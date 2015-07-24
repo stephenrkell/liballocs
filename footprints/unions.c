@@ -210,12 +210,12 @@ struct union_node *sorted_union_merge_extents(struct union_node *head) {
 }
 
 
-struct expr *eval_union(struct expr *e, struct env_node *env) {
+struct expr *eval_union(struct evaluator_state *state, struct expr *e, struct env_node *env) {
 	assert(e->type == EXPR_UNION);
 	struct union_node *current = e->unioned;
 	struct union_node *tail = NULL;
 	while (current != NULL) {
-		tail = union_new_with(eval_footprint_expr(current->expr, env), tail);
+		tail = union_new_with(eval_footprint_expr(state, current->expr, env), tail);
 		current = current->next;
 	}
 	return construct_union(tail);

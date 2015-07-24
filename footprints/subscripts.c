@@ -56,9 +56,9 @@ struct union_node *bytes_union_from_object(struct object obj) {
 }
 
 
-struct expr *eval_subscript(struct expr *e, struct env_node *env) {
+struct expr *eval_subscript(struct evaluator_state *state, struct expr *e, struct env_node *env) {
 	assert(e->type == EXPR_SUBSCRIPT);
-	struct expr *target_expr = eval_footprint_expr(e->subscript.target, env);
+	struct expr *target_expr = eval_footprint_expr(state, e->subscript.target, env);
 	if (target_expr->type == EXPR_UNION) {
 		char *loop_var_name = new_ident_not_in(env, "loop_var");
 
@@ -76,14 +76,37 @@ struct expr *eval_subscript(struct expr *e, struct env_node *env) {
 		loop->for_loop.ident = loop_var_name;
 		loop->for_loop.over = target_expr;
 
-		return eval_footprint_expr(loop, env);
+		return eval_footprint_expr(state, loop, env);
 	} else if (target_expr->type == EXPR_OBJECT) {
 		struct object target = target_expr->object;
-		int64_t from = eval_to_value(e->subscript.from, env);
-		int64_t to, length;
+		int64_t from, to, length;
+		_Bool from_success, to_success;
+		struct expr *partial_from, *partial_to;
+		from_success = eval_to_value(state, e->subscript.from, env, &partial_from, &from);
+		if (e->subscript.to) {
+			to_success = eval_to_value(state, e->subscript.to, env, &partial_to, &to);
+		}
+
+		if (!from_success || (e->subscript.to && !to_success)) {
+			// cache miss, state modified
+			struct expr *new_expr = expr_clone(e);
+			if (from_success) {
+				new_expr->subscript.from = construct_value(from);
+			} else {
+				new_expr->subscript.from = partial_from;
+			}
+			if (e->subscript.to) {
+				if (to_success) {
+					new_expr->subscript.to = construct_value(to);
+				} else {
+					new_expr->subscript.to = partial_to;
+				}
+			}
+			return new_expr;
+		}
+		
 		struct object derefed;
 		if (e->subscript.to) {
-			to = eval_to_value(e->subscript.to, env);
 			if (to == from) {
 				return construct_void();
 			}
@@ -102,8 +125,12 @@ struct expr *eval_subscript(struct expr *e, struct env_node *env) {
 				return construct_object(new_obj);
 			}
 		} break;
-		case SUBSCRIPT_DEREF_BYTES:
-			derefed = deref_object(target);
+		case SUBSCRIPT_DEREF_BYTES: {
+			struct object derefed;
+			if (!deref_object(state, target, &derefed)) {
+				// cache miss, state modified
+				return e;
+			}
 			if (e->subscript.to) {
 				//return construct_union(construct_bytes_union(derefed, from, length));
 				return construct_extent((unsigned long) derefed.addr + from, length);
@@ -113,8 +140,13 @@ struct expr *eval_subscript(struct expr *e, struct env_node *env) {
 				new_obj.addr = (void*)((unsigned long) derefed.addr + from);
 				return construct_object(new_obj);
 			}
-		case SUBSCRIPT_DEREF_SIZES:
-			derefed = deref_object(target);
+		} break;
+		case SUBSCRIPT_DEREF_SIZES: {
+			struct object derefed;
+			if (!deref_object(state, target, &derefed)) {
+				// cache miss, state modified
+				return e;
+			}
 			assert(UNIQTYPE_HAS_KNOWN_LENGTH(derefed.type));
 			size_t size = derefed.type->pos_maxoff;
 			if (e->subscript.to) {
@@ -124,6 +156,7 @@ struct expr *eval_subscript(struct expr *e, struct env_node *env) {
 				new_obj.addr = (void*) ((size_t)derefed.addr + (from * size));
 				return construct_object(new_obj);
 			}
+		} break;
 		default:
 			assert(false);
 			break;

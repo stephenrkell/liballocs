@@ -76,7 +76,7 @@ struct expr *lookup_in_env(struct env_node *env, char *ident) {
 	assert(false);
 }
 
-struct expr *eval_ident(struct expr *e, struct env_node *env) {
+struct expr *eval_ident(struct evaluator_state *state, struct expr *e, struct env_node *env) {
 	assert(e->type == EXPR_IDENT);
 	return lookup_in_env(env, e->ident);
 }
@@ -113,8 +113,8 @@ _Bool _ident_in(struct env_node *env, char *ident) {
 	return false;
 }
 
-char *eval_to_ident(struct expr *e, struct env_node *env) {
-	struct expr *result = eval_footprint_expr(e, env);
+char *eval_to_ident(struct evaluator_state *state, struct expr *e, struct env_node *env) {
+	struct expr *result = eval_footprint_expr(state, e, env);
 	assert(result->type == EXPR_IDENT);
 	return result->ident;
 }

@@ -80,7 +80,7 @@ struct expr {
 };
 
 struct extent_node {
-	struct extent *extent;
+	struct extent extent;
 	struct extent_node *next;
 };
 
@@ -95,7 +95,6 @@ struct data_extent_node {
 	struct data_extent_node *next;
 };
 
-
 struct env_node {
 	char *name;
 	struct expr *expr;
@@ -107,16 +106,14 @@ struct string_node {
 	struct string_node *next;
 };
 
-
-
 struct evaluator_state {
-	struct expr *read_expr;
-	struct expr *write_expr;
+	struct expr *expr;
 	struct env_node *toplevel_env;
-	struct extent_node *need_extents;
-	struct data_extent_node *have_extents;
+	struct extent_node *need_memory_extents;
+	struct data_extent_node *have_memory_extents;
+	struct union_node *result;
+	_Bool finished;
 };
-
 
 struct footprint_node {
 	char *name;

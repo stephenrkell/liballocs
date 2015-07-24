@@ -1,0 +1,30 @@
+GLIBC_2.2.5 {
+};
+
+GLIBC_2.3 {
+};
+
+GLIBC_2.3.2 {
+};
+
+GLIBC_2.3.3 {
+};
+
+GLIBC_2.3.4 {
+};
+
+GLIBC_2.4 { 
+};
+
+GLIBC_2.12 {
+};
+
+GLIBC_2.14 {
+};
+
+GLIBC_2.15 {
+};
+
+default {
+	global: __ifacetype_*; __uniqtype_*;
+};

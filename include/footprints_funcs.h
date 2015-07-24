@@ -34,22 +34,36 @@ void print_tree_types(void *ast);
 // evaluator
 ////////////////////////////////////////////////////////////
 
-struct union_node *eval_footprints_for(struct footprint_node *footprints, struct env_node *defined_functions, const char *name, struct uniqtype *func, long int arg_values[6]);
-struct union_node *eval_footprint_with(struct footprint_node *footprint, struct env_node *defined_functions, struct uniqtype *func, long int arg_values[6]);
+struct evaluator_state *eval_footprints_for(struct evaluator_state *state, struct footprint_node *footprints, struct env_node *defined_functions, const char *name, struct uniqtype *func, long int arg_values[6]);
+struct evaluator_state *eval_footprint_with(struct evaluator_state *state, struct footprint_node *footprint, struct env_node *defined_functions, struct uniqtype *func, long int arg_values[6]);
 
-struct expr *eval_footprint_expr(struct expr *e, struct env_node *env);
+struct expr *eval_footprint_expr(struct evaluator_state *state, struct expr *e, struct env_node *env);
 
-struct expr *eval_binary_op(struct expr* e, struct env_node *env);
-struct expr *eval_unary_op(struct expr* e, struct env_node *env);
-struct expr *eval_for_loop(struct expr *e, struct env_node *env);
-struct expr *eval_if_cond(struct expr *e, struct env_node *env);
-struct expr *eval_subscript(struct expr *e, struct env_node *env);
-struct expr *eval_ident(struct expr *e, struct env_node *env);
-struct expr *eval_union(struct expr *e, struct env_node *env);
+struct expr *eval_binary_op(struct evaluator_state *state, struct expr* e, struct env_node *env);
+struct expr *eval_unary_op(struct evaluator_state *state, struct expr* e, struct env_node *env);
+struct expr *eval_for_loop(struct evaluator_state *state, struct expr *e, struct env_node *env);
+struct expr *eval_if_cond(struct evaluator_state *state, struct expr *e, struct env_node *env);
+struct expr *eval_subscript(struct evaluator_state *state, struct expr *e, struct env_node *env);
+struct expr *eval_ident(struct evaluator_state *state, struct expr *e, struct env_node *env);
+struct expr *eval_union(struct evaluator_state *state, struct expr *e, struct env_node *env);
 
-int64_t eval_to_value(struct expr *e, struct env_node *env);
-char *eval_to_ident(struct expr *e, struct env_node *env);
-struct object eval_to_object(struct expr *e, struct env_node *env);
+_Bool eval_to_value(struct evaluator_state *state, struct expr *e, struct env_node *env, struct expr **out_expr, int64_t *out_result);
+char *eval_to_ident(struct evaluator_state *state, struct expr *e, struct env_node *env);
+_Bool eval_to_object(struct evaluator_state *state, struct expr *e, struct env_node *env, struct expr **out_expr, struct object *out_object);
+
+static inline _Bool _can_be_further_evaluated(enum expr_types type) {
+	switch (type) {
+	case EXPR_BINARY:
+	case EXPR_UNARY:
+	case EXPR_FOR:
+	case EXPR_IF:
+	case EXPR_SUBSCRIPT:
+		return true;
+	default:
+		return false;
+	}
+}
+
 
 ////////////////////////////////////////////////////////////
 // memory
@@ -58,8 +72,11 @@ struct object eval_to_object(struct expr *e, struct env_node *env);
 struct data_extent_node *data_extent_node_new();
 struct data_extent_node *data_extent_node_new_with(size_t base, size_t length, void *data, struct data_extent_node *next);
 
-int64_t object_to_value(struct uniqtype *type, void *addr);
-struct object deref_object(struct object pointer);
+struct extent_node *extent_node_new();
+struct extent_node *extent_node_new_with(size_t base, size_t length, struct extent_node *next);
+
+_Bool object_to_value(struct evaluator_state *state, struct uniqtype *type, void *addr, int64_t *out_result);
+_Bool deref_object(struct evaluator_state *state, struct object pointer, struct object *out_object);
 
 ////////////////////////////////////////////////////////////
 // exprs
