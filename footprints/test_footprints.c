@@ -36,7 +36,10 @@ int main(int argc, char **argv)
 	int *test_int_ptr = &test_int;
 	struct object test_int_object = {&__uniqtype__int$32, &test_int};
 	struct object test_int_ptr_object = {&__uniqtype____PTR_int$32, &test_int_ptr};
-	struct env_node *env = env_new_with("test_int_ptr", test_int_ptr_object, env_new_with("test_int", test_int_object, NULL));
+	struct env_node *env = env_new_with("test_int_ptr",
+										construct_object(test_int_ptr_object),
+										env_new_with("test_int",
+													 construct_object(test_int_object), NULL));
 
 	printf("antlr: %s\n", (char*) s->chars);
 	struct expr *parsed = parse_antlr_tree(tree);

@@ -85,6 +85,7 @@ struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 	 case EXPR_VALUE:
 	 case EXPR_EXTENT:
 	 case EXPR_OBJECT:
+	 case EXPR_FUNCTION:
 		  return e;
 		  break;
 	 case EXPR_FOR: {
@@ -105,6 +106,7 @@ struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 	 case EXPR_SUBSCRIPT: {
 		  return eval_subscript(e, env);
 	 } break;
+	 case EXPR_FUNCTION_ARGS:
 	 case EXPR_UNION: {
 		  return eval_union(e, env);
 	 } break;
@@ -314,10 +316,30 @@ struct expr *eval_binary_op(struct expr* e, struct env_node *env) {
 			   
 			   return eval_footprint_expr(loop, env);
 		  } else if (left->type == EXPR_OBJECT) {
-			   return construct_object(lookup_in_object(&left->object, e->binary_op.right->ident));
+			   return lookup_in_object(&left->object, e->binary_op.right->ident);
 		  } else {
 			   assert(false);
 		  }
+	 } break;
+	 case BIN_APP: {
+		  struct expr *left = eval_footprint_expr(e->binary_op.left, env);
+		  struct expr *right = e->binary_op.right;
+		  assert(left->type == EXPR_FUNCTION);
+		  assert(right->type == EXPR_FUNCTION_ARGS);
+		  struct function func = left->func;
+		  struct env_node *function_env = env;
+		  struct string_node *current_arg_name = func.args;
+		  struct union_node *current_arg_value = e->binary_op.right->unioned;
+		  while (current_arg_value != NULL) {
+			   assert(current_arg_name != NULL); // not too many arguments
+			   struct expr *e = eval_footprint_expr(current_arg_value->expr, env);
+			   function_env = env_new_with(current_arg_name->value, e, function_env);
+			   current_arg_name = current_arg_name->next;
+			   current_arg_value = current_arg_value->next;
+		  }
+		  assert(current_arg_name == NULL); // not too few arguments
+		  function_env = env_new_with(func.name, construct_function(func), function_env);
+		  return eval_footprint_expr(func.expr, function_env);
 	 } break;
 	 default:
 		  assert(false);
@@ -564,7 +586,7 @@ struct expr *eval_subscript(struct expr *e, struct env_node *env) {
 	 }
 }
 
-struct object lookup_in_object(struct object *context, char *ident) {
+struct expr *lookup_in_object(struct object *context, char *ident) {
 	 assert(context != NULL);
 	 assert(context->type != NULL);
 	 struct object obj;
@@ -573,7 +595,7 @@ struct object lookup_in_object(struct object *context, char *ident) {
 		  if (strcmp(ident, context->type->subobj_names[i]) == 0) {
 			   obj.type = context->type->contained[i].ptr;
 			   obj.addr = (void*) context->addr + context->type->contained[i].offset;
-			   return obj;
+			   return construct_object(obj);
 		  }
 	 }
 
@@ -581,12 +603,13 @@ struct object lookup_in_object(struct object *context, char *ident) {
 	 assert(false);
 }
 
-struct object lookup_in_env(struct env_node *env, char *ident) {
+struct expr *lookup_in_env(struct env_node *env, char *ident) {
 	 struct env_node *current = env;
 	 while (current != NULL) {
 		  if (strcmp(ident, current->name) == 0) {
-			   fprintf(stderr, "looked up %s and found %p\n", ident, (void*) object_to_value(current->value.type, current->value.addr));
-			   return current->value;
+			   fprintf(stderr, "looked up %s and found an %s\n", ident, expr_types_str[current->expr->type]);
+//			   fprintf(stderr, "looked up %s and found %p\n", ident, (void*) object_to_value(current->value.type, current->value.addr));
+			   return current->expr;
 		  }
 		  current = current->next;
 	 }
@@ -597,7 +620,7 @@ struct object lookup_in_env(struct env_node *env, char *ident) {
 
 struct expr *eval_ident(struct expr *e, struct env_node *env) {
 	 assert(e->type == EXPR_IDENT);
-	 return construct_object(lookup_in_env(env, e->ident));
+	 return lookup_in_env(env, e->ident);
 }
 
 ////////////////////////////////////////////////////////////
@@ -628,10 +651,10 @@ struct env_node *env_new() {
 	 return result;
 }
 
-struct env_node *env_new_with(char *name, struct object value, struct env_node *next) {
+struct env_node *env_new_with(char *name, struct expr *expr, struct env_node *next) {
 	 struct env_node *result = env_new();
 	 result->name = name;
-	 result->value = value;
+	 result->expr = expr;
 	 result->next = next;
 	 return result;
 }
@@ -654,6 +677,7 @@ void env_free(struct env_node *first) {
 struct union_node *union_new() {
 	 struct union_node *result = malloc(sizeof(struct union_node));
 	 memset(result, 0, sizeof(struct union_node));
+	 result->child_n = -1;
 	 return result;
 }
 
@@ -922,8 +946,9 @@ char *print_expr_tree(struct expr *e) {
 	 case EXPR_EXTENT: {
 		  asprintf(&body, "(extent base = %lx, length = %lx)", e->extent.base, e->extent.length);
 	 } break;
+	 case EXPR_FUNCTION_ARGS:
 	 case EXPR_UNION: {
-		  int n_nodes = 0;
+		  size_t n_nodes = 0;
 		  struct union_node *current = e->unioned;
 		  while (current != NULL) {
 			   n_nodes++;
@@ -932,10 +957,10 @@ char *print_expr_tree(struct expr *e) {
 
 		  char *union_str[n_nodes];
 		  
-		  int total_strlen = n_nodes; // n-1 spaces and \0
+		  size_t total_strlen = n_nodes; // n-1 spaces and \0
 		  
 		  current = e->unioned;
-		  int i = 0;
+		  size_t i = 0;
 		  while (current != NULL) {
 			   union_str[i] = print_expr_tree(current->expr);
 			   total_strlen += strlen(union_str[i]);
@@ -953,7 +978,7 @@ char *print_expr_tree(struct expr *e) {
 			   cur_char = stpcpy(cur_char, union_str[i]);
 		  }
 
-		  asprintf(&body, "(union %s)", union_body);
+		  asprintf(&body, (e->type == EXPR_FUNCTION_ARGS ? "(args %s)" : "(union %s)"), union_body);
 	 } break;
 	 case EXPR_OBJECT: {
 		  asprintf(&body, "(object @%p of type %s)", e->object.addr, e->object.type->name);
@@ -963,6 +988,37 @@ char *print_expr_tree(struct expr *e) {
 	 } break;
 	 case EXPR_VALUE: {
 		  asprintf(&body, "%ld", e->value);
+	 } break;
+	 case EXPR_FUNCTION: {
+		  size_t n_args = 0;
+		  struct string_node *current = e->func.args;
+		  while (current != NULL) {
+			   n_args++;
+			   current = current->next;
+		  }
+
+		  char *arg_str[n_args];
+		  size_t total_strlen = 2 * n_args - 1; // n-1 * ", " + \0
+		  current = e->func.args;
+		  size_t i = 0;
+		  while (current != NULL) {
+			   arg_str[i] = current->value;
+			   total_strlen += strlen(arg_str[i]);
+			   i++;
+			   current = current->next;
+		  }
+
+		  char *arg_body = malloc(total_strlen);
+		  char *cur_char = arg_body;
+
+		  for (i = 0; i < n_args; i++) {
+			   if (i > 0) {
+					cur_char = stpcpy(cur_char, ", ");
+			   }
+			   cur_char = stpcpy(cur_char, arg_str[i]);
+		  }
+		  
+		  asprintf(&body, "(function %s with args (%s) and expr (%s))", e->func.name, arg_body, print_expr_tree(e->func.expr));
 	 } break;
 	 default:
 		  assert(false);
@@ -1091,6 +1147,7 @@ struct expr *parse_antlr_tree(void *ptr) {
 	 case FP_BITOR:
 	 case FP_BITXOR:
 	 case FP_MEMBER:
+	 case FP_APP:
 		  e->type = EXPR_BINARY;
 		  break;
 	 case FP_NOT:
@@ -1119,6 +1176,12 @@ struct expr *parse_antlr_tree(void *ptr) {
 		  break;
 	 case FP_VOID:
 		  e->type = EXPR_VOID;
+		  break;
+	 case FP_FUN:
+		  e->type = EXPR_FUNCTION;
+		  break;
+	 case FP_ARGS:
+		  e->type = EXPR_FUNCTION_ARGS;
 		  break;
 	 default:
 		  assert(false);
@@ -1187,6 +1250,9 @@ struct expr *parse_antlr_tree(void *ptr) {
 			   break;
 		  case FP_MEMBER:
 			   e->binary_op.op = BIN_MEMBER;
+			   break;
+		  case FP_APP:
+			   e->binary_op.op = BIN_APP;
 			   break;
 		  default:
 			   assert(false);
@@ -1258,6 +1324,16 @@ struct expr *parse_antlr_tree(void *ptr) {
 		  assert(GET_CHILD_COUNT(ast) == 0);
 		  e->value = parse_int(ast);
 	 } break;
+	 case EXPR_FUNCTION: {
+		  e->func = parse_function(ast);
+	 } break;
+	 case EXPR_FUNCTION_ARGS: { // function args are just a union, but must be the right way around
+		  struct union_node *tail = NULL;
+		  for (int i = GET_CHILD_COUNT(ast) - 1; i >= 0; i--) {
+			   tail = union_new_with(parse_antlr_tree(GET_CHILD(ast, i)), tail);
+		  }
+		  e->unioned = tail;
+	 } break;
 	 case EXPR_UNION: {
 		  struct union_node *tail = NULL;
 		  FOR_ALL_CHILDREN(ast) {
@@ -1285,6 +1361,19 @@ void print_tree_types(void *ptr) {
 		  print_tree_types(n);
 	 }
 	 fprintf(stderr, ")");
+}
+
+struct string_node *string_node_new() {
+	 struct string_node *result = malloc(sizeof(struct string_node));
+	 memset(result, 0, sizeof(struct string_node));
+	 return result;
+}
+
+struct string_node *string_node_new_with(char *value, struct string_node *next) {
+	 struct string_node *result = string_node_new();
+	 result->value = value;
+	 result->next = next;
+	 return result;
 }
 
 ////////////////////////////////////////////////////////////
@@ -1338,8 +1427,8 @@ struct union_node *_union_remove_type(struct union_node *head, enum expr_types t
 	 }
 }
 
-struct union_node *eval_footprint_with(struct footprint_node *footprint, struct uniqtype *func, long int arg_values[6]) {
-	 struct env_node *env = NULL;
+struct union_node *eval_footprint_with(struct footprint_node *footprint, struct env_node *defined_functions, struct uniqtype *func, long int arg_values[6]) {
+	 struct env_node *env = defined_functions;
 	 for (uint8_t i = 0; i < 6; i++) {
 		  if (footprint->arg_names[i] == NULL) {
 			   break;
@@ -1348,7 +1437,7 @@ struct union_node *eval_footprint_with(struct footprint_node *footprint, struct 
 			   o.type = func->contained[i+1].ptr;
 			   o.addr = arg_values + i;
 			   fprintf(stderr, "created arg %s with type %s and typed value 0x%lx from untyped 0x%lx\n", footprint->arg_names[i], o.type->name, object_to_value(o.type, o.addr), arg_values[i]);
-			   env = env_new_with(footprint->arg_names[i], o, env);
+			   env = env_new_with(footprint->arg_names[i], construct_object(o), env);
 		  }
 	 }
 
@@ -1382,7 +1471,39 @@ struct footprint_node *get_footprints_for(struct footprint_node *footprints, con
 	 return NULL;
 }
 
-struct footprint_node *parse_footprints_from_file(char *filename) {
+struct function parse_function(void *ptr) {
+	 ANTLR3_BASE_TREE *func_ast = (ANTLR3_BASE_TREE*)ptr;
+	 assert(func_ast);
+	 assert(GET_TYPE(func_ast) == FP_FUN);
+	 assert(GET_CHILD_COUNT(func_ast) == 3);
+
+	 ANTLR3_BASE_TREE *name_ast = GET_CHILD(func_ast, 0);
+	 ANTLR3_BASE_TREE *args_ast = GET_CHILD(func_ast, 1);
+	 ANTLR3_BASE_TREE *expr_ast = GET_CHILD(func_ast, 2);
+
+	 struct function func;
+
+	 // name
+	 assert(GET_TYPE(name_ast) == IDENTS);
+	 func.name = parse_ident(name_ast);
+	 
+	 // expr
+	 func.expr = parse_antlr_tree(expr_ast);
+
+	 // args
+	 func.args = NULL;
+	 // in reverse order for easy linked-list-consing which would otherwise reverse it again
+	 for (int i = GET_CHILD_COUNT(args_ast) - 1; i >= 0; i--) {
+		  ANTLR3_BASE_TREE *arg = GET_CHILD(args_ast, i);
+		  assert(GET_TYPE(arg) == IDENTS);
+		  func.args = string_node_new_with(parse_ident(arg), func.args);
+	 }
+
+	 
+	 return func; //env_new_with(func.name, construct_function(func), next);
+}
+
+struct footprint_node *parse_footprints_from_file(const char *filename, struct env_node **output_env) {
 	 pANTLR3_INPUT_STREAM in_fileobj = antlr3FileStreamNew((uint8_t *) filename,
 														   ANTLR3_ENC_UTF8);
 	 if (!in_fileobj) {
@@ -1397,6 +1518,8 @@ struct footprint_node *parse_footprints_from_file(char *filename) {
 
 	 struct footprint_node *prints = NULL;
 
+	 struct env_node *defined_functions = NULL;
+
 	 assert(GET_TYPE(ast) == DIES);
 
 	 fprintf(stderr, "%s\n", TO_STRING_TREE(ast)->chars);
@@ -1408,9 +1531,14 @@ struct footprint_node *parse_footprints_from_file(char *filename) {
 			  GET_TYPE(GET_CHILD(die, 0)) == KEYWORD_TAG &&
 			  strcmp(CCP(GET_TEXT(GET_CHILD(die, 0))), "subprogram") == 0) {
 			   prints = new_from_subprogram_DIE(die, prints);
+		  } else if (GET_TYPE(die) == FP_FUN &&
+					 GET_CHILD_COUNT(die) > 0) {
+			   struct function func = parse_function(die);
+			   defined_functions = env_new_with(func.name, construct_function(func), defined_functions);
 		  }
 	 }
 
+	 *output_env = defined_functions;
 	 return prints;
 }
 
@@ -1527,11 +1655,11 @@ struct footprint_node *new_from_subprogram_DIE(void *ptr, struct footprint_node 
 	 return node;
 }
 
-struct union_node *eval_footprint_for(struct footprint_node *footprints, char *name, struct uniqtype *func, long int arg_values[6]) {
-	 struct footprint_node *fp = get_footprint_for(footprints, name);
+struct union_node *eval_footprints_for(struct footprint_node *footprints, struct env_node *defined_functions, const char *name, struct uniqtype *func, long int arg_values[6]) {
+	 struct footprint_node *fp = get_footprints_for(footprints, name);
 	 if (fp != NULL) {
 		  fprintf(stderr, "Evaling footprint for %s(0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx)\n", name, arg_values[0], arg_values[1], arg_values[2], arg_values[3], arg_values[4], arg_values[5]);
-		  struct union_node *result = eval_footprint_with(fp, func, arg_values);
+		  struct union_node *result = eval_footprint_with(fp, defined_functions, func, arg_values);
 		  fprintf(stderr, "Result:\n%s\n", print_footprint_extents(fp, result));
 		  return result;
 	 } else {

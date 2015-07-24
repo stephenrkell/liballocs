@@ -38,7 +38,8 @@ enum binary_ops {
 	 BIN_BITAND,
 	 BIN_BITOR,
 	 BIN_BITXOR,
-	 BIN_MEMBER
+	 BIN_MEMBER,
+	 BIN_APP
 };
 
 
@@ -68,7 +69,9 @@ enum expr_types {
 	 EXPR_UNION,
 	 EXPR_OBJECT,
 	 EXPR_IDENT,
-	 EXPR_VALUE
+	 EXPR_VALUE,
+	 EXPR_FUNCTION,
+	 EXPR_FUNCTION_ARGS,
 };
 
 
@@ -116,12 +119,24 @@ struct extent {
 struct union_node {
 	 struct expr *expr;
 	 struct union_node *next;
+	 int child_n;
 };
 
 struct env_node {
 	 char *name;
-	 struct object value;
+	 struct expr *expr;
 	 struct env_node *next;
+};
+
+struct string_node {
+	 char *value;
+	 struct string_node *next;
+};
+
+struct function {
+	 char *name;
+	 struct string_node *args;
+	 struct expr *expr;
 };
 
 struct expr {
@@ -135,6 +150,7 @@ struct expr {
 		  struct extent extent;
 		  struct union_node *unioned;
 		  struct object object;
+		  struct function func;
 		  char *ident;
 		  int64_t value;
 	 };
@@ -186,11 +202,12 @@ struct expr *eval_unary_op(struct expr* e, struct env_node *env);
 struct expr *eval_for_loop(struct expr *e, struct env_node *env);
 struct expr *eval_if_cond(struct expr *e, struct env_node *env);
 struct expr *eval_subscript(struct expr *e, struct env_node *env);
-struct object lookup_in_object(struct object *context, char *ident);
-struct object lookup_in_env(struct env_node *env, char *ident);
+struct expr *lookup_in_object(struct object *context, char *ident);
+struct expr *lookup_in_env(struct env_node *env, char *ident);
 struct expr *eval_ident(struct expr *e, struct env_node *env);
 struct expr *eval_union(struct expr *e, struct env_node *env);
 
+struct function parse_function(void *ast);
 char *print_expr_tree(struct expr *e);
 struct expr *parse_antlr_tree(void *ast);
 void print_tree_types(void *ast);
@@ -209,7 +226,7 @@ struct expr *expr_clone(struct expr *other);
 ////////////////////////////////////////////////////////////
 
 struct env_node *env_new();
-struct env_node *env_new_with(char *name, struct object value, struct env_node *next);
+struct env_node *env_new_with(char *name, struct expr *expr, struct env_node *next);
 void env_free(struct env_node *first);
 
 #define env_free_node(node) (free(node), node = NULL)
@@ -237,10 +254,10 @@ struct union_node *sorted_union_merge_extents(struct union_node *head);
 struct footprint_node *footprint_node_new();
 struct footprint_node *footprint_node_new_with(char *name, char *arg_names[6], enum footprint_direction direction, struct union_node *exprs, struct footprint_node *next);
 void footprint_free(struct footprint_node *node);
-struct union_node *eval_footprint_with(struct footprint_node *footprint, struct uniqtype *func, long int arg_values[6]);
+struct union_node *eval_footprint_with(struct footprint_node *footprint, struct env_node *defined_functions, struct uniqtype *func, long int arg_values[6]);
 struct footprint_node *get_footprints_for(struct footprint_node *footprints, const char *name);
-struct footprint_node *parse_footprints_from_file(const char *filename);
-struct union_node *eval_footprint_for(struct footprint_node *footprints, char *name, struct uniqtype *func, long int arg_values[6]);
+struct footprint_node *parse_footprints_from_file(const char *filename, struct env_node **output_env);
+struct union_node *eval_footprints_for(struct footprint_node *footprints, struct env_node *defined_functions, const char *name, struct uniqtype *func, long int arg_values[6]);
 char *print_footprint_extents(struct footprint_node *fp, struct union_node *extents);
 struct footprint_node *new_from_subprogram_DIE(void *subprogram, struct footprint_node *next);
 
