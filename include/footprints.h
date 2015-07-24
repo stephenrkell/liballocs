@@ -20,154 +20,154 @@ extern const char *footprint_direction_str[];
 
 
 enum binary_ops {
-	 BIN_GT,
-	 BIN_LT,
-	 BIN_GTE,
-	 BIN_LTE,
-	 BIN_EQ,
-	 BIN_NE,
-	 BIN_AND,
-	 BIN_OR,
-	 BIN_ADD,
-	 BIN_SUB,
-	 BIN_MUL,
-	 BIN_DIV,
-	 BIN_MOD,
-	 BIN_SHL,
-	 BIN_SHR,
-	 BIN_BITAND,
-	 BIN_BITOR,
-	 BIN_BITXOR,
-	 BIN_MEMBER,
-	 BIN_APP
+	BIN_GT,
+	BIN_LT,
+	BIN_GTE,
+	BIN_LTE,
+	BIN_EQ,
+	BIN_NE,
+	BIN_AND,
+	BIN_OR,
+	BIN_ADD,
+	BIN_SUB,
+	BIN_MUL,
+	BIN_DIV,
+	BIN_MOD,
+	BIN_SHL,
+	BIN_SHR,
+	BIN_BITAND,
+	BIN_BITOR,
+	BIN_BITXOR,
+	BIN_MEMBER,
+	BIN_APP
 };
 
 
 enum unary_ops {
-	 UN_NOT,
-	 UN_NEG,
-	 UN_BITNOT,
-	 UN_SIZEOF
+	UN_NOT,
+	UN_NEG,
+	UN_BITNOT,
+	UN_SIZEOF
 };
 
 
 enum subscript_methods {
-	 SUBSCRIPT_DIRECT_BYTES,
-	 SUBSCRIPT_DEREF_BYTES,
-	 SUBSCRIPT_DEREF_SIZES
+	SUBSCRIPT_DIRECT_BYTES,
+	SUBSCRIPT_DEREF_BYTES,
+	SUBSCRIPT_DEREF_SIZES
 };
 
 
 enum expr_types {
-	 EXPR_VOID,
-	 EXPR_BINARY,
-	 EXPR_UNARY,
-	 EXPR_FOR,
-	 EXPR_IF,
-	 EXPR_SUBSCRIPT,
-	 EXPR_EXTENT,
-	 EXPR_UNION,
-	 EXPR_OBJECT,
-	 EXPR_IDENT,
-	 EXPR_VALUE,
-	 EXPR_FUNCTION,
-	 EXPR_FUNCTION_ARGS,
+	EXPR_VOID,
+	EXPR_BINARY,
+	EXPR_UNARY,
+	EXPR_FOR,
+	EXPR_IF,
+	EXPR_SUBSCRIPT,
+	EXPR_EXTENT,
+	EXPR_UNION,
+	EXPR_OBJECT,
+	EXPR_IDENT,
+	EXPR_VALUE,
+	EXPR_FUNCTION,
+	EXPR_FUNCTION_ARGS,
 };
 
 
 
 struct binary_op {
-	 enum binary_ops op;
-	 struct expr *left;
-	 struct expr *right;
+	enum binary_ops op;
+	struct expr *left;
+	struct expr *right;
 };
 
 struct unary_op {
-	 enum unary_ops op;
-	 struct expr *arg;
+	enum unary_ops op;
+	struct expr *arg;
 };
 
 struct for_loop {
-	 struct expr *body;
-	 char *ident;
-	 struct expr *over;
+	struct expr *body;
+	char *ident;
+	struct expr *over;
 };
 
 struct if_cond {
-	 struct expr *cond;
-	 struct expr *then;
-	 struct expr *otherwise;
+	struct expr *cond;
+	struct expr *then;
+	struct expr *otherwise;
 };
 
 struct subscript {
-	 struct expr *target;
-	 enum subscript_methods method;
-	 struct expr *from;
-	 struct expr *to;
+	struct expr *target;
+	enum subscript_methods method;
+	struct expr *from;
+	struct expr *to;
 };
 
 struct object {
-	 struct uniqtype *type;
-	 void *addr;
+	struct uniqtype *type;
+	void *addr;
 };
 
 struct extent {
-	 unsigned long base;
-	 unsigned long length;
+	unsigned long base;
+	unsigned long length;
 };
 
 struct union_node {
-	 struct expr *expr;
-	 struct union_node *next;
-	 int child_n;
+	struct expr *expr;
+	struct union_node *next;
+	int child_n;
 };
 
 struct env_node {
-	 char *name;
-	 struct expr *expr;
-	 struct env_node *next;
+	char *name;
+	struct expr *expr;
+	struct env_node *next;
 };
 
 struct string_node {
-	 char *value;
-	 struct string_node *next;
+	char *value;
+	struct string_node *next;
 };
 
 struct function {
-	 char *name;
-	 struct string_node *args;
-	 struct expr *expr;
+	char *name;
+	struct string_node *args;
+	struct expr *expr;
 };
 
 struct expr {
-	 enum expr_types type;
-	 union {
-		  struct binary_op binary_op;
-		  struct unary_op unary_op;
-		  struct for_loop for_loop;
-		  struct if_cond if_cond;
-		  struct subscript subscript;
-		  struct extent extent;
-		  struct union_node *unioned;
-		  struct object object;
-		  struct function func;
-		  char *ident;
-		  int64_t value;
-	 };
+	enum expr_types type;
+	union {
+		struct binary_op binary_op;
+		struct unary_op unary_op;
+		struct for_loop for_loop;
+		struct if_cond if_cond;
+		struct subscript subscript;
+		struct extent extent;
+		struct union_node *unioned;
+		struct object object;
+		struct function func;
+		char *ident;
+		int64_t value;
+	};
 };
 
 enum footprint_direction {
-	 FOOTPRINT_READ,
-	 FOOTPRINT_WRITE,
-	 FOOTPRINT_READWRITE
+	FOOTPRINT_READ,
+	FOOTPRINT_WRITE,
+	FOOTPRINT_READWRITE
 };
 
 struct footprint_node {
-	 char *name;
-	 char *arg_names[6];
-	 enum footprint_direction direction;
-	 struct union_node *exprs;
-	 struct footprint_node *next;
+	char *name;
+	char *arg_names[6];
+	enum footprint_direction direction;
+	struct union_node *exprs;
+	struct footprint_node *next;
 };
 
 /*struct footprint {
@@ -176,7 +176,7 @@ struct footprint_node {
   struct expr *value;
   struct footprint *next;
   };
-  
+
   struct name_node {
   char *ident;
   struct footprint *prints;
@@ -194,7 +194,7 @@ char *eval_to_ident(struct expr *e, struct env_node *env);
 struct object eval_to_object(struct expr *e, struct env_node *env);
 struct expr *construct_value(int64_t value);
 struct expr *construct_object(struct object value);
-struct expr *eval_binary_op(struct expr* e, struct env_node *env); 
+struct expr *eval_binary_op(struct expr* e, struct env_node *env);
 char *new_ident_not_in(struct env_node *env, char *suffix);
 char *_find_ident_not_in(struct env_node *env, char *suffix, size_t length);
 _Bool _ident_in(struct env_node *env, char *ident);
@@ -262,6 +262,6 @@ char *print_footprint_extents(struct footprint_node *fp, struct union_node *exte
 struct footprint_node *new_from_subprogram_DIE(void *subprogram, struct footprint_node *next);
 
 #define footprint_node_free(node) (free(node), node = NULL)
- 
+
 #endif
 
