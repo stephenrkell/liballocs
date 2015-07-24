@@ -4,7 +4,7 @@ SUBDIRS = . src footprints
 
 AM_CXXFLAGS = -std=c++11 -ggdb3 -O0 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(DWARFIDL_CFLAGS)
 
-AM_CFLAGS = -std=gnu99 -ggdb3 -O0 -Iinclude -fPIC -Wp,-w
+AM_CFLAGS = -Wall -std=gnu99 -ggdb3 -O0 -Iinclude -fPIC -Wp,-w
 CFLAGS += $(AM_CFLAGS)
 
 AM_LDFLAGS = -lstdc++ -lm -lboost_regex $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(DWARFIDL_LIBS)

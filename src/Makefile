@@ -11,7 +11,7 @@ SRCROOT := $(dir $(THIS_MAKEFILE))../
 HOOKS_PRELOAD_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_preload_fast.o event_hooks_fast.o
 HOOKS_WRAP_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
 
-CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include -I../contrib/libmallochooks
+CFLAGS += -std=gnu99 -Wall -g -I../include -I$(SRCROOT)/include -I../contrib/libmallochooks
 
 ifeq ($(DEBUG),1)
     DEFAULT_EXTRA_CFLAGS := -g

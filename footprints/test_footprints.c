@@ -4,12 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-
-#include <antlr3.h>
-#include <antlr3defs.h>
-#include <dwarfidl/dwarfidlSimpleCLexer.h>
-#include <dwarfidl/dwarfidlSimpleCParser.h>
-
+#include <dwarfidl/parser_includes.h>
 #include "liballocs.h"
 #include "footprints.h"
 

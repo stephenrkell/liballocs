@@ -5,13 +5,67 @@
 #include <string.h>
 #include <sys/types.h>
 
-#include <antlr3.h>
-#include <antlr3defs.h>
-#include <dwarfidl/dwarfidlSimpleCLexer.h>
-#include <dwarfidl/dwarfidlSimpleCParser.h>
-
+#include <dwarfidl/parser_includes.h>
 #include "liballocs.h"
 #include "footprints.h"
+
+const char *binary_ops_str[] = {
+	 ">",
+	 "<",
+	 ">=",
+	 "<=",
+	 "==",
+	 "!=",
+	 "and",
+	 "or",
+	 "+",
+	 "-",
+	 "*",
+	 "/",
+	 "%",
+	 "<<",
+	 ">>",
+	 "&",
+	 "|",
+	 "^",
+	 ".",
+	 "called with"
+};
+
+const char *unary_ops_str[] = {
+	 "not",
+	 "-",
+	 "~",
+	 "sizeof"
+};
+
+const char *subscript_methods_str[] = {
+	 "SUBSCRIPT_DIRECT_BYTES",
+	 "SUBSCRIPT_DEREF_BYTES",
+	 "SUBSCRIPT_DEREF_SIZES"
+};
+
+const char *expr_types_str[] = {
+	 "EXPR_VOID",
+	 "EXPR_BINARY",
+	 "EXPR_UNARY",
+	 "EXPR_FOR",
+	 "EXPR_IF",
+	 "EXPR_SUBSCRIPT",
+	 "EXPR_EXTENT",
+	 "EXPR_UNION",
+	 "EXPR_OBJECT",
+	 "EXPR_IDENT",
+	 "EXPR_VALUE",
+	 "EXPR_FUNCTION",
+	 "EXPR_FUNCTION_ARGS"
+};
+
+const char *footprint_direction_str[] = {
+	 "read",
+	 "write",
+	 "readwrite"
+};
 
 ////////////////////////////////////////////////////////////
 // evaluator
@@ -19,6 +73,13 @@
 
 struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 	 assert(e);
+	 fprintf(stderr, "== eval_footprint_expr called with expr = %s (type = %s), env = ", print_expr_tree(e), expr_types_str[e->type]);
+	 struct env_node *current = env;
+	 while (current != NULL) {
+		  fprintf(stderr, "%s%s", current->name, (current->next == NULL ? "" : ", "));
+		  current = current->next;
+	 }
+	 fprintf(stderr, "\n");
 	 switch (e->type) {
 	 case EXPR_FOR: {
 		  return eval_for_loop(e, env);
@@ -76,7 +137,7 @@ int object_to_value(struct uniqtype *type, void *addr) {
 	 }
 }
 
-int eval_to_value(struct expr *e, struct env_node *env) {
+int64_t eval_to_value(struct expr *e, struct env_node *env) {
 	 struct expr *result = eval_footprint_expr(e, env);
 	 if (result->type == EXPR_OBJECT) {
 		  return object_to_value(result->object.type, result->object.addr);
@@ -98,7 +159,7 @@ struct object eval_to_object(struct expr *e, struct env_node *env) {
 	 return result->object;
 }
 
-struct expr *construct_value(int value) {
+struct expr *construct_value(int64_t value) {
 	 struct expr *result = expr_new();
 	 result->type = EXPR_VALUE;
 	 result->value = value;
@@ -119,7 +180,7 @@ struct expr *construct_object(struct object value) {
 	 return result;
 }
 
-struct expr *construct_extent(int base, int length) {
+struct expr *construct_extent(int64_t base, int64_t length) {
 	 struct expr *result = expr_new();
 	 result->type = EXPR_EXTENT;
 	 result->extent.base = base;
@@ -127,97 +188,104 @@ struct expr *construct_extent(int base, int length) {
 	 return result;
 }
 
+struct expr *construct_function(struct function func) {
+	 struct expr *result = expr_new();
+	 result->type = EXPR_FUNCTION;
+	 result->func = func;
+	 return result;
+}
+
 struct expr *eval_binary_op(struct expr* e, struct env_node *env) {
 	 assert(e->type == EXPR_BINARY);
 	 switch (e->binary_op.op) {
 	 case BIN_GT: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left > right ? 1 : 0);
 	 } break;	  
 	 case BIN_LT: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left < right ? 1 : 0);
 		  } break;
 	 case BIN_GTE: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left >= right ? 1 : 0);
 		  } break;
 	 case BIN_LTE: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left <= right ? 1 : 0);
 		  } break;
 	 case BIN_EQ: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left == right ? 1 : 0);
 		  } break;
 	 case BIN_NE: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left != right ? 1 : 0);
 		  } break;
 	 case BIN_AND: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(!!left && !!right ? 1 : 0);
 		  } break;
 	 case BIN_OR: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(!!left || !!right ? 1 : 0);
 		  } break;
 	 case BIN_ADD: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left + right);
 		  } break;
 	 case BIN_SUB: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left - right);
 		  } break;
 	 case BIN_MUL: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left * right);
 		  } break;
 	 case BIN_DIV: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left / right);
 		  } break;
 	 case BIN_MOD: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left % right);
 		  } break;
 	 case BIN_SHL: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left << right);
 		  } break;
 	 case BIN_SHR: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left >> right);
 		  } break;
 	 case BIN_BITAND: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left & right);
 		  } break;
 	 case BIN_BITOR: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left | right);
 		  } break;
 	 case BIN_BITXOR: {
-		  int left = eval_to_value(e->binary_op.left, env);
-		  int right = eval_to_value(e->binary_op.right, env);
+		  int64_t left = eval_to_value(e->binary_op.left, env);
+		  int64_t right = eval_to_value(e->binary_op.right, env);
 		  return construct_value(left ^ right);
 		  } break;
 	 case BIN_MEMBER: {
@@ -226,7 +294,6 @@ struct expr *eval_binary_op(struct expr* e, struct env_node *env) {
 		  // else:
 		  //     return lookup(left_obj, right_ident)
 		  assert(e->binary_op.right->type == EXPR_IDENT);
-		  char *right_ident = e->binary_op.right->ident;
 		  struct expr *left = eval_footprint_expr(e->binary_op.left, env);
 		  if (left->type == EXPR_UNION) {
 			   char *loop_var_name = new_ident_not_in(env, "loop_var");
@@ -237,10 +304,7 @@ struct expr *eval_binary_op(struct expr* e, struct env_node *env) {
 			   
 			   struct expr *loop_body = expr_new();
 			   memcpy(loop_body, e, sizeof(struct expr));
-			   //loop_body->type = EXPR_BINARY;
-			   //loop_body->binary_op.op = BIN_MEMBER;
 			   loop_body->binary_op.left = loop_var_ident;
-			   //loop_body->binary_op.right = e->binary_op.right;
 
 			   struct expr *loop = expr_new();
 			   loop->type = EXPR_FOR;
@@ -264,11 +328,12 @@ struct expr *eval_binary_op(struct expr* e, struct env_node *env) {
 struct expr *eval_union(struct expr *e, struct env_node *env) {
 	 assert(e->type == EXPR_UNION);
 	 struct union_node *current = e->unioned;
+	 struct union_node *tail = NULL;
 	 while (current != NULL) {
-		  current->expr = eval_footprint_expr(current->expr, env);
+		  tail = union_new_with(eval_footprint_expr(current->expr, env), tail);
 		  current = current->next;
 	 }
-	 return e;
+	 return construct_union(tail);
 }
 
 
@@ -328,14 +393,16 @@ struct expr *eval_unary_op(struct expr* e, struct env_node *env) {
 struct expr *eval_for_loop(struct expr *e, struct env_node *env) {
 	 // f(x) for x in xs -> union(f(x1), f(x2), ... f(xn))
 	 assert(e->type == EXPR_FOR);
-	 assert(e->for_loop.over->type == EXPR_UNION);
+	 
+	 struct expr *over = eval_footprint_expr(e->for_loop.over, env);
+	 assert(over->type == EXPR_UNION);
 	 
 	 struct union_node *tail = NULL;
-	 struct union_node *current = e->unioned;
+	 struct union_node *current = over->unioned;
 	 while (current != NULL) {
 		  struct env_node *head_env = env_new();
 		  head_env->name = e->for_loop.ident;
-		  head_env->value = eval_to_object(current->expr, env);
+		  head_env->expr = eval_footprint_expr(current->expr, env);
 		  head_env->next = env;
 		  struct union_node *head = union_new();
 		  head->expr = eval_footprint_expr(e->for_loop.body, head_env);
@@ -404,7 +471,6 @@ struct union_node *construct_size_union(struct object obj, size_t base, size_t l
 
 struct union_node *bytes_union_from_object(struct object obj) {
 	 assert(UNIQTYPE_HAS_KNOWN_LENGTH(obj.type));
-	 struct union_node *tail = NULL;
 	 size_t size = obj.type->pos_maxoff;
 	 return construct_bytes_union(obj, 0, size);
 }
@@ -438,8 +504,8 @@ struct expr *eval_subscript(struct expr *e, struct env_node *env) {
 		  return eval_footprint_expr(loop, env);
 	 } else if (target_expr->type == EXPR_OBJECT) {
 		  struct object target = target_expr->object;
-		  int from = eval_to_value(e->subscript.from, env);
-		  int to, length;
+		  int64_t from = eval_to_value(e->subscript.from, env);
+		  int64_t to, length;
 		  struct object derefed;
 		  if (e->subscript.to) {
 			   to = eval_to_value(e->subscript.to, env);
@@ -493,7 +559,7 @@ struct object lookup_in_object(struct object *context, char *ident) {
 	 assert(context != NULL);
 	 assert(context->type != NULL);
 	 struct object obj;
-	 int i;
+	 size_t i;
 	 for (i = 0; i < context->type->nmemb; i++) {
 		  if (strcmp(ident, context->type->subobj_names[i]) == 0) {
 			   obj.type = context->type->contained[i].ptr;
@@ -510,6 +576,7 @@ struct object lookup_in_env(struct env_node *env, char *ident) {
 	 struct env_node *current = env;
 	 while (current != NULL) {
 		  if (strcmp(ident, current->name) == 0) {
+			   fprintf(stderr, "looked up %s and found %p\n", ident, (void*) object_to_value(current->value.type, current->value.addr));
 			   return current->value;
 		  }
 		  current = current->next;
@@ -589,12 +656,20 @@ struct union_node *union_new_with(struct expr *e, struct union_node *next) {
 }
 
 struct union_node *union_union(struct union_node *first, struct union_node *second) {
-	 struct union_node *end = first;
-	 while (end->next != NULL) {
-		  end = end->next;
+	 if (first == NULL && second == NULL) {
+		  return NULL;
+	 } else if (first == NULL) {
+		  return second;
+	 } else if (second == NULL) {
+		  return first;
+	 } else {
+		  struct union_node *end = first;
+		  while (end->next != NULL) {
+			   end = end->next;
+		  }
+		  end->next = second;
+		  return first;
 	 }
-	 end->next = second;
-	 return first;
 }
 
 struct union_node *union_add(struct union_node *first, struct expr *e) {
@@ -617,22 +692,22 @@ struct union_node *_union_sort_merge(struct union_node *front, struct union_node
 	 } else if (back == NULL) {
 		  return front;
 	 } else {
-		  unsigned long front_addr, back_addr;
+		  void *front_addr, *back_addr;
 		  switch (front->expr->type) {
 		  case EXPR_OBJECT:
-			   front_addr = front->expr->object.addr;
+			   front_addr = (void*) front->expr->object.addr;
 			   break;
 		  case EXPR_EXTENT:
-			   front_addr = front->expr->extent.base;
+			   front_addr = (void*) front->expr->extent.base;
 			   break;
 		  default:
 			   assert(false);
 		  }
 		  switch (back->expr->type) {
 		  case EXPR_OBJECT:
-			   back_addr = back->expr->object.addr;
+			   back_addr = (void*) back->expr->object.addr;
 		  case EXPR_EXTENT:
-			   back_addr = back->expr->extent.base;
+			   back_addr = (void*) back->expr->extent.base;
 			   break;
 		  default:
 			   assert(false);
@@ -671,6 +746,9 @@ void union_halves(struct union_node *head, struct union_node **front, struct uni
 }
 
 struct union_node *union_flatten(struct union_node *first) {
+	 if (first == NULL) {
+		  return NULL;
+	 }
 	 struct union_node *tail = NULL;
 	 struct union_node *current = first;
 	 struct union_node *next = NULL;
@@ -745,6 +823,17 @@ struct union_node *union_objects_to_extents(struct union_node *head) {
 	 return head;
 }
 
+size_t union_size(struct union_node *head) {
+	 struct union_node *current = head;
+	 size_t size = 0;
+	 while (current != NULL) {
+		  size++;
+		  current = current->next;
+	 }
+
+	 return size;
+}
+
 struct union_node *sorted_union_merge_extents(struct union_node *head) {
 	 struct union_node *current = head;
 	 struct union_node *extents = NULL;
@@ -756,8 +845,13 @@ struct union_node *sorted_union_merge_extents(struct union_node *head) {
 		  length = current->expr->extent.length;
 		  next = current->next;
 		  while (next != NULL && next->expr->type == EXPR_EXTENT && next->expr->extent.base <= base + length) {
+			   //fprintf(stderr, "merging n=%p base=%p onto n=%p base=%p\n", next->expr->extent.length, next->expr->extent.base, length, base);
 			   length = (next->expr->extent.base + next->expr->extent.length) - base;
 			   next = next->next;
+		  }
+
+		  if (next != NULL) {
+			   //fprintf(stderr, "NOT merging n=%p base=%p onto n=%p base=%p\n", next->expr->extent.length, next->expr->extent.base, length, base);
 		  }
 
 		  extents = union_new_with(construct_extent(base, length), extents);
@@ -769,6 +863,7 @@ struct union_node *sorted_union_merge_extents(struct union_node *head) {
 
 	 
 char *print_expr_tree(struct expr *e) {
+	 if (e == NULL) return "(null)";
 	 char *body = NULL;
 	 switch (e->type) {
 	 case EXPR_BINARY: {
@@ -851,7 +946,7 @@ char *print_expr_tree(struct expr *e) {
 		  asprintf(&body, "%s", e->ident);
 	 } break;
 	 case EXPR_VALUE: {
-		  asprintf(&body, "%d", e->value);
+		  asprintf(&body, "%ld", e->value);
 	 } break;
 	 default:
 		  assert(false);
@@ -911,10 +1006,10 @@ static inline ANTLR3_BASE_TREE *get_child_(ANTLR3_BASE_TREE *n, int i)
 char *parse_ident(ANTLR3_BASE_TREE *ast) {
 	 assert(ast);
 	 assert(GET_TYPE(ast) == IDENTS);
-	 int n_children = GET_CHILD_COUNT(ast);
+	 size_t n_children = GET_CHILD_COUNT(ast);
 	 char *child_str[n_children];
-	 int total_strlen = n_children; // n-1 spaces and \0
-	 int i;
+	 size_t total_strlen = n_children; // n-1 spaces and \0
+	 size_t i;
 	 for (i = 0; i < n_children; i++) {
 		  child_str[i] = CCP(GET_TEXT(GET_CHILD(ast, i)));
 		  total_strlen += strlen(child_str[i]);
@@ -932,20 +1027,20 @@ char *parse_ident(ANTLR3_BASE_TREE *ast) {
 	 return ident;
 }
 
-int parse_int(ANTLR3_BASE_TREE *ast) {
+int64_t parse_int(ANTLR3_BASE_TREE *ast) {
 	 assert(ast);
 	 assert(GET_TYPE(ast) == INT);
 	 const char * s = CCP(GET_TEXT(ast));
-	 int result;
-	 int n = sscanf(s, "0x%x", &result);
+	 int64_t result = 0;
+	 int64_t n = sscanf(s, "0x%lx", &result);
 	 if (n == 1) {
 		  return result;
 	 } else {
-		  n = sscanf(s, "0%o", &result);
+		  n = sscanf(s, "0%lo", &result);
 		  if (n == 1) {
 			   return result;
 		  } else {
-			   n = sscanf(s, "%d", &result);
+			   n = sscanf(s, "%ld", &result);
 			   if (n == 1) {
 					return result;
 			   } else {
@@ -1112,7 +1207,7 @@ struct expr *parse_antlr_tree(void *ptr) {
 		  e->if_cond.otherwise = parse_antlr_tree(GET_CHILD(ast, 2));
 	 } break;
 	 case EXPR_SUBSCRIPT: {
-		  assert(GET_CHILD_COUNT(ast) == 3);
+		  assert(GET_CHILD_COUNT(ast) == 3 || GET_CHILD_COUNT(ast) == 4);
 		  switch (GET_TYPE(GET_CHILD(ast, 0))) {
 		  case FP_DEREFBYTES:
 			   e->subscript.method = SUBSCRIPT_DEREF_BYTES;
@@ -1127,19 +1222,10 @@ struct expr *parse_antlr_tree(void *ptr) {
 			   assert(false);
 		  }
 		  e->subscript.target = parse_antlr_tree(GET_CHILD(ast, 1));
-		  ANTLR3_BASE_TREE *subscr = GET_CHILD(ast, 2);
-		  switch (GET_TYPE(subscr)) {
-		  case SUBSCRIPT_SCALAR:
-			   assert(GET_CHILD_COUNT(subscr) == 1);
-			   e->subscript.from = parse_antlr_tree(GET_CHILD(subscr, 0));
-			   break;
-		  case SUBSCRIPT_RANGE:
-			   assert(GET_CHILD_COUNT(subscr) == 2);
-			   e->subscript.from = parse_antlr_tree(GET_CHILD(subscr, 0));
-			   e->subscript.to = parse_antlr_tree(GET_CHILD(subscr, 1));
-			   break;
-		  default:
-			   assert(false);
+
+		  e->subscript.from = parse_antlr_tree(GET_CHILD(ast, 2));
+		  if (GET_CHILD_COUNT(ast) > 3) {
+			   e->subscript.to = parse_antlr_tree(GET_CHILD(ast, 3));
 		  }
 	 } break;
 	 case EXPR_IDENT: {
@@ -1166,17 +1252,17 @@ struct expr *parse_antlr_tree(void *ptr) {
 
 void print_tree_types(void *ptr) {
 	 ANTLR3_BASE_TREE *ast = (ANTLR3_BASE_TREE*)ptr;
-	 printf("(%d[%s] ", GET_TYPE(ast), CCP(GET_TEXT(ast)));
+	 fprintf(stderr, "(%d[%s] ", GET_TYPE(ast), CCP(GET_TEXT(ast)));
 	 _Bool first = true;
 	 FOR_ALL_CHILDREN(ast) {
 		  if (first) {
 			   first = false;
 		  } else {
-			   printf(" ");
+			   fprintf(stderr, " ");
 		  }
 		  print_tree_types(n);
 	 }
-	 printf(")");
+	 fprintf(stderr, ")");
 }
 
 ////////////////////////////////////////////////////////////
@@ -1189,14 +1275,16 @@ struct footprint_node *footprint_node_new() {
 	 return result;
 }
 
-struct footprint_node *footprint_node_new_with(char *name, char *arg_names[static 6], struct union_node *exprs, struct footprint_node *next) {
+struct footprint_node *footprint_node_new_with(char *name, char *arg_names[static 6], enum footprint_direction direction, struct union_node *exprs, struct footprint_node *next) {
 	 struct footprint_node *result = footprint_node_new();
 	 result->name = name;
-	 for (int i = 0; i < 6; i++) {
+	 for (uint8_t i = 0; i < 6; i++) {
 		  result->arg_names[i] = arg_names[i];
 	 }
 	 result->exprs = exprs;
 	 result->next = next;
+	 result->direction = direction;
+	 return result;
 }
 
 void footprint_free(struct footprint_node *head) {
@@ -1230,14 +1318,16 @@ struct union_node *eval_footprint_with(struct footprint_node *footprint, struct 
 	 } else {
 		  result = evaled->unioned;
 	 }
-	 
-	 result = union_objects_to_extents(union_flatten(result));
+
+	 result = union_flatten(result);
+	 result = _union_remove_type(result, EXPR_VOID);
+	 result = union_objects_to_extents(result);
 	 union_sort(&result);
 	 result = sorted_union_merge_extents(result);
 	 return result;
 }
 
-struct footprint_node *get_footprint_for(struct footprint_node *footprints, char *name) {
+struct footprint_node *get_footprints_for(struct footprint_node *footprints, const char *name) {
 	 struct footprint_node *current = footprints;
 	 while (current != NULL) {
 		  if (strcmp(name, current->name) == 0) {
@@ -1253,6 +1343,10 @@ struct footprint_node *get_footprint_for(struct footprint_node *footprints, char
 struct footprint_node *parse_footprints_from_file(char *filename) {
 	 pANTLR3_INPUT_STREAM in_fileobj = antlr3FileStreamNew((uint8_t *) filename,
 														   ANTLR3_ENC_UTF8);
+	 if (!in_fileobj) {
+		  perror("Could not open antlr3FileStream");
+		  return NULL;
+	 }
 	 dwarfidlSimpleCLexer *lexer = dwarfidlSimpleCLexerNew(in_fileobj);
 	 ANTLR3_COMMON_TOKEN_STREAM *tokenStream = antlr3CommonTokenStreamSourceNew(
 		  ANTLR3_SIZE_HINT, TOKENSOURCE(lexer));
@@ -1263,7 +1357,9 @@ struct footprint_node *parse_footprints_from_file(char *filename) {
 
 	 assert(GET_TYPE(ast) == DIES);
 
-	 for (int i = 0; i < GET_CHILD_COUNT(ast); i++) {
+	 fprintf(stderr, "%s\n", TO_STRING_TREE(ast)->chars);
+
+	 for (size_t i = 0; i < GET_CHILD_COUNT(ast); i++) {
 		  ANTLR3_BASE_TREE *die = GET_CHILD(ast, i);
 		  if (GET_TYPE(die) == DIE &&
 			  GET_CHILD_COUNT(die) > 0 &&
@@ -1284,17 +1380,17 @@ struct footprint_node *new_from_subprogram_DIE(void *ptr, struct footprint_node 
 	 ANTLR3_BASE_TREE *tag_node = GET_CHILD(subprogram, 0);
 	 assert(GET_TYPE(tag_node) == KEYWORD_TAG);
 	 assert(strcmp(CCP(GET_TEXT(tag_node)), "subprogram") == 0);
-	 int n_arguments = 0;
+	 size_t n_arguments = 0;
 
 	 struct footprint_node *node = footprint_node_new();
 	 node->next = next;
 
 	 struct union_node *exprs = NULL;
 	 
-	 for (int i = 0; i < GET_CHILD_COUNT(subprogram); i++) {
+	 for (size_t i = 0; i < GET_CHILD_COUNT(subprogram); i++) {
 		  ANTLR3_BASE_TREE *child = GET_CHILD(subprogram, i);
 		  if (GET_TYPE(child) == ATTRS) {
-			   for (int j = 0; j < GET_CHILD_COUNT(child); j++) {
+			   for (size_t j = 0; j < GET_CHILD_COUNT(child); j++) {
 					ANTLR3_BASE_TREE *attr = GET_CHILD(child, j);
 					if (GET_TYPE(attr) == ATTR &&
 						GET_CHILD_COUNT(attr) == 2) {
@@ -1308,11 +1404,23 @@ struct footprint_node *new_from_subprogram_DIE(void *ptr, struct footprint_node 
 						 } else if (GET_TYPE(key) == FOOTPRINT) {
 							  
 							  assert(GET_TYPE(value) == FP_CLAUSES);
-							  for (int k = 0; k < GET_CHILD_COUNT(value); k++) {
+							  for (size_t k = 0; k < GET_CHILD_COUNT(value); k++) {
 
 								   ANTLR3_BASE_TREE *clause = GET_CHILD(value, k);
 								   assert(GET_TYPE(clause) == FP_CLAUSE);
-								   // FIXME TODO: direction!!
+								   switch (GET_TYPE(GET_CHILD(clause, 0))) {
+								   case KEYWORD_R:
+										node->direction = FOOTPRINT_READWRITE; // TODO FIXME HACK
+										break;
+								   case KEYWORD_W:
+										node->direction = FOOTPRINT_READWRITE; // TODO FIXME HACK
+										break;
+								   case KEYWORD_RW:
+										node->direction = FOOTPRINT_READWRITE;
+										break;
+								   default:
+										assert(false);
+								   }
 								   exprs = union_new_with(parse_antlr_tree(GET_CHILD(clause, 1)), exprs);
 							  }
 							  
@@ -1325,7 +1433,7 @@ struct footprint_node *new_from_subprogram_DIE(void *ptr, struct footprint_node 
 					}
 			   }
 		  } else if (GET_TYPE(child) == CHILDREN) {
-			   for (int j = 0; j < GET_CHILD_COUNT(child); j++) {
+			   for (size_t j = 0; j < GET_CHILD_COUNT(child); j++) {
 					ANTLR3_BASE_TREE *subdie = GET_CHILD(child, j);
 					if (GET_TYPE(subdie) == DIE &&
 						GET_CHILD_COUNT(subdie) > 0 &&
@@ -1334,10 +1442,10 @@ struct footprint_node *new_from_subprogram_DIE(void *ptr, struct footprint_node 
 						 // an argument!
 						 _Bool have_name = false;
 
-						 for (int k = 0; k < GET_CHILD_COUNT(subdie); k++) {
+						 for (size_t k = 0; k < GET_CHILD_COUNT(subdie); k++) {
 							  ANTLR3_BASE_TREE *sub_child = GET_CHILD(subdie, k);
 							  if (GET_TYPE(sub_child) == ATTRS) {
-								   for (int l = 0; l < GET_CHILD_COUNT(sub_child); l++) {
+								   for (size_t l = 0; l < GET_CHILD_COUNT(sub_child); l++) {
 										ANTLR3_BASE_TREE *sub_attr = GET_CHILD(sub_child, l);
 										if (GET_TYPE(sub_attr) == ATTR &&
 											GET_CHILD_COUNT(sub_attr) == 2) {
@@ -1380,14 +1488,17 @@ struct footprint_node *new_from_subprogram_DIE(void *ptr, struct footprint_node 
 struct union_node *eval_footprint_for(struct footprint_node *footprints, char *name, struct uniqtype *func, long int arg_values[6]) {
 	 struct footprint_node *fp = get_footprint_for(footprints, name);
 	 if (fp != NULL) {
-		  return eval_footprint_with(fp, func, arg_values);
+		  fprintf(stderr, "Evaling footprint for %s(0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx)\n", name, arg_values[0], arg_values[1], arg_values[2], arg_values[3], arg_values[4], arg_values[5]);
+		  struct union_node *result = eval_footprint_with(fp, func, arg_values);
+		  fprintf(stderr, "Result:\n%s\n", print_footprint_extents(fp, result));
+		  return result;
 	 } else {
 		  return NULL;
 	 }
 }
 
-char *print_footprint_extents(struct union_node *extents) {
-	 int n_nodes = 0;
+char *print_footprint_extents(struct footprint_node *fp, struct union_node *extents) {
+	 size_t n_nodes = 0;
 	 struct union_node *current = extents;
 	 while (current != NULL) {
 		  n_nodes++;
@@ -1395,15 +1506,15 @@ char *print_footprint_extents(struct union_node *extents) {
 	 }
 	 
 	 char *union_str[n_nodes];
-	 int total_strlen = n_nodes; // n-1 newlines and \0
+	 size_t total_strlen = n_nodes; // n-1 newlines and \0
 
-	 char *direction = "(unknown direction)";
+	 const char *direction = footprint_direction_str[fp->direction];
 	 
 	 current = extents;
-	 int i = 0;
+	 size_t i = 0;
 	 while (current != NULL) {
 		  assert(current->expr->type == EXPR_EXTENT);
-		  asprintf(&(union_str[i]), "Allowed footprint: %s n=0x%lx base=0x%p", direction, current->expr->extent.length, current->expr->extent.base);
+		  asprintf(&(union_str[i]), "Allowed footprint: %s n=0x%lx base=0x%lx", direction, current->expr->extent.length, current->expr->extent.base);
 		  assert(union_str[i]);
 		  total_strlen += strlen(union_str[i]);
 		  i++;
