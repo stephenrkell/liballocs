@@ -15,23 +15,22 @@ typedef ANTLR3_COMMON_TOKEN_STREAM CommonTokenStream;
 typedef ANTLR3_BASE_TREE Tree;
 typedef ANTLR3_COMMON_TREE CommonTree;
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
 	assert(argc == 2);
 	const char *filename = argv[1];
-
+	
 	pANTLR3_INPUT_STREAM in_fileobj = antlr3FileStreamNew((uint8_t *) filename,
 	                                                      ANTLR3_ENC_UTF8);
 	dwarfidlSimpleCLexer *lexer = dwarfidlSimpleCLexerNew(in_fileobj);
-	CommonTokenStream *tokenStream = antlr3CommonTokenStreamSourceNew(
-		ANTLR3_SIZE_HINT, TOKENSOURCE(lexer));
-	dwarfidlSimpleCParser *parser = dwarfidlSimpleCParserNew(tokenStream);
-
+	CommonTokenStream *tokenStream =
+		antlr3CommonTokenStreamSourceNew(ANTLR3_SIZE_HINT, TOKENSOURCE(lexer));
+	dwarfidlSimpleCParser *parser = dwarfidlSimpleCParserNew(tokenStream); 
+	
 	dwarfidlSimpleCParser_expression_return ret = parser->expression(parser);
 	Tree *tree = ret.tree;
-
+	
 	pANTLR3_STRING s = tree->toStringTree(tree);
-
+	
 	int test_int = 42;
 	int *test_int_ptr = &test_int;
 	struct object test_int_object = {&__uniqtype__int$32, &test_int};
@@ -60,3 +59,4 @@ int main(int argc, char **argv)
 
 	return 0;
 }
+

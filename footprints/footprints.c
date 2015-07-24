@@ -71,6 +71,54 @@ const char *footprint_direction_str[] = {
 // evaluator
 ////////////////////////////////////////////////////////////
 
+// returns true if succeeded, false if added to needed_list
+_Bool object_to_value(struct evaluator_state *state, struct uniqtype *type, void *addr, int64_t *out_result) {
+	
+	assert(UNIQTYPE_HAS_KNOWN_SIZE(type));
+	// traverse the have_extents list looking for what we need
+	struct data_extent_node current = state->have_extents;
+	while (current == NULL) {
+		if (addr >= current->base
+		    && (addr + type->pos_maxoff) <= (current->base + current->length)) {
+			// this extent contains it
+			int64_t result;
+			void *bytes = current->base + (addr - current->base);
+
+			if (type == &__uniqtype_int$16) {
+				result = (*(int16_t*)bytes);
+			} else if (type == &__uniqtype__int$32) {
+				result = (int64_t)(*(int32_t*)bytes);
+			} else if (type == &__uniqtype__int$64) {
+				result = (int64_t)(*(int64_t*)bytes);
+			} else if (type == &__uniqtype__uint$16) {
+				result = (int64_t)(*(uint16_t*)bytes);
+			} else if (type == &__uniqtype__uint$32) {
+				result = (int64_t)(*(uint32_t*)bytes);
+			} else if (type == &__uniqtype__uint$64) {
+				result = (int64_t)(*(uint64_t*)bytes);
+			} else if (type == &__uniqtype__signed_char$8) {
+				result = (int64_t)(*(int8_t*)bytes);
+			} else if (type == &__uniqtype__unsigned_char$8) {
+				result = (int64_t)(*(uint8_t*)bytes);
+			} else if (UNIQTYPE_IS_POINTER_TYPE(type)) {
+				// aaaaaaaa scary
+				result = (int64_t)(*(void**)bytes);
+			} else {
+				fprintf(stderr, "\nBUG. don't know how to convert a '%s' to value! this should never happen.\n", type->name);
+				assert(false);
+			}
+		
+			*out_result = result;
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	// not found
+	return false;
+}
+
 struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 	assert(e);
 	fprintf(stderr, "== eval_footprint_expr called with expr = %s (type = %s), env = ", print_expr_tree(e), expr_types_str[e->type]);
@@ -111,30 +159,6 @@ struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 		return eval_union(e, env);
 	} break;
 	default:
-		assert(false);
-	}
-}
-
-int object_to_value(struct uniqtype *type, void *addr) {
-/*	 if (type == &__uniqtype_int$16) {
-	 return *(int16_t*)addr;
-	 } else*/
-
-	if (type == &__uniqtype__int$32) {
-		return *(int32_t*)addr;
-	} else if (type == &__uniqtype__int$64) {
-		return *(int64_t*)addr;
-/*} else if (type == &__uniqtype__uint$16) {
-  return *(uint16_t*)addr;*/
-	} else if (type == &__uniqtype__uint$32) {
-		return *(uint32_t*)addr;
-	} else if (type == &__uniqtype__uint$64) {
-		return *(uint64_t*)addr;
-	} else if (type == &__uniqtype__signed_char$8) {
-		return *(int8_t*)addr;
-	} else if (type == &__uniqtype__unsigned_char$8) {
-		return *(uint8_t*)addr;
-	} else {
 		assert(false);
 	}
 }
@@ -811,34 +835,6 @@ void union_sort(struct union_node **head) {
 	}
 }
 
-/* struct union_node *union_objects_to_bytes(struct union_node *head) { */
-/* 	 struct union_node *tail = NULL; */
-/* 	 struct union_node *current = head; */
-/* 	 struct union_node *next = NULL; */
-/* 	 while (current != NULL) { */
-/* 		  next = current->next; */
-/* 		  if (current->expr->type == EXPR_EXTENT) { */
-/* 			   current->next = tail; */
-/* 			   tail = current; */
-/* 			   current = next; */
-/* 		  } else { */
-/* 			   assert(current->expr->type == EXPR_OBJECT); */
-/* 			   assert(UNIQTYPE_HAS_KNOWN_LENGTH(current->expr->object.type)); */
-/* 			   if (current->expr->object.type->pos_maxoff == 1) { */
-/* 					current->next = tail; */
-/* 					tail = current; */
-/* 			   } else { */
-/* 					/\* struct union_node *bytes = union_new_with(); bytes_union_from_object(current->expr->object); *\/ */
-/* 					/\* tail = union_union(bytes, tail); *\/ */
-/* 					tail = union_new_with(extent_from_object(current->expr->object), tail); */
-/* 			   } */
-/* 		  } */
-
-/* 		  current = next; */
-/* 	 } */
-/* 	 return tail; */
-/* } */
-
 struct union_node *union_objects_to_extents(struct union_node *head) {
 	struct union_node *current = head;
 	unsigned long base, length;
@@ -882,13 +878,8 @@ struct union_node *sorted_union_merge_extents(struct union_node *head) {
 		length = current->expr->extent.length;
 		next = current->next;
 		while (next != NULL && next->expr->type == EXPR_EXTENT && next->expr->extent.base <= base + length) {
-			//fprintf(stderr, "merging n=%p base=%p onto n=%p base=%p\n", next->expr->extent.length, next->expr->extent.base, length, base);
 			length = (next->expr->extent.base + next->expr->extent.length) - base;
 			next = next->next;
-		}
-
-		if (next != NULL) {
-			//fprintf(stderr, "NOT merging n=%p base=%p onto n=%p base=%p\n", next->expr->extent.length, next->expr->extent.base, length, base);
 		}
 
 		extents = union_new_with(construct_extent(base, length), extents);
@@ -1703,3 +1694,4 @@ char *print_footprint_extents(struct footprint_node *fp, struct union_node *exte
 
 	return union_body;
 }
+

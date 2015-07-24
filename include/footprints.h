@@ -116,6 +116,22 @@ struct extent {
 	unsigned long length;
 };
 
+struct extent_node {
+	struct extent *extent;
+	struct extent_node *next;
+};
+
+struct data_extent {
+	unsigned long base;
+	unsigned long length;
+	void *data;
+};
+
+struct data_extent_node {
+	struct data_extent extent;
+	struct data_extent_node *next;
+};
+
 struct union_node {
 	struct expr *expr;
 	struct union_node *next;
@@ -141,6 +157,7 @@ struct function {
 
 struct expr {
 	enum expr_types type;
+	enum footprint_direction direction;
 	union {
 		struct binary_op binary_op;
 		struct unary_op unary_op;
@@ -161,6 +178,15 @@ enum footprint_direction {
 	FOOTPRINT_WRITE,
 	FOOTPRINT_READWRITE
 };
+
+struct evaluator_state {
+	struct expr *read_expr;
+	struct expr *write_expr;
+	struct env_node *toplevel_env;
+	struct extent_node *need_extents;
+	struct data_extent_node *have_extents;
+};
+
 
 struct footprint_node {
 	char *name;
@@ -189,11 +215,14 @@ struct footprint_node {
 ////////////////////////////////////////////////////////////
 
 struct expr *eval_footprint_expr(struct expr *e, struct env_node *env);
+
 int64_t eval_to_value(struct expr *e, struct env_node *env);
 char *eval_to_ident(struct expr *e, struct env_node *env);
 struct object eval_to_object(struct expr *e, struct env_node *env);
+
 struct expr *construct_value(int64_t value);
 struct expr *construct_object(struct object value);
+
 struct expr *eval_binary_op(struct expr* e, struct env_node *env);
 char *new_ident_not_in(struct env_node *env, char *suffix);
 char *_find_ident_not_in(struct env_node *env, char *suffix, size_t length);
@@ -262,6 +291,13 @@ char *print_footprint_extents(struct footprint_node *fp, struct union_node *exte
 struct footprint_node *new_from_subprogram_DIE(void *subprogram, struct footprint_node *next);
 
 #define footprint_node_free(node) (free(node), node = NULL)
+
+struct string_node *string_node_new();
+struct string_node *string_node_new_with(char *value, struct string_node *next);
+
+struct data_extent_node *data_extent_node_new();
+struct data_extent_node *data_extent_node_new_with(size_t base, size_t length, void *data, );
+
 
 #endif
 
