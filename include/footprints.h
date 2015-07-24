@@ -58,6 +58,7 @@ enum subscript_methods {
 
 
 enum expr_types {
+	 EXPR_VOID,
 	 EXPR_BINARY,
 	 EXPR_UNARY,
 	 EXPR_FOR,

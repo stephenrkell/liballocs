@@ -81,6 +81,12 @@ struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 	 }
 	 fprintf(stderr, "\n");
 	 switch (e->type) {
+	 case EXPR_VOID:
+	 case EXPR_VALUE:
+	 case EXPR_EXTENT:
+	 case EXPR_OBJECT:
+		  return e;
+		  break;
 	 case EXPR_FOR: {
 		  return eval_for_loop(e, env);
 	 } break;
@@ -96,14 +102,8 @@ struct expr *eval_footprint_expr(struct expr* e, struct env_node *env) {
 	 case EXPR_IDENT: {
 		  return eval_ident(e, env);
 	 } break;
-	 case EXPR_VALUE: {
-		  return e;
-	 } break;
 	 case EXPR_SUBSCRIPT: {
 		  return eval_subscript(e, env);
-	 } break;
-	 case EXPR_EXTENT: {
-		  return e;
 	 } break;
 	 case EXPR_UNION: {
 		  return eval_union(e, env);
@@ -452,6 +452,12 @@ struct union_node *construct_bytes_union(struct object obj, size_t base, size_t 
 	 return tail;
 }
 
+struct expr *construct_void() {
+	 struct expr *result = expr_new();
+	 result->type = EXPR_VOID;
+	 return result;
+}
+
 // TODO: bounds checking?
 struct union_node *construct_size_union(struct object obj, size_t base, size_t length) {
 	 assert(UNIQTYPE_HAS_KNOWN_LENGTH(obj.type));
@@ -509,6 +515,9 @@ struct expr *eval_subscript(struct expr *e, struct env_node *env) {
 		  struct object derefed;
 		  if (e->subscript.to) {
 			   to = eval_to_value(e->subscript.to, env);
+			   if (to == from) {
+					return construct_void();
+			   }
 			   assert(to > from);
 			   length = to - from;
 		  }
@@ -840,6 +849,10 @@ struct union_node *sorted_union_merge_extents(struct union_node *head) {
 	 struct union_node *next = NULL;
 	 unsigned long base, length;
 	 while (current != NULL) {
+		  if (current->expr->type == EXPR_VOID) {
+			   current = current->next;
+			   continue;
+		  }
 		  assert(current->expr->type == EXPR_EXTENT);
 		  base = current->expr->extent.base;
 		  length = current->expr->extent.length;
@@ -866,6 +879,9 @@ char *print_expr_tree(struct expr *e) {
 	 if (e == NULL) return "(null)";
 	 char *body = NULL;
 	 switch (e->type) {
+	 case EXPR_VOID: {
+		  asprintf(&body, "(void)");
+	 } break;
 	 case EXPR_BINARY: {
 		  asprintf(&body, "(%s %s %s)", print_expr_tree(e->binary_op.left), binary_ops_str[e->binary_op.op], print_expr_tree(e->binary_op.right));
 	 } break;
@@ -1101,11 +1117,17 @@ struct expr *parse_antlr_tree(void *ptr) {
 	 case FP_UNION:
 		  e->type = EXPR_UNION;
 		  break;
+	 case FP_VOID:
+		  e->type = EXPR_VOID;
+		  break;
 	 default:
 		  assert(false);
 	 }
 
 	 switch (e->type) {
+	 case EXPR_VOID: {
+		  // nothing further to do
+	 } break;
 	 case EXPR_BINARY: {
 		  assert(GET_CHILD_COUNT(ast) == 2);
 		  switch (GET_TYPE(ast)) {
@@ -1297,15 +1319,35 @@ void footprint_free(struct footprint_node *head) {
 	 }
 }
 
+struct union_node *_union_remove_type(struct union_node *head, enum expr_types type) {
+	 if (head == NULL) {
+		  return NULL;
+	 } else {
+		  
+		  struct union_node *current = head;
+		  struct union_node *tail = NULL;
+		  while (current != NULL) {
+			   if (current->expr->type != type) {
+					tail = union_new_with(current->expr, tail);
+			   }
+			   
+			   current = current->next;
+		  }
+		 
+		  return tail;
+	 }
+}
+
 struct union_node *eval_footprint_with(struct footprint_node *footprint, struct uniqtype *func, long int arg_values[6]) {
 	 struct env_node *env = NULL;
-	 for (int i = 0; i < 6; i++) {
+	 for (uint8_t i = 0; i < 6; i++) {
 		  if (footprint->arg_names[i] == NULL) {
 			   break;
 		  } else {
 			   struct object o;
 			   o.type = func->contained[i+1].ptr;
-			   o.addr = &(arg_values[i]);
+			   o.addr = arg_values + i;
+			   fprintf(stderr, "created arg %s with type %s and typed value 0x%lx from untyped 0x%lx\n", footprint->arg_names[i], o.type->name, object_to_value(o.type, o.addr), arg_values[i]);
 			   env = env_new_with(footprint->arg_names[i], o, env);
 		  }
 	 }
