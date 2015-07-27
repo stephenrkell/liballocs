@@ -1,3 +1,6 @@
+/footprints/ocaml/_build/
+/footprints/ocaml/ocaml_test_syscalls.native
+/footprints/dynamic-list
 *.allocstubs.c
 *.allocstubs.s
 *.cil.c
