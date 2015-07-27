@@ -16,7 +16,7 @@ _Bool eval_to_value(struct evaluator_state *state, struct expr *e, struct env_no
 		return false;
 	} else {
 		if (result->type == EXPR_OBJECT) {
-			return object_to_value(state, result->object.type, result->object.addr, out_result);
+			return object_to_value(state, result->object, out_result);
 		} else if (result->type == EXPR_VALUE) {
 			*out_result = result->value;
 			return true;

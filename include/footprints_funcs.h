@@ -75,7 +75,7 @@ struct data_extent_node *data_extent_node_new_with(size_t base, size_t length, v
 struct extent_node *extent_node_new();
 struct extent_node *extent_node_new_with(size_t base, size_t length, struct extent_node *next);
 
-_Bool object_to_value(struct evaluator_state *state, struct uniqtype *type, void *addr, int64_t *out_result);
+_Bool object_to_value(struct evaluator_state *state, struct object object, int64_t *out_result);
 _Bool deref_object(struct evaluator_state *state, struct object pointer, struct object *out_object);
 
 ////////////////////////////////////////////////////////////

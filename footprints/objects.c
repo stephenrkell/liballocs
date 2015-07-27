@@ -10,59 +10,72 @@
 #include "uniqtype.h"
 #include "footprints.h"
 
+int64_t transmogrify_pointer(struct uniqtype *type, void *bytes) {
+	// signed int16 seems to be missing from uniqtypes?
+	//if (type == &__uniqtype_int$16) {
+	//return (*(int16_t*)bytes);
+	//	} else
+	if (type == &__uniqtype__int$32) {
+		return (int64_t)(*(int32_t*)bytes);
+	} else if (type == &__uniqtype__int$64) {
+		return (int64_t)(*(int64_t*)bytes);
+	} else if (type == &__uniqtype__uint$16) {
+		return (int64_t)(*(uint16_t*)bytes);
+	} else if (type == &__uniqtype__uint$32) {
+		return (int64_t)(*(uint32_t*)bytes);
+	} else if (type == &__uniqtype__uint$64) {
+		return (int64_t)(*(uint64_t*)bytes);
+	} else if (type == &__uniqtype__signed_char$8) {
+		return (int64_t)(*(int8_t*)bytes);
+	} else if (type == &__uniqtype__unsigned_char$8) {
+		return (int64_t)(*(uint8_t*)bytes);
+	} else if (UNIQTYPE_IS_POINTER_TYPE(type)) {
+		// aaaaaaaa scary
+		return (int64_t)(*(void**)bytes);
+	} else {
+		fprintf(stderr, "\ndon't know how to convert a '%s' to value!\n", type->name);
+		assert(false);
+		return 0; // I'm sure assert() was noreturn last time I checked
+	}
+}
+
 // returns true if succeeded, false if added to needed_list
-_Bool object_to_value(struct evaluator_state *state, struct uniqtype *type, void *addr, int64_t *out_result) {
+_Bool object_to_value(struct evaluator_state *state, struct object object, int64_t *out_result) {
+	struct uniqtype *type = object.type;
+	void *addr = object.addr;
 	assert(UNIQTYPE_HAS_KNOWN_LENGTH(type));
 	// traverse the have_extents list looking for what we need
 	struct data_extent_node *current = state->have_memory_extents;
 
-	fprintf(stderr, "trying to object_to_value a '%s' at 0x%16lx\n", type->name, (size_t)addr);
-	fprintf(stderr, "looking in cache for memory extent base = 0x%16lx, length = 0x%8x\n", (size_t)addr, type->pos_maxoff);
-	while (current != NULL) {
-		fprintf(stderr, "considering base = 0x%16lx, length = 0x%16lx\n", current->extent.base, current->extent.length);
-		if ((size_t)addr >= current->extent.base
-		    && ((size_t)addr + type->pos_maxoff) <= (current->extent.base + current->extent.length)) {
-			// this extent contains it
-			fprintf(stderr, "found it in base = 0x%16lx, length = 0x%16lx\n", current->extent.base, current->extent.length);
-			int64_t result;
-			void *bytes = (void*)(current->extent.base + (((size_t)addr) - current->extent.base));
-			// signed int16 seems to be missing from uniqtypes?
-			//if (type == &__uniqtype_int$16) {
-			//result = (*(int16_t*)bytes);
-			//	} else 
-			if (type == &__uniqtype__int$32) {
-				result = (int64_t)(*(int32_t*)bytes);
-			} else if (type == &__uniqtype__int$64) {
-				result = (int64_t)(*(int64_t*)bytes);
-			} else if (type == &__uniqtype__uint$16) {
-				result = (int64_t)(*(uint16_t*)bytes);
-			} else if (type == &__uniqtype__uint$32) {
-				result = (int64_t)(*(uint32_t*)bytes);
-			} else if (type == &__uniqtype__uint$64) {
-				result = (int64_t)(*(uint64_t*)bytes);
-			} else if (type == &__uniqtype__signed_char$8) {
-				result = (int64_t)(*(int8_t*)bytes);
-			} else if (type == &__uniqtype__unsigned_char$8) {
-				result = (int64_t)(*(uint8_t*)bytes);
-			} else if (UNIQTYPE_IS_POINTER_TYPE(type)) {
-				// aaaaaaaa scary
-				result = (int64_t)(*(void**)bytes);
-			} else {
-				fprintf(stderr, "\ndon't know how to convert a '%s' to value!\n", type->name);
-				assert(false);
-			}
+	fprintf(stderr, "trying to object_to_value a '%s' at 0x%16lx (direct: %s)\n",
+	        type->name, (size_t)addr, (object.direct ? "yes" : "no"));
 
-			*out_result = result;
-			return true;
+	if (object.direct) {
+		fprintf(stderr, "it's direct, just dereferencing it\n");
+		*out_result = transmogrify_pointer(type, addr);
+		return true;
+	} else {
+		fprintf(stderr, "looking in cache for memory extent base = 0x%16lx, length = 0x%8x\n", (size_t)addr, type->pos_maxoff);
+		while (current != NULL) {
+			fprintf(stderr, "considering base = 0x%16lx, length = 0x%16lx\n", current->extent.base, current->extent.length);
+			if ((size_t)addr >= current->extent.base
+			    && ((size_t)addr + type->pos_maxoff) <= (current->extent.base + current->extent.length)) {
+				// this extent contains it
+				fprintf(stderr, "found it in base = 0x%16lx, length = 0x%16lx\n", current->extent.base, current->extent.length);
+				int64_t result;
+				void *bytes = (void*)(current->extent.data + (((size_t)addr) - current->extent.base));
+				*out_result = transmogrify_pointer(type, bytes);
+				return true;
+			}
+			
+			current = current->next;
 		}
 
-		current = current->next;
+		// not found
+		fprintf(stderr, "DIDN'T find it, adding to need_memory_extents and returning unevaluated\n");
+		state->need_memory_extents = extent_node_new_with((size_t) addr, type->pos_maxoff, state->need_memory_extents);
+		return false;
 	}
-
-	// not found
-	fprintf(stderr, "DIDN'T find it, adding to need_memory_extents and returning unevaluated\n");
-	state->need_memory_extents = extent_node_new_with((size_t) addr, type->pos_maxoff, state->need_memory_extents);
-	return false;
 }
 
 _Bool eval_to_object(struct evaluator_state *state, struct expr *e, struct env_node *env, struct expr **out_expr, struct object *out_object) {
@@ -83,8 +96,9 @@ _Bool deref_object(struct evaluator_state *state, struct object ptr, struct obje
 	struct object obj;
 	obj.type = UNIQTYPE_POINTEE_TYPE(ptr.type);
 	int64_t ptr_val;
-	if (object_to_value(state, ptr.type, ptr.addr, &ptr_val)) {
+	if (object_to_value(state, ptr, &ptr_val)) {
 		obj.addr = (void*) ptr_val;
+		obj.direct = false;
 		*out_object = obj;
 		return true;
 	} else {
@@ -94,6 +108,7 @@ _Bool deref_object(struct evaluator_state *state, struct object ptr, struct obje
 
 struct expr *extent_from_object(struct object obj) {
 	assert(UNIQTYPE_HAS_KNOWN_LENGTH(obj.type));
+	assert(!obj.direct);
 	size_t size = obj.type->pos_maxoff;
 	return construct_extent((unsigned long) obj.addr, size);
 }

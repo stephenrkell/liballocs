@@ -26,6 +26,7 @@ struct union_node *construct_bytes_union(struct object obj, size_t base, size_t 
 		new_byte->type = EXPR_OBJECT;
 		new_byte->object.type = byte_type;
 		new_byte->object.addr = (void*)ptr;
+		new_byte->object.direct = false;
 		struct union_node *head = union_new_with(new_byte, tail);
 		tail = head;
 	}
@@ -43,6 +44,7 @@ struct union_node *construct_size_union(struct object obj, size_t base, size_t l
 		new_obj->type = EXPR_OBJECT;
 		new_obj->object.type = obj.type;
 		new_obj->object.addr = (void*)ptr;
+		new_obj->object.direct = false;
 		struct union_node *head = union_new_with(new_obj, tail);
 		tail = head;
 	}
@@ -122,6 +124,7 @@ struct expr *eval_subscript(struct evaluator_state *state, struct expr *e, struc
 				struct object new_obj;
 				new_obj.type = byte_type;
 				new_obj.addr = (void*)((unsigned long) target.addr + from);
+				new_obj.direct = false;
 				return construct_object(new_obj);
 			}
 		} break;
@@ -138,6 +141,7 @@ struct expr *eval_subscript(struct evaluator_state *state, struct expr *e, struc
 				struct object new_obj;
 				new_obj.type = byte_type;
 				new_obj.addr = (void*)((unsigned long) derefed.addr + from);
+				new_obj.direct = false;
 				return construct_object(new_obj);
 			}
 		} break;

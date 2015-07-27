@@ -33,8 +33,8 @@ int main(int argc, char **argv) {
 	
 	int test_int = 42;
 	int *test_int_ptr = &test_int;
-	struct object test_int_object = {&__uniqtype__int$32, &test_int};
-	struct object test_int_ptr_object = {&__uniqtype____PTR_int$32, &test_int_ptr};
+	struct object test_int_object = {&__uniqtype__int$32, &test_int, false};
+	struct object test_int_ptr_object = {&__uniqtype____PTR_int$32, &test_int_ptr, false};
 	struct env_node *env = env_new_with("test_int_ptr",
 	                                    construct_object(test_int_ptr_object),
 	                                    env_new_with("test_int",

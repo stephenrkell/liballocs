@@ -42,6 +42,7 @@ struct subscript {
 struct object {
 	struct uniqtype *type;
 	void *addr;
+	_Bool direct;
 };
 
 struct extent {

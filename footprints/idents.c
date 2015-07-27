@@ -53,6 +53,7 @@ struct expr *lookup_in_object(struct object *context, char *ident) {
 		if (strcmp(ident, context->type->subobj_names[i]) == 0) {
 			obj.type = context->type->contained[i].ptr;
 			obj.addr = (void*) context->addr + context->type->contained[i].offset;
+			obj.direct = false;
 			return construct_object(obj);
 		}
 	}
@@ -65,8 +66,12 @@ struct expr *lookup_in_env(struct env_node *env, char *ident) {
 	struct env_node *current = env;
 	while (current != NULL) {
 		if (strcmp(ident, current->name) == 0) {
-			fprintf(stderr, "looked up %s and found an %s\n", ident, expr_types_str[current->expr->type]);
-//			   fprintf(stderr, "looked up %s and found %p\n", ident, (void*) object_to_value(current->value.type, current->value.addr));
+			fprintf(stderr, "looked up %s and found an %s", ident, expr_types_str[current->expr->type]);
+			if (current->expr->type == EXPR_VALUE) {
+				fprintf(stderr, " with value %ld", current->expr->value);
+			}
+			fprintf(stderr, "\n");
+//			   fprintf(stderr, "looked up %s and found %p\n", ident, (void*) object_to_value(state, current->value));
 			return current->expr;
 		}
 		current = current->next;

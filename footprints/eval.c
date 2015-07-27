@@ -69,7 +69,8 @@ struct evaluator_state *eval_footprint_with(struct evaluator_state *state, struc
 			struct object o;
 			o.type = func->contained[i+1].ptr;
 			o.addr = arg_values + i;
-			//fprintf(stderr, "created arg %s with type %s and typed value 0x%lx from untyped 0x%lx\n", footprint->arg_names[i], o.type->name, object_to_value(o.type, o.addr), arg_values[i]);
+			o.direct = true;
+			//fprintf(stderr, "created arg %s with type %s and typed value 0x%lx from untyped 0x%lx\n", footprint->arg_names[i], o.type->name, object_to_value(state, o), arg_values[i]);
 			env = env_new_with(footprint->arg_names[i], construct_object(o), env);
 		}
 	}
