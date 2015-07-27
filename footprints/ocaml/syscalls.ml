@@ -3,6 +3,8 @@ open Ctypes
 open PosixTypes
 open Foreign
 
+(***** Types *****)
+
 type c_footprint_node
 let c_footprint_node : c_footprint_node structure typ = structure "footprint_node"
 
@@ -57,11 +59,24 @@ let c_syscall_state_write_extents = field c_syscall_state "write_extents" (ptr_o
 let c_syscall_state_finished = field c_syscall_state "finished" bool
 let () = seal c_syscall_state
 
-let c_load_syscall_footprints_from_file = foreign "load_syscall_footprints_from_file" (string @-> ptr c_syscall_env @-> returning bool)
-let c_start_syscall = foreign "start_syscall" (ptr c_syscall_env @-> nativeint @-> ptr nativeint @-> returning (ptr c_syscall_state))
-let c_continue_syscall = foreign "continue_syscall" (ptr c_syscall_state @-> ptr c_data_extent_node @-> returning (ptr c_syscall_state))
+let c_load_syscall_footprints_from_file = foreign "load_syscall_footprints_from_file" (string
+                                                                                       @-> ptr c_syscall_env
+                                                                                       @-> returning bool)
 
-let c_data_extent_node_new_with = foreign "data_extent_node_new_with" (nativeint @-> nativeint @-> ptr char @-> ptr c_data_extent_node @-> returning (ptr c_data_extent_node))
+let c_start_syscall = foreign "start_syscall" (ptr c_syscall_env
+                                               @-> nativeint
+                                               @-> ptr nativeint
+                                               @-> returning (ptr c_syscall_state))
+
+let c_continue_syscall = foreign "continue_syscall" (ptr c_syscall_state
+                                                     @-> ptr c_data_extent_node
+                                                     @-> returning (ptr c_syscall_state))
+
+let c_data_extent_node_new_with = foreign "data_extent_node_new_with" (nativeint
+                                                                       @-> nativeint
+                                                                       @-> ptr char
+                                                                       @-> ptr c_data_extent_node
+                                                                       @-> returning (ptr c_data_extent_node))
 
 type state = c_syscall_state structure ptr
 type env = c_syscall_env structure ptr
@@ -76,14 +91,9 @@ type result =
   | Finished of (* retval : *) nativeint * (* write_footprint : *) extent list
   | MoreDataNeeded of state * (* read_footprint : *) extent list
 
-let load_footprints_from_file filename =
-  print_endline "entering load_footprints_from_file";
-  let env_ptr = allocate_n ~count:1 c_syscall_env in
-  let success = c_load_syscall_footprints_from_file filename env_ptr in
-  if success then
-    Some env_ptr
-  else
-    None
+
+(***** Utility functions *****)
+
 
 let _marshal_from_read_extents c_extents =
   let rec marshal_one_extent = function
@@ -97,12 +107,17 @@ let _marshal_from_read_extents c_extents =
            } :: marshal_one_extent (getf c_extent_node c_extent_node_next) in
   marshal_one_extent (Some c_extents)
 
+
 let _marshal_to_read_extents extents =
   let rec marshal_one_extent = function
     | [] -> (from_voidp c_data_extent_node null)
     | x::xs -> match x.data with
                | None -> failwith "data extent provided with None in data field"
-               | Some data -> (c_data_extent_node_new_with x.base x.length (bigarray_start array1 data) (marshal_one_extent xs)) in
+               | Some data -> (c_data_extent_node_new_with
+                                 x.base
+                                 x.length
+                                 (bigarray_start array1 data)
+                                 (marshal_one_extent xs)) in
   marshal_one_extent extents
     
 
@@ -121,6 +136,33 @@ let _marshal_from_write_extents c_data_extents =
          } :: marshal_one_extent (getf c_data_extent_node c_data_extent_node_next) in 
   marshal_one_extent (Some c_data_extents)
 
+
+let _check_c_retval state_ptr =
+  let state = (!@ state_ptr) in
+  if getf state c_syscall_state_finished then
+    let retval = getf state c_syscall_state_retval in
+    match getf state c_syscall_state_write_extents with
+    | None -> Finished (retval, [])
+    | Some (extents) -> Finished (retval, _marshal_from_write_extents extents)
+  else
+    match getf state c_syscall_state_need_extents with
+    | None -> failwith "apparently we need some extents, but haven't been given any"
+    | Some extents -> MoreDataNeeded (state_ptr, _marshal_from_read_extents extents)
+
+
+(***** Public API *****)
+
+
+let load_footprints_from_file filename =
+  print_endline "entering load_footprints_from_file";
+  let env_ptr = allocate_n ~count:1 c_syscall_env in
+  let success = c_load_syscall_footprints_from_file filename env_ptr in
+  if success then
+    Some env_ptr
+  else
+    None
+
+
 let start_syscall env num args =
   let args_length = Array.length args in
   if args_length  < 0 || args_length > 6 then
@@ -131,30 +173,12 @@ let start_syscall env num args =
       CArray.set arr i args.(i)
     done;
     let state_ptr = c_start_syscall env num (CArray.start arr) in
-    let state = (!@ state_ptr) in
-    if getf state c_syscall_state_finished then
-      let retval = getf state c_syscall_state_retval in
-      match getf state c_syscall_state_write_extents with
-      | None -> Finished (retval, [])
-      | Some (extents) -> Finished (retval, _marshal_from_write_extents extents)
-    else
-      match getf state c_syscall_state_need_extents with
-      | None -> failwith "apparently we need some extents, but haven't been given any"
-      | Some extents -> MoreDataNeeded (state_ptr, _marshal_from_read_extents extents)
+    _check_c_retval state_ptr
     end
 
 
 let continue_syscall state extents =
   let c_extents = _marshal_to_read_extents extents in
   let state_ptr = c_continue_syscall state c_extents in
-  let state = (!@ state_ptr) in
-  if getf state c_syscall_state_finished then
-      let retval = getf state c_syscall_state_retval in
-      match getf state c_syscall_state_write_extents with
-      | None -> Finished (retval, [])
-      | Some (extents) -> Finished (retval, _marshal_from_write_extents extents)
-    else
-      match getf state c_syscall_state_need_extents with
-      | None -> failwith "apparently we need some extents, but haven't been given any"
-      | Some extents -> MoreDataNeeded (state_ptr, _marshal_from_read_extents extents)
+  _check_c_retval state_ptr
 
