@@ -19,6 +19,9 @@ typedef ANTLR3_COMMON_TREE CommonTree;
 void supply_syscall_footprint(struct syscall_state **state_ptr) {
 	struct syscall_state *state = *state_ptr;
 	while (!state->finished) {
+		printf("================================================================================\n"
+		       "STARTING PASS\n"
+		       "================================================================================\n");
 		// we have to give it some more data. hopefully
 		assert(state->need_memory_extents != NULL);
 		

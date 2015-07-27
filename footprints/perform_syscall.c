@@ -442,6 +442,7 @@ extern inline long int
 __attribute__((always_inline,gnu_inline)) 
 do_syscall6(long int syscall_number, long int args[static 6])
 {
+
 	
 /* Our callee-save registers are
  *	 rbp, rbx, r12, r13, r14, r15
@@ -465,13 +466,13 @@ do_syscall6(long int syscall_number, long int args[static 6])
 	"addq %%r12, %%rsp\n"
 
 	
-	#define PERFORM_SYSCALL	     \
-	  FIX_STACK_ALIGNMENT "   \n\
-	  movq %[op], %%rax       \n\
-	  syscall		 \n\
-	 "UNFIX_STACK_ALIGNMENT " \n\
+#define PERFORM_SYSCALL	  \
+	FIX_STACK_ALIGNMENT "   \n\
+	  movq %[op], %%rax       \n \
+	  syscall		 \n \
+	 "UNFIX_STACK_ALIGNMENT " \n \
 	  movq %%rax, %[ret]      \n"
-
+	
 	
 	long int ret;
 	__asm__ volatile ("movq %[arg0], %%rdi \n\

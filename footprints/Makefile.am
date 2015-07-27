@@ -5,6 +5,7 @@ AM_LDFLAGS = -lstdc++ -lm -lboost_regex $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS)
 noinst_PROGRAMS = test_footprints test_syscalls
 test_footprints_SOURCES = test_footprints.c linux-syscall-ifacetypes.c
 test_footprints_LDADD = -lantlr3c ../src/liballocs_nonshared.a ../tools/liballocstool.a liballocs_footprints.a
+
 test_syscalls_SOURCES = test_syscalls.c perform_syscall.c
 test_syscalls_LDADD = -lantlr3c ../src/liballocs_nonshared.a ../tools/liballocstool.a liballocs_footprints.a
 test_syscalls_DEPENDENCIES = ../src/liballocs_nonshared.a ../tools/liballocstool.a liballocs_footprints.a dynamic-list
@@ -14,5 +15,11 @@ dynamic-list: $(patsubst %.c,%.o,linux-syscall-ifacetypes.c)
 
 lib_LIBRARIES = liballocs_footprints.a
 liballocs_footprints_a_SOURCES = binary_ops.c eval.c footprints.c parser.c subscripts.c unary_ops.c values.c control_flow.c exprs.c idents.c objects.c printer.c unions.c linux-syscall-ifacetypes.c
-
 liballocs_footprints_a_LIBADD = ../src/liballocs_nonshared.a ../tools/liballocstool.a
+
+lib_LTLIBRARIES = liballocs_syscalls.la
+liballocs_syscalls_la_SOURCES = binary_ops.c eval.c footprints.c parser.c subscripts.c unary_ops.c values.c control_flow.c exprs.c idents.c objects.c printer.c unions.c linux-syscall-ifacetypes.c perform_syscall.c
+liballocs_syscalls_la_CFLAGS = $(AM_CFLAGS)
+liballocs_syscalls_la_LIBADD = -lantlr3c ../src/liballocs_nonshared.a ../tools/liballocstool.a liballocs_footprints.a
+liballocs_syscalls_la_DEPENDENCIES = ../src/liballocs_nonshared.a ../tools/liballocstool.a liballocs_footprints.a dynamic-list
+

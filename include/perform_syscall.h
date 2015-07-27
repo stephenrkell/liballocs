@@ -19,6 +19,7 @@ struct syscall_state {
 	char *syscall_name;
 	long int retval;
 	struct extent_node *need_memory_extents;
+	struct data_extent_node *write_extents;
 	_Bool finished;
 };
 

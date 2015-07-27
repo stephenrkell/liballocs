@@ -86,8 +86,8 @@ struct extent_node {
 };
 
 struct data_extent {
-	unsigned long base;
-	unsigned long length;
+	size_t base;
+	size_t length;
 	void *data;
 };
 
