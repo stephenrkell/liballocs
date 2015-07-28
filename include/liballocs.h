@@ -36,7 +36,7 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 #endif
 
 #include "addrmap.h"
-#include "../src/allocsmt.h"
+#include "allocsmt.h"
 
 void __liballocs_add_missing_maps(void);
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj);
