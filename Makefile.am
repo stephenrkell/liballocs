@@ -1,8 +1,9 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = . src
+SUBDIRS = tools/lang . src
 
 AM_CXXFLAGS = -std=c++11 -ggdb3 -O0 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(DWARFIDL_CFLAGS)
+CXXFLAGS += $(AM_CXXFLAGS)
 
 AM_CFLAGS = -Wall -std=gnu99 -ggdb3 -O0 -Iinclude -fPIC -Wp,-w
 CFLAGS += $(AM_CFLAGS)
@@ -171,5 +172,6 @@ tools_find_allocated_type_size_LDADD = tools/liballocstool.a
 # src/liballocs_nomemtable.o: src/liballocs.c
 # 	$(CC) $(CFLAGS) -DNO_MEMTABLE -c -o "$@" "$<" 
 
-export INSTALL INSTALL_DATA libdir
+export 
+# was export INSTALL INSTALL_DATA libdir
 
