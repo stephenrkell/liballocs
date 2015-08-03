@@ -13,19 +13,20 @@
 *.o.fixuplog
 *.swp
 
-tests/alloca/alloca
-tests/offsetof/offsetof
-tests/section-group/section-group
-tests/simple-client/simple-client
-tests/simple-multi-alloc/simple-multi-alloc
-tests/sloppy-dumptypes/sloppy-dumptypes
-tools/allocsites
-tools/dumptypes
-tools/ifacetypes
-tools/find-allocated-type-size
-tools/lang/c/bin
-tools/lang/c/src/base-types-translation
-tools/usedtypes
+/tests/alloca/alloca
+/tests/offsetof/offsetof
+/tests/section-group/section-group
+/tests/simple-client/simple-client
+/tests/simple-multi-alloc/simple-multi-alloc
+/tests/sloppy-dumptypes/sloppy-dumptypes
+/tools/allocsites
+/tools/dumptypes
+/tools/ifacetypes
+/tools/find-allocated-type-size
+/tools/lang/c/bin
+/tools/lang/c/src/base-types-translation
+/tools/usedtypes
+/tools/lang/c/*/*.d
 
 /Makefile
 
