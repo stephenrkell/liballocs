@@ -8,7 +8,7 @@ CXXFLAGS += $(AM_CXXFLAGS)
 AM_CFLAGS = -Wall -std=gnu99 -ggdb -O0 -Iinclude -fPIC -Wp,-w
 CFLAGS += $(AM_CFLAGS)
 
-AM_LDFLAGS = -lstdc++ -lm -lboost_regex $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(DWARFIDL_LIBS)
+AM_LDFLAGS = -Wl,--no-as-needed -lstdc++ -lm -lboost_regex $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(DWARFIDL_LIBS)
 
 extra_DIST = liballocs.pc.in
 pkgconfigdir = $(libdir)/pkgconfig
