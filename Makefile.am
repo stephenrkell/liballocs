@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = tools/lang . src
+SUBDIRS = . tools/lang src
 
 AM_CXXFLAGS = -std=c++11 -ggdb -O0 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(DWARFIDL_CFLAGS)
 CXXFLAGS += $(AM_CXXFLAGS)
