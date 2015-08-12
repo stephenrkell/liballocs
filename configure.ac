@@ -14,8 +14,12 @@ LT_INIT
 AC_LANG([C++])
 AM_INIT_AUTOMAKE([foreign subdir-objects -Wno-portability])
 AM_MAINTAINER_MODE
-AC_PROG_CXX
+AC_LANG_PUSH([C])
+AC_PROG_CC
+AC_PROG_CC_C99
+AC_LANG_POP([C])
 
+AC_PROG_CXX
 AX_CXX_COMPILE_STDCXX_11
 export CXXFLAGS
 
@@ -25,6 +29,16 @@ AC_TYPE_SIZE_T
 AC_CHECK_TYPES([ptrdiff_t])
 AC_PROG_LN_S
 AC_PROG_INSTALL
+
+my_save_cflags="$CFLAGS"
+CFLAGS="-flto -ffat-lto-objects"
+AC_MSG_CHECKING([whether $CC supports -flto -ffat-lto-objects])
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([])],
+    [AC_MSG_RESULT([yes])]
+    [],
+    [AC_MSG_FAILURE([need a C compiler that supports -flto (e.g. gcc >= 4.8) Try again with CC=path/to/newer-cc?])]
+)
+CFLAGS="$my_save_cflags"
 
 OLD_CPPFLAGS=$CPPFLAGS
 CPPFLAGS="-std=c++11 $CPPFLAGS"
