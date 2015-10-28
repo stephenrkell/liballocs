@@ -1,4 +1,3 @@
-*.a
 *.allocstubs.c
 *.allocstubs.s
 *.cil.c
@@ -9,24 +8,101 @@
 *.cmo
 *.cmx
 *.cmxs
-*.d
 *.i
 *.i.allocs
-*.o
 *.o.fixuplog
-*.pyc
-*.so
 *.swp
-tests/alloca/alloca
-tests/offsetof/offsetof
-tests/section-group/section-group
-tests/simple-client/simple-client
-tests/simple-multi-alloc/simple-multi-alloc
-tests/sloppy-dumptypes/sloppy-dumptypes
-tools/allocsites
-tools/dumptypes
-tools/ifacetypes
-tools/find-allocated-type-size
-tools/lang/c/bin
-tools/lang/c/src/base-types-translation
-tools/usedtypes
+
+/tests/alloca/alloca
+/tests/offsetof/offsetof
+/tests/section-group/section-group
+/tests/simple-client/simple-client
+/tests/simple-multi-alloc/simple-multi-alloc
+/tests/sloppy-dumptypes/sloppy-dumptypes
+/tools/allocsites
+/tools/dumptypes
+/tools/ifacetypes
+/tools/find-allocated-type-size
+/tools/lang/c/bin
+/tools/lang/c/src/base-types-translation
+/tools/usedtypes
+/tools/lang/c/*/*.d
+
+/Makefile
+
+__pycache__/
+*.py[cod]
+
+.deps/
+.libs/
+
+
+# http://www.gnu.org/software/automake
+
+Makefile.in
+
+# http://www.gnu.org/software/autoconf
+
+.dirstamp
+/autom4te.cache
+/aclocal.m4
+/compile
+/configure
+/depcomp
+/install-sh
+/missing
+/stamp-h1
+/m4/
+/config.guess
+/config.sub
+/config.status
+/config.log
+/ltmain.sh
+/libtool
+
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+*.pc
+
+# Dependencies
+.*.d
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+
+# Backup files
+*~
+\#*\#
+.\#*
+
+# WTF Dropbox
+
+.fuse_hidden*
+.nfs*
+.dropbox*

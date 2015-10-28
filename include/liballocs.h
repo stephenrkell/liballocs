@@ -36,7 +36,7 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 #endif
 
 #include "addrmap.h"
-#include "../src/allocsmt.h"
+#include "allocsmt.h"
 
 void __liballocs_add_missing_maps(void);
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj);
@@ -205,6 +205,28 @@ extern struct uniqtype __uniqtype____PTR_void;
 extern struct uniqtype __uniqtype____PTR_signed_char;
 extern struct uniqtype __uniqtype__float;
 extern struct uniqtype __uniqtype__double;
+
+#ifdef __GNUC__ // HACK. TODO: dollars are a good idea or not?
+
+	 extern struct uniqtype __uniqtype__float$32;
+	 extern struct uniqtype __uniqtype__float$64;
+	 extern struct uniqtype __uniqtype__int$16;
+	 extern struct uniqtype __uniqtype__int$32;
+	 extern struct uniqtype __uniqtype__int$64;
+	 extern struct uniqtype __uniqtype__uint$16;
+	 extern struct uniqtype __uniqtype__uint$32;
+	 extern struct uniqtype __uniqtype__uint$64;
+	 extern struct uniqtype __uniqtype__signed_char$8;
+	 extern struct uniqtype __uniqtype__unsigned_char$8;
+
+	 extern struct uniqtype __uniqtype____PTR_int$32;
+	 extern struct uniqtype __uniqtype____PTR_int$64;
+	 extern struct uniqtype __uniqtype____PTR_uint$32;
+	 extern struct uniqtype __uniqtype____PTR_uint$64;
+
+	 extern struct uniqtype __uniqtype____PTR_signed_char$8;
+	 
+#endif
 
 struct liballocs_err;
 extern struct liballocs_err __liballocs_err_stack_walk_step_failure;

@@ -1,4 +1,6 @@
-default: c
+default: all
+all: c
+install: ; # nothing
 
 .PHONY: c
 c:
