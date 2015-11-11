@@ -92,6 +92,7 @@ struct suballocated_chunk_rec
 	char log_pitch;
 	size_t one_layer_nbytes;
 	unsigned long biggest_object;
+	unsigned long *starts_bitmap;
 };
 int  __index_deep_alloc(void *ptr, int level, unsigned size_bytes) __attribute__((weak));
 void __unindex_deep_alloc(void *ptr, int level) __attribute__((weak));

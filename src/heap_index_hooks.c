@@ -1479,6 +1479,74 @@ static void init_suballocs(void)
 	}
 }
 
+static inline _Bool bitmap_get(unsigned long *p_bitmap, unsigned long index)
+{
+	return p_bitmap[index / UNSIGNED_LONG_NBITS] & (1ul << (index % UNSIGNED_LONG_NBITS));
+}
+static inline _Bool bitmap_set(unsigned long *p_bitmap, unsigned long index)
+{
+	p_bitmap[index / UNSIGNED_LONG_NBITS] |= (1ul << (index % UNSIGNED_LONG_NBITS));
+}
+static inline _Bool bitmap_clear(unsigned long *p_bitmap, unsigned long index)
+{
+	p_bitmap[index / UNSIGNED_LONG_NBITS] &= ~(1ul << (index % UNSIGNED_LONG_NBITS));
+}
+static inline unsigned long bitmap_find_first_set(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long *out_test_bit)
+{
+	unsigned long *p_initial_bitmap;
+			
+	while (*p_bitmap == (unsigned long) 0
+				&& p_bitmap < p_limit) ++p_bitmap;
+	if (p_bitmap == p_limit) return (unsigned long) -1;
+	
+	/* Find the lowest free bit in this bitmap. */
+	unsigned long test_bit = 1;
+	unsigned test_bit_index = 0;
+	// while the test bit is unset...
+	while (!(*p_bitmap & test_bit))
+	{
+		if (__builtin_expect(test_bit != 1ul<<(UNSIGNED_LONG_NBITS - 1), 1))
+		{
+			test_bit <<= 1;
+			++test_bit_index;
+		}
+		else assert(0); // all 1s --> we shouldn't have got here
+	}
+	/* FIXME: thread-safety */
+	unsigned free_index = (p_bitmap - p_initial_bitmap) * UNSIGNED_LONG_NBITS
+			+ test_bit_index;
+	
+	if (out_test_bit) *out_test_bit = test_bit;
+	return free_index;	
+}
+static inline unsigned long bitmap_find_first_clear(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long *out_test_bit)
+{
+	unsigned long *p_initial_bitmap;
+			
+	while (*p_bitmap == (unsigned long) -1
+				&& p_bitmap < p_limit) ++p_bitmap;
+	if (p_bitmap == p_limit) return (unsigned long) -1;
+	
+	/* Find the lowest free bit in this bitmap. */
+	unsigned long test_bit = 1;
+	unsigned test_bit_index = 0;
+	while (*p_bitmap & test_bit)
+	{
+		if (__builtin_expect(test_bit != 1ul<<(UNSIGNED_LONG_NBITS - 1), 1))
+		{
+			test_bit <<= 1;
+			++test_bit_index;
+		}
+		else assert(0); // all 1s --> we shouldn't have got here
+	}
+	/* FIXME: thread-safety */
+	unsigned free_index = (p_bitmap - p_initial_bitmap) * UNSIGNED_LONG_NBITS
+			+ test_bit_index;
+	
+	if (out_test_bit) *out_test_bit = test_bit;
+	return free_index;
+}
+
 static struct suballocated_chunk_rec *make_suballocated_chunk(void *chunk_base, size_t chunk_size, 
 		struct insert *chunk_existing_ins, size_t guessed_average_size)
 {
@@ -1518,7 +1586,13 @@ static struct suballocated_chunk_rec *make_suballocated_chunk(void *chunk_base, 
 		.parent = NULL, // FIXME: level > 2 cases
 		.begin = chunk_base,
 		.real_size = chunk_size,
-		.size = next_power_of_two_ge(chunk_size)
+		.size = next_power_of_two_ge(chunk_size),
+		.metadata_recs = NULL,
+		.log_pitch = 0,
+		.one_layer_nbytes = 0,
+		.biggest_object = 0,
+		.starts_bitmap = mmap(NULL, sizeof (unsigned long) * (chunk_size / UNSIGNED_LONG_NBITS),
+			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0)
 	}; // others 0 for now
 	
 	if (guessed_average_size > MAX_PITCH) guessed_average_size = MAX_PITCH;
@@ -1587,6 +1661,9 @@ static void delete_suballocated_chunk(struct suballocated_chunk_rec *p_rec)
 
 	/* munmap it. */
 	int ret = munmap(p_rec->metadata_recs, (sizeof (struct insert)) * p_rec->size);
+	assert(ret == 0);
+	ret = munmap(p_rec->starts_bitmap,
+		sizeof (unsigned long) * (p_rec->real_size / UNSIGNED_LONG_NBITS));
 	assert(ret == 0);
 	
 	// bzero the chunk rec
@@ -1664,8 +1741,32 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 		/* This chunk already records a suballocated region. */
 		p_rec = &suballocated_chunks[(uintptr_t) found_ins->alloc_site];
 	}
-
-
+#ifdef HEAP_INDEX_DEEP_BITMAP_ONLY
+	/* Just maintain the bitmap. Set the first bit and clear up to the size of the object. */
+	bitmap_set(p_rec->starts_bitmap, (char*) ptr - (char*) existing_object_start);
+// 	/* We clear in three phases.
+// 	 * 1. bytes from start + 1 */
+// 	unsigned nbyte = 1;
+// 	while (nbyte < size_bytes && nbyte < 8) 
+// 	{
+// 		bitmap_clear(p_rec->starts_bitmap, 
+// 			((char*) ptr - (char*) existing_object_start) + nbyte);
+// 		nbyte++;
+// 	}
+// 	/* 2. bytes from 8 to ROUND_DOWN(size, 8) */
+// 	while (nbyte < size_bytes && nbyte < 8 * (size_bytes / 8))
+// 	{
+// 		p_rec->starts_bitmap[((char*) ptr - (char*) existing_object_start) / UNSIGNED_LONG_NBITS] = 0;
+// 		nbyte += UNSIGNED_LONG_NBITS;
+// 	}
+// 	/* 3. remaining bytes at the end */
+// 	while (nbyte < size_bytes)
+// 	{
+// 		bitmap_clear(p_rec->starts_bitmap, 
+// 			((char*) ptr - (char*) existing_object_start) + nbyte);
+// 		nbyte++;
+// 	}
+#else
 	/* Get the relevant bucket. */
 	unsigned long bucket_num = NBUCKET_OF(ptr, p_rec);
 	struct insert *p_bucket = p_rec->metadata_recs + bucket_num;
@@ -1813,6 +1914,8 @@ int __index_deep_alloc(void *ptr, int level, unsigned size_bytes)
 	struct insert *p_found_ins2 = lookup_deep_alloc((char*) ptr + size_bytes - 1, 1, 
 		found_ins, NULL, NULL, NULL);
 	assert(p_found_ins2 == p_ins);
+#endif
+	
 #endif
 	check_cache_sanity();
 	
