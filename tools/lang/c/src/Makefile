@@ -5,7 +5,7 @@ ALLOCSTOOL ?= ../../../
 CXXFLAGS += -std=c++0x -g -O0 -I$(ALLOCSTOOL)
 CXXFLAGS += -Wno-deprecated-declarations # while we're using old libdwarfpp -- FIXME
 LDFLAGS += -L`pwd` -Wl,-R`pwd` -L$(ALLOCSTOOL) -Wl,-R$(realpath $(ALLOCSTOOL))
-LDLIBS += -lallocstool -ldwarfidl -lcxxgen -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization -lcxxfileno -lsrk31cxx -lelf
+LDLIBS += -lallocstool -ldwarfidl -lcxxgen -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization -lc++fileno -lsrk31c++ -lelf
 
 CPP_SRC := $(wildcard *.cpp)
 
