@@ -204,8 +204,10 @@ let rec barenameFromSig ts =
        "__FUN_FROM_" ^ (labelledArgTs argsTss 0) ^ "__FUN_TO_" ^ (barenameFromSig returnTs)
  | TSFun(returnTs, Some(argsTss), true, attrs) -> 
        "__FUN_FROM_" ^ (labelledArgTs argsTss 0) ^ "__VA___FUN_TO_" ^ (barenameFromSig returnTs)
- | TSFun(returnTs, None, _, attrs) -> 
+ | TSFun(returnTs, None, true, attrs) -> 
         "__FUN_FROM___VA___FUN_TO_" ^ (barenameFromSig returnTs)
+ | TSFun(returnTs, None, false, attrs) -> 
+        "__FUN_FROM___FUN_TO_" ^ (barenameFromSig returnTs)
  | TSEnum(enumName, attrs) -> enumName
  | TSBase(TVoid(attrs)) -> "void"
  | TSBase(tbase) -> baseTypeStr tbase
@@ -230,8 +232,10 @@ let rec dwarfidlFromSig ts =
        "(" ^ (dwarfidlLabelledArgTs argsTss 0) ^ ") => " ^ (dwarfidlFromSig returnTs)
  | TSFun(returnTs, Some(argsTss), true, attrs) -> 
        "(" ^ (dwarfidlLabelledArgTs argsTss 0) ^ ", ...)" ^ (dwarfidlFromSig returnTs)
- | TSFun(returnTs, None, _, attrs) -> 
+ | TSFun(returnTs, None, true, attrs) -> 
         "(...) => " ^ (barenameFromSig returnTs)
+ | TSFun(returnTs, None, false, attrs) -> 
+        "() => " ^ (barenameFromSig returnTs)
  | TSEnum(enumName, attrs) -> enumName
  | TSBase(TVoid(attrs)) -> "(unspecified_type)"
  | TSBase(tbase) -> dwarfidlIdent (baseTypeRawStr tbase)
@@ -288,7 +292,7 @@ let rec getConcreteType ts =
    TSArray(tsig, optSz, attrs) -> getConcreteType tsig
  | TSPtr(tsig, attrs) -> TSPtr(getConcreteType tsig, []) (* stays a pointer, but discard attributes *)
  | TSComp(isSpecial, name, attrs) -> TSComp(isSpecial, name, [])
- | TSFun(returnTs, maybeArgsTss, isSpecial, attrs) -> TSFun(returnTs, maybeArgsTss, isSpecial, [])
+ | TSFun(returnTs, argsTss, isSpecial, attrs) -> TSFun(returnTs, argsTss, isSpecial, [])
  | TSEnum(enumName, attrs) -> TSEnum(enumName, [])
  | TSBase(TVoid(attrs)) -> TSBase(TVoid([]))
  | TSBase(TInt(kind,attrs)) -> TSBase(TInt(kind, []))
@@ -399,11 +403,10 @@ let rec tsIsUndefinedType ts wholeFile =
         TSArray(tsig, optSz, attrs)                 -> tsIsUndefinedType tsig wholeFile
     |   TSPtr(tsig, attrs)                          -> tsIsUndefinedType tsig wholeFile
     |   TSComp(isStruct, name, attrs)               -> (findCompDefinitionInFile isStruct name wholeFile) = None
-    |   TSFun(returnTs, maybeArgsTss, isVarargs, attrs)  -> begin
-            tsIsUndefinedType returnTs wholeFile || match maybeArgsTss with
-                None -> false
-              | Some(argsTss) -> anyTsIsUndefined argsTss
-        end
+    |   TSFun(returnTs, Some(argsTss), isVarargs, attrs)  ->
+            tsIsUndefinedType returnTs wholeFile || anyTsIsUndefined argsTss
+    |   TSFun(returnTs, None, isVarargs, attrs)  ->
+            tsIsUndefinedType returnTs wholeFile
     |   _                                           -> false
 
 let findOrCreateExternalFunctionInFile fl nm proto : fundec = (* findOrCreateFunc fl nm proto *) (* NO! doesn't let us have the fundec *)

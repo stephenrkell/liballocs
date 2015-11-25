@@ -1,14 +1,14 @@
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 OCAMLFIND ?= ocamlfind
-CILLY ?= cilly
+CILLY ?= $(dir $(THIS_MAKEFILE))/cil/bin/cilly
 CIL_TOOLS := cilallocs dumpallocs monalloca #trumptr
 OCAMLFLAGS +=  -package findlib -package cil
-OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/cilallocs
+OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
 
 CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) $(realpath $(dir $(THIS_MAKEFILE)))/lib -name '*.ml') 
 
-default: src bin cil
+default: src bin $(foreach t,$(CIL_TOOLS),$(t)/$(t).cmxs $(t)/$(t).cma)
 
 OCAML_DEPS := $(patsubst %.ml,%.d,$(CIL_TOOLS_SRC))
 
@@ -19,7 +19,14 @@ DEPS += $(OCAML_DEPS)
 -include $(DEPS)
 
 .PHONY: cil
-cil: $(foreach t,$(CIL_TOOLS),$(t)/$(t).cmxs $(t)/$(t).cma)
+cil: cil/Makefile
+	$(MAKE) -C cil all
+
+cil/Makefile: cil/configure
+	cd cil && ./configure --prefix=$(realpath $(dir $(THIS_MAKEFILE))) INSTALL="`which install` -p"
+
+cil/configure:
+	git submodule update --init --recursive cil
 
 %.cmxs: %.cmx 
 	$(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
@@ -34,12 +41,18 @@ cil: $(foreach t,$(CIL_TOOLS),$(t)/$(t).cmxs $(t)/$(t).cma)
 %.cil.o: %.c
 	cd "$(dir $<)" && $(CILLY) --do$$( echo $(dir $<) | tr -d '/' ) --save-temps -c -o "$(notdir $@)" "$(notdir $<)"
 
+.PHONY: clean
 clean:
 	for dir in $(CIL_TOOLS); do (cd $$dir && rm -f *.o *.cmo *.cma *.cmi *.cmx *.cmxa *.cmxs *.cil.c *.i ); done
 	$(MAKE) -C src clean
+#	$(MAKE) -C cil clean
+
+# .PHONY: distclean
+# distclean: clean
+# 	$(MAKE) -C cil distclean
 
 .PHONY: src
-src:
+src: 
 	$(MAKE) -C src
 
 .PHONY: bin

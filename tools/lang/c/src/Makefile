@@ -4,6 +4,11 @@ ALLOCSTOOL ?= ../../../
 
 CXXFLAGS += -std=c++0x -g -O0 -I$(ALLOCSTOOL)
 CXXFLAGS += -Wno-deprecated-declarations # while we're using old libdwarfpp -- FIXME
+
+# use the pkg-config vars
+CXXFLAGS += $(LIBCXXFILENO_CXXFLAGS) $(LIBSRK31CXX_CXXFLAGS) $(LIBDWARFPP_CXXFLAGS) $(LIBCXXGEN_CXXFLAGS) $(DWARFIDL_CXXFLAGS)
+LDFLAGS += $(LIBCXXFILENO_LIBS) $(LIBSRK31CXX_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(DWARFIDL_LIBS)
+
 LDFLAGS += -L`pwd` -Wl,-R`pwd` -L$(ALLOCSTOOL) -Wl,-R$(realpath $(ALLOCSTOOL))
 LDLIBS += -lallocstool -ldwarfidl -lcxxgen -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization -lc++fileno -lsrk31c++ -lelf
 

@@ -1,7 +1,7 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
-SRCROOT := $(dir $(THIS_MAKEFILE))/..
-MALLOC_HOOKS ?= ../../libmallochooks.hg
+SRCROOT := $(dir $(THIS_MAKEFILE))../
+# MALLOC_HOOKS := $(SRCROOT)contrib/libmallochooks #./../libmallochooks.hg
 
 # HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
 # object. It complains about __next_malloc_hook et al being undefined, even though
@@ -11,7 +11,7 @@ MALLOC_HOOKS ?= ../../libmallochooks.hg
 HOOKS_PRELOAD_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_preload_fast.o event_hooks_fast.o
 HOOKS_WRAP_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
 
-CFLAGS += -std=gnu99 -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS)
+CFLAGS += -std=gnu99 -Wall -g -I../include -I$(SRCROOT)/include -I../contrib/libmallochooks
 
 ifeq ($(DEBUG),1)
     DEFAULT_EXTRA_CFLAGS := -g
@@ -39,6 +39,7 @@ else
 endif
 
 default: liballocs_preload.so liballocs_nonshared.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
+all: default
 
 HOOKS_NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
 HOOKS_FAST_CFLAGS += -fpic -flto -ffat-lto-objects
@@ -73,12 +74,12 @@ endif
 # GRR. We can't include the Makerules now that we need to build the hooks by 
 # two different methods. Also, we can't get dependency information about these
 # files from the makefiles. So we always want to run these rules. HMM.
-malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o: $(MALLOC_HOOKS)/malloc_hook_stubs_wrap.c
-	CFLAGS="$(CFLAGS) -fPIC" $(MAKE) MALLOC_HOOKS_METHOD=preload -f $(MALLOC_HOOKS)/Makerules malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o
-malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o: $(MALLOC_HOOKS)/malloc_hook_stubs_wrap.c
-	$(MAKE) MALLOC_HOOKS_METHOD=wrap -f $(MALLOC_HOOKS)/Makerules malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o
+malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o: ../contrib/libmallochooks/malloc_hook_stubs_wrap.c
+	CFLAGS="$(CFLAGS) -fPIC" $(MAKE) MALLOC_HOOKS_METHOD=preload -f ../contrib/libmallochooks/Makerules malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o
+malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o: ../contrib/libmallochooks/malloc_hook_stubs_wrap.c
+	$(MAKE) MALLOC_HOOKS_METHOD=wrap -f ../contrib/libmallochooks/Makerules malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o
 
-vpath %.c $(MALLOC_HOOKS)
+vpath %.c ../contrib/libmallochooks
 
 ifeq ($(USE_REAL_LIBUNWIND),)
 FAKE_LIBUNWIND_OBJ := fake-libunwind.o
@@ -153,7 +154,7 @@ event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 
 liballocs_preload.so: liballocs_preload.a
 	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
-	
+
 liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
 
@@ -204,3 +205,8 @@ liballocs_nomemtable.o: liballocs.c
 # liballocs.so is a linker script, so don't remove it
 clean: 
 	rm -f *.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d *.a *_fast.c
+
+
+install: all
+	${INSTALL} liballocs_preload.so liballocs.so liballocs_noop.so ${libdir}
+	${INSTALL_DATA} liballocs_preload.a liballocs_nonshared.a liballocs.a liballocs_noop.a ${libdir}
