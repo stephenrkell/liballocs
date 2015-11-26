@@ -1,0 +1,40 @@
+Here are some things you'll need in order to build this software.
+
+* GNU make 3.81 or later
+* GNU bash
+* autoconf 2.69 or greater
+* automake 1.11 or greater
+* libtool
+* pkg-config
+* autoconf-archive
+* g++ 4.8 or later, or some comparably compliant C++ compiler
+* boost 1.55 or later (1.55 is "known good" as of this writing)
+* libdwarf (a recent version)
+* libelf1
+* antlr-3.5 complete JAR (e.g. antlr-3.5.2-complete.jar)
+* antlr-3.5 C runtime (libantlr3c)
+
+Then you'll also need the following other codebases of mine, which you
+can find wherever you found this one (e.g. my GitHub page). Build them
+in order! You have a choice: build and install them, like third-party
+libraries, or simply build them and use their build tree in-place. For
+the latter, you'll need to set the relevant environment variables to
+point to them at configure time. If you expect to be hacking on any of
+my code, I recommend this approach, because your hacking might easily
+stray into these other codebases.
+
+* libc++fileno
+* libsrk31c++
+* libdwarfpp
+* libantlr3c++
+* libcxxgen
+* dwarfidl
+
+Finally, for a fully-functioning liballocs toolchain, you'll also want
+to grab the following:
+
+* binutils-gdb
+
+... i.e. my patched binutils. You can get a long way without it, but in
+some awkward cases, liballocs's compilers wrappers need to invoke my
+hacked objcopy.
