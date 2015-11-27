@@ -1,6 +1,7 @@
 #ifndef RELF_H_
 #define RELF_H_
 
+#include <link.h>
 #include <stddef.h> /* for offsetof */
 #include <elf.h>
 /* #include <link.h> -- we don't do this because it can pollute us with libc stuff
