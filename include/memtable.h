@@ -10,6 +10,8 @@
 extern "C" {
 #endif
 
+#include <stdlib.h>
+
 #if defined (X86_64) || (defined (__x86_64__))
 #define BIGGEST_MMAP_ALLOWED (1ULL<<46)
 #else
