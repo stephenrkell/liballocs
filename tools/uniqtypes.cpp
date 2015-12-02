@@ -285,7 +285,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			<< " = {\n\t" 
 			<< "{ 0, 0, 0 },\n\t"
 			<< "\"void\"" << ",\n\t"
-			<< mangle_typename(make_pair(string(""), string("void"))) << "_subobj_names,\n\t"
 			<< "0" << " /* pos_maxoff (void) */,\n\t"
 			<< "0" << " /* neg_maxoff (void) */,\n\t"
 			<< "0" << " /* nmemb (void) */,\n\t"
@@ -528,9 +527,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			<< " = {\n\t" 
 			<< "{ 0, 0, 0 },\n\t"
 			<< "\"" << i_vert->first.second << "\",\n\t"
-			 
-			<< mangled_name << "_subobj_names,\n\t"
-			 
 			/* implement the flexible/opaque/undefined distinction we mentioned... */
 			<< (opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
 			<< "0 /* neg_maxoff */,\n\t"
@@ -721,9 +717,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				<< /* contained[0] */ "/* contained */ {\n\t\t"
 				<< "{ 0, &" << mangled_name
 				<< " }";
-			out << "\n\t}\n\t(char*)NULL"; /* end contained */
-
-			
+			out << "\n\t}"; /* end contained */
 			out << "\n};\n"; /* end struct uniqtype */
 			out << ensure_contained_length(compl_name, 1);
 			

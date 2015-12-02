@@ -16,7 +16,6 @@ struct uniqtype \
 { \
 	struct uniqtype_cache_word cache_word; \
 	const char *name; \
-	const char **subobj_names;				 \
 	unsigned short pos_maxoff; /* 16 bits */ \
 	unsigned short neg_maxoff; /* 16 bits */ \
 	unsigned nmemb:12;         /* 12 bits -- number of `contained's (always 1 if array) */ \
