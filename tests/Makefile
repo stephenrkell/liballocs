@@ -1,5 +1,4 @@
 CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -O2
-CFLAGS += -DUSE_STARTUP_BRK
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
 CFLAGS += -DUSE_FAKE_LIBUNWIND=1
@@ -7,18 +6,22 @@ endif
 
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-# HMM -- this is causing us to re-add the +='d stuff in each recursive make.
-# can we get away without this?
-export CFLAGS
-
 UNIQTYPES_BASE ?= /usr/lib/allocsites
 ALLOCSITES_BASE ?= /usr/lib/allocsites
 
 export UNIQTYPES_BASE
 export ALLOCSITES_BASE
 
-export CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
-export CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
+CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
+CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
+LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../src
+
+# HMM -- this is causing us to re-add the +='d stuff in each recursive make.
+# can we get away without this?
+export CC
+export CFLAGS
+export LDFLAGS
+export LDLIBS
 
 ifeq ($(CC),)
 $(error Could not find allocscc)
@@ -61,6 +64,13 @@ checkrun-fail-%:
 		grep ' 0.* 0.* 0.* 0\+.* [1-9][0-9]*.* 0\+$$' >/dev/null || \
 		(tail -n20 $$err; false)
 
+# Some cases are expected to abort
+checkrun-abort-%:
+	@echo "expected-fail case is fail-$*" && \
+	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
+	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
+	if $(MAKE) cleanrun-abort-$* 1>$$out 2>$$err; then false; else true; fi
+
 # Most test cases should output a liballocs summary in which 
 # -- zero queries aborted
 checkrun-%:
@@ -81,8 +91,12 @@ checkrun-simple-multi-alloc:
 	$(MAKE) cleanrun-simple-multi-alloc >/dev/null 2>&1
 checkrun-simple-client:
 	$(MAKE) cleanrun-simple-client >/dev/null 2>&1
-checkrun-nopreload-%:
-	$(MAKE) cleanrun-nopreload-$* >/dev/null 2>&1
+checkrun-nopreload-alloca:
+	$(MAKE) cleanrun-nopreload-alloca >/dev/null 2>&1
+checkrun-relf-auxv-dynamic:
+	$(MAKE) cleanrun-relf-auxv-dynamic >/dev/null 2>&1
+checkrun-relf-auxv-static:
+	$(MAKE) cleanrun-relf-auxv-static >/dev/null 2>&1
 
 _onlyrun-nopreload-%:
 	./nopreload-$*

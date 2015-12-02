@@ -12,7 +12,7 @@ int main(int argc, const char **argv)
 {
 	fprintf(stderr, "A stackptr is %p\n", &argc);
 	fflush(stderr);
-	sleep(10); /* DEBUG HACK */
+	// sleep(10); /* DEBUG HACK */
 	
 	ElfW(auxv_t) *found = get_auxv((const char **) environ, &argc);
 	assert(found);
