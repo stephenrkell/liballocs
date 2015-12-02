@@ -9,8 +9,10 @@
 
 import os, sys, re, subprocess, tempfile
 # HACK
-sys.path.append(os.path.realpath(os.path.dirname(__file__) + "/../../.."))
+liballocs_base = os.path.realpath(os.path.dirname(__file__) + "/../../../..")
+sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
+cilly_cmd = liballocs_base + "/tools/lang/c/cil/bin/cilly"
 
 class AllocsCC(AllocsCompilerWrapper):
 
@@ -84,19 +86,20 @@ class AllocsCC(AllocsCompilerWrapper):
             # silence them.
     
     def getUnderlyingCompilerCommand(self, sourceFiles):
-        return ["cilly"] + self.getCillyArgs(sourceFiles)
+        return [cilly_cmd] + self.getCillyArgs(sourceFiles)
     
     # HACK HACK HACK override buildOneObjectFile so that if we fail, we try the vanilla cc
     def runUnderlyingCompiler(self, sourceFiles, options):
         ret1 = AllocsCompilerWrapper.runUnderlyingCompiler(self, sourceFiles, options)
         if (ret1 != 0):
-            originalCommand = self.getUnderlyingCompilerCommand(sourceFiles) + options
-            alternativeCommand = ["cc"] + [s for s in originalCommand if s != "cilly" and \
-                not s.startswith("--")]
-            self.debugMsg("Falling back to: " + " ".join(alternativeCommand) + "\n")
-            ret1 = subprocess.call(alternativeCommand)
-            if (ret1 == 0):
-                self.debugMsg("WARNING: fell back to cc to compile [%s]\n" % ", ".join(sourceFiles))
+#            originalCommand = self.getUnderlyingCompilerCommand(sourceFiles) + options
+#            alternativeCommand = ["cc"] + [s for s in originalCommand if s != "cilly" and \
+#                not s.startswith("--")]
+#            self.debugMsg("Falling back to: " + " ".join(alternativeCommand) + "\n")
+#            ret1 = subprocess.call(alternativeCommand)
+#            if (ret1 == 0):
+#                self.debugMsg("WARNING: fell back to cc to compile [%s]\n" % ", ".join(sourceFiles))
+            pass
         return ret1
 
 if __name__ == '__main__':

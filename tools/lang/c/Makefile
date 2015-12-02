@@ -3,8 +3,8 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 OCAMLFIND ?= ocamlfind
 CILLY ?= $(dir $(THIS_MAKEFILE))/cil/bin/cilly
 CIL_TOOLS := cilallocs dumpallocs monalloca #trumptr
-OCAMLFLAGS +=  -package findlib -package cil
-OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
+OCAMLFLAGS +=  -package findlib
+OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/cil/lib/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
 
 CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) $(realpath $(dir $(THIS_MAKEFILE)))/lib -name '*.ml') 
 
@@ -20,10 +20,10 @@ DEPS += $(OCAML_DEPS)
 
 .PHONY: cil
 cil: cil/Makefile
-	$(MAKE) -C cil all
+	$(MAKE) -C cil all install-local
 
 cil/Makefile: cil/configure
-	cd cil && ./configure --prefix=$(realpath $(dir $(THIS_MAKEFILE))) INSTALL="`which install` -p"
+	cd cil && ./configure INSTALL="`which install` -p"
 
 cil/configure:
 	git submodule update --init --recursive cil
