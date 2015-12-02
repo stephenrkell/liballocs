@@ -35,4 +35,4 @@ to grab the following (from the same place):
 
 ... i.e. my patched binutils. You can get a long way without it, but in
 some awkward cases, liballocs's compilers wrappers need to invoke my
-hacked objcopy.
+hacked objcopy, which should therefore be on your PATH.

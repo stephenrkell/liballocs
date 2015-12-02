@@ -1,0 +1,22 @@
+This is experimental research software! If you're interested in
+licensing it, please contact me, the author, Stephen Kell
+<stephen.kell@cl.cam.ac.uk>.
+
+Software licensing is complicated; licensing of research software is
+doubly so. If you care, please read my thoughts on this matter.
+<http://www.cl.cam.ac.uk/~srk31/blog/2015/06/30#software-licenses>
+
+Since people seem interested in using this software, as of the current
+revision I am happy to license it under the terms of GNU Lesser General
+Public License version 3, whose text is in the file LICENSE.lgpl3.
+
+If you want it under a different license, please contact me.
+
+Nothing about this licensing arrangement is final, nor exclusive of
+other options. For example, I may be interested in licensing the
+software *to you* on customised terms. And I may also change how I
+license subsequent changes to the work. All this is in aid of maximising
+public good.
+
+Stephen Kell
+2nd December 2015
