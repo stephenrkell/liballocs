@@ -62,6 +62,8 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 
 #define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) (u)->array_len
 
+#define UNIQTYPE_ARRAY_LEN(u) (UNIQTYPE_IS_ARRAY((u)) ? (u)->array_len : 0)
+
 #define MAGIC_LENGTH_POINTER ((1u << 19) - 1u)
 #define UNIQTYPE_IS_POINTER_TYPE(u) \
 (!((u)->is_array) && (u)->array_len == MAGIC_LENGTH_POINTER)

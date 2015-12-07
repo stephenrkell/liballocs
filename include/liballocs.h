@@ -94,11 +94,24 @@ extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtyp
 }
 
 #define maximum_vaddr_range_size (4*1024) // HACK
-extern inline struct uniqtype *vaddr_to_uniqtype(const void *vaddr) __attribute__((gnu_inline,always_inline));
-extern inline struct uniqtype *__attribute__((gnu_inline)) vaddr_to_uniqtype(const void *vaddr)
+struct frame_uniqtype_and_offset
+{
+	struct uniqtype *u;
+	unsigned o;
+};
+extern inline struct frame_uniqtype_and_offset vaddr_to_uniqtype(const void *vaddr) __attribute__((gnu_inline,always_inline));
+extern inline struct frame_uniqtype_and_offset __attribute__((gnu_inline)) vaddr_to_uniqtype(const void *vaddr)
 {
 	assert(__liballocs_allocsmt != NULL);
-	if (!vaddr) return NULL;
+	if (!vaddr) return (struct frame_uniqtype_and_offset) { NULL, 0 };
+	
+	/* We chained the buckets to completely bypass the extra struct layer 
+	 * that is frame_allocsite_entry.
+	 * This means we can walk the buckets as normal.
+	 * BUT we then have to fish out the frame offset.
+	 * We do this with a "CONTAINER_OF"-style hack. 
+	 * Then we return a *pair* of pointers. */
+	
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)vaddr | STACK_BEGIN));
 	struct allocsite_entry **bucketpos = initial_bucketpos;
 	_Bool might_start_in_lower_bucket = 1;
@@ -113,7 +126,12 @@ extern inline struct uniqtype *__attribute__((gnu_inline)) vaddr_to_uniqtype(con
 			if (p->allocsite <= vaddr && 
 				(!p->next || ((struct allocsite_entry *) p->next)->allocsite > vaddr))
 			{
-				return p->uniqtype;
+				struct frame_allocsite_entry *e = (struct frame_allocsite_entry *) (
+					(char*) p
+					- offsetof(struct frame_allocsite_entry, entry)
+				);
+				assert(&e->entry == p);
+				return (struct frame_uniqtype_and_offset) { p->uniqtype, e->offset_from_frame_base };
 			}
 			might_start_in_lower_bucket &= (p->allocsite > vaddr);
 		}
@@ -124,7 +142,7 @@ extern inline struct uniqtype *__attribute__((gnu_inline)) vaddr_to_uniqtype(con
 		--bucketpos;
 	} while (might_start_in_lower_bucket && 
 	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_vaddr_range_size);
-	return NULL;
+	return (struct frame_uniqtype_and_offset) { NULL, 0 };
 }
 #undef maximum_vaddr_range_size
 
@@ -816,7 +834,8 @@ __liballocs_get_alloc_info
 				// (if our target address is *lower* than sp, we'll abandon the walk, below)
 				
 				// 1. get the frame uniqtype for frame_ip
-				struct uniqtype *frame_desc = vaddr_to_uniqtype((void *) ip);
+				struct frame_uniqtype_and_offset s = vaddr_to_uniqtype((void *) ip);
+				struct uniqtype *frame_desc = s.u;
 				if (!frame_desc)
 				{
 					// no frame descriptor for this frame; that's okay!
@@ -825,11 +844,14 @@ __liballocs_get_alloc_info
 				}
 				// 2. what's the frame base? it's the higherframe stack pointer
 				unsigned char *frame_base = (unsigned char *) higherframe_sp;
-				// 3. is our candidate addr between frame-base - negoff and frame_base + posoff?
-				if ((unsigned char *) obj >= frame_base - frame_desc->neg_maxoff  // is unsigned, so subtract
-					&& (unsigned char *) obj < frame_base + frame_desc->pos_maxoff)
+				// 2a. what's the frame *allocation* base? It's the frame_base *minus*
+				// the amount that s told us. 
+				unsigned char *frame_allocation_base = frame_base - s.o;
+				// 3. is our candidate addr between frame_allocation_base and that+posoff?
+				if ((unsigned char *) obj >= frame_allocation_base
+					&& (unsigned char *) obj < frame_allocation_base + frame_desc->pos_maxoff)
 				{
-					object_start = frame_base;
+					object_start = frame_allocation_base;
 					if (out_alloc_start) *out_alloc_start = object_start;
 					if (out_alloc_uniqtype) *out_alloc_uniqtype = frame_desc;
 					if (out_alloc_site) *out_alloc_site = (void*)(intptr_t) ip; // HMM -- is this the best way to represent this?
@@ -840,7 +862,7 @@ __liballocs_get_alloc_info
 				// ... so if our current frame (not higher frame)'s 
 				// numerically lowest (deepest) addr 
 				// is still higher than our object's addr, we must have gone past it
-				if (frame_base - frame_desc->neg_maxoff > (unsigned char *) obj)
+				if (frame_allocation_base > (unsigned char *) obj)
 				{
 					containing_suballoc = NULL;
 					heap_info = lookup_object_info(obj, (void**) out_alloc_start, 

@@ -17,6 +17,8 @@
 #include <srk31/ordinal.hpp>
 #include <cxxgen/tokens.hpp>
 #include <dwarfpp/lib.hpp>
+#include <dwarfpp/frame.hpp>
+#include <dwarfpp/regs.hpp>
 #include <fileno.hpp>
 
 #include "helpers.hpp"
@@ -50,7 +52,7 @@ using dwarf::core::address_holding_type_die;
 using dwarf::core::array_type_die;
 using dwarf::core::type_chain_die;
 
-using dwarf::lib::Dwarf_Off;
+using namespace dwarf::lib;
 
 // regex usings
 using boost::regex;
@@ -237,6 +239,7 @@ int main(int argc, char **argv)
 		> discarded_intervals_t;
 		
 	map< iterator_df<subprogram_die>, retained_intervals_t > intervals_by_subprogram;
+	map< iterator_df<subprogram_die>, unsigned > frame_offsets_by_subprogram;
 	
 	for (auto i_i_subp = subprograms_list.begin(); i_i_subp != subprograms_list.end(); ++i_i_subp)
 	{
@@ -308,6 +311,7 @@ int main(int argc, char **argv)
 				dwarf::spec::opt<const encap::loclist&>() /* opt_fbreg */
 			);
 			// cerr << "Rewrote to loclist " << var_loclist << endl;
+
 			
 			// for each of this variable's intervals, add it to the map
 			int interval_index = 0;
@@ -320,6 +324,7 @@ int main(int argc, char **argv)
 				 * the relevant loc_expr. */
 				singleton_set.insert(make_pair(i_dyn, *i_locexpr));
 				
+				// FIXME: disgusting hack
 				if (i_locexpr->lopc == 0xffffffffffffffffULL
 				|| i_locexpr->lopc == 0xffffffffUL)
 				{
@@ -338,12 +343,36 @@ int main(int argc, char **argv)
 				
 				/* vaddrs in this CU are relative to what addr? 
 				 * If we're an executable, they're absolute. 
-				 * If we're a shared library, */
+				 * If we're a shared library, they should be relative to its load address. */
 				auto opt_cu_base = i_subp.enclosing_cu()->get_low_pc();
 				Dwarf_Unsigned cu_base = opt_cu_base->addr;
 				
 				// handle "for all vaddrs" entries
 				boost::icl::discrete_interval<Dwarf_Off> our_interval;
+				auto print_sp_expr = [&our_interval, &root]() {
+					/* Last question. What's the stack pointer in terms of the 
+					 * CFA? We can answer this question by faking up a location
+					 * list referring to the stack pointer, and asking libdwarfpp
+					 * to rewrite that.*/
+					cerr << "Calculating rewritten-SP loclist..." << endl;
+					auto sp_loclist = encap::rewrite_loclist_in_terms_of_cfa(
+						encap::loclist(dwarf_stack_pointer_expr_for_elf_machine(
+							root.get_frame_section().get_elf_machine(),
+							our_interval.lower(), 
+							our_interval.upper()
+						)),
+						root.get_frame_section(), 
+						dwarf::spec::opt<const encap::loclist&>() /* opt_fbreg */
+					);
+					cerr << "Got SP loclist " << sp_loclist << endl;
+					
+					/* NOTE: I abandoned the above approach because it doesn't yield
+					 * a fixed offset to the SP in general. One reason why not is
+					 * alloca(). Other frames might also do weird dynamic sp adjustments
+					 * not captured in the unwind information. The Right Fix is to store
+					 * one offset per frame, recording the biggest negative offset such 
+					 * that all frame elements start at a nonnegative offset from that. */
+				};
 				if (i_locexpr->lopc == 0 && 0 == i_locexpr->hipc
 					|| i_locexpr->lopc == 0 && i_locexpr->hipc == std::numeric_limits<Dwarf_Off>::max())
 				{
@@ -365,7 +394,7 @@ int main(int argc, char **argv)
 						);
 						
 						cerr << "Borrowing vaddr ranges of " << *i_subp
-							<< " for dynamic-location " << *i_dyn;
+							<< " for dynamic-location " << *i_dyn << endl;
 						
 						/* assert sane interval */
 						assert(our_interval.lower() < our_interval.upper());
@@ -374,7 +403,9 @@ int main(int argc, char **argv)
 						subp_vaddr_intervals += make_pair(
 							our_interval,
 							singleton_set
-						); 
+						);
+						
+						// print_sp_expr();
 					}
 					/* There should be only one entry in the location list if so. */
 					assert(i_locexpr == var_loclist.begin());
@@ -397,9 +428,10 @@ int main(int argc, char **argv)
 					subp_vaddr_intervals += make_pair(
 						our_interval,
 						singleton_set
-					); 
+					);
+					
+					// print_sp_expr();
 				}
-				
 			}
 			
 			/* We note that the map is supposed to map file-relative addrs
@@ -484,9 +516,10 @@ int main(int argc, char **argv)
 				try
 				{
 					std::stack<Dwarf_Unsigned> initial_stack; 
-					initial_stack.push(0); 
 					// call the evaluator directly
 					// -- push zero (a.k.a. the frame base) onto the initial stack
+					initial_stack.push(0); 
+					// FIXME: really want to push the offset of the stack pointer from the frame base
 					lib::evaluator e(i_el_pair->second,
 						i_el_pair->first.spec_here(),
 						/* fb */ 0, 
@@ -549,14 +582,18 @@ int main(int argc, char **argv)
 			cerr << "Warning: no frame element intervals for subprogram " << i_subp << endl;
 		}
 		
-		/* Now for each distinct interval in the frame_intervals map... */
+		/* Now figure out the positive and negative extents of the frame. */
+		typedef decltype(frame_intervals) is_t;
+		std::map< is_t::key_type, unsigned> interval_maxoffs;
+		std::map< is_t::key_type, signed>   interval_minoffs;
+		signed overall_frame_minoff = 0;
 		for (auto i_frame_int = frame_intervals.begin(); i_frame_int != frame_intervals.end();
 			++i_frame_int)
 		{
-			unsigned frame_maxoff;
-			signed frame_minoff;
+			unsigned interval_maxoff;
+			signed interval_minoff;
 			//if (by_frame_off.begin() == by_frame_off.end()) frame_size = 0;
-			if (i_frame_int->second.size() == 0) { frame_maxoff = 0; frame_minoff = 0; }
+			if (i_frame_int->second.size() == 0) { interval_maxoff = 0; interval_minoff = 0; }
 			else
 			{
 				{
@@ -579,15 +616,46 @@ int main(int argc, char **argv)
 							calculated_maxel_size = 0;						
 						} else calculated_maxel_size = *opt_size;
 					}
-					signed frame_max_offset = i_maxoff_el->first + calculated_maxel_size;
-					frame_maxoff = (frame_max_offset < 0) ? 0 : frame_max_offset;
+					signed interval_max_offset = i_maxoff_el->first + calculated_maxel_size;
+					interval_maxoff = (interval_max_offset < 0) ? 0 : interval_max_offset;
 				}
 				{
 					auto i_minoff_el = i_frame_int->second.begin();
-					signed frame_min_offset = i_minoff_el->first;
-					frame_minoff = (frame_min_offset > 0) ? 0 : frame_min_offset;
+					signed interval_min_offset = i_minoff_el->first;
+					interval_minoff = (interval_min_offset > 0) ? 0 : interval_min_offset;
 				}
 			}
+			
+			interval_maxoffs.insert(make_pair(i_frame_int->first, interval_maxoff));
+			interval_minoffs.insert(make_pair(i_frame_int->first, interval_minoff));
+			if (interval_minoff < overall_frame_minoff) overall_frame_minoff = interval_minoff;
+		}
+		unsigned offset_to_all = 0;
+		if (overall_frame_minoff < 0)
+		{
+			/* The offset we want to apply to everything is the negation of 
+			 * overall_frame_minoff, rounded *up* to a word. */
+			// FIXME: don't assume host word size
+			unsigned remainder = (-overall_frame_minoff) % (sizeof (void*));
+			unsigned quotient  = (-overall_frame_minoff) / (sizeof (void*));
+			offset_to_all =
+				remainder == 0 ? quotient * (sizeof (void*))
+					: (quotient + 1) * (sizeof (void*));
+		}
+		frame_offsets_by_subprogram[i_subp] = offset_to_all;
+		
+		/* Now for each distinct interval in the frame_intervals map... */
+		for (auto i_frame_int = frame_intervals.begin(); i_frame_int != frame_intervals.end();
+			++i_frame_int)
+		{
+			auto found_maxoff = interval_maxoffs.find(i_frame_int->first);
+			assert(found_maxoff != interval_maxoffs.end());
+			unsigned interval_maxoff = found_maxoff->second;
+			auto found_minoff = interval_minoffs.find(i_frame_int->first);
+			assert(found_minoff != interval_minoffs.end());
+			signed interval_minoff = found_minoff->second;
+			
+
 			
 			/* Output in offset order, CHECKing that there is no overlap (sanity). */
 			cout << "\n/* uniqtype for stack frame ";
@@ -603,8 +671,8 @@ int main(int argc, char **argv)
 				<< " = {\n\t" 
 				<< "{ 0, 0, 0 },\n\t"
 				<< "\"" << unmangled_typename << "\",\n\t"
-				<< frame_maxoff << " /* pos_maxoff */,\n\t"
-				<< -frame_minoff << " /* neg_maxoff */,\n\t"
+				<< interval_maxoff + offset_to_all << " /* pos_maxoff */,\n\t"
+				<< 0 << " /* actual min is " << interval_minoff + offset_to_all << " */ /* neg_maxoff */,\n\t"
 				<< i_frame_int->second.size() << " /* nmemb */,\n\t"
 				<< "0 /* is_array */,\n\t"
 				<< "0 /* array_len */,\n\t"
@@ -616,7 +684,7 @@ int main(int argc, char **argv)
 				cout << "{ ";
 				string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->second->find_type()));
 				assert(names_emitted.find(mangled_name) != names_emitted.end());
-				cout << i_by_off->first << ", "
+				cout << (i_by_off->first + offset_to_all) << ", "
 					<< "&" << mangled_name
 					<< "}";
 				cout << " /* ";
@@ -659,7 +727,12 @@ int main(int argc, char **argv)
 	void *allocsite; \n\
 	struct uniqtype *uniqtype; \n\
 };\n";
-	cout << "struct allocsite_entry frame_vaddrs[] = {" << endl;
+	cout << "struct frame_allocsite_entry\n\
+{ \n\
+	unsigned offset_from_frame_base;\n\
+	struct allocsite_entry entry;\n\
+};\n";
+	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
 
 	unsigned total_emitted = 0;
 	// reminder: retained_intervals_t is
@@ -673,7 +746,7 @@ int main(int argc, char **argv)
 	//		>
 	//	>
 	
-	/* NOTE: our allocsite chaining trick in liballcs requires that our allocsites 
+	/* NOTE: our allocsite chaining trick in liballocs requires that our allocsites 
 	 * are sorted in vaddr order, so that adjacent allocsites in the memtable buckets
 	 * are adjacent in the table. So we sort them here. */
 	set< pair< boost::icl::discrete_interval<Dwarf_Addr>, iterator_df<subprogram_die> > > sorted_intervals;
@@ -691,19 +764,23 @@ int main(int argc, char **argv)
 	
 	for (auto i_pair = sorted_intervals.begin(); i_pair != sorted_intervals.end(); ++i_pair)
 	{
+		unsigned offset_from_frame_base = frame_offsets_by_subprogram[i_pair->second];
+	
 		cout << "\n\t/* frame alloc record for vaddr 0x" << std::hex << i_pair->first.lower() 
 			<< "+" << i_pair->first.upper() << std::dec << " */";
-		cout << "\n\t{ (void*)0, (void*)0, "
+		cout << "\n\t{\t" << offset_from_frame_base << ","
+			<< "\n\t\t{ (void*)0, (void*)0, "
 			<< "(char*) " << "0" // will fix up at load time
 			<< " + " << i_pair->first.lower() << "UL, " 
 			<< "&" << mangle_typename(make_pair(*i_pair->second.enclosing_cu().name_here(),
 				typename_for_vaddr_interval(i_pair->second, i_pair->first)))
-			<< " }";
+			<< " }"
+			<< "\n\t}";
 		cout << ",";
 		++total_emitted;
 	}
 	// output a null terminator entry
-	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 }";
+	cout << "\n\t{ 0, { (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 } }";
 	
 	// close the list
 	cout << "\n};\n";

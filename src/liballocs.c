@@ -551,7 +551,8 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 	
 	{
 		dlerror();
-		struct allocsite_entry *first_frame_entry = (struct allocsite_entry *) dlsym(types_handle, "frame_vaddrs");
+		struct frame_allocsite_entry *first_frame_entry
+		 = (struct frame_allocsite_entry *) dlsym(types_handle, "frame_vaddrs");
 		if (!first_frame_entry)
 		{
 			debug_printf(1, "Could not load frame vaddrs (%s)", dlerror());
@@ -560,18 +561,20 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 
 		/* We chain these much like the allocsites, BUT we OR each vaddr with 
 		 * STACK_BEGIN first.  */
-		struct allocsite_entry *cur_frame_ent = first_frame_entry;
-		struct allocsite_entry *prev_frame_ent = NULL;
+		struct frame_allocsite_entry *cur_frame_ent = first_frame_entry;
+		struct frame_allocsite_entry *prev_frame_ent = NULL;
 		unsigned current_frame_bucket_size = 1; // out of curiosity...
-		for (; cur_frame_ent->allocsite; prev_frame_ent = cur_frame_ent++)
+		for (; cur_frame_ent->entry.allocsite; prev_frame_ent = cur_frame_ent++)
 		{
-			chain_allocsite_entries(cur_frame_ent, prev_frame_ent, &current_frame_bucket_size,
+			chain_allocsite_entries(cur_frame_ent ? &cur_frame_ent->entry : NULL, 
+				prev_frame_ent ? &cur_frame_ent->entry : NULL, 
+				&current_frame_bucket_size,
 				info->dlpi_addr, STACK_BEGIN);
 		}
 
 		// debugging: check that we can look up the first entry, if we are non-empty
-		assert(!first_frame_entry || !first_frame_entry->allocsite || 
-			vaddr_to_uniqtype(first_frame_entry->allocsite) == first_frame_entry->uniqtype);
+		assert(!first_frame_entry || !first_frame_entry->entry.allocsite || 
+			vaddr_to_uniqtype(first_frame_entry->entry.allocsite) == first_frame_entry->entry.uniqtype);
 	}
 	
 	/* Now a similar job for the statics. */
