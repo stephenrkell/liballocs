@@ -106,17 +106,28 @@ let rec offsetPrefix (o : offset) (suffix : offset) =
       | Field(fi, rest) -> Field(fi, (offsetPrefix rest suffix))
       | Index(intExp, rest) -> Index(intExp, (offsetPrefix rest suffix))
 
+let offsetAppend off rest = offsetFromList ((offsetToList off) @ (offsetToList rest))
+
 let stringEndsWith (s : string) (e : string) : bool = 
     (String.length s) >= (String.length e) &&
     String.sub s ((String.length s) - (String.length e)) (String.length e) = e
 
 let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
 
+let makeIntegerConstant n = Const(CInt64(n, IInt, None))
+
 let isStaticallyZero e = isZero (foldConstants e) 
 
 let isStaticallyNullPtr e = match (typeSig (typeOf e)) with
     TSPtr(_) -> isStaticallyZero(e)
   | _ -> false
+  
+let rec constInt64ValueOfExpr (intExp: Cil.exp) : int64 option =
+    match (foldConstants intExp) with
+        Const(CInt64(intValue, _, _)) -> 
+            Some(intValue)
+      | Const(CChr(chrValue)) -> constInt64ValueOfExpr (Const(charConstToInt chrValue))
+      | _ -> None
 
 let nullPtr = CastE( TPtr(TVoid([]), []) , Const(CInt64((Int64.of_int 0), IInt, None)) )
 
