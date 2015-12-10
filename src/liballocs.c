@@ -431,8 +431,8 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 	*((unsigned char **) &cur_ent->allocsite) += load_addr;
 
 	// debugging: print out entry
-	/* fprintf(stream_err, "allocsite entry: %p, to uniqtype at %p\n", 
-		cur_ent->allocsite, cur_ent->uniqtype); */
+	debug_printf(3, "allocsite entry: %p, extrabits %p, to uniqtype at %p\n", 
+		cur_ent->allocsite, (void*) extrabits, cur_ent->uniqtype);
 
 	// if we've moved to a different bucket, point the table entry at us
 	struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, FIXADDR(cur_ent->allocsite));
@@ -445,6 +445,8 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 	{
 		// fresh bucket, so should be null
 		assert(*bucketpos == NULL);
+		debug_printf(3, "starting a new bucket for allocsite %p, mapped from %p\n", 
+			cur_ent->allocsite, bucketpos);
 		*bucketpos = cur_ent;
 	}
 	if (!prev_ent) return;
@@ -567,7 +569,7 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 		for (; cur_frame_ent->entry.allocsite; prev_frame_ent = cur_frame_ent++)
 		{
 			chain_allocsite_entries(cur_frame_ent ? &cur_frame_ent->entry : NULL, 
-				prev_frame_ent ? &cur_frame_ent->entry : NULL, 
+				prev_frame_ent ? &prev_frame_ent->entry : NULL, 
 				&current_frame_bucket_size,
 				info->dlpi_addr, STACK_BEGIN);
 		}
