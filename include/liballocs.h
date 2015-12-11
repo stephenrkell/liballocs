@@ -410,7 +410,7 @@ __liballocs_walk_subobjects_spanning_rec(
 			if (ret) return ret;
 			// tail-recurse
 			else return __liballocs_walk_subobjects_spanning_rec(
-				accum_offset + div, accum_depth + 1u,
+				accum_offset + (div * element_uniqtype->pos_maxoff), accum_depth + 1u,
 				mod, element_uniqtype, cb, arg);
 		} 
 		else // element's pos_maxoff == 0 || num_contained <= target_offset / element's pos_maxoff 
