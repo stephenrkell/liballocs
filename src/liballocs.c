@@ -576,7 +576,7 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 
 		// debugging: check that we can look up the first entry, if we are non-empty
 		assert(!first_frame_entry || !first_frame_entry->entry.allocsite || 
-			vaddr_to_uniqtype(first_frame_entry->entry.allocsite) == first_frame_entry->entry.uniqtype);
+			vaddr_to_uniqtype(first_frame_entry->entry.allocsite).u == first_frame_entry->entry.uniqtype);
 	}
 	
 	/* Now a similar job for the statics. */
