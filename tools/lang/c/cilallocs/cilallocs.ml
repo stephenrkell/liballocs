@@ -112,6 +112,12 @@ let stringEndsWith (s : string) (e : string) : bool =
     (String.length s) >= (String.length e) &&
     String.sub s ((String.length s) - (String.length e)) (String.length e) = e
 
+(* Zip two lists (possibly unequal lengths) into a tuple *)
+let rec zip lst1 lst2 = match lst1,lst2 with
+  | [],_ -> []
+  | _, []-> []
+  | (x::xs),(y::ys) -> (x,y) :: (zip xs ys)
+
 let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
 
 let makeIntegerConstant n = Const(CInt64(n, IInt, None))
@@ -121,13 +127,17 @@ let isStaticallyZero e = isZero (foldConstants e)
 let isStaticallyNullPtr e = match (typeSig (typeOf e)) with
     TSPtr(_) -> isStaticallyZero(e)
   | _ -> false
-  
-let rec constInt64ValueOfExpr (intExp: Cil.exp) : int64 option =
+
+let constInt64ValueOfExprNoChr (intExp: Cil.exp) : int64 option =
     match (foldConstants intExp) with
         Const(CInt64(intValue, _, _)) -> 
             Some(intValue)
-      | Const(CChr(chrValue)) -> constInt64ValueOfExpr (Const(charConstToInt chrValue))
       | _ -> None
+  
+let constInt64ValueOfExpr (intExp: Cil.exp) : int64 option =
+    match (foldConstants intExp) with
+      | Const(CChr(chrValue)) -> constInt64ValueOfExprNoChr (Const(charConstToInt chrValue))
+      | _ -> constInt64ValueOfExprNoChr intExp
 
 let nullPtr = CastE( TPtr(TVoid([]), []) , Const(CInt64((Int64.of_int 0), IInt, None)) )
 
