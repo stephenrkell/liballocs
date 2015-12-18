@@ -414,7 +414,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             passedThroughArgs = sys.argv[1:]
 
         if "DEBUG_CC" in os.environ:
-            verboseArgs = ["--verbose"]
+            verboseArgs = ["--verbose", "--live_debug"]
         else:
             verboseArgs = []
 
