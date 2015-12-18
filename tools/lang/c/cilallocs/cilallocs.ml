@@ -51,6 +51,7 @@ let expToString e      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp e))
 let instToString i     = (Pretty.sprint 80 (Pretty.dprintf "%a" d_instr i))
 let lvalToString lv    = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv))
 let typToString t      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
+let typsigToString ts  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig ts))
 
 let expToCilString e   = (Pretty.sprint 80 (printExp  (new plainCilPrinterClass) () e))
 let lvalToCilString lv = (Pretty.sprint 80 (printLval (new plainCilPrinterClass) () lv))
@@ -139,7 +140,11 @@ let constInt64ValueOfExpr (intExp: Cil.exp) : int64 option =
       | Const(CChr(chrValue)) -> constInt64ValueOfExprNoChr (Const(charConstToInt chrValue))
       | _ -> constInt64ValueOfExprNoChr intExp
 
-let nullPtr = CastE( TPtr(TVoid([]), []) , Const(CInt64((Int64.of_int 0), IInt, None)) )
+let nullPtr = CastE( TPtr(TVoid([]), []) , zero )
+let one = Const(CInt64((Int64.of_int 1), IInt, None))
+let onePtr = CastE( TPtr(TVoid([]), []) , one )
+let negativeOne = Const(CInt64((Int64.of_int (0-1)), IInt, None))
+let negativeOnePtr = CastE( TPtr(TVoid([]), []) , negativeOne )
 
 let debug_print lvl s = 
   try begin 
@@ -378,6 +383,7 @@ let getOrCreateUniqtypeGlobal m concreteType globals =
       in 
       (m, foundVar, globals)
   with Not_found -> 
+     debug_print 0 ("Creating new uniqtype global for type named " ^ typename ^ "\n");
      let typeStructUniqtype = try findStructTypeByName globals "uniqtype" 
         with Not_found -> failwith "no struct uniqtype in file; why is libcrunch_cil_inlines not included?"
      in
@@ -397,11 +403,13 @@ let getOrCreateUniqtypeGlobal m concreteType globals =
      (newMap, newGlobal, newGlobals)
 
 let ensureUniqtypeGlobal concreteType enclosingFile (uniqtypeGlobals : Cil.global UniqtypeMap.t ref) = 
+    debug_print 0 ("Ensuring we have uniqtype for " ^ (typsigToString concreteType) ^ "\n");
     let (updatedMap, uniqtypeGlobalVar, updatedGlobals)
      = getOrCreateUniqtypeGlobal !uniqtypeGlobals concreteType enclosingFile.globals
     in 
     enclosingFile.globals <- updatedGlobals; 
     uniqtypeGlobals := updatedMap;
+    debug_print 0 ("Got uniqtype for " ^ (typsigToString concreteType) ^ "\n");
     uniqtypeGlobalVar
 
 let findCompDefinitionInFile isStruct name wholeFile = 
