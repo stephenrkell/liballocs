@@ -27,7 +27,8 @@ __liballocs_walk_subobjects_spanning_rec(
 	const signed target_offset_within_u,
 	struct uniqtype *u, 
 	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth,
-		struct uniqtype *containing, struct contained *contained_pos, void *arg),
+		struct uniqtype *containing, struct contained *contained_pos, 
+		signed containing_span_start_offset, void *arg),
 	void *arg
 	);
 

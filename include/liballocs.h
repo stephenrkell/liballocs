@@ -351,7 +351,8 @@ __liballocs_walk_subobjects_spanning(
 	const signed target_offset_within_u,
 	struct uniqtype *u, 
 	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth,
-		struct uniqtype *containing, struct contained *contained_pos, void *arg),
+		struct uniqtype *containing, struct contained *contained_pos, 
+		signed containing_span_start_offset, void *arg),
 	void *arg
 	)
 __attribute__((always_inline,gnu_inline));
@@ -362,7 +363,8 @@ __liballocs_walk_subobjects_spanning_rec(
 	const signed target_offset_within_u,
 	struct uniqtype *u, 
 	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth,
-		struct uniqtype *containing, struct contained *contained_pos, void *arg),
+		struct uniqtype *containing, struct contained *contained_pos, 
+		signed containing_span_start_offset, void *arg),
 	void *arg
 	);
 
@@ -372,7 +374,8 @@ __liballocs_walk_subobjects_spanning(
 	const signed target_offset_within_u,
 	struct uniqtype *u, 
 	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth,
-		struct uniqtype *containing, struct contained *contained_pos, void *arg),
+		struct uniqtype *containing, struct contained *contained_pos, 
+		signed containing_span_start_offset, void *arg),
 	void *arg
 	)
 {
@@ -387,7 +390,8 @@ __liballocs_walk_subobjects_spanning_rec(
 	const signed target_offset_within_u,
 	struct uniqtype *u, 
 	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth, 
-		struct uniqtype *containing, struct contained *contained_pos, void *arg),
+		struct uniqtype *containing, struct contained *contained_pos, 
+		signed containing_span_start_offset, void *arg),
 	void *arg
 	)
 {
@@ -406,7 +410,7 @@ __liballocs_walk_subobjects_spanning_rec(
 			__liballocs_private_assert(target_offset_within_u < u->pos_maxoff,
 				"offset not within subobject", __FILE__, __LINE__, __func__);
 			int ret = cb(element_uniqtype, accum_offset + skip_sz, accum_depth + 1u, 
-				u, element_contained_in_u, arg);
+				u, element_contained_in_u, accum_offset, arg);
 			if (ret) return ret;
 			// tail-recurse
 			else return __liballocs_walk_subobjects_spanning_rec(
@@ -456,7 +460,7 @@ __liballocs_walk_subobjects_spanning_rec(
 				if (target_offset_within_u < u->pos_maxoff)
 				{
 					int ret = cb(u->contained[i_ind].ptr, accum_offset + offset,
-							accum_depth + 1u, u, &u->contained[i_ind], arg);
+							accum_depth + 1u, u, &u->contained[i_ind], accum_offset, arg);
 					if (ret) return ret;
 					else
 					{
