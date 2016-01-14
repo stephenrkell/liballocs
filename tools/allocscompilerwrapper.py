@@ -91,7 +91,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
         "-fno-omit-frame-pointer", "-ffunction-sections"]
     
     def fixupDotO(self, filename, errfile):
+        self.debugMsg("Fixing up .o file: %s\n" % filename)
         if self.commandStopsBeforeObjectOutput():
+            self.debugMsg("No .o file output.\n")
             return
         # do we need to unbind? 
         # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
@@ -324,7 +326,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         extraFlags += ["-fPIC"]
                     else:
                         pass
-                    stubs_pp_cmd = ["cc", "-E"] + extraFlags + ["-o", stubs_pp, \
+                    stubs_pp_cmd = ["cc", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
                         "-I" + self.getLibAllocsBaseDir() + "/tools"] \
                         + [arg for arg in passedThroughArgs if arg.startswith("-D")] \
                         + [stubsfile.name]
@@ -481,9 +483,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
     
     def parseInputAndOutputFiles(self, args):
         return CompilerWrapper.parseInputAndOutputFiles(self, args)
-    
-    def fixupDotO(self, filename, errfile):
-        return CompilerWrapper.fixupDotO(self, filename, errfile)
 
     def makeDotOAndPassThrough(self, argv, customArgs, inputFiles):
         return CompilerWrapper.makeDotOAndPassThrough(self, argv, customArgs, inputFiles)
