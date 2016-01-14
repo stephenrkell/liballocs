@@ -147,13 +147,13 @@ let negativeOne = Const(CInt64((Int64.of_int (0-1)), IInt, None))
 let negativeOnePtr = CastE( TPtr(TVoid([]), []) , negativeOne )
 
 let debug_print lvl s = 
-  try begin 
+  let level = try begin 
     let levelString = (Sys.getenv "DEBUG_CC")
     in
-    let level = int_of_string levelString
-    in
-    if level >= lvl then output_string Pervasives.stderr s else ()
-  end with Not_found -> () | Failure(_) -> ()
+    int_of_string levelString
+  end with Not_found -> 0 | Failure(_) -> 0
+  in
+  if level >= lvl then (output_string Pervasives.stderr s; flush Pervasives.stderr) else ()
 
 (* HACKed realpath for now: *)
 let abspath f =
@@ -272,6 +272,7 @@ let symnameFromSig ts = "__uniqtype_" ^ "" ^ "_" ^ (barenameFromSig ts)
 
 (* CIL doesn't give us a const void * type builtin, so we define one. *)
 let voidConstPtrType = TPtr(TVoid([Attr("const", [])]),[])
+let voidConstPtrPtrType = TPtr(TPtr(TVoid([Attr("const", [])]),[]), [])
 (* ditto for some more * *)
 let ulongPtrType = TPtr(TInt(IULong, []),[])
 let voidPtrPtrType = TPtr(TPtr(TVoid([]),[]),[])
