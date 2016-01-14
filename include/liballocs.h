@@ -966,6 +966,8 @@ __liballocs_get_alloc_info
 				heap_info->alloc_site = (uintptr_t) alloc_uniqtype /* | 0x0ul */;
 #endif
 			}
+
+			if (out_alloc_size_bytes) *out_alloc_size_bytes = alloc_chunksize - sizeof (struct insert);
 			
 			// if we didn't get an alloc uniqtype, we abort
 			if (!alloc_uniqtype) 
@@ -978,10 +980,8 @@ __liballocs_get_alloc_info
 				else ++__liballocs_aborted_stack;
 				return err;
 			}
-			
-			// else do the other outputs
+			// else output it
 			if (out_alloc_uniqtype) *out_alloc_uniqtype = alloc_uniqtype;
-			if (out_alloc_size_bytes) *out_alloc_size_bytes = alloc_chunksize - sizeof (struct insert);
 			break;
 		}
 		case STATIC:
