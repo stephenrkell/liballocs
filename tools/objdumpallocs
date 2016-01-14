@@ -283,4 +283,5 @@ while read address sym offset; do
 done <"$allocsites_tmpfile" | \
    pad_numbers | sort -t$'\t' -k3 -k4
 
-# rm -f "$tmpfile"
+# uncomment to help debugging
+rm -f "$tmpfile"
