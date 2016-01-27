@@ -114,6 +114,10 @@ size_t __wrap_malloc_usable_size (void *ptr)
 }
 #pragma GCC pop_options
 
+/* Libraries that extend us can define this to control mmap placement policy. */
+void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
+                  int *p_fd, off_t *p_offset, const void *caller) __attribute__((weak));
+
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
 {
@@ -137,6 +141,10 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		assert(orig_mmap);
 	}
 	
+	if (&__liballocs_nudge_mmap)
+	{
+		__liballocs_nudge_mmap(&addr, &length, &prot, &flags, &fd, &offset, __builtin_return_address(0));
+	}
 	void *ret = orig_mmap(addr, length, prot, flags, fd, offset);
 	if (ret != MAP_FAILED)
 	{
