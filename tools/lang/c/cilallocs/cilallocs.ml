@@ -276,6 +276,7 @@ let voidConstPtrPtrType = TPtr(TPtr(TVoid([Attr("const", [])]),[]), [])
 (* ditto for some more * *)
 let ulongPtrType = TPtr(TInt(IULong, []),[])
 let voidPtrPtrType = TPtr(TPtr(TVoid([]),[]),[])
+let boolType = TInt(IBool, [])
 
 (* Returns true if the given lvalue offset ends in a bitfield access. *) 
 let rec is_bitfield lo = match lo with
