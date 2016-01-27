@@ -89,7 +89,7 @@ static void (__attribute__((constructor)) init)(void)
 		/* Mmap our region. We map one byte for every page in the user address region. */
 		assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE);
 		l0index = MEMTABLE_NEW_WITH_TYPE(mapping_num_t, PAGE_SIZE, (void*) 0, (void*) STACK_BEGIN);
-		assert(l0index != MAP_FAILED);
+		if (l0index == MAP_FAILED) abort();
 	}
 }
 

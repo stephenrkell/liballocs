@@ -942,7 +942,7 @@ int __liballocs_global_init(void)
 	 * So quadruple up the size of the table accordingly. */
 	__liballocs_allocsmt = MEMTABLE_NEW_WITH_TYPE(allocsmt_entry_type, allocsmt_entry_coverage, 
 		(void*) 0, (void*) (STACK_BEGIN << 2));
-	assert(__liballocs_allocsmt != MAP_FAILED);
+	if (__liballocs_allocsmt == MAP_FAILED) abort();
 	
 	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_for_one_object, NULL);
 	assert(ret_allocsites == 0);
