@@ -14,6 +14,8 @@ typedef bool _Bool;
 #endif
 
 #include <sys/types.h>
+#include <alloca.h>
+#include <string.h>
 #include <link.h>
 #include "addrmap.h"
 #include "heap_index.h"
@@ -1074,6 +1076,26 @@ __liballocs_get_type_inside(void *obj, struct uniqtype *t);
 struct uniqtype * 
 __liballocs_get_innermost_type(void *obj);
 
+inline 
+const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
+{
+	/* HACK: this all needs to go away, once we overhaul uniqtype's layout. */
+	Dl_info i = dladdr_with_cache(t);
+	if (i.dli_sname)
+	{
+		char *names_name = alloca(strlen(i.dli_sname) + sizeof "_subobj_names" + 1); /* HACK: necessary? */
+		strncpy(names_name, i.dli_sname, strlen(i.dli_sname));
+		strcat(names_name, "_subobj_names");
+		void *handle = dlopen(i.dli_fname, RTLD_NOW | RTLD_NOLOAD);
+		if (handle)
+		{
+			const char **names_name_array = (const char**) dlsym(handle, names_name);
+			dlclose(handle);
+			return names_name_array;
+		}
+	}
+	return NULL;
+}
 
 // struct uniqtype * 
 // get_outermost_type(void *obj, struct uniqtype *bound)
