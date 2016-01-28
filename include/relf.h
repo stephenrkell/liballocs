@@ -336,7 +336,7 @@ ElfW(Sym) *hash_lookup(ElfW(Word) *hash, ElfW(Sym) *symtab, const char *strtab, 
 {
 	ElfW(Sym) *found_sym = NULL;
 	ElfW(Word) nbucket = hash[0];
-	ElfW(Word) nchain = hash[1];
+	ElfW(Word) nchain __attribute__((unused)) = hash[1];
 	/* gcc accepts these funky "dependent types", but frontc doesn't */
 	ElfW(Word) (*buckets)[/*nbucket*/] = (void*) &hash[2];
 	ElfW(Word) (*chains)[/*nchain*/] = (void*) &hash[2 + nbucket];
