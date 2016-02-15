@@ -1,3 +1,12 @@
+liballocs is a run-time library (and related toolchain extensions) which
+somewhat-transparently adds a reflective notion of "allocations" to Unix
+processes. 
+
+To understand what that means, you probably have to read the paper
+<http://www.cl.cam.ac.uk/~srk31/#onward15> from Onward! 2015. Or for a
+brief introduction you could watch the talk from Strange Loop 2014.
+<http://www.youtube.com/watch?v=LwicN2u6Dro>
+
 Here are some things you'll need in order to build this software.
 
 * GNU make 3.81 or later
@@ -18,8 +27,8 @@ in order! You have a choice: build and install them, like third-party
 libraries, or simply build them and use their build tree in-place. For
 the latter, you'll need to set the relevant environment variables to
 point to them at configure time. If you expect to be hacking on any of
-my code, I recommend this approach, because your hacking might easily
-stray into these other codebases.
+my code, I recommend the latter approach, because your hacking might
+easily stray into these other codebases.
 
 * libc++fileno
 * libsrk31c++
