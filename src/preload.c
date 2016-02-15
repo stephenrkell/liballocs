@@ -278,22 +278,22 @@ void *dlopen(const char *filename, int flag)
 }
 
 #define MAX_MAPPINGS 16
-struct mapping
+struct amapping
 {
 	void *base;
 	size_t size;
 };
-struct mapping_set
+struct amapping_set
 {
 	const char *filename;
 	void *handle;
 	int nmappings;
-	struct mapping mappings[MAX_MAPPINGS];
+	struct amapping mappings[MAX_MAPPINGS];
 };
 
 static int gather_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
-	struct mapping_set *mappings = (struct mapping_set *) data;
+	struct amapping_set *mappings = (struct amapping_set *) data;
 	const char *filename = mappings->filename;
 	if (0 == strcmp(filename, info->dlpi_name))
 	{
@@ -309,7 +309,7 @@ static int gather_mappings_cb(struct dl_phdr_info *info, size_t size, void *data
 						info->dlpi_phdr[i].p_vaddr);
 				uintptr_t end = MAPPING_END_FROM_PHDR_VADDR(((struct link_map *) mappings->handle)->l_addr,
 						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_memsz);
-				mappings->mappings[mappings->nmappings++] = (struct mapping) { (void*) base, end - base };
+				mappings->mappings[mappings->nmappings++] = (struct amapping) { (void*) base, end - base };
 			}
 		}
 	
@@ -339,7 +339,7 @@ int dlclose(void *handle)
 		/* Use dl_iterate_phdr to gather the mappings that we will 
 		 * remove from the tree *if* the dlclose() actually unloads
 		 * the library. */
-		struct mapping_set mappings;
+		struct amapping_set mappings;
 		mappings.filename = copied_filename;
 		mappings.handle = handle;
 		mappings.nmappings = 0;

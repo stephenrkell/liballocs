@@ -7,14 +7,6 @@
 #include <wchar.h>
 #include "liballocs_private.h"
 
-#define MAPPING_IN_USE(m) ((m)->begin && (m)->end)
-struct mapping
-{
-	void *begin;
-	void *end;
-	struct mapping_info n;
-};
-
 #ifndef NO_PTHREADS
 #include <pthread.h>
 #define BIG_LOCK \
@@ -141,7 +133,7 @@ static struct mapping *find_free_mapping(void)
 			return p;
 		}
 	}
-	assert(0);
+	abort();
 }
 
 static _Bool
@@ -278,7 +270,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 					/* for stack, upper bound must be unchanged */
 					&& mappings[i_map].end == (char*) base + s)
 				{
-					_Bool contracting = base > mappings[i_map].begin;
+					_Bool contracting __attribute__((unused)) = base > mappings[i_map].begin;
 					/* assert that we're not contracting -- we're expanding! */
 					assert(!contracting);
 
@@ -317,7 +309,6 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 	}
 	
 	/* If we got here, we've unmapped anything overlapping us. */
-	
 	mapping_num_t mapping_num = l0index[PAGENUM(base)];
 	//SANITY_CHECK_MAPPING(&mappings[mapping_num]);
 	assert(mapping_num == 0);
@@ -357,7 +348,7 @@ struct mapping *create_or_extend_mapping(void *base, size_t s, mapping_flags_t f
 			&& mappings[our_end_overlaps].n.f.kind == HEAP)
 		{
 			// move our end earlier, but not to earlier than base
-			void *cur_end = (char *) base + s;
+			void *cur_end __attribute__((unused)) = (char *) base + s;
 			void *new_end = MAXPTR(base, mappings[our_end_overlaps].begin);
 			s = (char*) new_end - (char*) base;
 		}
@@ -841,15 +832,15 @@ mapping_lookup(void *base)
 }
 
 size_t
-mapping_get_overlapping(struct mapping_info **out_begin, 
+mapping_get_overlapping(unsigned short *out_begin, 
 		size_t out_size, void *begin, void *end) __attribute__((visibility("hidden")));
-size_t mapping_get_overlapping(struct mapping_info **out_begin, 
+size_t mapping_get_overlapping(unsigned short *out_begin, 
 		size_t out_size, void *begin, void *end)
 {
 	int lock_ret;
 	BIG_LOCK
 	
-	struct mapping_info **out = out_begin;
+	unsigned short *out = out_begin;
 	uintptr_t end_pagenum = PAGENUM(end);
 	uintptr_t begin_pagenum = PAGENUM(begin);
 	while (out - out_begin < out_size)
@@ -861,7 +852,7 @@ size_t mapping_get_overlapping(struct mapping_info **out_begin,
 		if (begin_pagenum >= end_pagenum) break; // normal termination case
 		
 		mapping_num_t num = l0index[begin_pagenum];
-		*out++ = &mappings[num].n;
+		*out++ = num;
 		
 		// advance begin_pagenum to one past the end of this mapping
 		begin_pagenum = PAGENUM(mappings[num].end);

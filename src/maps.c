@@ -195,7 +195,7 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 	if (size > 0 && ent->first < STACK_BEGIN) // don't add kernel pages
 	{
 		void *obj = (void *)(uintptr_t) ent->first;
-		void *obj_lastbyte = (void *)((uintptr_t) ent->second - 1);
+		void *obj_lastbyte __attribute__((unused)) = (void *)((uintptr_t) ent->second - 1);
 
 		enum object_memory_kind kind = UNKNOWN;
 		void *data_ptr;
@@ -283,44 +283,60 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 		 * state by throwing them away, cf. heap mapping extensions 
 		 * where we really want to keep what we know). */
 		#define MAX_OVERLAPPING 32
-		struct mapping_info *overlapping[MAX_OVERLAPPING];
+		unsigned short overlapping[MAX_OVERLAPPING];
 		size_t n_overlapping = mapping_get_overlapping(
 				&overlapping[0], MAX_OVERLAPPING, obj, (char*) obj + size);
 		assert(n_overlapping < MAX_OVERLAPPING); // '<=' would mean we might have run out of space
 
 		// if we have nothing overlapping, we should definitely add it....
 		_Bool need_to_add = (n_overlapping == 0);
-
 		mapping_flags_t f = { .kind = kind, .r = (ent->r == 'r'), .w = (ent->w == 'w'), .x = (ent->x == 'x') };
 
-		/* Else some other number of overlapping mappings exists. */
+		/* Sanity-check the overlapping mappings we found. */
 		for (unsigned i = 0; i < n_overlapping; ++i)
 		{
+			/* If we enter this loop, need_to_add is false. */
 			/* Handle the common case where the mapping we saw is already there
 			 * with the right kind and, where appropriate, filename. 
 			 * Note that the mappings's dimensions needn't be the same, because we merge
 			 * adjacent entries, etc.. */
-			if ((mapping_flags_equal(overlapping[i]->f, f)
+			struct mapping *o = &mappings[overlapping[i]];
+			_Bool static_vs_mapped_disagreement = 
+				((o->n.f.kind == STATIC && f.kind == MAPPED_FILE)
+					|| (o->n.f.kind == MAPPED_FILE && f.kind == STATIC)
+				);
+			_Bool extents_differ = (o->begin != (void*) ent->first)
+					|| (o->end != (void*) ent->second);
+			
+			need_to_add |= extents_differ;
+					
+			if ((mapping_flags_equal(o->n.f, f)
 					/* match STATIC and MAPPED_FILE interchangeably, because 
 					 * we can't always tell the difference */
-					|| ((overlapping[i]->f.kind == STATIC && f.kind == MAPPED_FILE)
-						|| (overlapping[i]->f.kind == MAPPED_FILE && f.kind == STATIC)
-					)
+					|| static_vs_mapped_disagreement
 				)
-				&& (overlapping[i]->what != DATA_PTR 
+				&& (o->n.what != DATA_PTR 
 					|| // we do have a data ptr
-						mapping_info_has_data_ptr_equal_to(f, overlapping[i], data_ptr))) 
+						mapping_info_has_data_ptr_equal_to(f, &o->n, data_ptr))) 
 					{
-						return 0; // keep going
+						/* This mapping is "matching, except maybe for dimensions". 
+						 * Ordinary sloppy handling will deal with this overlap.
+						 * We need to force the addition in the static or mapped case.
+						 * (FIXME: won't this fail? We use the strict mapping_add, below.) */
+						need_to_add |= static_vs_mapped_disagreement;
+						continue; 
 					};
 
+			/* Now the stranger cases. We delete the overlapping mappings,
+			 * so will always add the new one. But we want to warn when
+			 * strange things happen. */
 			need_to_add = 1;
 
 			// if we got here, is this a different mapped file? it's clearly not mapped there any more
-			if (overlapping[i]->f.kind == STATIC || overlapping[i]->f.kind == MAPPED_FILE)
+			if (o->n.f.kind == STATIC || o->n.f.kind == MAPPED_FILE)
 			{
-				assert(overlapping[i]->what == DATA_PTR);
-				const char *existing_data_ptr = overlapping[i]->un.data_ptr;
+				assert(o->n.what == DATA_PTR);
+				const char *existing_data_ptr = o->n.un.data_ptr;
 				if ((data_ptr != NULL && existing_data_ptr == NULL)
 						|| (data_ptr == NULL && existing_data_ptr != NULL)
 						|| (data_ptr != NULL && existing_data_ptr != NULL && 
@@ -328,11 +344,11 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 				{
 					debug_printf(2, "a static or mapped-file mapping, kind %d, data_ptr \"%s\", overlapping %p-%p "
 							"seems to have gone away: now covered by kind %d, data_ptr \"%s\"\n",
-						overlapping[i]->f.kind, (const char *) existing_data_ptr, 
+						o->n.f.kind, (const char *) existing_data_ptr, 
 						obj, (char*) obj + size, 
 						f.kind, (const char *) data_ptr);
-					mapping_del_node(overlapping[i]);
-					return 0; // keep going
+					mapping_del_node(&o->n);
+					continue; // keep going
 				}
 
 				/* If we got here, it means we have a static mapping which compared 
@@ -342,10 +358,10 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 				// Try just deleting this node. 
 				debug_printf(2, "skipping POSSIBLY NOT static or mapped-file mapping (\"%s\") "
 					"overlapping %p-%p and apparently already present\n",
-					(const char *) overlapping[i]->un.data_ptr, obj, (char*) obj + size);
+					(const char *) o->n.un.data_ptr, obj, (char*) obj + size);
 				//goto continue_loop;
-				mapping_del_node(overlapping[i]);
-				return 0; // keep going
+				mapping_del_node(&o->n);
+				continue; // keep going
 			}
 		}
 

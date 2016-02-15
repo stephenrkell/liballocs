@@ -1,5 +1,11 @@
+#ifndef LIBALLOCS_MAPS_H_
+#define LIBALLOCS_MAPS_H_
+
 #include <string.h>
 #include <unistd.h>
+
+/* Don't include stdio -- trap-syscalls won't like it, for example. */
+int sscanf(const char *str, const char *format, ...);
 
 inline ssize_t get_a_line(char *buf, size_t size, int fd)
 {
@@ -62,4 +68,52 @@ inline int for_each_maps_entry(int fd, char *linebuf, size_t bufsz, struct proc_
 	}
 	return 0;
 	#undef NUM_FIELDS
+	
+	/* Here's how we open-coded it in trap-syscalls's saw_mapping(), 
+	 * before we started using selected C library calls in there.
+void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
+{
+	const char *line_pos = line_begin_pos;
+	unsigned long begin_addr = read_hex_num(&line_pos, line_end_pos);
+	++line_pos;
+	unsigned long end_addr = read_hex_num(&line_pos, line_end_pos);
+	++line_pos;
+	char r = *line_pos++;
+	char w = *line_pos++;
+	char x = *line_pos++;
+	char p __attribute__((unused)) = *line_pos++;
+	const char *newline = strchr(line_pos, '\n');
+	if (!newline) newline = line_pos;
+	const char *slash = strchr(line_pos, '/');
+	const char *filename_src = NULL;
+	size_t filename_sz;
+	if (slash && slash < newline && *(slash - 1) == ' ')
+	{
+		filename_src = slash;
+		const char *filename_end = strchr(filename_src, '\n');
+		if (!filename_end)
+		{
+			// hmm -- slash but no newline
+			filename_end = line_end_pos;
+		}
+		filename_sz = filename_end - filename_src;
+	}
+	else
+	{
+		// no filename present
+		filename_sz = 0;
+		filename_src = line_pos;
+	}
+	
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+	char filename[PATH_MAX + 1];
+	size_t copy_sz = (filename_sz < PATH_MAX) ? filename_sz : PATH_MAX;
+	strncpy(filename, filename_src, copy_sz);
+	filename[copy_sz] = '\0';
+	 
+	 */
 }
+
+#endif

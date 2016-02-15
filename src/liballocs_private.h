@@ -72,7 +72,7 @@ void mapping_del(void *base, size_t s) __attribute__((visibility("hidden")));
 void mapping_del_node(struct mapping_info *n) __attribute__((visibility("hidden")));
 int mapping_lookup_exact(struct mapping_info *n, void *begin, void *end) __attribute__((visibility("hidden")));
 size_t
-mapping_get_overlapping(struct mapping_info **out_begin, 
+mapping_get_overlapping(unsigned short *out_begin, 
 		size_t out_size, void *begin, void *end) __attribute__((visibility("hidden")));
 // these ones are public, so use protected visibility
 void __liballocs_add_missing_maps(void) VIS(protected);
@@ -131,6 +131,15 @@ extern unsigned long __liballocs_hit_stack_case;
 extern unsigned long __liballocs_hit_static_case;
 extern unsigned long __liballocs_aborted_unindexed_heap;
 extern unsigned long __liballocs_aborted_unrecognised_allocsite;
+
+struct mapping
+{
+	void *begin;
+	void *end;
+	struct mapping_info n;
+};
+#define MAPPING_IN_USE(m) ((m)->begin && (m)->end)
+extern struct mapping mappings[];
 
 #ifdef __cplusplus
 } /* end extern "C" */

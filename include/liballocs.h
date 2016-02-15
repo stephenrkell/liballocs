@@ -707,7 +707,7 @@ __liballocs_get_alloc_info
 	struct suballocated_chunk_rec *containing_suballoc;
 	size_t alloc_chunksize;
 	struct insert *heap_info;
-	uintptr_t alloc_site_addr = 0;
+	uintptr_t alloc_site_addr __attribute__((unused)) = 0;
 	switch(k)
 	{
 		case STACK:
@@ -722,7 +722,7 @@ __liballocs_get_alloc_info
 			 * the stack pointer not moving between getcontext and the sanity check.
 			 * FIXME: better would be to write this function in C90 and compile with
 			 * special flags. */
-			unw_cursor_t cursor, saved_cursor, prev_saved_cursor;
+			unw_cursor_t cursor, saved_cursor, prev_saved_cursor __attribute__((unused));
 			unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0, callee_ip __attribute__((unused));
 			int unw_ret;
 			unw_context_t unw_context;
