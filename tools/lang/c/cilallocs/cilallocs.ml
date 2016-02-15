@@ -47,6 +47,8 @@ open Pretty
 open Cil
 module NamedTypeMap = Map.Make(String)
 
+let list_empty l = not (List.exists (fun x -> true) l)
+
 let expToString e      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp e))
 let instToString i     = (Pretty.sprint 80 (Pretty.dprintf "%a" d_instr i))
 let lvalToString lv    = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv))
@@ -424,6 +426,20 @@ let findCompDefinitionInFile isStruct name wholeFile =
             end
     in
     findCompGlobal isStruct name wholeFile.globals
+
+let findGlobalVarInFile name wholeFile = 
+    let rec findGlobalVar n globals = 
+        match globals with
+            []       -> None
+        |   g :: gs  -> begin match g with
+                GVar(vi, _, _) -> if vi.vname = n then Some(vi) else 
+                    findGlobalVar n gs
+              | GVarDecl(vi, _) ->  if vi.vname = n then Some(vi) else 
+                    findGlobalVar n gs
+              | _ -> findGlobalVar n gs
+            end
+    in
+    findGlobalVar name wholeFile.globals
 
 let rec tsIsUndefinedType ts wholeFile = 
     let rec anyTsIsUndefined tss = match tss with
