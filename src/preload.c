@@ -33,8 +33,8 @@ size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("pr
 #include "liballocs_private.h"
 
 /* We should be safe to use it once malloc is initialized. */
-// #define safe_to_use_mappings (__liballocs_is_initialized)
-#define safe_to_use_mappings (l0index)
+// #define safe_to_use_bigalloc (__liballocs_is_initialized)
+#define safe_to_use_bigalloc (pageindex)
 #define safe_to_call_dlsym (safe_to_call_malloc)
 
 /* some signalling to malloc hooks */
@@ -83,7 +83,7 @@ size_t __wrap_malloc_usable_size (void *ptr)
 	 * and handle it appropriately. 
 	 * 
 	 * How can we detect the stack case quickly?
-	 * We could just ask the l0index.
+	 * We could just ask the pageindex.
 	 * 
 	 * If we wanted a faster-but-less-general common case, 
 	 * - If ptr is on the same page as our thread's rsp, 
@@ -128,7 +128,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	 * in these cases.
 	 */
 
-	if (!safe_to_use_mappings || !safe_to_call_dlsym)
+	if (!safe_to_use_bigalloc || !safe_to_call_dlsym)
 	{
 		// call via syscall and skip hooking logic
 		return (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
@@ -155,7 +155,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		};
 		const char *data_ptr = (fd == -1) ? NULL : filename_for_fd(fd);
 		/* Add to the prefix tree */
-		mapping_add(ret, ROUND_UP_TO_PAGE_SIZE(length), f, data_ptr);
+		bigalloc_add_l0(ret, ROUND_UP_TO_PAGE_SIZE(length), f, data_ptr);
 	}
 	return ret;
 }
@@ -171,13 +171,13 @@ int munmap(void *addr, size_t length)
 		assert(orig_munmap);
 	}
 	
-	if (!safe_to_use_mappings) return orig_munmap(addr, length);
+	if (!safe_to_use_bigalloc) return orig_munmap(addr, length);
 	else
 	{
 		int ret = orig_munmap(addr, length);
 		if (ret == 0)
 		{
-			mapping_del(addr, ROUND_UP_TO_PAGE_SIZE(length));
+			bigalloc_del_l0(addr, ROUND_UP_TO_PAGE_SIZE(length));
 		}
 		return ret;
 	}
@@ -205,7 +205,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 			? orig_mremap(old_addr, old_size, new_size, flags, new_address) \
 			: orig_mremap(old_addr, old_size, new_size, flags))
 	
-	if (!safe_to_use_mappings) 
+	if (!safe_to_use_bigalloc) 
 	{
 		return orig_call;
 	}
@@ -214,11 +214,11 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 		void *ret = orig_call;
 		if (ret != MAP_FAILED)
 		{
-			struct mapping_info *cur = mapping_lookup(old_addr);
+			struct big_allocation *cur = bigalloc_lookup_l0(old_addr);
 			assert(cur != NULL);
-			struct mapping_info saved = *cur;
-			mapping_del(old_addr, ROUND_UP_TO_PAGE_SIZE(old_size));
-			mapping_add_full(ret, ROUND_UP_TO_PAGE_SIZE(new_size), &saved);
+			struct big_allocation saved = *cur;
+			bigalloc_del_l0(old_addr, ROUND_UP_TO_PAGE_SIZE(old_size));
+			bigalloc_add_l0_full(ret, ROUND_UP_TO_PAGE_SIZE(new_size), saved.f, saved.meta);
 		}
 		return ret;
 	}
@@ -249,7 +249,7 @@ void *dlopen(const char *filename, int flag)
 		/* Have we just opened a new object? If filename was null, 
 		 * we haven't; if ret is null; we haven't; if NOLOAD was passed,
 		 * we haven't. Otherwise we *might* have done, but we still
-		 * can't be sure. We'll have to make __liballocs_add_all_mappings_cb
+		 * can't be sure. We'll have to make add_all_loaded_segments_cb
 		 * tolerant of re-adding. */
 		if (filename != NULL && ret != NULL && !(flag & RTLD_NOLOAD))
 		{
@@ -257,7 +257,7 @@ void *dlopen(const char *filename, int flag)
 		
 			/* Note that in general we will get one mapping for every 
 			 * LOAD phdr. So we use dl_iterate_phdr. */
-			int dlpi_ret = dl_iterate_phdr(__liballocs_add_all_mappings_cb, 
+			int dlpi_ret = dl_iterate_phdr(add_all_loaded_segments_cb, 
 				((struct link_map *) ret)->l_name);
 			assert(dlpi_ret != 0);
 		
@@ -330,7 +330,7 @@ int dlclose(void *handle)
 		assert(orig_dlclose);
 	}
 	
-	if (!safe_to_use_mappings) return orig_dlclose(handle);
+	if (!safe_to_use_bigalloc) return orig_dlclose(handle);
 	else
 	{
 		char *copied_filename = strdup(((struct link_map *) handle)->l_name);
@@ -359,7 +359,7 @@ int dlclose(void *handle)
 				// yes, it was unloaded
 				for (int i = 0; i < mappings.nmappings; ++i)
 				{
-					mapping_del(mappings.mappings[i].base, 
+					bigalloc_del_l0(mappings.mappings[i].base, 
 						mappings.mappings[i].size);
 				}
 			}

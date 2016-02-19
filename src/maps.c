@@ -15,7 +15,7 @@
 _Bool initialized_maps __attribute__((visibility("hidden")));
 static _Bool trying_to_initialize;
 
-void __liballocs_init_l0(void)
+void __liballocs_init_pageindex(void)
 {
 	if (!initialized_maps && !trying_to_initialize)
 	{
@@ -23,17 +23,17 @@ void __liballocs_init_l0(void)
 		/* First use dl_iterate_phdr to check that all library mappings are in the tree 
 		 * with a STATIC kind. Since we hook dlopen(), at least from the point where we're
 		 * initialized, we should only have to do this on startup.  */
-		dl_iterate_phdr(__liballocs_add_all_mappings_cb, NULL);
+		dl_iterate_phdr(add_all_loaded_segments_cb, NULL);
 
 		/* Now fill in the rest from /proc. */
-		__liballocs_add_missing_maps();
+		__liballocs_add_missing_mappings_from_proc();
 		initialized_maps = 1;
 		trying_to_initialize = 0;
 	}
 }
 
 __attribute__((visibility("hidden")))
-int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
+int add_all_loaded_segments_cb(struct dl_phdr_info *info, size_t size, void *data)
 {
 	static _Bool running;
 	/* HACK: if we have an instance already running, quit early. */
@@ -126,7 +126,7 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 							 * got created as an anonymous section? Why wouldn't that happen here? */
 							mapping_flags_t ro_f = f;
 							ro_f.w = 0;
-							struct mapping_info *added = mapping_add(
+							struct big_allocation *added = bigalloc_add_l0(
 								(void*) relro_rounded_up_base, 
 								relro_rounded_down_end_of_mem - relro_rounded_up_base,
 								ro_f, data_ptr);
@@ -136,7 +136,7 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 							/* Add a pre-mapping if we have to. */
 							if (relro_rounded_up_base > rounded_down_base)
 							{
-								struct mapping_info *added = mapping_add(
+								struct big_allocation *added = bigalloc_add_l0(
 									(void*) rounded_down_base, 
 									relro_rounded_up_base - rounded_down_base,
 									f, data_ptr);
@@ -152,7 +152,7 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 				
 				if (rounded_down_base < rounded_up_end_of_file)
 				{
-					struct mapping_info *added = mapping_add(
+					struct big_allocation *added = bigalloc_add_l0(
 						(void*) rounded_down_base, 
 						rounded_up_end_of_file - rounded_down_base,
 						f, data_ptr);
@@ -163,7 +163,7 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 				if (rounded_up_end_of_mem > rounded_up_end_of_file
 						&& rounded_up_end_of_mem > rounded_down_base)
 				{
-					struct mapping_info *added = mapping_add(
+					struct big_allocation *added = bigalloc_add_l0(
 						(void*) rounded_up_end_of_file, 
 						rounded_up_end_of_mem - rounded_up_end_of_file,
 						f, NULL);
@@ -181,7 +181,6 @@ int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void
 	
 	// keep going
 	return 0;
-	
 }
 
 static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg)
@@ -189,7 +188,7 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 	unsigned long size = ent->second - ent->first;
 	
 	// if this mapping looks like a memtable, we skip it
-	if (size > BIGGEST_MAPPING) return 0; // keep going
+	if (size > BIGGEST_BIGALLOC) return 0; // keep going
 
 	// ... but if we do, and it's not square-bracketed and nonzero-sizes, it's a mapping
 	if (size > 0 && ent->first < STACK_BEGIN) // don't add kernel pages
@@ -284,7 +283,7 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 		 * where we really want to keep what we know). */
 		#define MAX_OVERLAPPING 32
 		unsigned short overlapping[MAX_OVERLAPPING];
-		size_t n_overlapping = mapping_get_overlapping(
+		size_t n_overlapping = bigalloc_get_overlapping_l0(
 				&overlapping[0], MAX_OVERLAPPING, obj, (char*) obj + size);
 		assert(n_overlapping < MAX_OVERLAPPING); // '<=' would mean we might have run out of space
 
@@ -300,24 +299,24 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 			 * with the right kind and, where appropriate, filename. 
 			 * Note that the mappings's dimensions needn't be the same, because we merge
 			 * adjacent entries, etc.. */
-			struct mapping *o = &mappings[overlapping[i]];
+			struct big_allocation *o = &big_allocations[overlapping[i]];
 			_Bool static_vs_mapped_disagreement = 
-				((o->n.f.kind == STATIC && f.kind == MAPPED_FILE)
-					|| (o->n.f.kind == MAPPED_FILE && f.kind == STATIC)
+				((o->f.kind == STATIC && f.kind == MAPPED_FILE)
+					|| (o->f.kind == MAPPED_FILE && f.kind == STATIC)
 				);
 			_Bool extents_differ = (o->begin != (void*) ent->first)
 					|| (o->end != (void*) ent->second);
 			
 			need_to_add |= extents_differ;
 					
-			if ((mapping_flags_equal(o->n.f, f)
+			if ((mapping_flags_equal(o->f, f)
 					/* match STATIC and MAPPED_FILE interchangeably, because 
 					 * we can't always tell the difference */
 					|| static_vs_mapped_disagreement
 				)
-				&& (o->n.what != DATA_PTR 
+				&& (o->meta.what != DATA_PTR 
 					|| // we do have a data ptr
-						mapping_info_has_data_ptr_equal_to(f, &o->n, data_ptr))) 
+						bigalloc_data_ptr_equal(f, &o->meta, data_ptr))) 
 					{
 						/* This mapping is "matching, except maybe for dimensions". 
 						 * Ordinary sloppy handling will deal with this overlap.
@@ -333,10 +332,10 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 			need_to_add = 1;
 
 			// if we got here, is this a different mapped file? it's clearly not mapped there any more
-			if (o->n.f.kind == STATIC || o->n.f.kind == MAPPED_FILE)
+			if (o->f.kind == STATIC || o->f.kind == MAPPED_FILE)
 			{
-				assert(o->n.what == DATA_PTR);
-				const char *existing_data_ptr = o->n.un.data_ptr;
+				assert(o->meta.what == DATA_PTR);
+				const char *existing_data_ptr = o->meta.un.data_ptr;
 				if ((data_ptr != NULL && existing_data_ptr == NULL)
 						|| (data_ptr == NULL && existing_data_ptr != NULL)
 						|| (data_ptr != NULL && existing_data_ptr != NULL && 
@@ -344,10 +343,10 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 				{
 					debug_printf(2, "a static or mapped-file mapping, kind %d, data_ptr \"%s\", overlapping %p-%p "
 							"seems to have gone away: now covered by kind %d, data_ptr \"%s\"\n",
-						o->n.f.kind, (const char *) existing_data_ptr, 
+						o->f.kind, (const char *) existing_data_ptr, 
 						obj, (char*) obj + size, 
 						f.kind, (const char *) data_ptr);
-					mapping_del_node(&o->n);
+					bigalloc_del(o);
 					continue; // keep going
 				}
 
@@ -358,9 +357,9 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 				// Try just deleting this node. 
 				debug_printf(2, "skipping POSSIBLY NOT static or mapped-file mapping (\"%s\") "
 					"overlapping %p-%p and apparently already present\n",
-					(const char *) o->n.un.data_ptr, obj, (char*) obj + size);
+					(const char *) o->meta.un.data_ptr, obj, (char*) obj + size);
 				//goto continue_loop;
-				mapping_del_node(&o->n);
+				bigalloc_del(o);
 				continue; // keep going
 			}
 		}
@@ -371,15 +370,15 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 		 * our checks above didn't account for changes in size. */
 		if (need_to_add || f.kind == HEAP || f.kind == STACK)
 		{
-			if (f.kind == HEAP) mapping_add_sloppy(obj, ent->second - ent->first, f, data_ptr);
-			else mapping_add(obj, ent->second - ent->first, f, data_ptr);
+			if (f.kind == HEAP) bigalloc_add_l0_sloppy(obj, ent->second - ent->first, f, data_ptr);
+			else bigalloc_add_l0(obj, ent->second - ent->first, f, data_ptr);
 		}
 	} // end if size > 0
 
 	return 0; // keep going
 }
 
-void __liballocs_add_missing_maps(void)
+void __liballocs_add_missing_mappings_from_proc(void)
 {
 	struct proc_entry entry;
 

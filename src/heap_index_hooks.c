@@ -360,7 +360,7 @@ static void list_sanity_check(entry_type *head, const void *should_see_chunk) {}
 #define ADDR_FOR_INDEX_LOC(e) MEMTABLE_ENTRY_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
 		entry_coverage_in_bytes, index_begin_addr, index_end_addr, (e))
 
-static uintptr_t nbytes_in_index_for_l0_entry(void *userchunk_base)
+static uintptr_t nbytes_in_index_for_bigalloc_entry(void *userchunk_base)
 {
 	void *allocptr = userptr_to_allocptr(userchunk_base);
 	void *end_addr = (char*) allocptr + malloc_usable_size(allocptr);
@@ -409,24 +409,24 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	
 	/* If we're entirely within a mmap()'d region, 
 	 * and if we cover all of it, 
-	 * push our metadata into the l0 map. 
+	 * push our metadata into the bigalloc map. 
 	 * (Do we still index it at l1? NO, but this stores up complication when we need to promote it.  */
 	if (__builtin_expect(
 			modified_size > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072
 			&& (uintptr_t) userptr_to_allocptr(new_userchunkaddr) % PAGE_SIZE <= MAXIMUM_MALLOC_HEADER_OVERHEAD
-				&& &__try_index_l0, 
+				&& &__try_index_bigalloc, 
 		0))
 	{
-		const struct insert *ins = __try_index_l0(userptr_to_allocptr(new_userchunkaddr), modified_size, caller);
+		const struct insert *ins = __try_index_bigalloc(userptr_to_allocptr(new_userchunkaddr), modified_size, caller);
 		if (ins)
 		{
-			// memset the covered entries with the l0 value
-			struct entry l0_value = { 0, 1, 63 };
-			assert(IS_L0_ENTRY(&l0_value));
-			memset(INDEX_LOC_FOR_ADDR(new_userchunkaddr), *(char*) &l0_value, 
-				nbytes_in_index_for_l0_entry(new_userchunkaddr));
-			assert(IS_L0_ENTRY(INDEX_LOC_FOR_ADDR(new_userchunkaddr)));
-			assert(IS_L0_ENTRY(INDEX_LOC_FOR_ADDR((char*) new_userchunkaddr + modified_size - 1)));
+			// memset the covered entries with the bigalloc value
+			struct entry bigalloc_value = { 0, 1, 63 };
+			assert(IS_BIGALLOC_ENTRY(&bigalloc_value));
+			memset(INDEX_LOC_FOR_ADDR(new_userchunkaddr), *(char*) &bigalloc_value, 
+				nbytes_in_index_for_bigalloc_entry(new_userchunkaddr));
+			assert(IS_BIGALLOC_ENTRY(INDEX_LOC_FOR_ADDR(new_userchunkaddr)));
+			assert(IS_BIGALLOC_ENTRY(INDEX_LOC_FOR_ADDR((char*) new_userchunkaddr + modified_size - 1)));
 			
 			BIG_UNLOCK
 			return;
@@ -767,13 +767,13 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 #endif
 	
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(userptr);
-	/* unindex the l0 maps */
-	if (__builtin_expect(IS_L0_ENTRY(index_entry), 0))
+	/* unindex the bigalloc maps */
+	if (__builtin_expect(IS_BIGALLOC_ENTRY(index_entry), 0))
 	{
 		void *allocptr = userptr_to_allocptr(userptr);
 		unsigned long size = malloc_usable_size(allocptr);
 #ifdef TRACE_HEAP_INDEX
-		fprintf(stderr, "*** Unindexing l0 entry for alloc chunk %p (size %lu)\n", 
+		fprintf(stderr, "*** Unindexing bigalloc entry for alloc chunk %p (size %lu)\n", 
 				allocptr, size);
 #endif
 		unsigned start_remainder = ((uintptr_t) allocptr) % PAGE_SIZE;
@@ -782,7 +782,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		unsigned expected_pagewise_size = size 
 				+ start_remainder
 				+ ((end_remainder == 0) ? 0 : PAGE_SIZE - end_remainder);
-		unsigned size_unindexed = __unindex_l0(userptr_to_allocptr(userptr));
+		unsigned size_unindexed = __unindex_bigalloc(userptr_to_allocptr(userptr));
 #ifdef TRACE_HEAP_INDEX
 		if (size_unindexed > expected_pagewise_size)
 		{
@@ -798,7 +798,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		// memset the covered entries with the empty value
 		struct entry empty_value = { 0, 0, 0 };
 		assert(IS_EMPTY_ENTRY(&empty_value));
-		memset(index_entry, *(char*) &empty_value, nbytes_in_index_for_l0_entry(userptr));
+		memset(index_entry, *(char*) &empty_value, nbytes_in_index_for_bigalloc_entry(userptr));
 		
 #ifdef TRACE_HEAP_INDEX
 		*next_recently_freed_to_replace = userptr;
@@ -1192,7 +1192,7 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 	   in the fast-path functions, we bail here.  */
 	if (!index_region) return NULL;
 	
-	/* Try matching in the cache. NOTE: how does this impact l0 and deep-indexed 
+	/* Try matching in the cache. NOTE: how does this impact bigalloc and deep-indexed 
 	 * entries? In all cases, we cache them here. We also keep a "is_deepest" flag
 	 * which tells us (conservatively) whether it's known to be the deepest entry
 	 * indexing that storage. In this function, we *only* return a cache hit if the 
@@ -1357,9 +1357,9 @@ struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object
 	{
 		seen_object_starting_earlier = 0;
 		
-		if (__builtin_expect(IS_L0_ENTRY(cur_head), 0))
+		if (__builtin_expect(IS_BIGALLOC_ENTRY(cur_head), 0))
 		{
-			return __lookup_l0(mem, out_object_start);
+			return __lookup_bigalloc(mem, out_object_start);
 		}
 	
 // 		if (__builtin_expect(IS_DEEP_ENTRY(cur_head), 0))

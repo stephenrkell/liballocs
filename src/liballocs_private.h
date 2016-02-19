@@ -25,58 +25,6 @@ typedef bool _Bool;
 #include <stdint.h>
 
 #include "liballocs.h"
-typedef struct mapping_flags
-{
-	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC, ...
-	unsigned r:1;
-	unsigned w:1;
-	unsigned x:1;
-} mapping_flags_t;
-_Bool mapping_flags_equal(mapping_flags_t f1, mapping_flags_t f2);
-enum mapping_info_kind { DATA_PTR, INS_AND_BITS };
-union mapping_info_union
-{
-	const void *data_ptr;
-	struct 
-	{
-		struct insert ins;
-		unsigned is_object_start:1;
-		unsigned npages:20;
-		unsigned obj_offset:7;
-	} ins_and_bits;
-};
-struct mapping_info {
-	struct mapping_flags f;
-	enum mapping_info_kind what;
-	/* PRIVATE i.e. change-prone impl details beyond here! */
-	union mapping_info_union un;
-};
-/* Will be defined as an alias of mapping_lookup. */
-struct mapping_info *__liballocs_mapping_lookup(const void *obj);
-
-#define ROUND_DOWN_TO_PAGE_SIZE(n) \
-	(assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE), ((n)>>LOG_PAGE_SIZE)<<LOG_PAGE_SIZE)
-#define ROUND_UP_TO_PAGE_SIZE(n) \
-	(assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE), (n) % PAGE_SIZE == 0 ? (n) : ((((n) >> LOG_PAGE_SIZE) + 1) << LOG_PAGE_SIZE))
-// mappings over 4GB in size are assumed to be memtables and are ignored
-#define BIGGEST_MAPPING (1ull<<32)
-
-#define MAPPING_BASE_FROM_PHDR_VADDR(base_addr, vaddr) \
-   (ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr)))
-#define MAPPING_END_FROM_PHDR_VADDR(base_addr, vaddr, memsz) \
-	(ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
-
-/* We use these for PT_GNU_RELRO mappings. */
-#define MAPPING_NEXT_PAGE_START_FROM_PHDR_BEGIN_VADDR(base_addr, vaddr) \
-   (ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr)))
-#define MAPPING_PRECEDING_PAGE_START_FROM_PHDR_END_VADDR(base_addr, vaddr, memsz) \
-	(ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
-
-/* The biggest virtual address that we might find in an executable image. */
-#define BIGGEST_SANE_EXECUTABLE_VADDR  (1ull<<31)
-
-#define PAGENUM(p) (((uintptr_t) (p)) >> LOG_PAGE_SIZE)
-#define ADDR_OF_PAGENUM(p) ((const void *) ((p) << LOG_PAGE_SIZE))
 
 const char *
 dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
@@ -85,28 +33,7 @@ char execfile_name[4096] __attribute__((visibility("hidden")));
 char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 
-typedef uint16_t mapping_num_t;
-mapping_num_t *l0index __attribute__((visibility("hidden")));
-extern _Bool initialized_maps;
-
-/* FIXME: rename to __liballocs_ */
-_Bool mapping_flags_equal(mapping_flags_t f1, mapping_flags_t f2);
-
-void __liballocs_init_l0(void) VIS(protected);
-struct mapping_info *mapping_add(void *base, size_t s, mapping_flags_t f, const void *arg) __attribute__((visibility("hidden")));
-void mapping_add_sloppy(void *base, size_t s, mapping_flags_t f, const void *arg) __attribute__((visibility("hidden")));
-struct mapping_info *mapping_add_full(void *base, size_t s, struct mapping_info *arg) __attribute__((visibility("hidden")));
-void mapping_del(void *base, size_t s) __attribute__((visibility("hidden")));
-void mapping_del_node(struct mapping_info *n) __attribute__((visibility("hidden")));
-int mapping_lookup_exact(struct mapping_info *n, void *begin, void *end) __attribute__((visibility("hidden")));
-size_t
-mapping_get_overlapping(unsigned short *out_begin, 
-		size_t out_size, void *begin, void *end) __attribute__((visibility("hidden")));
-// these ones are public, so use protected visibility
-void __liballocs_add_missing_maps(void) VIS(protected);
-enum object_memory_kind __liballocs_get_memory_kind(const void *obj) VIS(protected);;
-void __liballocs_print_mappings_to_stream_err(void) VIS(protected);
-_Bool mapping_info_has_data_ptr_equal_to(mapping_flags_t f, const struct mapping_info *info, const void *data_ptr) __attribute((visibility("hidden")));
+#include "pageindex.h"
 
 int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
@@ -116,12 +43,6 @@ int dl_for_one_object_phdrs(void *handle,
 	int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
 	void *data) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
-
-struct mapping_info *
-mapping_lookup(void *base) __attribute__((visibility("hidden")));
-struct mapping_info *
-mapping_bounds(const void *ptr, const void **begin, const void **end) __attribute__((visibility("hidden")));
-int __liballocs_add_all_mappings_cb(struct dl_phdr_info *info, size_t size, void *data) __attribute__((visibility("hidden")));
 
 extern char exe_fullname[4096];
 extern char exe_basename[4096];
@@ -159,15 +80,6 @@ extern unsigned long __liballocs_hit_stack_case;
 extern unsigned long __liballocs_hit_static_case;
 extern unsigned long __liballocs_aborted_unindexed_heap;
 extern unsigned long __liballocs_aborted_unrecognised_allocsite;
-
-struct mapping
-{
-	void *begin;
-	void *end;
-	struct mapping_info n;
-};
-#define MAPPING_IN_USE(m) ((m)->begin && (m)->end)
-extern struct mapping mappings[];
 
 #ifdef __cplusplus
 } /* end extern "C" */

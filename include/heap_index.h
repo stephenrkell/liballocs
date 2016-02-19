@@ -14,7 +14,7 @@ struct entry
 struct insert;
 
 #define IS_DEEP_ENTRY(e) (!(e)->present && (e)->removed && (e)->distance != 63)
-#define IS_L0_ENTRY(e) (!(e)->present && (e)->removed && (e)->distance == 63)
+#define IS_BIGALLOC_ENTRY(e) (!(e)->present && (e)->removed && (e)->distance == 63)
 #define IS_EMPTY_ENTRY(e) (!(e)->present && !(e)->removed)
 
 extern unsigned long biggest_l1_object __attribute__((weak,visibility("protected")));
@@ -31,7 +31,7 @@ extern unsigned long biggest_l1_object __attribute__((weak,visibility("protected
  * well-matched, i.e. ins is the physical l0 or l1 insert for the chunk
  * overlapping ptr. This is easy in the l1 case, but hard in the l0 case
  * since we don't implement the l0 index here. We have to call out to
- * __lookup_l0 to test this. */
+ * __lookup_bigalloc to test this. */
 static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins);
 /* Terminators must have the alloc_site and the flag both unset. */
 #define INSERT_IS_TERMINATOR(p_ins) (!(p_ins)->alloc_site && !(p_ins)->alloc_site_flag)
@@ -101,13 +101,13 @@ struct insert *lookup_object_info(const void *mem,
 		void **out_object_start, size_t *out_object_size, 
 		struct suballocated_chunk_rec **out_containing_chunk) __attribute__((weak));
 
-void *__try_index_l0(const void *, size_t modified_size, const void *caller) __attribute__((weak));
-struct insert *__lookup_l0(const void *mem, void **out_object_start) __attribute__((weak));
-unsigned __unindex_l0(const void *mem) __attribute__((weak));
+void *__try_index_bigalloc(const void *, size_t modified_size, const void *caller) __attribute__((weak));
+struct insert *__lookup_bigalloc(const void *mem, void **out_object_start) __attribute__((weak));
+unsigned __unindex_bigalloc(const void *mem) __attribute__((weak));
 static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins)
 {
-	bool is_l0 = __lookup_l0 && __lookup_l0(ptr, NULL) == ins;
-	bool is_sane_l01 = is_l0 || ((char*)(ins) - (char*)(ptr) >= 0
+	bool is_bigalloc = __lookup_bigalloc && __lookup_bigalloc(ptr, NULL) == ins;
+	bool is_sane_l01 = is_bigalloc || ((char*)(ins) - (char*)(ptr) >= 0
 			&& (char*)(ins) - (char*)(ptr) < (signed long) biggest_l1_object);
 	return is_sane_l01 && INSERT_IS_SUBALLOC_CHAIN(ins);
 }

@@ -1026,7 +1026,7 @@ int __liballocs_global_init(void)
 	assert(__liballocs_main_bp != 0);
 	
 	// also init the l0 index -- danger! avoid allocation here too
-	__liballocs_init_l0();
+	__liballocs_init_pageindex();
 
 	__liballocs_is_initialized = 1;
 

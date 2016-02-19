@@ -96,7 +96,7 @@ uniqtypes.o: uniqtypes.c
 	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
 ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard allocators/*.c))
-UTIL_OBJS := l0index.o maps.o addrmap.o addrlist.o uniqtypes.o uniqtype-bfs.o
+UTIL_OBJS := pageindex.o maps.o addrmap.o addrlist.o uniqtypes.o uniqtype-bfs.o
 MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ) $(ALLOCATOR_OBJS)
 MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 PRELOAD_OBJS := preload.o
