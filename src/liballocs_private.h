@@ -25,6 +25,34 @@ typedef bool _Bool;
 #include <stdint.h>
 
 #include "liballocs.h"
+typedef struct mapping_flags
+{
+	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC, ...
+	unsigned r:1;
+	unsigned w:1;
+	unsigned x:1;
+} mapping_flags_t;
+_Bool mapping_flags_equal(mapping_flags_t f1, mapping_flags_t f2);
+enum mapping_info_kind { DATA_PTR, INS_AND_BITS };
+union mapping_info_union
+{
+	const void *data_ptr;
+	struct 
+	{
+		struct insert ins;
+		unsigned is_object_start:1;
+		unsigned npages:20;
+		unsigned obj_offset:7;
+	} ins_and_bits;
+};
+struct mapping_info {
+	struct mapping_flags f;
+	enum mapping_info_kind what;
+	/* PRIVATE i.e. change-prone impl details beyond here! */
+	union mapping_info_union un;
+};
+/* Will be defined as an alias of mapping_lookup. */
+struct mapping_info *__liballocs_mapping_lookup(const void *obj);
 
 #define ROUND_DOWN_TO_PAGE_SIZE(n) \
 	(assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE), ((n)>>LOG_PAGE_SIZE)<<LOG_PAGE_SIZE)

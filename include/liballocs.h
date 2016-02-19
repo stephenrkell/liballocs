@@ -283,35 +283,10 @@ extern INLINE _Bool __liballocs_find_matching_subobject(signed target_offset_wit
 		signed *p_cumulative_offset_searched) DEFAULT_ATTRS __attribute__((hot));
 /* Some inlines follow at the bottom. */
 
-/* Public API for l0index / mappings. */
-typedef struct mapping_flags
-{
-	unsigned kind:4; // UNKNOWN, STACK, HEAP, STATIC, ...
-	unsigned r:1;
-	unsigned w:1;
-	unsigned x:1;
-} mapping_flags_t;
-_Bool mapping_flags_equal(mapping_flags_t f1, mapping_flags_t f2);
-enum mapping_info_kind { DATA_PTR, INS_AND_BITS };
-union mapping_info_union
-{
-	const void *data_ptr;
-	struct 
-	{
-		struct insert ins;
-		unsigned is_object_start:1;
-		unsigned npages:20;
-		unsigned obj_offset:7;
-	} ins_and_bits;
-};
-struct mapping_info {
-	struct mapping_flags f;
-	enum mapping_info_kind what;
-	/* PRIVATE i.e. change-prone impl details beyond here! */
-	union mapping_info_union un;
-};
-/* Will be defined as an alias of mapping_lookup. */
-struct mapping_info *__liballocs_mapping_lookup(const void *obj);
+/* Public API for l0index / mappings was here. FIXME: why was it public? Presumably
+ * for libcrunch's consumption, i.e. clients that "extend". But libcrunch
+ * already includes liballocs_private.h, so there's no need for this to be here. 
+ * I've moved it to liballocs_private.h. */
 
 #include "allocmeta.h"
 

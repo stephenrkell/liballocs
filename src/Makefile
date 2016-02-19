@@ -104,13 +104,20 @@ PRELOAD_OBJS := preload.o
 
 # build src backwards 
 C_SRC := $(sort $(patsubst %.o,%.c,$(MAIN_OBJS) $(PRELOAD_OBJS) $(HOOKS_PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) liballocs_nomemtable.o))
-C_DEPS := $(patsubst %.c,.%.d,$(C_SRC))
+dep_fname = $(dir $1)$(patsubst %.c,.%.d,$(notdir $1))
+C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
+# patsubst %.c,$(dir %.c).$(patsubst %.c,%.d$(notdir %.c).d,$(C_SRC))
 
 DEPS := $(C_DEPS)
+# $(warning DEPS are $(DEPS))
 
-$(C_DEPS): .%.d : %.c
-	$(CC) -MM $(CFLAGS) "$<"  > "$@"
-$(CC_DEPS): .%.d : %.cc
+# FIXME: make complains "target `allocators/.alloca.d' doesn't match the target pattern"
+# if we prefix with C_DEPS here. 
+# Actually it's a bit weird (but nice) that it's happy to expand "$(call dep_fname,%.c)".
+#$(C_DEPS): 
+$(call dep_fname,%.c) : %.c
+	$(CC) -MM $(CFLAGS) "$<" > "$@"
+$(CC_DEPS): $(dir %.cc)$(patsubst %.cc,.%.d,$(notdir %.cc)) : %.cc
 	$(CXX) -MM $(CXXFLAGS) "$<"  > "$@"
 
 -include $(DEPS)
@@ -188,8 +195,7 @@ liballocs_nomemtable.o: liballocs.c
 
 # liballocs.so is a linker script, so don't remove it
 clean: 
-	rm -f *.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d *.a *_fast.c
-
+	rm -f *.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d */.*.d *.a *_fast.c
 
 install: all
 	${INSTALL} liballocs_preload.so liballocs.so liballocs_noop.so ${libdir}
