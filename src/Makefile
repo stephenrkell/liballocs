@@ -95,9 +95,10 @@ uniqtypes.o: uniqtypes.c
 	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
 	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
+ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard allocators/*.c))
 UTIL_OBJS := l0index.o maps.o addrmap.o addrlist.o uniqtypes.o uniqtype-bfs.o
-MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ)
-MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS)
+MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ) $(ALLOCATOR_OBJS)
+MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 PRELOAD_OBJS := preload.o
 # HOOKS_*_OBJS are defined at the top
 
@@ -164,18 +165,6 @@ liballocs_nonshared.a: uniqtypes.o
 liballocs.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
 	$(AR) r "$@" $+
 
-## What's going on here?
-## We have a __wrap_malloc_usable_size in our preload, and normally we alias it
-## to the main one too. Here we strip that alias, to avoid multiple definitions.
-## WHY is malloc_usable_size special? Perhaps because it's in preload.o, whereas
-## our other wrappers (like malloc) are in the malloc hooks... have we excluded
-## them here?
-#preload-wrap.o: preload.o
-#	objcopy --strip-symbol malloc_usable_size "$<" "$@"
-#
-#liballocs_exe.a: $(MAIN_OBJS) preload-wrap.o $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
-#	rm -f "$@" && ar r "$@" $+ 
-
 noop.o: CFLAGS += -fPIC 
 liballocs_noop.o: noop.o
 	ln -s "$<" "$@"
@@ -185,11 +174,6 @@ liballocs_noop.a: noop.o
 
 liballocs_noop.so: noop.o
 	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
-
-# this version lacks preload stuff
-#liballocs.a: $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ) $(filter-out malloc%,$(HOOKS_PRELOAD_OBJS))
-#	ar r "$@" $+
-
 
 libdumpsmaps.so: libdumpsmaps.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 

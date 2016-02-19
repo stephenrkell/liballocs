@@ -100,7 +100,7 @@ int main(int argc, char **argv)
 			/* Find a CU such that 
 			 - one of its source files is named sourcefile, taken relative to comp_dir if necessary;
 			 - that file defines a type of the name we want
-			 */ 
+			 */
 
 			// look for a CU embodying this source file 
 			std::vector<iterator_df<compile_unit_die> > embodying_cus;

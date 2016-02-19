@@ -1186,3 +1186,16 @@ __liballocs_get_outermost_type(void *obj)
 {
 	return __liballocs_get_alloc_type(obj);
 }
+
+void *
+__liballocs_get_alloc_site(void *obj)
+{
+	memory_kind k;
+	void *alloc_site;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
+		NULL, NULL, &alloc_site);
+	
+	if (err) return NULL;
+	
+	return alloc_site;
+}

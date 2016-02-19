@@ -16,6 +16,7 @@ typedef bool _Bool;
 #include <sys/types.h>
 #include <alloca.h>
 #include <string.h>
+#include <dlfcn.h>
 #include <link.h>
 #include "addrmap.h"
 #include "heap_index.h"
@@ -311,6 +312,8 @@ struct mapping_info {
 };
 /* Will be defined as an alias of mapping_lookup. */
 struct mapping_info *__liballocs_mapping_lookup(const void *obj);
+
+#include "allocmeta.h"
 
 /* our own private assert */
 extern inline void
@@ -939,7 +942,8 @@ __liballocs_get_alloc_info
 				if (out_alloc_site) *out_alloc_site = NULL;
 				/* Clear the low-order bit, which is available as an extra flag 
 				 * bit. libcrunch uses this to track whether an object is "loose"
-				 * or not. Loose objects have */
+				 * or not. Loose objects have approximate type info that might be 
+				 * "refined" later, typically e.g. from __PTR_void to __PTR_T. */
 				alloc_uniqtype = (struct uniqtype *)((uintptr_t)(heap_info->alloc_site) & ~0x1ul);
 			}
 			else
@@ -1103,11 +1107,8 @@ const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
 // 	
 // }
 // 
-// void *
-// get_alloc_site(void *obj)
-// {
-// 	
-// }
+void *
+__liballocs_get_alloc_site(void *obj);
 
 #ifdef __cplusplus
 } // end extern "C"

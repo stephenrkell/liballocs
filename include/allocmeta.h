@@ -28,18 +28,18 @@
  * - ... but we might want to preserve some invariants about that
  */
 
-enum addr_disc_t { ANY, BASE_ONLY, ASK_FIRST };
+typedef enum { DISCIPL_ANY, DISCIPL_BASE_ONLY, DISCIPL_ASK_FIRST } addr_discipl_t;
 /* Two concerns: 
  * - what event signifies the end of the lifetime? Ideally in a form that can be observed. 
  *      -- the goal here is to enable observation of end-of-life.
  * - what is a necessary and sufficient condition for that event *not* to occur?
  *      -- the goal here is to enable *extending* the allocation's life
  */
-enum lifetime_end_event_t { PROC_CALL, FRAME_EXEC_PT }; // these are all patterns over ucontexts
-enum lifetime_cond_t { UNKNOWN, REACHABLE_IN };         // stack and manual are "unknown"
+typedef enum { LT_EVENT_PROC_CALL, LT_EVENT_FRAME_EXEC_PT } lifetime_end_event_t; // these are all patterns over ucontexts
+typedef enum { LT_COND_UNKNOWN, LT_COND_REACHABLE_IN } lifetime_cond_t;         // stack and manual are "unknown"
 typedef struct lifetime_policy_s
 {
-	enum lifetime_end_event_t end_event;
+	lifetime_end_event_t end_event;
 	union
 	{
 		struct
@@ -56,7 +56,7 @@ typedef struct lifetime_policy_s
 		} frame_event;
 	} u_end;
 	
-	enum lifetime_cond_t cond;
+	lifetime_cond_t cond;
 	union
 	{
 		struct
@@ -66,49 +66,91 @@ typedef struct lifetime_policy_s
 		struct 
 		{
 			struct allocator *allocator;
-		} reachable
+		} reachable;
 	} u_cond;
 } lifetime_policy_t;
 
+struct allocated_chunk;              /* the start of an allocation, opaquely */
+struct alloc_metadata;               /* metadata associated with a chunk */
+struct lifetime_policy_s;
+typedef struct lifetime_policy_s lifetime_policy_t;
+
+/* The idealised base-level allocator protocol. These operations are mostly
+   to be considered logically; some allocators (e.g. stack, GC) "inline" them
+   rather than defining them as entry points. However, some allocators do define
+   corresponding entry points, like malloc; here it would make sense to implement 
+   these operations as an abstraction layer. I'm not yet sure how useful this is. */
+#define ALLOC_BASE_API(fun, arg) \
+fun(struct allocated_chunk *,new_uninit     ,arg(size_t, sz),arg(size_t,align),arg(struct uniqtype *,t)) \
+fun(struct allocated_chunk *,new_zero       ,arg(size_t, sz),arg(size_t,align),arg(struct uniqtype *,t)) \
+fun(void,                    delete         ,arg(struct allocated_chunk *,start)) \
+fun(_Bool,                   resize_in_place,arg(struct allocated_chunk *,start),arg(size_t,new_sz)) \
+fun(struct allocated_chunk *,safe_migrate,   arg(struct allocated_chunk *,start),arg(struct allocator *,recipient)) /* may fail */\
+fun(struct allocated_chunk *,unsafe_migrate, arg(struct allocated_chunk *,start),arg(struct allocator *,recipient)) /* needn't free existing (stack) */\
+fun(void,                    register_suballoc,arg(struct allocated_chunk *,start),arg(struct allocator *,suballoc))
+
 #define ALLOC_REFLECTIVE_API(fun, arg) \
 /* The *process-wide* reflective interface of liballocs */ \
-fun(uniqtype * , alloc_get_type, arg(void *, obj)) /* what type? */ \
-fun(void *     , alloc_get_base, arg(void *, obj))  /* base address? */ \
-fun(void *     , alloc_get_limit,arg(void *,obj))  /* end address? */ \
-fun(void *     , alloc_get_site, arg(void *,obj))  /* where allocated?   optional   */ \
-fun(Dl_info    , alloc_dladdr,   arg(void *, obj))  /* dladdr-like -- only for static*/ \
-fun(allocator *, alloc_get_allocator, arg((void *, obj))  /* heap/stack? etc */ \
-fun(discipl_t  , alloc_get_discipl, arg(void *,site)) /* what will the code (if any) assume it can do with the ptr? */ \
-fun(lifetime_policy_t *,alloc_get_lifetime, arg(void *,obj))
+fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
+fun(void *             ,get_base,      arg(void *, obj))  /* base address? */ \
+fun(void *             ,get_limit,     arg(void *, obj))  /* end address? */ \
+fun(void *             ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
+fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static*/ \
+fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
+fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
+fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \
+fun(size_t             ,raw_metadata,  arg(struct allocated_chunk *,start),arg(struct alloc_metadata **, buf)) \
+fun(void               ,set_type,      arg(struct uniqtype *,new_t)) /* optional (stack) */\
+fun(void               ,set_site,      arg(struct uniqtype *,new_t)) /* optional (stack) */
 
 #define __allocmeta_fun_arg(argt, name) argt
-#define __allocmeta_fun_ptr(rett, name, args...) \
-	rett (*name)( ## args );
+#define __allocmeta_fun_ptr(rett, name, ...) \
+	rett (*name)( __VA_ARGS__ );
 
 struct allocator
 {
-	ALLOC_REFLECTIVE_API(__allocmeta_fun_arg, __allocmeta_fun_ptr)
+	memory_kind k;
+	ALLOC_REFLECTIVE_API(__allocmeta_fun_ptr, __allocmeta_fun_arg)
+	/* Put the base API last, because it's least likely to take non-NULL values. */
+	ALLOC_BASE_API(__allocmeta_fun_ptr, __allocmeta_fun_arg)
 };
 
+extern struct allocator __stack_allocator;
+extern struct allocator __anon_allocator; /* anonymous mmaps */
+extern struct allocator __sbrk_allocator; /* sbrk() */
+extern struct allocator __file_allocator; /* named mmaps */
+extern struct allocator __static_allocator; /* ldso; nests under file? */
+extern struct allocator __auxv_allocator; /* nests under stack? */
+extern struct allocator __alloca_allocator; /* nests under stack? */
+extern struct allocator __generic_malloc_allocator; /* covers all chunks */
+extern struct allocator __generic_small_allocator; /* usual suballoc impl */
+extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 
-/* The idealised base-level allocator protocol. These operations are 
-   defined only logically; any allocators (e.g. stack, GC) "inline" them. */
-void *alloc_new_uninit(size_t size, size_t align, struct uniqtype *t);
-void *alloc_new_zero(size_t size, size_t align, struct uniqtype *t);
-void  alloc_delete(void *start);
-void *alloc_resize_in_place(void *start, size_t new_size, size_t new_align); /* may fail */
-void *alloc_change_type(void *start, struct uniqtype *u);                    /* optional (stack) */
-void *alloc_safe_migrate(void *start, allocator *recipient);                 /* may fail */
-void  alloc_unsafe_migrate(void *start, allocator *recipient);               /* needn't free existing (stack) */
-void *alloc_nest(void *obj, struct allocator *impl); /* register an allocated region (implied by suballocator handling) */
+/* liballocs assumes some fixed structure in the first couple of levels of the hierarchy.
+ * 
+ *                           ______ (imaginary root) ______
+ *                          /         /         \          \
+ *                      sbrk        file        anon        stack
+ *                                  /                       /    \
+ *                              static                   auxv   alloca
+ * 
+ * (... or, more precisely, every chunk allocated by one of these allocators has
+ * a parent chunk allocated by the parent allocator shown.)
+ * 
+ * Memory kinds: HEAP, STATIC, STACK and MAPPED_FILE attach to these as you'd expect.
+ */
 
-/* The *per-allocator* meta-level interface of liballocs */
-uniqtype * (*get_type)   (void *obj);  /* what type?        \  call            */
-void *     (*get_site)   (void *obj);  /* where allocated?   > these on        */
-void *     (*get_base)   (void *obj);  /* base address?     /  issued addrs!   */
-void *     (*get_limit)  (void *obj);  /* end address?     /                   */
-discipl_t  (*get_discipl)(void *site); /* what will code assume it can do with the ptr? */
-int        (*can_issue)  (void *obj, off_t off); /* ok to issue this address? only for ASK_FIRST */
+/* liballocs default: fixed population of allocators with their own fixed metadata
+ * implementations. All suballocated chunks are considered to be managed by the small
+ * allocator, say, whichever SUBALLOC function created them.
+ * 
+ * Alternative: one allocator identity per suballoc function. But then multiple
+ * "allocators" [functions] might beallocating out of the same chunk, which would
+ * violate our model.
+ * 
+ * Obviously this doesn't match with reality. It's really an indexing scheme that
+ * we're designating, not an allocator per se. But elaborating this structure faithfully
+ * would require more info from the user than what LIBALLOCS_* env vars currently get. */
 
 /* Key point:
  * - core liballocs implements the reflective protocol 
@@ -125,13 +167,13 @@ int        (*can_issue)  (void *obj, off_t off); /* ok to issue this address? on
 
 /* The allocator's contract with liballocs:
  * 
- * want to implement TLAB / GC-nursery allocation metadata.
+ * Consider TLAB / GC-nursery allocation metadata.
  * One way is to define a protocol between liballocs and the allocator 
  * on thread-local metadata buffers.
  * We could write an inline function in C which
  * records an allocation in the buffer,
  * as a ready-made helper function that most VMs could plumb in, 
- * even though the "official" protocol is defined in shared memory
+ * even though the "official" protocol is defined in shared memory.
  *
  * In fact this generalises. 
  * All our link-time allocator wrappers are just an opportunity
@@ -141,15 +183,4 @@ int        (*can_issue)  (void *obj, off_t off); /* ok to issue this address? on
  * we don't want to force them to pay the cost of a function call; 
  * we want something more local that just compiles into
  * a few instructions' work on hot/local memory.
- * 
- * It might be worth tweaking the layering of 
- * the l0 index, l1 index, malloc wrappers, preload.o and link-time stubs
- * to more cleanly exhibit this protocol.
- */
-
-/* What allocators do we have? 
- * 
- * - level 0: mmap, munmap, mremap, 
- * - level 1: global malloc/free 
- * - level 2: e.g. gslice
  */
