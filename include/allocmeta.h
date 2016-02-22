@@ -93,8 +93,9 @@ fun(void,                    register_suballoc,arg(struct allocated_chunk *,star
 /* The *process-wide* reflective interface of liballocs */ \
 fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
 fun(void *             ,get_base,      arg(void *, obj))  /* base address? */ \
-fun(void *             ,get_limit,     arg(void *, obj))  /* end address? */ \
-fun(void *             ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
+fun(unsigned long      ,get_size,      arg(void *, obj))  /* size? */ \
+fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
+fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
 fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static*/ \
 fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
 fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
@@ -109,16 +110,16 @@ fun(void               ,set_site,      arg(struct uniqtype *,new_t)) /* optional
 
 struct allocator
 {
-	memory_kind k;
+	const char *name;
+	_Bool is_cacheable; /* HACK. FIXME: check libcrunch / is_a_cache really gets invalidated by all allocators. */
 	ALLOC_REFLECTIVE_API(__allocmeta_fun_ptr, __allocmeta_fun_arg)
 	/* Put the base API last, because it's least likely to take non-NULL values. */
 	ALLOC_BASE_API(__allocmeta_fun_ptr, __allocmeta_fun_arg)
 };
 
 extern struct allocator __stack_allocator;
-extern struct allocator __anon_allocator; /* anonymous mmaps */
+extern struct allocator __mmap_allocator; /* mmaps */
 extern struct allocator __sbrk_allocator; /* sbrk() */
-extern struct allocator __file_allocator; /* named mmaps */
 extern struct allocator __static_allocator; /* ldso; nests under file? */
 extern struct allocator __auxv_allocator; /* nests under stack? */
 extern struct allocator __alloca_allocator; /* nests under stack? */
@@ -126,13 +127,36 @@ extern struct allocator __generic_malloc_allocator; /* covers all chunks */
 extern struct allocator __generic_small_allocator; /* usual suballoc impl */
 extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 
+void __mmap_allocator_init(void);
+void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
+	int prot, int flags, int fd, off_t offset);
+void __mmap_allocator_notify_mremap(void *ret, void *old_addr, size_t old_size, 
+	size_t new_size, int flags, void *new_address);
+void __mmap_allocator_notify_munmap(void *addr, size_t length);
+
+void __sbrk_allocator_init(void);
+_Bool __sbrk_allocator_notify_unindexed_address(const void *ptr);
+
+void __static_allocator_init(void);
+void __static_allocator_notify_load(void *handle);
+void __static_allocator_notify_unload(const char *copied_filename);
+
+void __stack_allocator_init(void);
+_Bool __stack_allocator_notify_unindexed_address(const void *ptr);
+
+void __auxv_allocator_init(void);
+void __alloca_allocator_init(void);
+void __generic_malloc_allocator_init(void);
+void __generic_small_allocator_init(void);
+void __generic_uniform_allocator_init(void);
+
 /* liballocs assumes some fixed structure in the first couple of levels of the hierarchy.
  * 
  *                           ______ (imaginary root) ______
- *                          /         /         \          \
- *                      sbrk        file        anon        stack
- *                                  /                       /    \
- *                              static                   auxv   alloca
+ *                          /               |              \
+ *                      sbrk               mmap             stack
+ *                                          |              /    \
+ *                                        static         auxv   alloca
  * 
  * (... or, more precisely, every chunk allocated by one of these allocators has
  * a parent chunk allocated by the parent allocator shown.)

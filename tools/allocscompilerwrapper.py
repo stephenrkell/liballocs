@@ -77,6 +77,19 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def getLibNameStem(self):
         return "allocs"
     
+    def getDummyWeakObjectNameStem(self):
+        return "dummyweaks"
+    
+    def getDummyWeakLinkArgs(self, outputIsDynamic, outputIsExecutable):
+        if outputIsDynamic and outputIsExecutable:
+            return [ "-Wl,--push-state", "-Wl,--no-as-needed", \
+                    self.getLinkPath() + "/lib" + self.getLibNameStem() + "_" + self.getDummyWeakObjectNameStem() + ".so", \
+                    "-Wl,--pop-state" ]
+        elif outputIsDynamic and not outputIsExecutable:
+            return [self.getLinkPath() + "/lib" + self.getLibNameStem() + "_" + self.getDummyWeakObjectNameStem() + ".o"]
+        else:
+            return []
+    
     def getLdLibBase(self):
         return "-l" + self.getLibNameStem()
      
@@ -377,9 +390,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                             # NO NO NO! linker chooses the path of weakness, i.e. instead of 
                             # using symbols from _noop.so, uses 0 and doesn't depend on noop.
                             # AHA: the GNU linker has this handy --push-state thing...
-                            linkArgs += [ "-Wl,--push-state", "-Wl,--no-as-needed" ]
-                            linkArgs += [self.getLdLibBase() + "_noop"]
-                            linkArgs += [ "-Wl,--pop-state" ]
+                            linkArgs += self.getDummyWeakLinkArgs(True, True)
                     else:
                         # we're building a statically linked executable
                         if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
@@ -388,7 +399,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
                             # no load-time overriding; do link-time overriding 
                             # by using the full liballocs library in archive form
                             linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + ".a"]
-                    
             else:
                 if not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
                     # We're building a shared library, so simply add liballocs_noop.o; 
@@ -396,10 +406,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                         linkArgs += ["-L" + self.getLinkPath()]
                         linkArgs += ["-Wl,-rpath," + self.getRunPath()]
-                        if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                            linkArgs += [getLdLibBase()]
+                        linkArgs += [getLdLibBase()]
                     else: # FIXME: weak linkage one day....
-                        linkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + "_noop.o"]
+                        linkArgs += self.getDummyWeakLinkArgs(True, False)
                     # note: we leave the shared library with 
                     # dangling dependencies on __wrap_
                     # and unused __real_
@@ -421,8 +430,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
             verboseArgs = []
 
         argsToExec = verboseArgs + allocsccCustomArgs \
-        + linkArgs \
-        + passedThroughArgs
+        + passedThroughArgs \
+        + linkArgs
         self.debugMsg("about to run cilly with args: " + " ".join(argsToExec) + "\n")
         self.debugMsg("passedThroughArgs is: " + " ".join(passedThroughArgs) + "\n")
         self.debugMsg("allocsccCustomArgs is: " + " ".join(allocsccCustomArgs) + "\n")

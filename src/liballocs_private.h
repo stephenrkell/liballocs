@@ -21,6 +21,7 @@ typedef bool _Bool;
 
 #include "heap_index.h" /* includes memtable */
 #include "allocsmt.h"
+#include "systrap.h"
 #include <link.h>
 #include <stdint.h>
 
@@ -34,6 +35,10 @@ char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 
 #include "pageindex.h"
+
+void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
+void munmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
+void mremap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 
 int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
@@ -64,6 +69,22 @@ struct addrlist
 	unsigned allocsz;
 	void **addrs;
 };
+struct liballocs_err
+{
+	const char *message;
+};
+struct frame_uniqtype_and_offset
+{
+	struct uniqtype *u;
+	unsigned o;
+};
+
+struct frame_uniqtype_and_offset 
+vaddr_to_stack_uniqtype(const void *vaddr)
+		__attribute__((visibility("hidden")));
+struct uniqtype *
+static_addr_to_uniqtype(const void *static_addr, void **out_object_start) 
+		__attribute__((visibility("hidden")));
 
 /* avoid dependency on libc headers (in this header only) */
 void __assert_fail(const char *assertion, 

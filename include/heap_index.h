@@ -2,6 +2,7 @@
 #define __HEAP_INDEX_H
 
 #include <stdbool.h>
+#include "vas.h"
 #define USE_SYSCALL_FOR_MMAP
 #include "memtable.h"
 
@@ -12,13 +13,29 @@ struct entry
 	unsigned distance:6; /* distance from the base of this entry's region, in 8-byte units */
 } __attribute__((packed));
 struct insert;
+#define entry_coverage_in_bytes 512
+typedef struct entry entry_type;
+extern void *index_begin_addr;
+extern void *index_end_addr;
 
 #define IS_DEEP_ENTRY(e) (!(e)->present && (e)->removed && (e)->distance != 63)
 #define IS_BIGALLOC_ENTRY(e) (!(e)->present && (e)->removed && (e)->distance == 63)
 #define IS_EMPTY_ENTRY(e) (!(e)->present && !(e)->removed)
 
+#define INDEX_LOC_FOR_ADDR(a) MEMTABLE_ADDR_WITH_TYPE(index_region, entry_type, \
+		entry_coverage_in_bytes, \
+		index_begin_addr, index_end_addr, (a))
+#define INDEX_BIN_START_ADDRESS_FOR_ADDR(a) MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
+		entry_coverage_in_bytes, \
+		index_begin_addr, index_end_addr, (a))
+#define INDEX_BIN_END_ADDRESS_FOR_ADDR(a) ((char*)(MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
+		entry_coverage_in_bytes, \
+		index_begin_addr, index_end_addr, ((char*)(a)))) + entry_coverage_in_bytes)
+#define ADDR_FOR_INDEX_LOC(e) MEMTABLE_ENTRY_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
+		entry_coverage_in_bytes, index_begin_addr, index_end_addr, (e))
+
+
 extern unsigned long biggest_l1_object __attribute__((weak,visibility("protected")));
-#define MINIMUM_USER_ADDRESS  ((char*)0x400000) /* FIXME: less {x86-64,GNU/Linux}-specific please */
 #define MAX_SUBALLOCATED_CHUNKS ((unsigned long) MINIMUM_USER_ADDRESS)
 /* Inserts describing objects have user addresses. They may have the flag set or unset. */
 #define INSERT_DESCRIBES_OBJECT(ins) \
@@ -55,12 +72,6 @@ static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins);
 extern struct entry *index_region __attribute__((weak));
 int safe_to_call_malloc __attribute__((weak));
 
-#define WORD_BITSIZE ((sizeof (void*))<<3)
-#if defined(__x86_64__) || defined(x86_64)
-#define ADDR_BITSIZE 48
-#else
-#define ADDR_BITSIZE WORD_BITSIZE
-#endif
 struct ptrs 
 {
 	struct entry next;
@@ -70,9 +81,6 @@ struct insert
 {
 	unsigned alloc_site_flag:1;
 	unsigned long alloc_site:(ADDR_BITSIZE-1);
-#ifdef HEAP_INDEX_HEADER_INCLUDE
-#include HEAP_INDEX_HEADER_INCLUDE
-#endif
 	union  __attribute__((packed))
 	{
 		struct ptrs ptrs;
@@ -94,19 +102,20 @@ struct suballocated_chunk_rec
 	unsigned long biggest_object;
 	unsigned long *starts_bitmap;
 };
-int  __index_deep_alloc(void *ptr, int level, unsigned size_bytes) __attribute__((weak));
-void __unindex_deep_alloc(void *ptr, int level) __attribute__((weak));
+/* HACK while this deep alloc stuff is hanging around. */
+struct allocator;
+extern struct allocator __generic_malloc_allocator;
+struct big_allocation;
+struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 
 struct insert *lookup_object_info(const void *mem, 
 		void **out_object_start, size_t *out_object_size, 
 		struct suballocated_chunk_rec **out_containing_chunk) __attribute__((weak));
 
-void *__try_index_bigalloc(const void *, size_t modified_size, const void *caller) __attribute__((weak));
-struct insert *__lookup_bigalloc(const void *mem, void **out_object_start) __attribute__((weak));
-unsigned __unindex_bigalloc(const void *mem) __attribute__((weak));
 static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins)
 {
-	bool is_bigalloc = __lookup_bigalloc && __lookup_bigalloc(ptr, NULL) == ins;
+	bool is_bigalloc = (__lookup_bigalloc_with_insert(ptr, &__generic_malloc_allocator, NULL) == ins);
 	bool is_sane_l01 = is_bigalloc || ((char*)(ins) - (char*)(ptr) >= 0
 			&& (char*)(ins) - (char*)(ptr) < (signed long) biggest_l1_object);
 	return is_sane_l01 && INSERT_IS_SUBALLOC_CHAIN(ins);
@@ -131,5 +140,72 @@ extern size_t __current_allocsz;
 extern int __currently_freeing;
 extern int __currently_allocating;
 #endif
+
+/* "Distance" is a right-shifted offset within a memory region. */
+static inline ptrdiff_t entry_to_offset(struct entry e) 
+{ 
+	assert(e.present); 
+	return e.distance << DISTANCE_UNIT_SHIFT; 
+}
+static inline struct entry offset_to_entry(ptrdiff_t o) 
+{ 
+	return (struct entry) { .present = 1, .removed = 0, .distance = o >> DISTANCE_UNIT_SHIFT }; 
+}
+static inline void *entry_ptr_to_addr(struct entry *p_e)
+{
+	if (!p_e->present) return NULL;
+	return MEMTABLE_ENTRY_RANGE_BASE_WITH_TYPE(
+		index_region,
+		entry_type,
+		entry_coverage_in_bytes,
+		index_begin_addr,
+		index_end_addr,
+		p_e)
+	+ entry_to_offset(*p_e);
+}
+static inline void *entry_to_same_range_addr(struct entry e, void *same_range_ptr)
+{
+	if (!e.present) return NULL;
+	return MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(
+		index_region,
+		entry_type,
+		entry_coverage_in_bytes,
+		index_begin_addr,
+		index_end_addr,
+		same_range_ptr) + entry_to_offset(e);
+}
+static inline struct entry addr_to_entry(void *a)
+{
+	if (a == NULL) return (struct entry) { .present = 0, .removed = 0, .distance = 0 };
+	else return offset_to_entry(
+		MEMTABLE_ADDR_RANGE_OFFSET_WITH_TYPE(
+			index_region, entry_type, entry_coverage_in_bytes, 
+			index_begin_addr, index_end_addr,
+			a
+		)
+	);
+}
+size_t malloc_usable_size(void *ptr);
+static void *userptr_to_allocptr(void *userptr) { return userptr; }
+static void *allocptr_to_userptr(void *allocptr) { return allocptr; }
+static size_t allocsize_to_usersize(size_t usersize) { return usersize; }
+static size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
+static size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr_to_allocptr(userptr))); }
+static size_t allocsize(void *allocptr) { return malloc_usable_size(allocptr); }
+
+static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);
+static inline struct insert *insert_for_chunk(void *userptr)
+{
+	return insert_for_chunk_and_usable_size(userptr, malloc_usable_size(userptr)); 
+}
+static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, size_t usable_size)
+{
+	/* Round down to an aligned address! */
+	return (struct insert*) (
+			(uintptr_t)((char*) userptr + usable_size - sizeof (struct insert))
+				& (~(uintptr_t)(sizeof (struct insert) - 1))
+			);
+}
+
 
 #endif

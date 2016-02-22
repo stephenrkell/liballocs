@@ -1,17 +1,19 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 SRCROOT := $(dir $(THIS_MAKEFILE))../
-# MALLOC_HOOKS := $(SRCROOT)contrib/libmallochooks #./../libmallochooks.hg
+MALLOC_HOOKS ?= $(SRCROOT)contrib/libmallochooks #./../libmallochooks.hg
+TRAP_SYSCALLS ?= $(SRCROOT)contrib/trap-syscalls
 
 # HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
 # object. It complains about __next_malloc_hook et al being undefined, even though
 # we --defsym'd them and they are clearly defined in the .o file.
 # So don't use that rule. We use the preprocessor (above) to define __next_hook_*.
 
-HOOKS_PRELOAD_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_preload_fast.o event_hooks_fast.o
-HOOKS_WRAP_OBJS := heap_index_hooks_fast.o malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
+HOOKS_PRELOAD_OBJS := malloc_hook_stubs_preload_fast.o event_hooks_fast.o
+HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
 
-CFLAGS += -std=gnu99 -Wall -g -I../include -I$(SRCROOT)/include -I../contrib/libmallochooks
+CFLAGS += -std=gnu11 -Wall -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS) \
+   -I$(TRAP_SYSCALLS)/libsystrap -I$(SRCROOT)/src -Wno-unused
 
 ifeq ($(DEBUG),1)
     DEFAULT_EXTRA_CFLAGS := -g
@@ -35,10 +37,10 @@ else
 
     # Summary of the above: -O3 -DNDEBUG is the fastest
     FAST_EXTRA_CFLAGS := -O3 -DNDEBUG
-	DEBUG_EXTRA_CFLAGS := -O0
+    DEBUG_EXTRA_CFLAGS := -O0
 endif
 
-default: liballocs_preload.so liballocs_nonshared.a liballocs_noop.so liballocs_noop.a liballocs_noop.o liballocs.a
+default: liballocs_preload.so liballocs_nonshared.a liballocs_dummyweaks.so liballocs_dummyweaks.o liballocs.a
 all: default
 
 HOOKS_NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
@@ -74,12 +76,29 @@ endif
 # GRR. We can't include the Makerules now that we need to build the hooks by 
 # two different methods. Also, we can't get dependency information about these
 # files from the makefiles. So we always want to run these rules. HMM.
-malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o: ../contrib/libmallochooks/malloc_hook_stubs_wrap.c
-	CFLAGS="$(CFLAGS) -fPIC" $(MAKE) MALLOC_HOOKS_METHOD=preload -f ../contrib/libmallochooks/Makerules malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o
-malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o: ../contrib/libmallochooks/malloc_hook_stubs_wrap.c
-	$(MAKE) MALLOC_HOOKS_METHOD=wrap -f ../contrib/libmallochooks/Makerules malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o
+malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o: $(MALLOC_HOOKS)/malloc_hook_stubs_wrap.c
+	CFLAGS="$(CFLAGS) -fPIC" $(MAKE) MALLOC_HOOKS_METHOD=preload -f $(MALLOC_HOOKS)/Makerules malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o
+malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o: $(MALLOC_HOOKS)/malloc_hook_stubs_wrap.c
+	$(MAKE) MALLOC_HOOKS_METHOD=wrap -f $(MALLOC_HOOKS)/Makerules malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o
 
-vpath %.c ../contrib/libmallochooks
+vpath %.c $(MALLOC_HOOKS)
+
+vpath dlmalloc.c $(TRAP_SYSCALLS)/src
+# We put dlmalloc in a library so that --exclude-libs=dlmalloc.a will hide its symbols
+# in our output .so, so that they don't override anything in the rest of the program.
+dlmalloc.a: dlmalloc.o
+	$(AR) r "$@" $^
+dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0 -DUSE_DL_PREFIX -fPIC
+liballocs_preload.so: dlmalloc.a
+liballocs_preload.so: LDFLAGS += -Wl,--whole-archive dlmalloc.a  -Wl,--no-whole-archive \
+ -Wl,--defsym,__private_malloc=dlmalloc \
+ -Wl,--defsym,__private_calloc=dlcalloc \
+ -Wl,--defsym,__private_free=dlfree \
+ -Wl,--defsym,__private_realloc=dlrealloc \
+ -Wl,--defsym,__private_memalign=dlmemalign \
+ -Wl,--defsym,__private_posix_memalign=dlposix_memalign \
+ -Wl,--exclude-libs=dlmalloc.a \
+ -Bsymbolic # important for _etext in preload hooks
 
 ifeq ($(USE_REAL_LIBUNWIND),)
 FAKE_LIBUNWIND_OBJ := fake-libunwind.o
@@ -96,7 +115,7 @@ uniqtypes.o: uniqtypes.c
 	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
 ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard allocators/*.c))
-UTIL_OBJS := pageindex.o maps.o addrmap.o addrlist.o uniqtypes.o uniqtype-bfs.o
+UTIL_OBJS := pageindex.o addrlist.o uniqtypes.o uniqtype-bfs.o
 MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ) $(ALLOCATOR_OBJS)
 MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 PRELOAD_OBJS := preload.o
@@ -110,6 +129,8 @@ C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
 
 DEPS := $(C_DEPS)
 # $(warning DEPS are $(DEPS))
+
+CFLAGS += -I$(SRCROOT)/src
 
 # FIXME: make complains "target `allocators/.alloca.d' doesn't match the target pattern"
 # if we prefix with C_DEPS here. 
@@ -126,9 +147,9 @@ $(CC_DEPS): $(dir %.cc)$(patsubst %.cc,.%.d,$(notdir %.cc)) : %.cc
 	$(CC) $(CFLAGS) -c -o "$@" "$<"
 
 ifeq ($(DEBUG),1)
-$(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(DEBUG_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+systrap.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(DEBUG_EXTRA_CFLAGS) # hooks have either fpic or fPIC
 else
-$(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(FAST_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+systrap.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(FAST_EXTRA_CFLAGS) # hooks have either fpic or fPIC
 endif 
 .SECONDARY: heap_index_hooks_fast.c
 heap_index_hooks_fast.o: CFLAGS += $(HOOKS_FAST_CFLAGS)
@@ -152,34 +173,31 @@ event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 # liballocs.so         -- nasty linker script for clients, working around uniqueness problem
 # liballocs_nonshared.a -- just uniqtypes; linker script points to this, s.t. client exes (-lallocs) get this linked in statically (uniqtypes)
 # liballocs.a          -- the main binary usable for statically-linked exes -- no uniqueness problem
-# liballocs_noop.so     -- non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
-# liballocs_noop.a      -- in archive form, for extending noop libraries to link in (libcrunch_noop)
-# liballocs_noop.o      -- non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
+# liballocs_dummyweaks.so -- non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
+# liballocs_dummyweaks.o  -- non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
 #
 # What do client solibs get?
 # Easiest is just to treat them like exes. They will get their own copy 
 # of the basic uniqtypes, but this will get uniqued as appropriate.
 
 liballocs_preload.so: liballocs_preload.a
-	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
+	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
-liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
+liballocs_preload.a: systrap.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
 
 liballocs_nonshared.a: uniqtypes.o
 	$(AR) r "$@" $+
 
-liballocs.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
+liballocs.a: systrap.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
 	$(AR) r "$@" $+
 
-noop.o: CFLAGS += -fPIC 
-liballocs_noop.o: noop.o
-	ln -s "$<" "$@"
+# HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option.
+dummyweaks.o: CFLAGS += -fPIC 
+liballocs_dummyweaks.o: dummyweaks.o
+	$(LD) -r -o "$@" $+
 
-liballocs_noop.a: noop.o
-	$(AR) r "$@" $+
-
-liballocs_noop.so: noop.o
+liballocs_dummyweaks.so: dummyweaks.o
 	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
 
 libdumpsmaps.so: libdumpsmaps.o
@@ -195,8 +213,8 @@ liballocs_nomemtable.o: liballocs.c
 
 # liballocs.so is a linker script, so don't remove it
 clean: 
-	rm -f *.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d */.*.d *.a *_fast.c
+	rm -f *.o */*.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d */.*.d *.a *_fast.c
 
 install: all
-	${INSTALL} liballocs_preload.so liballocs.so liballocs_noop.so ${libdir}
-	${INSTALL_DATA} liballocs_preload.a liballocs_nonshared.a liballocs.a liballocs_noop.a ${libdir}
+	${INSTALL} liballocs_preload.so liballocs.so liballocs_dummyweaks.so ${libdir}
+	${INSTALL_DATA} liballocs_preload.a liballocs_nonshared.a liballocs.a liballocs_dummyweaks.o ${libdir}

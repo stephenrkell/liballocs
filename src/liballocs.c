@@ -14,7 +14,9 @@
 #ifdef USE_REAL_LIBUNWIND
 #include <libunwind.h>
 #endif
+#include "maps.h"
 #include "relf.h"
+#include "systrap.h"
 #include "liballocs.h"
 #include "liballocs_private.h"
 
@@ -64,7 +66,6 @@ _Bool __liballocs_is_initialized;
 allocsmt_entry_type *__liballocs_allocsmt;
 
 // these two are defined in addrmap.h as weak
-void *__addrmap_executable_end_addr;
 unsigned long __addrmap_max_stack_size;
 
 // helper
@@ -73,10 +74,6 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 // HACK
 void __liballocs_preload_init(void);
 
-struct liballocs_err
-{
-	const char *message;
-};
 struct liballocs_err __liballocs_err_stack_walk_step_failure 
  = { "stack walk reached higher frame" };
 struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame 
@@ -136,7 +133,7 @@ int dl_for_one_object_phdrs(void *handle,
 		callback,
 		data
 	};
-	dl_iterate_phdr(dl_for_one_phdr_cb, &args);
+	return dl_iterate_phdr(dl_for_one_phdr_cb, &args);
 }
 
 
@@ -161,7 +158,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	/* If load address is greater than STACK_BEGIN, it's suspicious -- 
 	 * perhaps a vdso-like thing. Skip it. The vdso itself is detected
 	 * below (it lives in user memory, but points into kernel memory). */
-	if (!load_addr || (uintptr_t) load_addr > STACK_BEGIN) return 0;
+	if (!load_addr || (intptr_t) load_addr < 0) return 0;
 	
 	/* We don't have to add load_addr, because ld.so has already done it. */
 	ElfW(Dyn) *dynsym_ent = dynamic_lookup(h->l_ld, DT_SYMTAB);
@@ -169,7 +166,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
 	assert(dynsym);
 	/* Catch the vdso case. */
-	if (!dynsym || (uintptr_t) dynsym > STACK_BEGIN) return 0;
+	if (!dynsym || (intptr_t) dynsym < 0) return 0;
 	
 	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(h->l_ld, DT_HASH);
 	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
@@ -289,6 +286,7 @@ void __liballocs_main_init(void) __attribute__((constructor(101),visibility("pro
 // NOTE: runs *before* the constructor in preload.c
 void __liballocs_main_init(void)
 {
+	sleep(10);
 	assert(!done_init);
 	
 	done_init = 1;
@@ -572,12 +570,12 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 			chain_allocsite_entries(cur_frame_ent ? &cur_frame_ent->entry : NULL, 
 				prev_frame_ent ? &prev_frame_ent->entry : NULL, 
 				&current_frame_bucket_size,
-				info->dlpi_addr, STACK_BEGIN);
+				info->dlpi_addr, 0x800000000000ul);
 		}
 
 		// debugging: check that we can look up the first entry, if we are non-empty
 		assert(!first_frame_entry || !first_frame_entry->entry.allocsite || 
-			vaddr_to_uniqtype(first_frame_entry->entry.allocsite).u == first_frame_entry->entry.uniqtype);
+			vaddr_to_stack_uniqtype(first_frame_entry->entry.allocsite).u == first_frame_entry->entry.uniqtype);
 	}
 	
 	/* Now a similar job for the statics. */
@@ -598,7 +596,7 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 		for (; cur_static_ent->allocsite; prev_static_ent = cur_static_ent++)
 		{
 			chain_allocsite_entries(cur_static_ent, prev_static_ent, &current_static_bucket_size,
-				info->dlpi_addr, STACK_BEGIN<<1);
+				info->dlpi_addr, 0x800000000000ul<<1);
 		}
 
 		// debugging: check that we can look up the first entry, if we are non-empty
@@ -705,14 +703,14 @@ static void consider_blacklisting(const void *obj)
 		&& ~mask + 1 > PAGE_SIZE)
 	{
 		mask >>= 1;                            // shift the mask right
-		mask |= 1ul<<sizeof (uintptr_t) * 8 - 1; // set the top bit of the mask
+		mask |= 1ul<<(sizeof (uintptr_t) * 8 - 1); // set the top bit of the mask
 		bits = ((uintptr_t) slot->actual_start) & mask;
 		
 	}
 	
 	// if we got a zero-length entry, give up and zero the whole lot
 	assert((bits | mask) >= (uintptr_t) slot->actual_start);
-	assert(bits | ~mask <= (uintptr_t) slot->actual_start + slot->actual_length);
+	assert((bits | ~mask) <= (uintptr_t) slot->actual_start + slot->actual_length);
 	
 	slot->mask = mask;
 	slot->bits = bits;
@@ -720,18 +718,6 @@ static void consider_blacklisting(const void *obj)
 }
 
 void *__liballocs_main_bp; // beginning of main's stack frame
-
-// const struct uniqtype *__liballocs_uniqtype_void; // remember the location of the void uniqtype
-// const struct uniqtype *__liballocs_uniqtype_signed_char;
-// const struct uniqtype *__liballocs_uniqtype_unsigned_char;
-// #define LOOKUP_CALLER_TYPE(frag, caller) /* FIXME: use caller not RTLD_DEFAULT -- use interval tree? */ \
-//     ( \
-// 		(__liballocs_uniqtype_ ## frag) ? __liballocs_uniqtype_ ## frag : \
-// 		(__liballocs_uniqtype_ ## frag = dlsym(RTLD_DEFAULT, "__uniqtype__" #frag), \
-// 			assert(__liballocs_uniqtype_ ## frag), \
-// 			__liballocs_uniqtype_ ## frag \
-// 		) \
-// 	)
 
 /* counters */
 unsigned long __liballocs_aborted_stack;
@@ -826,9 +812,10 @@ void *biggest_vaddr_in_obj(void *handle)
 /* This is *not* a constructor. We don't want to be called too early,
  * because it might not be safe to open the -uniqtypes.so handle yet.
  * So, initialize on demand. */
-int __liballocs_global_init(void) __attribute__((constructor,visibility("protected")));
+int __liballocs_global_init(void) __attribute__((constructor(103),visibility("protected")));
 int __liballocs_global_init(void)
 {
+	sleep(10);
 	if (__liballocs_is_initialized) return 0; // we are okay
 
 	// don't try more than once to initialize
@@ -889,37 +876,6 @@ int __liballocs_global_init(void)
 	 * It seems that option 1 is better. 
 	 */
 
-	// grab the executable's end address
-	// we used to try dlsym()'ing "_end" but this doesn't work! 
-	// Not all executables have _end and _begin exported as dynamic syms
-	// Also, we don't want to call dlsym since it might not be safe to malloc.
-	// Get the phdrs directly from the auxv.
-	/* void *executable_handle = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
-	assert(executable_handle != NULL);
-	__addrmap_executable_end_addr = biggest_vaddr_in_obj(executable_handle);*/
-	
-	char dummy;
-	ElfW(auxv_t) *auxv = get_auxv((const char **) environ, &dummy);
-	assert(auxv);
-	ElfW(auxv_t) *ph_auxv = auxv_lookup(auxv, AT_PHDR);
-	ElfW(auxv_t) *phnum_auxv = auxv_lookup(auxv, AT_PHNUM);
-	assert(ph_auxv);
-	assert(phnum_auxv);
-	uintptr_t biggest_seen = 0;
-	for (int i = 0; i < phnum_auxv->a_un.a_val; ++i)
-	{
-		ElfW(Phdr) *phdr = ((ElfW(Phdr)*) ph_auxv->a_un.a_val) + i;
-		if (phdr->p_type == PT_LOAD)
-		{
-			/* We can round down to int because vaddrs *within* an object 
-			 * will not be more than 2^31 from the object base. */
-			uintptr_t max_plus_one = (int) (phdr->p_vaddr + phdr->p_memsz);
-			if (max_plus_one > biggest_seen) biggest_seen = max_plus_one;
-		}
-	}
-	__addrmap_executable_end_addr = (void*) biggest_seen;
-	assert(__addrmap_executable_end_addr != 0);
-	assert((char*) __addrmap_executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
 	
 	// grab the executable's basename
 	ssize_t readlink_ret = readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);
@@ -941,7 +897,7 @@ int __liballocs_global_init(void)
 	 * with STACK_BEGIN<<1. 
 	 * So quadruple up the size of the table accordingly. */
 	__liballocs_allocsmt = MEMTABLE_NEW_WITH_TYPE(allocsmt_entry_type, allocsmt_entry_coverage, 
-		(void*) 0, (void*) (STACK_BEGIN << 2));
+		(void*) 0, (void*) (0x800000000000ul << 2));
 	if (__liballocs_allocsmt == MAP_FAILED) abort();
 	
 	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_for_one_object, NULL);
@@ -950,83 +906,12 @@ int __liballocs_global_init(void)
 	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_for_one_object, NULL);
 	assert(ret_stackaddr == 0);
 #endif
-	// grab the maximum stack size
-	struct rlimit rlim;
-	int rlret = getrlimit(RLIMIT_STACK, &rlim);
-	if (rlret == 0)
-	{
-		__addrmap_max_stack_size = rlim.rlim_cur;
-	}
 	
-	// grab the start of main's stack frame -- we'll use this 
-	// when walking the stack
-	unw_cursor_t cursor;
-	unw_context_t unw_context;
-	int ret = unw_getcontext(&unw_context); assert(ret == 0);
-	ret = unw_init_local(&cursor, &unw_context); assert(ret == 0);
-	char buf[8];
-	unw_word_t ip;
-	unw_word_t sp;
-	unw_word_t bp;
-	_Bool have_bp;
-	_Bool have_name;
-	assert(ret == 0);
-	do
-	{
-		// get bp, sp, ip and proc_name
-		ret = unw_get_proc_name(&cursor, buf, sizeof buf, NULL); have_name = (ret == 0 || ret == -UNW_ENOMEM);
-		buf[sizeof buf - 1] = '\0';
-		// if (have_name) fprintf(stream_err, "Saw frame %s\n", buf);
-
-		ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(ret == 0);
-		ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(ret == 0);
-		ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); have_bp = (ret == 0);
-	} while ((!have_name || 0 != strcmp(buf, "main")) && 
-		(ret = unw_step(&cursor)) > 0);
-
-	// have we found main?
-	if (have_name && 0 == strcmp(buf, "main"))
-	{
-		// did we get its bp?
-		if (!have_bp)
-		{
-			// try stepping once more
-			ret = unw_step(&cursor);
-			if (ret == 0)
-			{
-				ret = unw_get_reg(&cursor, UNW_REG_SP, &bp);
-			}
-
-			if (ret == 0) have_bp = 1;
-		}
-
-		if (have_bp)
-		{
-			__liballocs_main_bp = (void*) (intptr_t) bp;
-		}
-		else
-		{
-			// underapproximate bp as the sp
-			__liballocs_main_bp = (void*) (intptr_t) sp;
-		}
-	}
-	
-	if (__liballocs_main_bp == 0) 
-	{
-		// underapproximate bp as our current sp!
-		debug_printf(1, "Warning: using egregious approximation for bp of main().\n");
-		unw_word_t our_sp;
-	#ifdef UNW_TARGET_X86
-		__asm__ ("movl %%esp, %0\n" :"=r"(our_sp));
-	#else // assume X86_64 for now
-		__asm__("movq %%rsp, %0\n" : "=r"(our_sp));
-	#endif
-		__liballocs_main_bp = (void*) (intptr_t) our_sp;
-	}
-	assert(__liballocs_main_bp != 0);
-	
-	// also init the l0 index -- danger! avoid allocation here too
-	__liballocs_init_pageindex();
+	// DANGER: these want to malloc. I don't think this is okay. FIXME.
+	__stack_allocator_init();
+	__mmap_allocator_init();
+	__static_allocator_init();
+	__auxv_allocator_init();
 
 	__liballocs_is_initialized = 1;
 
@@ -1058,10 +943,6 @@ void *__liballocs_my_typeobj(void)
 	__liballocs_ensure_init();
 	return typeobj_handle_for_addr(__builtin_return_address(0));
 }
-
-/* FIXME: hook dlopen and dlclose so that we can load/unload allocsites and types
- * as execution proceeds. */
-
 
 /* This is left out-of-line because it's inherently a slow path. */
 const void *__liballocs_typestr_to_uniqtype(const char *typestr) __attribute__((visibility("protected")));
@@ -1170,7 +1051,6 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 struct uniqtype * 
 __liballocs_get_alloc_type(void *obj)
 {
-	memory_kind k;
 	const void *object_start;
 	struct uniqtype *out;
 	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
@@ -1190,12 +1070,11 @@ __liballocs_get_outermost_type(void *obj)
 void *
 __liballocs_get_alloc_site(void *obj)
 {
-	memory_kind k;
-	void *alloc_site;
+	const void *alloc_site;
 	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
 		NULL, NULL, &alloc_site);
 	
 	if (err) return NULL;
 	
-	return alloc_site;
+	return (void*) alloc_site;
 }

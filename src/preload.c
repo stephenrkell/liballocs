@@ -11,7 +11,7 @@
 #include <sys/types.h>
 /* We make very heavy use of malloc_usable_size in heap_index. But we also 
  * override it -- twice! -- once in mallochooks, to intercept the early_malloc
- * case, and once here to intercept the fast case. 
+ * case, and once here to intercept the stack (alloca) case. 
  * 
  * We want to be very careful with the visibility of this symbol, so that references
  * we make always go straight to our definition, not via the PLT. So declare it
@@ -39,21 +39,6 @@ size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("pr
 
 /* some signalling to malloc hooks */
 _Bool __avoid_calling_dl_functions;
-
-static const char *filename_for_fd(int fd)
-{
-	/* We read from /proc into a thread-local buffer. */
-	static char __thread out_buf[8192];
-	
-	static char __thread proc_path[4096];
-	int ret = snprintf(proc_path, sizeof proc_path, "/proc/%d/fd/%d", getpid(), fd);
-	assert(ret > 0);
-	ret = readlink(proc_path, out_buf, sizeof out_buf);
-	assert(ret != -1);
-	out_buf[ret] = '\0';
-	
-	return out_buf;
-}
 
 /* NOTE that our wrappers are all init-on-use. This is because 
  * we might get called very early, and even if we're not trying to
@@ -103,7 +88,7 @@ size_t __wrap_malloc_usable_size (void *ptr)
 		__asm__("movq %%rsp, %0\n" : "=r"(sp));
 	#endif
 
-	_Bool is_stack = (__liballocs_get_memory_kind(ptr) == STACK);
+	_Bool is_stack = (__lookup_top_level_allocator(ptr) == &__stack_allocator);
 	
 	if (is_stack)
 	{
@@ -118,44 +103,33 @@ size_t __wrap_malloc_usable_size (void *ptr)
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller) __attribute__((weak));
 
+/* For most of the process we rely on symbol overriding to observe mmap calls. 
+ * However, we have another trick for ld.so and libc mmap syscalls.
+ * We *never* delegate to the underlying (RTLD_NEXT) mmap; we always do it
+ * ourselves. This ensures that the handling is an either-or; exactly one of these
+ * paths (preload or systrap) should be hit. We must take care to do the
+ * (logically) same things in both. */
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
 {
-	/* HACK: let through the memtable mmaps and other things that 
-	 * run before our constructor. These will get called *very* early,
-	 * before malloc is initialized, hence before it's safe to call
-	 * libdl. Therefore, instead of orig_mmap, we use syscall() 
-	 * in these cases.
-	 */
+	/* Let through the memtable mmaps and anything happening 
+	 * super-early. */
 
-	if (!safe_to_use_bigalloc || !safe_to_call_dlsym)
+	if (!safe_to_use_bigalloc || length > BIGGEST_BIGALLOC)
 	{
 		// call via syscall and skip hooking logic
 		return (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-	}
-
-	static void *(*orig_mmap)(void *, size_t, int, int, int, off_t);
-	if (!orig_mmap)
-	{
-		orig_mmap = dlsym(RTLD_NEXT, "mmap");
-		assert(orig_mmap);
 	}
 	
 	if (&__liballocs_nudge_mmap)
 	{
 		__liballocs_nudge_mmap(&addr, &length, &prot, &flags, &fd, &offset, __builtin_return_address(0));
 	}
-	void *ret = orig_mmap(addr, length, prot, flags, fd, offset);
+	void *ret = // orig_mmap(addr, length, prot, flags, fd, offset);
+		(void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
 	if (ret != MAP_FAILED)
 	{
-		mapping_flags_t f = { .kind = (fd == -1) ? HEAP : MAPPED_FILE, 
-			.r = (flags & PROT_READ), 
-			.w = (flags & PROT_WRITE),
-			.x = (flags & PROT_EXEC) 
-		};
-		const char *data_ptr = (fd == -1) ? NULL : filename_for_fd(fd);
-		/* Add to the prefix tree */
-		bigalloc_add_l0(ret, ROUND_UP_TO_PAGE_SIZE(length), f, data_ptr);
+		__mmap_allocator_notify_mmap(ret, addr, length, prot, flags, fd, offset);
 	}
 	return ret;
 }
@@ -177,7 +151,7 @@ int munmap(void *addr, size_t length)
 		int ret = orig_munmap(addr, length);
 		if (ret == 0)
 		{
-			bigalloc_del_l0(addr, ROUND_UP_TO_PAGE_SIZE(length));
+			__mmap_allocator_notify_munmap(addr, length);
 		}
 		return ret;
 	}
@@ -193,7 +167,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 		assert(orig_mremap);
 	}
 	
-	void *new_address;
+	void *new_address = MAP_FAILED;
 	if (flags & MREMAP_FIXED)
 	{
 		va_start(ap, flags);
@@ -214,11 +188,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 		void *ret = orig_call;
 		if (ret != MAP_FAILED)
 		{
-			struct big_allocation *cur = bigalloc_lookup_l0(old_addr);
-			assert(cur != NULL);
-			struct big_allocation saved = *cur;
-			bigalloc_del_l0(old_addr, ROUND_UP_TO_PAGE_SIZE(old_size));
-			bigalloc_add_l0_full(ret, ROUND_UP_TO_PAGE_SIZE(new_size), saved.f, saved.meta);
+			__mmap_allocator_notify_mremap(ret, old_addr, old_size, new_size, flags, new_address);
 		}
 		return ret;
 	}
@@ -242,25 +212,33 @@ void *dlopen(const char *filename, int flag)
 	if (!__liballocs_is_initialized) return orig_dlopen(filename, flag);
 	else
 	{
+		if (__avoid_calling_dl_functions) abort();
 		__avoid_calling_dl_functions = 1;
+		_Bool file_already_loaded = 0;
+		/* FIXME: inherently racy, but does any client really race here? */
+		if (filename) 
+		{
+			const char *file_realname = strdup(realpath_quick(filename));
+			for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
+			{
+				file_already_loaded |= (l->l_name && 
+						(0 == strcmp(realpath_quick(l->l_name), file_realname)));
+				if (file_already_loaded) break;
+			}
+			free((void*) file_realname);
+		}
 		void *ret = orig_dlopen(filename, flag);
 		__avoid_calling_dl_functions = 0;
 		
 		/* Have we just opened a new object? If filename was null, 
 		 * we haven't; if ret is null; we haven't; if NOLOAD was passed,
-		 * we haven't. Otherwise we *might* have done, but we still
-		 * can't be sure. We'll have to make add_all_loaded_segments_cb
-		 * tolerant of re-adding. */
-		if (filename != NULL && ret != NULL && !(flag & RTLD_NOLOAD))
+		 * we haven't. Otherwise we rely on the racy logic above. */
+		if (filename != NULL && ret != NULL && !(flag & RTLD_NOLOAD) && !file_already_loaded)
 		{
 			if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(ret);
 		
-			/* Note that in general we will get one mapping for every 
-			 * LOAD phdr. So we use dl_iterate_phdr. */
-			int dlpi_ret = dl_iterate_phdr(add_all_loaded_segments_cb, 
-				((struct link_map *) ret)->l_name);
-			assert(dlpi_ret != 0);
-		
+			__static_allocator_notify_load(ret);
+			
 			/* Also load the types and allocsites for this object. These callbacks
 			 * also have to be tolerant of already-loadedness. */
 			int ret_types = dl_for_one_object_phdrs(ret, load_types_for_one_object, NULL);
@@ -275,48 +253,6 @@ void *dlopen(const char *filename, int flag)
 
 		return ret;
 	}
-}
-
-#define MAX_MAPPINGS 16
-struct amapping
-{
-	void *base;
-	size_t size;
-};
-struct amapping_set
-{
-	const char *filename;
-	void *handle;
-	int nmappings;
-	struct amapping mappings[MAX_MAPPINGS];
-};
-
-static int gather_mappings_cb(struct dl_phdr_info *info, size_t size, void *data)
-{
-	struct amapping_set *mappings = (struct amapping_set *) data;
-	const char *filename = mappings->filename;
-	if (0 == strcmp(filename, info->dlpi_name))
-	{
-		// this is the file we care about, so iterate over its phdrs
-		for (int i = 0; i < info->dlpi_phnum; ++i)
-		{
-			// if this phdr's a LOAD and matches our filename, 
-			if (info->dlpi_phdr[i].p_type == PT_LOAD)
-			{
-				assert(mappings->nmappings < MAX_MAPPINGS);
-				/* Mappings always get rounded up to page size. */
-				uintptr_t base = MAPPING_BASE_FROM_PHDR_VADDR(((struct link_map *) mappings->handle)->l_addr,
-						info->dlpi_phdr[i].p_vaddr);
-				uintptr_t end = MAPPING_END_FROM_PHDR_VADDR(((struct link_map *) mappings->handle)->l_addr,
-						info->dlpi_phdr[i].p_vaddr, info->dlpi_phdr[i].p_memsz);
-				mappings->mappings[mappings->nmappings++] = (struct amapping) { (void*) base, end - base };
-			}
-		}
-	
-		// can stop now
-		return 1;
-	} // else keep going
-	else return 0;
 }
 
 int dlclose(void *handle)
@@ -336,16 +272,6 @@ int dlclose(void *handle)
 		char *copied_filename = strdup(((struct link_map *) handle)->l_name);
 		assert(copied_filename != NULL);
 		
-		/* Use dl_iterate_phdr to gather the mappings that we will 
-		 * remove from the tree *if* the dlclose() actually unloads
-		 * the library. */
-		struct amapping_set mappings;
-		mappings.filename = copied_filename;
-		mappings.handle = handle;
-		mappings.nmappings = 0;
-		int dlpi_ret = dl_iterate_phdr(gather_mappings_cb, &mappings);
-		assert(dlpi_ret != 0);
-		
 		int ret = orig_dlclose(handle);
 		/* NOTE that a successful dlclose doesn't necessarily unload 
 		 * the library! To see whether it's really unloaded, we use 
@@ -357,11 +283,7 @@ int dlclose(void *handle)
 			if (h == NULL)
 			{
 				// yes, it was unloaded
-				for (int i = 0; i < mappings.nmappings; ++i)
-				{
-					bigalloc_del_l0(mappings.mappings[i].base, 
-						mappings.mappings[i].size);
-				}
+				__static_allocator_notify_unload(copied_filename);
 			}
 			else 
 			{

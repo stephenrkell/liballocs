@@ -14,7 +14,7 @@ pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = liballocs.pc
 
 liballocs_includedir = $(includedir)/liballocs
-liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/relf.h include/addrmap.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsmt.h
+liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/relf.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsmt.h include/vas.h 
 
 bin_PROGRAMS = tools/dumptypes tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size
 lib_LIBRARIES = tools/liballocstool.a 

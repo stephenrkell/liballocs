@@ -7,7 +7,7 @@
 /* Don't include stdio -- trap-syscalls won't like it, for example. */
 int sscanf(const char *str, const char *format, ...);
 
-inline ssize_t get_a_line(char *buf, size_t size, int fd)
+static inline ssize_t get_a_line(char *buf, size_t size, int fd)
 {
 	if (size == 0) return -1; // now size is at least 1
 	
@@ -48,7 +48,7 @@ struct proc_entry
 };
 typedef int maps_cb_t(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg);
 
-inline int for_each_maps_entry(int fd, char *linebuf, size_t bufsz, struct proc_entry *entry_buf, 
+static inline int for_each_maps_entry(int fd, char *linebuf, size_t bufsz, struct proc_entry *entry_buf, 
 		maps_cb_t *cb, void *arg)
 {
 	#define NUM_FIELDS 11

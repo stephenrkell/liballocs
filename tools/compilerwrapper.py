@@ -157,7 +157,7 @@ class CompilerWrapper:
         #libraryArgs = [arg for arg in otherOptions if arg.startswith("-l") or arg.endswith(".a") \
         #    or arg.endswith(".so")]
         #nonLibraryArgs = [arg for arg in otherOptions if not arg in libraryArgs]
-        # NO NO NO -- this doesn't work, because we will disrupt the use of 
+        # NO NO NO -- the above doesn't work, because we will disrupt the use of 
         # things like "-Wl,--some-option", "-lallocs_noop", "-Wl,--some-option"
         # (e.g. push/pop as-needed)
         commandAndArgs = self.getUnderlyingCompilerCommand(sourceFiles) + \

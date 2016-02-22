@@ -4,7 +4,7 @@ int __liballocs_global_init (void);
 /* This is not weak. */
 void __assert_fail(const char * assertion, const char * file, unsigned int line, const char * function);
 /* Heap index hooks -- these also aren't weak, for the usual reason. */
-void __liballocs_index_insert(void *new_userchunkaddr, unsigned long modified_size, 
+void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_size, 
 		const void *caller);
 void __liballocs_index_delete(void*);
 struct uniqtype; /* forward decl */
@@ -61,7 +61,7 @@ extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloc
 	
 	/* Note that we pass the caller directly; __current_allocsite is not required. */
 	void *userptr = (char*) alloc + ALLOCA_HEADER_SIZE;
-	__liballocs_index_insert(userptr, chunk_size, caller);
+	__alloca_allocator_notify(userptr, chunk_size, caller);
 	
 	return userptr;
 }

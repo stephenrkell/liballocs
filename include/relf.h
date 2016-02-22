@@ -11,6 +11,8 @@
 extern void 
 __assert_fail (const char *assertion, const char *file,
 	unsigned int line, const char *function) __attribute__((__noreturn__));
+extern char **environ;
+extern void abort(void) __attribute__((noreturn));
 
 /* 
 
@@ -235,7 +237,7 @@ ElfW(Dyn) *find_dynamic(const char **environ, void *stackptr)
 
 
 static inline
-ElfW(Dyn) *dynamic_lookup(ElfW(Dyn) *d, ElfW(Sxword) tag)
+ElfW(Dyn) *dynamic_lookup(ElfW(Dyn) *d, ElfW(Sword) tag)
 {
 	for (ElfW(Dyn) *dyn = d; dyn->d_tag != DT_NULL; ++dyn)
 	{
@@ -248,11 +250,17 @@ ElfW(Dyn) *dynamic_lookup(ElfW(Dyn) *d, ElfW(Sxword) tag)
 }
 
 static inline
+ElfW(Dyn) *dynamic_xlookup(ElfW(Dyn) *dyn, ElfW(Sword) tag)
+{
+	ElfW(Dyn) *found = dynamic_lookup(dyn, tag);
+	if (!found) __assert_fail("expected dynamic tag", __FILE__, __LINE__, __func__);
+	return found;
+}
+
+static inline
 ElfW(Dyn) *local_dynamic_xlookup(ElfW(Sword) tag)
 {
-	ElfW(Dyn) *found = dynamic_lookup(_DYNAMIC, tag);
-	if (!found) __assert_fail("found expected dynamic tag", __FILE__, __LINE__, __func__);
-	return found;
+	return dynamic_xlookup(_DYNAMIC, tag);
 }
 
 static inline 
@@ -386,9 +394,25 @@ ElfW(Sym) *symbol_lookup_linear(ElfW(Sym) *symtab, ElfW(Sym) *symtab_end, const 
 	return found_sym;
 }
 
+static inline 
+uintptr_t guess_page_size_unsafe(void)
+{
+	int x;
+	ElfW(auxv_t) *p_auxv = get_auxv((const char **) environ, &x);
+	if (!p_auxv) abort();
+	return auxv_xlookup(p_auxv, AT_PAGESZ)->a_un.a_val;
+}
+
+#define ROUND_DOWN(p, align) \
+	(((uintptr_t) (p)) % (align) == 0 ? ((uintptr_t) (p)) \
+	: (uintptr_t) ((align) * ((uintptr_t) (p) / (align))))
+#define ROUND_UP(p, align) \
+	(((uintptr_t) (p)) % (align) == 0 ? ((uintptr_t) (p)) \
+	: (uintptr_t) ((align) * (1 + ((uintptr_t) (p) / (align)))))
 #define ROUND_DOWN_PTR(p, align) \
-	(((uintptr_t) (p)) % (align) == 0 ? ((void*) (p)) \
-	: (void*) ((align) * ((uintptr_t) (p) / (align))))
+	((void*) (ROUND_DOWN((p), (align))))
+#define ROUND_UP_PTR(p, align) \
+	((void*) (ROUND_UP((p), (align))))
 
 static inline 
 ElfW(Sym) *symbol_lookup_linear_local(const char *sym)
