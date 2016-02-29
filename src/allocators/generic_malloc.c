@@ -180,13 +180,17 @@ do_init(void)
 
 	/* Check we got the shift logic correct in entry_to_offset, and other compile-time logic. */
 	check_impl_sanity();
-
+	
 	/* If we're already trying to initialize, or have already
 	 * tried, don't try recursively/again. */
 	if (tried_to_init) return;
 	tried_to_init = 1;
 	
 	if (index_region) return; /* already done */
+
+	/* Initialize what we depend on. */
+	__sbrk_allocator_init();
+	__mmap_allocator_init();
 	
 	index_begin_addr = (void*) 0U;
 #if defined(__x86_64__) || defined(x86_64)
@@ -219,6 +223,7 @@ do_init(void)
 	
 	index_region = MEMTABLE_NEW_WITH_TYPE(struct entry, 
 		entry_coverage_in_bytes, index_begin_addr, index_end_addr);
+	debug_printf(3, "heap_index at %p\n", index_region);
 	
 	assert(index_region != MAP_FAILED);
 }
@@ -1154,7 +1159,7 @@ fail:
 	/* FIXME: use the actual biggest allocated object, not a guess. */
 }
 
-static liballocs_err_t get_info(void * obj, struct uniqtype **out_type, void **out_base, 
+liballocs_err_t __generic_heap_get_info(void * obj, struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site)
 {
 	++__liballocs_hit_heap_case;
@@ -1242,6 +1247,6 @@ do_alloca_as_if_heap:
 
 struct allocator __generic_malloc_allocator = {
 	.name = "generic malloc",
-	.get_info = get_info,
+	.get_info = __generic_heap_get_info,
 	.is_cacheable = 1
 };

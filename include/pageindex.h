@@ -75,6 +75,8 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 
 _Bool __liballocs_delete_bigalloc(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end);
+_Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end);
+_Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin);
 
 struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
@@ -83,8 +85,8 @@ struct allocator *__lookup_top_level_allocator(const void *mem) __attribute__((v
 
 _Bool __liballocs_notify_unindexed_address(const void *);
 
-/* mappings over 4GB in size are assumed to be memtables and are ignored */
-#define BIGGEST_BIGALLOC (1ull<<32)
+/* mappings of 4GB or more in size are assumed to be memtables and are ignored */
+#define BIGGEST_BIGALLOC BIGGEST_SANE_USER_ALLOC
 #include "vas.h"
 
 extern inline

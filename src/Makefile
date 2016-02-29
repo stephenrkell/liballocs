@@ -180,10 +180,10 @@ event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 # Easiest is just to treat them like exes. They will get their own copy 
 # of the basic uniqtypes, but this will get uniqued as appropriate.
 
-liballocs_preload.so: liballocs_preload.a
+liballocs_preload.so: systrap.o liballocs_preload.a
 	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
-liballocs_preload.a: systrap.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
+liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
 
 liballocs_nonshared.a: uniqtypes.o

@@ -31,6 +31,7 @@ size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("pr
 #include <string.h>
 #include <stdarg.h>
 #include "liballocs_private.h"
+#include "relf.h"
 
 /* We should be safe to use it once malloc is initialized. */
 // #define safe_to_use_bigalloc (__liballocs_is_initialized)
@@ -38,7 +39,7 @@ size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("pr
 #define safe_to_call_dlsym (safe_to_call_malloc)
 
 /* some signalling to malloc hooks */
-_Bool __avoid_calling_dl_functions;
+_Bool __avoid_libdl_calls;
 
 /* NOTE that our wrappers are all init-on-use. This is because 
  * we might get called very early, and even if we're not trying to
@@ -112,21 +113,23 @@ void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
 {
-	/* Let through the memtable mmaps and anything happening 
-	 * super-early. */
-
-	if (!safe_to_use_bigalloc || length > BIGGEST_BIGALLOC)
-	{
-		// call via syscall and skip hooking logic
-		return (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-	}
-	
+	/* We always nudge, even for mmaps we do ourselves. This is because 
+	 * the nudge function implements some global placement policy that even
+	 * our memtables must adhere to. */
 	if (&__liballocs_nudge_mmap)
 	{
 		__liballocs_nudge_mmap(&addr, &length, &prot, &flags, &fd, &offset, __builtin_return_address(0));
 	}
-	void *ret = // orig_mmap(addr, length, prot, flags, fd, offset);
-		(void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
+
+	void *ret = (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
+	/* We only start hooking mmap after we read /proc, which is also when we 
+	 * enable the systrap stuff. */
+	if (!__liballocs_systrap_is_initialized || length > BIGGEST_BIGALLOC)
+	{
+		// skip hooking logic
+		return ret;
+	}
+	
 	if (ret != MAP_FAILED)
 	{
 		__mmap_allocator_notify_mmap(ret, addr, length, prot, flags, fd, offset);
@@ -201,64 +204,63 @@ extern void  __attribute__((weak)) __libcrunch_scan_lazy_typenames(void*);
 void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
 void *dlopen(const char *filename, int flag)
 {
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
 	if (!orig_dlopen) // happens if we're called before liballocs init
 	{
-		__avoid_calling_dl_functions = 1;
 		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
-		__avoid_calling_dl_functions = 0;
-		assert(orig_dlopen);
+		if (!orig_dlopen) abort();
+	}
+
+	_Bool file_already_loaded = 0;
+	/* FIXME: inherently racy, but does any client really race here? */
+	if (filename) 
+	{
+		const char *file_realname = strdup(realpath_quick(filename));
+		for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
+		{
+			const char *lm_ent_realname = dynobj_name_from_dlpi_name(l->l_name, l->l_addr);
+			file_already_loaded |= (l->l_name && 
+					(0 == strcmp(lm_ent_realname, file_realname)));
+			if (file_already_loaded) break;
+		}
+		free((void*) file_realname);
 	}
 	
-	if (!__liballocs_is_initialized) return orig_dlopen(filename, flag);
-	else
+	void *ret = orig_dlopen(filename, flag);
+	if (we_set_flag) __avoid_libdl_calls = 0;
+		
+	/* Have we just opened a new object? If filename was null, 
+	 * we haven't; if ret is null; we haven't; if NOLOAD was passed,
+	 * we haven't. Otherwise we rely on the racy logic above. */
+	if (filename != NULL && ret != NULL && !(flag & RTLD_NOLOAD) && !file_already_loaded)
 	{
-		if (__avoid_calling_dl_functions) abort();
-		__avoid_calling_dl_functions = 1;
-		_Bool file_already_loaded = 0;
-		/* FIXME: inherently racy, but does any client really race here? */
-		if (filename) 
-		{
-			const char *file_realname = strdup(realpath_quick(filename));
-			for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
-			{
-				file_already_loaded |= (l->l_name && 
-						(0 == strcmp(realpath_quick(l->l_name), file_realname)));
-				if (file_already_loaded) break;
-			}
-			free((void*) file_realname);
-		}
-		void *ret = orig_dlopen(filename, flag);
-		__avoid_calling_dl_functions = 0;
-		
-		/* Have we just opened a new object? If filename was null, 
-		 * we haven't; if ret is null; we haven't; if NOLOAD was passed,
-		 * we haven't. Otherwise we rely on the racy logic above. */
-		if (filename != NULL && ret != NULL && !(flag & RTLD_NOLOAD) && !file_already_loaded)
-		{
-			if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(ret);
-		
-			__static_allocator_notify_load(ret);
-			
-			/* Also load the types and allocsites for this object. These callbacks
-			 * also have to be tolerant of already-loadedness. */
-			int ret_types = dl_for_one_object_phdrs(ret, load_types_for_one_object, NULL);
-			assert(ret_types == 0);
-		#ifndef NO_MEMTABLE
-			int ret_allocsites = dl_for_one_object_phdrs(ret, load_and_init_allocsites_for_one_object, NULL);
-			assert(ret_allocsites == 0);
-			int ret_stackaddr = dl_for_one_object_phdrs(ret, link_stackaddr_and_static_allocs_for_one_object, NULL);
-			assert(ret_stackaddr == 0);
-		#endif
-		}
+		if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(ret);
 
-		return ret;
+		__static_allocator_notify_load(ret);
+
+		/* Also load the types and allocsites for this object. These callbacks
+		 * also have to be tolerant of already-loadedness. */
+		int ret_types = dl_for_one_object_phdrs(ret, load_types_for_one_object, NULL);
+		assert(ret_types == 0);
+	#ifndef NO_MEMTABLE
+		int ret_allocsites = dl_for_one_object_phdrs(ret, load_and_init_allocsites_for_one_object, NULL);
+		assert(ret_allocsites == 0);
+		int ret_stackaddr = dl_for_one_object_phdrs(ret, link_stackaddr_and_static_allocs_for_one_object, NULL);
+		assert(ret_stackaddr == 0);
+	#endif
 	}
+
+	return ret;
 }
 
 int dlclose(void *handle)
 {
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
 	static int (*orig_dlclose)(void *);
-	static void *(*orig_dlopen)(const char *, int);
 	if(!orig_dlclose)
 	{
 		orig_dlclose = dlsym(RTLD_NEXT, "dlclose");
@@ -266,7 +268,11 @@ int dlclose(void *handle)
 		assert(orig_dlclose);
 	}
 	
-	if (!safe_to_use_bigalloc) return orig_dlclose(handle);
+	if (!safe_to_use_bigalloc)
+	{
+		if (we_set_flag) __avoid_libdl_calls = 0;
+		return orig_dlclose(handle);
+	}
 	else
 	{
 		char *copied_filename = strdup(((struct link_map *) handle)->l_name);
@@ -293,6 +299,159 @@ int dlclose(void *handle)
 	
 	// out:
 		free(copied_filename);
+		if (we_set_flag) __avoid_libdl_calls = 0;
 		return ret;
 	}
+}
+
+static char *our_dlerror;
+char *dlerror(void)
+{
+	static char *(*orig_dlerror)(void);
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
+	if (!orig_dlerror)
+	{
+		if (__avoid_libdl_calls && !we_set_flag) orig_dlerror = fake_dlsym(RTLD_NEXT, "dlerror");
+		else orig_dlerror = dlsym(RTLD_NEXT, "dlerror");
+		if (!orig_dlerror) abort();
+	}
+	char *orig_err = orig_dlerror(); // clear the original error
+	char *ret = our_dlerror ? our_dlerror : orig_err;
+	if (our_dlerror) our_dlerror = NULL;
+	
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
+}
+
+/* Q. How on earth do we override dlsym?
+ * A. We use relf.h's fake_dlsym. */
+void *dlsym(void *handle, const char *symbol)
+{
+	static char *(*orig_dlsym)(void *handle, const char *symbol);
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
+	if (!orig_dlsym)
+	{
+		orig_dlsym = fake_dlsym(RTLD_NEXT, "dlsym");
+		if (orig_dlsym == (void*) -1)
+		{
+			our_dlerror = "symbol not found";
+			orig_dlsym = NULL;
+		}
+		if (!orig_dlsym) abort();
+	}
+	
+	void *ret = orig_dlsym(handle, symbol);
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
+}
+
+int dladdr(const void *addr, Dl_info *info)
+{
+	static int(*orig_dladdr)(const void *, Dl_info *);
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
+	if (!orig_dladdr)
+	{
+		if (__avoid_libdl_calls && !we_set_flag) abort();
+		orig_dladdr = dlsym(RTLD_NEXT, "dladdr");
+		if (!orig_dladdr) abort();
+	}
+	int ret = orig_dladdr(addr, info);
+	
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
+}
+
+void *dlvsym(void *handle, const char *symbol, const char *version)
+{
+	static void *(*orig_dlvsym)(void *, const char*, const char*);
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
+	if (!orig_dlvsym)
+	{
+		if (__avoid_libdl_calls && !we_set_flag) abort();
+		orig_dlvsym = dlsym(RTLD_NEXT, "dlvsym");
+		if (!orig_dlvsym) abort();
+	}
+	void *ret = orig_dlvsym(handle, symbol, version);
+	
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
+}
+
+/* FIXME: do the stuff here that we do for dlopen above. */
+void *dlmopen(long nsid, const char *file, int mode)
+{
+	static void *(*orig_dlmopen)(long, const char*, int);
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
+	if (!orig_dlmopen)
+	{
+		if (__avoid_libdl_calls && !we_set_flag) abort();
+		orig_dlmopen = dlsym(RTLD_NEXT, "dlmopen");
+		if (!orig_dlmopen) abort();
+	}
+	void *ret = orig_dlmopen(nsid, file, mode);
+	
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
+}
+
+int dladdr1(const void *addr, Dl_info *info, void **extra, int flags)
+{
+	static int(*orig_dladdr1)(const void*, Dl_info *, void**, int);
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
+	if (!orig_dladdr1)
+	{
+		if (__avoid_libdl_calls && !we_set_flag) abort();
+		orig_dladdr1 = dlsym(RTLD_NEXT, "dladdr1");
+		if (!orig_dladdr1) abort();
+	}
+	int ret = orig_dladdr1(addr, info, extra, flags);
+	
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
+}
+
+struct dl_phdr_info;
+int dl_iterate_phdr(
+                 int (*callback) (struct dl_phdr_info *info,
+                                  size_t size, void *data),
+                 void *data)
+{
+	static int(*orig_dl_iterate_phdr)(int (*) (struct dl_phdr_info *info,
+		size_t size, void *data), void*);
+	
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	
+	if (!orig_dl_iterate_phdr)
+	{
+		if (__avoid_libdl_calls && !we_set_flag) abort();
+		orig_dl_iterate_phdr = dlsym(RTLD_NEXT, "dl_iterate_phdr");
+		if (!orig_dl_iterate_phdr) abort();
+	}
+	int ret = orig_dl_iterate_phdr(callback, data);
+	
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
+}
+
+static void init(void) __attribute__((constructor));
+static void init(void)
+{
+	/* We have to initialize these in a constructor, because if we 
+	 * do it lazily we might find that the first call is in an 
+	 * "avoid libdl" context. HMM, but then we just use fake_dlsym
+	 * to get the original pointer and call that. so doing it lazily
+	 * is okay, it seems. */
 }

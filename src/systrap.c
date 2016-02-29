@@ -9,7 +9,9 @@
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller) __attribute__((weak));
 void __mmap_allocator_notify_munmap(void *addr, size_t length) __attribute__((weak));
-void __mmap_allocator_notify_mremap(void *ret, void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address)
+void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address)
+			__attribute__((weak));
+void __mmap_allocator_notify_mremap_after(void *ret, void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address)
 			__attribute__((weak));
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
@@ -94,15 +96,22 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	int flags = s->args[3];
 	void *maybe_new_address = (void*) s->args[4];
 	
+	/* Pre-notify the allocator. This is so it can grab the "prot". */
+	if (&__mmap_allocator_notify_mremap_before)
+	{
+		__mmap_allocator_notify_mremap_before(old_addr, old_length, new_length, flags, 
+			maybe_new_address);
+	}	
+	
 	/* Do the call. */
 	long int ret = do_syscall5(s);
 	
 	// FIXME: also nudge mremaps
 	
-	/* If it did something, notify the allocator. */
-	if ((void*) ret != (void*) -1 && &__mmap_allocator_notify_mremap)
+	/* Whether or not it did something, notify the allocator. */
+	if (&__mmap_allocator_notify_mremap_after)
 	{
-		__mmap_allocator_notify_mremap((void*) ret, old_addr, old_length, new_length, flags, 
+		__mmap_allocator_notify_mremap_after((void*) ret, old_addr, old_length, new_length, flags, 
 			maybe_new_address);
 	}
 	
@@ -127,13 +136,25 @@ static int trap_ldso_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, voi
 }
 
 extern ElfW(Dyn) _DYNAMIC[];
-/* This is a constructor, since it's important that it happens before
- * much stuff has been memory-mapped. Unlike the main libcrunch/liballocs
- * initialisation, we don't rely on any dynamic linker or libc state. */
-static void init_systrap(void) __attribute__((constructor(102)));
-static void init_systrap(void)
+_Bool __liballocs_systrap_is_initialized; /* globally visible, so that it gets overridden. */
+/* This is logically a constructor, since it's important that it happens before
+ * much stuff has been memory-mapped. BUT we have to hand off smoothly from the
+ * mmap allocator, which processes /proc. So it will call us when it's done that.
+ * Does this also avoid the "two copies" problem we had before. But it does mean
+ * that libcrunch's stubs library has to call us explicitly. */
+void __liballocs_systrap_init(void)
 {
-	sleep(10);
+	/* NOTE: in a preload libcrunch run, there are two copies of this code running!
+	 * One is in the preload library, the other in the stubs library. We should only
+	 * run one of them.
+	 * 
+	 * Also, it's important that we don't call malloc() in this function, because its
+	 * self-call detection will be foiled: we'll be calling *from* the stubs library 
+	 * *into* the preload library. It's okay to call malloc from (non-static) things we 
+	 * call, because it'll be the preload's copy of that callee that actually gets called.
+	 * ARGH, but -Bsymbolic may have screwed with this. Oh, but we don't use it for the 
+	 * stubs library, I don't think. Indeed, we don't. */
+	if (__liballocs_systrap_is_initialized) return;
 	static char realpath_buf[4096]; /* bit of a HACK */
 	/* Make sure we're trapping all syscalls within ld.so. */
 	replaced_syscalls[SYS_mmap] = mmap_replacement;
@@ -209,4 +230,5 @@ static void init_systrap(void)
 		}
 	}
 	install_sigill_handler();
+	__liballocs_systrap_is_initialized = 1;
 }

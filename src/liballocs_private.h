@@ -27,6 +27,11 @@ typedef bool _Bool;
 
 #include "liballocs.h"
 
+#define likely(cond) \
+  __builtin_expect( (cond), 1 )
+#define unlikely(cond) \
+  __builtin_expect( (cond), 0 )
+
 const char *
 dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 		__attribute__((visibility("hidden")));
@@ -39,7 +44,7 @@ const char *format_symbolic_address(const void *addr) __attribute__((visibility(
 void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void munmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void mremap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
-
+void __liballocs_systrap_init(void);
 int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
@@ -101,6 +106,14 @@ extern unsigned long __liballocs_hit_stack_case;
 extern unsigned long __liballocs_hit_static_case;
 extern unsigned long __liballocs_aborted_unindexed_heap;
 extern unsigned long __liballocs_aborted_unrecognised_allocsite;
+
+/* We're allowed to malloc, thanks to __private_malloc(), but we 
+ * we shouldn't call strdup because libc will do the malloc. */
+char *private_strdup(const char *s);
+
+/* Our handling of mmap is in two phases: before systrapping enabled,
+ * and after. */
+extern _Bool __liballocs_systrap_is_initialized;
 
 #ifdef __cplusplus
 } /* end extern "C" */

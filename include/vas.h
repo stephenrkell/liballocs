@@ -13,6 +13,7 @@
 
 /* The biggest virtual address that we might find in an executable image. */
 #define BIGGEST_SANE_EXECUTABLE_VADDR  (1ull<<31)
+#define BIGGEST_SANE_USER_ALLOC ((1ull<<32)-1ull)
 
 #define MAXPTR(a, b) \
 	((((char*)(a)) > ((char*)(b))) ? (a) : (b))

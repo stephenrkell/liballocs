@@ -124,6 +124,10 @@ void __stack_allocator_init(void)
 		
 		initialized = 1;
 		trying_to_initialize = 0;
+		
+		/* NOTE: we don't add any mappings initially; we rely on the mmap allocator 
+		 * to tell us about them. Similarly for new mappings, we rely on the 
+		 * mmap trap logic to identify them, by their MAP_GROWSDOWN flag. */
 	}
 }
 

@@ -61,10 +61,14 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 	
 	// do the memset
 	wchar_t accept[] = { wchar_old_val, '\0' };
+	// PROBLEM: if our accept val is 0, 
 #ifndef NDEBUG
 	ssize_t max_len = (ssize_t) -1;
-	if (old_num != (bigalloc_num_t) -1) max_len = wcsspn((wchar_t *) begin, accept);
-	if (max_len < n/2) abort();
+	if (old_num != (bigalloc_num_t) -1 && old_num) // FIXME: also check when old_num is zero
+	{
+		max_len = wcsspn((wchar_t *) begin, accept);
+		if (max_len < n/2) abort();
+	}
 #endif
 	if (n != 0) wmemset((wchar_t *) begin, wchar_val, n / 2);
 	
@@ -80,12 +84,12 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 
 static void (__attribute__((constructor(101))) init)(void)
 {
-	sleep(10);
 	if (!pageindex)
 	{
 		/* Mmap our region. We map one 16-bit number for every page in the user address region. */
 		pageindex = MEMTABLE_NEW_WITH_TYPE(bigalloc_num_t, PAGE_SIZE, (void*) 0, (void*) (MAXIMUM_USER_ADDRESS + 1));
 		if (pageindex == MAP_FAILED) abort();
+		debug_printf(3, "pageindex at %p\n", pageindex);
 	}
 }
 
@@ -119,7 +123,6 @@ is_unindexed(void *begin, void *end)
 static void check_page_size(void) __attribute__((constructor));
 static void check_page_size(void)
 {
-	sleep(10);
 	if (PAGE_SIZE != sysconf(_SC_PAGE_SIZE)) abort();
 }
 
@@ -139,7 +142,6 @@ static void clear_bigalloc(struct big_allocation *b)
 	memset(&b->meta, 0, sizeof b->meta);
 }
 
-static void bigalloc_del(struct big_allocation *b) __attribute__((visibility("hidden")));
 static void bigalloc_del(struct big_allocation *b)
 {
 	/* Recursively delete all children. */
@@ -194,8 +196,8 @@ void __liballocs_print_l0_to_stream_err(void)
 
 static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const void *end);
 
-struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a) __attribute__((visibility("hidden")));
-struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a)
+struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by) __attribute__((visibility("hidden")));
+struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by)
 {
 	/* We get called from heap_index when the malloc'd address is a multiple of the 
 	 * page size, is big enough and fills (more-or-less) the alloc'd region. If so,  
@@ -204,15 +206,34 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	int lock_ret;
 	BIG_LOCK
 	
-	__liballocs_ensure_init();
 	char *chunk_end = (char*) ptr + size;
+	if (size > BIGGEST_SANE_USER_ALLOC) abort();
 
 	// ensure we have the parent entry
-	struct big_allocation *parent = get_common_parent_bigalloc(ptr, chunk_end);
-	if (!parent) abort();
+	struct big_allocation *parent = NULL;
+	if (maybe_parent) parent = maybe_parent;
+	else 
+	{
+		parent = get_common_parent_bigalloc(ptr, chunk_end);
+		if (!parent)
+		{
+			/* No parent is okay if we're sbrk (but bump it up) or 
+			 * page-aligned mmap. NOTE that sbrk does not have a parent
+			 * mmap-allocated bigalloc! Hmm, is that weird? */
+			if (allocated_by == &__sbrk_allocator)
+			{
+				// okay
+			}
+			else
+			{
+				if (ROUND_UP_PTR(ptr, PAGE_SIZE) != ptr) abort();
+				if (ROUND_UP_PTR(chunk_end, PAGE_SIZE) != chunk_end) abort();
+			}
+		}
+	}
 	
 	/* Grab a new bigalloc. */
-	bigalloc_num_t parent_num = parent - &big_allocations[0];
+	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
 	struct big_allocation *b = find_free_bigalloc();
 	if (b)
 	{
@@ -222,9 +243,9 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 			.parent = parent,
 				/* Do we have any sibling bigallocs? 
 				 * These are bigallocs allocated by the same allocator
-				 * out of the same chunk. For now, assume no. FIXME. */
+				 * out of the same chunk. For now, assume no. FIXME FIXME FIXME! */
 			.meta = meta,
-			.allocated_by = a
+			.allocated_by = allocated_by
 		};
 		SANITY_CHECK_BIGALLOC(b);
 		
@@ -258,6 +279,41 @@ _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end)
 	return 1;
 }
 
+_Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end)
+{
+	int lock_ret;
+	BIG_LOCK
+	const void *old_end = b->end;
+	b->end = (void*) new_end;
+	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+	
+	/* For each page that this alloc no longer spans, memset it back to the parent num. */
+	memset_bigalloc(pageindex + PAGENUM(ROUND_DOWN((unsigned long) new_end, PAGE_SIZE)),
+		parent_num, b - &big_allocations[0], 
+			PAGENUM(ROUND_DOWN((unsigned long) old_end, PAGE_SIZE))
+			 - PAGENUM(ROUND_DOWN((unsigned long) new_end, PAGE_SIZE)));
+	
+	BIG_UNLOCK
+	return 1;
+}
+
+_Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin)
+{
+	int lock_ret;
+	BIG_LOCK
+	const void *old_begin = b->begin;
+	b->begin = (void*) new_begin;
+	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+	
+	/* For each page that this alloc no longer spans, memset it in the page index. */
+	memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) old_begin, PAGE_SIZE)),
+		parent_num, b - &big_allocations[0], 
+			PAGENUM(ROUND_UP((unsigned long) new_begin, PAGE_SIZE))
+			 - PAGENUM(ROUND_UP((unsigned long) old_begin, PAGE_SIZE)));
+	
+	BIG_UNLOCK
+	return 1;
+}
 static struct big_allocation *find_bigalloc_recursive(struct big_allocation *start, 
 	const void *addr, struct allocator *a)
 {
@@ -280,8 +336,15 @@ static struct big_allocation *find_bigalloc_recursive(struct big_allocation *sta
 	/* We didn't find an overlapping child, so we fail. */
 	return NULL;
 }
-
+static struct big_allocation *find_bigalloc_nofail(const void *addr, struct allocator *a);
 static struct big_allocation *find_bigalloc(const void *addr, struct allocator *a)
+{
+	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
+	if (start_idx == 0) return NULL;
+	return find_bigalloc_recursive(&big_allocations[start_idx], addr, a);
+}
+
+static struct big_allocation *find_bigalloc_nofail(const void *addr, struct allocator *a)
 {
 	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
 	/* We should always have something at level0 spanning the whole page. */
@@ -313,7 +376,12 @@ static struct big_allocation *find_deepest_bigalloc_recursive(struct big_allocat
 static struct big_allocation *find_deepest_bigalloc(const void *addr)
 {
 	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
-	if (start_idx == 0) abort();
+	if (unlikely(start_idx == 0))
+	{
+		__liballocs_notify_unindexed_address(addr);
+		start_idx = pageindex[PAGENUM(addr)];
+		if (start_idx == 0) return NULL;
+	}
 	return find_deepest_bigalloc_recursive(&big_allocations[start_idx], addr);
 }
 
@@ -382,7 +450,7 @@ struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 	BIG_LOCK
 	struct big_allocation *b = find_deepest_bigalloc(mem);
 	BIG_UNLOCK
-	while (b->parent) b = b->parent;
+	while (b && b->parent) b = b->parent;
 	return b;
 }
 

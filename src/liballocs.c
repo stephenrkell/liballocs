@@ -54,6 +54,7 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 
 char exe_basename[4096] __attribute__((visibility("hidden")));
 char exe_fullname[4096] __attribute__((visibility("hidden")));
+const char __ldso_name[] = "/lib64/ld-linux-x86-64.so.2"; // FIXME: sysdep
 FILE *stream_err __attribute__((visibility("hidden")));
 
 struct addrlist __liballocs_unrecognised_heap_alloc_sites = { 0, 0, NULL };
@@ -286,7 +287,6 @@ void __liballocs_main_init(void) __attribute__((constructor(101),visibility("pro
 // NOTE: runs *before* the constructor in preload.c
 void __liballocs_main_init(void)
 {
-	sleep(10);
 	assert(!done_init);
 	
 	done_init = 1;
@@ -309,11 +309,7 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 		 *
 		 * - the executable;
 		 * - itself;
-		 * - any others?
-		 *
-		 * To avoid parsing /proc/self/maps, we use a quick hack: 
-		 * ask dladdr, and expect it to know the pathname. It seems
-		 * to work.
+		 * - any others? vdso?
 		 */
 		if (dlpi_addr == 0)
 		{
@@ -323,23 +319,26 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 		}
 		else
 		{
-			dlerror();
-			Dl_info addr_info;
-			int dladdr_ret = dladdr(dlpi_addr, &addr_info);
-			if (dladdr_ret == 0)
+			/* HMM -- empty dlpi_name but non-zero load addr.
+			 * Is it the vdso? */
+			struct link_map *l = get_highest_loaded_object_below((char*) dlpi_addr);
+			ElfW(Dyn) *strtab_ent = (const char *) dynamic_lookup(l->l_ld, DT_STRTAB);
+			if (strtab_ent && (intptr_t) strtab_ent->d_un.d_val < 0)
 			{
-				debug_printf(1, "dladdr could not resolve library loaded at %p\n", dlpi_addr);
-				return NULL;
-				// char cmdbuf[4096];
-				// int snret = snprintf(cmdbuf, 4096, "cat /proc/%d/maps", getpid());
-				// assert(snret > 0);
-				// system(cmdbuf);
-				// assert(0 && "no filename available for some loaded object");
+				/* BUGGY vdso, but good enough for me. */
+				return "[vdso]";
+				//const char *strtab = (const char *) strtab_ent->d_un.d_ptr;
+				//ElfW(Dyn) *soname_ent = dynamic_lookup(l->l_ld, DT_SONAME);
+				//const char *soname_str = strtab + soname_ent->d_un.d_val;
+				//if (strstr(soname_str, "vdso"))
+				//{
+				//	// okay, vdso
+				//	return "[vdso]";
+				//}
 			}
-			assert(addr_info.dli_fname != NULL);
-			return realpath_quick(addr_info.dli_fname);
+			abort();
 		}
-	} 
+	}
 	else
 	{
 		// we need to realpath() it
@@ -809,13 +808,22 @@ void *biggest_vaddr_in_obj(void *handle)
 	return (void*)(uintptr_t)seen;
 }
 
+/* We're allowed to malloc, thanks to __private_malloc(), but we 
+ * we shouldn't call strdup because libc will do the malloc. */
+char *private_strdup(const char *s)
+{
+	size_t len = strlen(s);
+	char *mem = malloc(len + 1);
+	strncpy(mem, s, len);
+	return mem;
+}
+
 /* This is *not* a constructor. We don't want to be called too early,
  * because it might not be safe to open the -uniqtypes.so handle yet.
  * So, initialize on demand. */
 int __liballocs_global_init(void) __attribute__((constructor(103),visibility("protected")));
 int __liballocs_global_init(void)
 {
-	sleep(10);
 	if (__liballocs_is_initialized) return 0; // we are okay
 
 	// don't try more than once to initialize
@@ -899,6 +907,7 @@ int __liballocs_global_init(void)
 	__liballocs_allocsmt = MEMTABLE_NEW_WITH_TYPE(allocsmt_entry_type, allocsmt_entry_coverage, 
 		(void*) 0, (void*) (0x800000000000ul << 2));
 	if (__liballocs_allocsmt == MAP_FAILED) abort();
+	debug_printf(3, "allocsmt at %p\n", __liballocs_allocsmt);
 	
 	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_for_one_object, NULL);
 	assert(ret_allocsites == 0);

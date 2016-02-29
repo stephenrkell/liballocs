@@ -31,6 +31,8 @@ void __static_allocator_init(void)
 	if (!initialized && !trying_to_initialize)
 	{
 		trying_to_initialize = 1;
+		/* Initialize what we depend on. */
+		__mmap_allocator_init();
 		dl_iterate_phdr(add_all_loaded_segments, /* any filename */ NULL);
 		initialized = 1;
 		trying_to_initialize = 0;
@@ -43,24 +45,6 @@ void __static_allocator_notify_load(void *handle)
 		((struct link_map *) handle)->l_name);
 	assert(dlpi_ret != 0);
 }
-
-// FIXME: I don't think these macros are used any more
-#define ROUND_DOWN_TO_PAGE_SIZE(n) \
-	(assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE), ((n)>>LOG_PAGE_SIZE)<<LOG_PAGE_SIZE)
-#define ROUND_UP_TO_PAGE_SIZE(n) \
-	(assert(sysconf(_SC_PAGE_SIZE) == PAGE_SIZE), (n) % PAGE_SIZE == 0 ? (n) : ((((n) >> LOG_PAGE_SIZE) + 1) << LOG_PAGE_SIZE))
-
-#define MAPPING_BASE_FROM_PHDR_VADDR(base_addr, vaddr) \
-   (ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr)))
-#define MAPPING_END_FROM_PHDR_VADDR(base_addr, vaddr, memsz) \
-	(ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
-
-/* We use these for PT_GNU_RELRO mappings. */
-#define MAPPING_NEXT_PAGE_START_FROM_PHDR_BEGIN_VADDR(base_addr, vaddr) \
-   (ROUND_UP_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr)))
-#define MAPPING_PRECEDING_PAGE_START_FROM_PHDR_END_VADDR(base_addr, vaddr, memsz) \
-	(ROUND_DOWN_TO_PAGE_SIZE((uintptr_t) (base_addr) + (uintptr_t) (vaddr) + (memsz)))
-
 
 struct segment_metadata
 {
@@ -105,8 +89,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 	{
 		const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, 
 			(void*) info->dlpi_addr);
-		// we might have been returned a static buffer, so strdup it
-		char *copied_filename = strdup(dynobj_name);
+		if (!dynobj_name) dynobj_name = "(unknown)";
 
 		// this is the file we care about, so iterate over its phdrs
 		for (int i = 0; i < info->dlpi_phnum; ++i)
@@ -121,7 +104,9 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 				if (!containing_mapping) abort();
 				struct segment_metadata *m = malloc(sizeof (struct segment_metadata));
 				*m = (struct segment_metadata) {
-					.filename = strdup(info->dlpi_name),
+					/* We strdup once per segment, even though the filename could be 
+					 * shared, in order to simplify the cleanup logic. */
+					.filename = private_strdup(dynobj_name),
 					.phdr = &info->dlpi_phdr[i]
 				};
 				
@@ -132,7 +117,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 						.what = DATA_PTR,
 						.un = {
 							opaque_data: { 
-								.data_ptr = (void*) &info->dlpi_phdr[i],
+								.data_ptr = (void*) m,
 								.free_func = &free_segment_metadata
 							}
 						}

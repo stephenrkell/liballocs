@@ -75,6 +75,13 @@ struct R_DEBUG_STRUCT_TAG
 	} r_state;
 	ElfW(Addr) r_ldbase;
 };
+#ifndef RTLD_DEFAULT
+#define RTLD_DEFAULT ((void*)0) /* HACK: GNU-specific? */
+#endif
+#ifndef RTLD_NEXT
+#define RTLD_NEXT ((void*)-1) /* HACK: GNU-specific? */
+#endif
+
 #endif
 
 extern ElfW(Dyn) _DYNAMIC[] __attribute__((weak));
@@ -463,15 +470,91 @@ dynsym_nasty_hack:
 	return nsyms;
 }
 
+static inline 
+ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sym)
+{
+	ElfW(Dyn) *hash_ent = dynamic_lookup(l->l_ld, DT_HASH);
+	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
+	ElfW(Sym) *symtab = (ElfW(Sym) *) dynamic_xlookup(l->l_ld, DT_SYMTAB)->d_un.d_ptr;
+	ElfW(Sym) *symtab_end = symtab + dynamic_symbol_count(l->l_ld);
+	const char *strtab = (const char *) dynamic_xlookup(l->l_ld, DT_STRTAB)->d_un.d_ptr;
+	const char *strtab_end = strtab + local_dynamic_xlookup(DT_STRSZ)->d_un.d_val;
+	
+	/* Try the hash lookup, if we can. FIXME: support GNU hash. */
+	ElfW(Sym) *found_sym = NULL;
+	ElfW(Sym) *found = NULL;
+	if (hash) found = hash_lookup(hash, symtab, strtab, sym);
+	else found = symbol_lookup_linear(symtab, symtab_end, strtab, strtab_end, sym);
+	return found;
+}
+
 /* preserve NULLs */
+#define LOAD_ADDR_FIXUP_IN_OBJ(l, p) \
+	((!(p)) ? NULL : ((void*) ((char*) (p)) + (l->l_addr)))
 #define LOAD_ADDR_FIXUP(p, p_into_obj) \
-	((!(p)) ? NULL : ((void*) ((char*) (p)) + (uintptr_t) (get_link_map( (p_into_obj) )->l_addr)))
+	LOAD_ADDR_FIXUP_IN_OBJ( (uintptr_t) (get_link_map( (p_into_obj) )), (p) )
 
 static inline
 void *sym_to_addr(ElfW(Sym) *sym)
 {
 	if (!sym) return NULL;
 	return LOAD_ADDR_FIXUP(sym->st_value, sym);
+}
+
+static inline
+void *sym_to_addr_in_object(struct LINK_MAP_STRUCT_TAG *l, ElfW(Sym) *sym)
+{
+	if (!sym) return NULL;
+	return LOAD_ADDR_FIXUP_IN_OBJ(l, sym->st_value);
+}
+
+static inline
+void *fake_dlsym(void *handle, const char *symname)
+{
+	/* Which object do we want? It's either
+	 * "the first" (RTLD_DEFAULT);
+	 * "the one after us (RTLD_NEXT);
+	 * "this one". */
+
+	struct LINK_MAP_STRUCT_TAG *default_match = NULL;
+	struct LINK_MAP_STRUCT_TAG *ourselves = NULL;
+	struct LINK_MAP_STRUCT_TAG *handle_match = NULL;
+	
+	for (struct LINK_MAP_STRUCT_TAG *l = _r_debug.r_map;
+			l;
+			l = l->l_next)
+	{
+		_Bool had_seen_ourselves = (ourselves != NULL);
+
+		if (l->l_ld == _DYNAMIC)
+		{
+			ourselves = l;
+		}
+		
+		/* Is this object eligible? */
+		if (handle == l
+				|| handle == RTLD_DEFAULT
+				|| (handle == RTLD_NEXT && had_seen_ourselves))
+		{
+			/* Does this object have the symbol? */
+			ElfW(Sym) *found = symbol_lookup_in_object(l, symname);
+			if (found && found->st_shndx != SHN_UNDEF) return sym_to_addr(found);
+			
+			if (handle == l)
+			{
+				/* Symbol not found. We can stop now. */
+				goto not_found;
+			}
+			// else continue around the loop
+		}
+	}
+	
+not_found:
+	/* Symbol not found. FIXME: we really want to set dlerror, but we can't. 
+	 * Ideally we'd make a libdl call that sets it to something. But we can't
+	 * reliably do that from here. Instead, we use MAP_FAILED to signal error. */
+	return (void*) -1;
+	
 }
 
 #endif

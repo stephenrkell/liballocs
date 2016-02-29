@@ -3,7 +3,6 @@
 
 #include <stdbool.h>
 #include "vas.h"
-#define USE_SYSCALL_FOR_MMAP
 #include "memtable.h"
 
 struct entry
