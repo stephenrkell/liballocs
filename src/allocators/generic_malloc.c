@@ -94,7 +94,7 @@ static void **next_recently_freed_to_replace = &recently_freed[0];
 #endif
 
 struct entry *index_region __attribute__((aligned(64))) /* HACK for cacheline-alignedness */;
-unsigned long biggest_l1_object __attribute__((visibility("protected")));
+unsigned long biggest_unpromoted_object __attribute__((visibility("protected")));
 void *index_max_address;
 int safe_to_call_malloc;
 
@@ -311,17 +311,54 @@ static void list_sanity_check(entry_type *head, const void *should_see_chunk)
 static void list_sanity_check(entry_type *head, const void *should_see_chunk) {}
 #endif
 
-static uintptr_t nbytes_in_index_for_bigalloc_entry(void *userchunk_base)
-{
-	void *allocptr = userptr_to_allocptr(userchunk_base);
-	void *end_addr = (char*) allocptr + malloc_usable_size(allocptr);
-	uintptr_t begin_pagenum = ((uintptr_t) userchunk_base >> LOG_PAGE_SIZE);
-	uintptr_t end_pagenum = ((uintptr_t) end_addr >> LOG_PAGE_SIZE)
-			 + (((((uintptr_t) end_addr) % PAGE_SIZE) == 0) ? 0 : 1);
-	unsigned long nbytes_in_index = ((end_pagenum - begin_pagenum) << LOG_PAGE_SIZE)
-			/ entry_coverage_in_bytes;
-	return nbytes_in_index;
-}
+// static void memset_index_big_chunk(void *userptr, struct entry value)
+// {
+// 	void *allocptr = userptr_to_allocptr(userptr);
+// 	/* Allow allocs beginning a short distance into the entry to be 
+// 	 * treated as beginning at the start of the entry.
+// 	 * This is because the malloc header. should not prevent an initial
+// 	 * entry from being marked as belonging to the bigalloc. */
+// 	_Bool covers_whole_initial_entry = ((uintptr_t) allocptr) % PAGE_SIZE
+// 		 <= MAXIMUM_MALLOC_HEADER_OVERHEAD;
+// 	char *malloc_end_address = (char*) allocptr + malloc_usable_size(allocptr);
+// 	_Bool covers_whole_final_entry = (0 == ((uintptr_t) malloc_end_address % 
+// 		entry_coverage_in_bytes));
+// 	struct entry *start_entry = covers_whole_initial_entry ? 
+// 		INDEX_LOC_FOR_ADDR(userptr)
+// 			: INDEX_LOC_FOR_ADDR(userptr) + 1;
+// 	struct entry *end_entry = covers_whole_final_entry ? 
+// 		INDEX_LOC_FOR_ADDR((char*) malloc_end_address)
+// 			: INDEX_LOC_FOR_ADDR((char*) malloc_end_address) - 1;
+// 	size_t n = (end_entry - start_entry) * sizeof (struct entry);
+// #ifndef NDEBUG
+// 	/* CHECK that we're really overwriting what we expect.*/
+// 	struct entry bigalloc_value = { 0, 1, 63 };
+// 	assert(IS_BIGALLOC_ENTRY(&bigalloc_value));
+// 	char bigalloc_accept[] = { *(char*) &bigalloc_value, '\0' };
+// 	struct entry empty_value = { 0, 0, 0 };
+// 	assert(IS_EMPTY_ENTRY(&empty_value));
+// 	if (*(char*) &bigalloc_value == *(char*) &value)
+// 	{
+// 		/* Check we see n empties */
+// 		/* We can't use strspn to compare against zero bytes. Instead, use memcmp! */
+// 		char zeroes[n];
+// 		bzero(zeroes, n);
+// 		_Bool ok = (0 == memcmp(zeroes, (char*) start_entry, n));
+// 		assert(ok);
+// 	} else if (*(char*) &empty_value == *(char*) &value)
+// 	{
+// 		size_t n_ok = strspn((char*) start_entry, bigalloc_accept);
+// 		assert(n_ok >= n);
+// 	}
+// #endif
+// 	if (end_entry > start_entry)
+// 	{
+// 		memset(start_entry, 
+// 			*(char*) &value, 
+// 			n
+// 		);
+// 	}
+// }
 
 static void 
 index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller);
@@ -332,6 +369,11 @@ __liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, const vo
 	index_insert(new_userchunkaddr, modified_size, caller);
 }
 
+static unsigned long index_insert_count;
+
+#define PROMOTE_TO_BIGALLOC(userchunk) \
+	(malloc_usable_size(userptr_to_allocptr((userchunk))) \
+				 > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072)
 static void 
 index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 {
@@ -362,9 +404,8 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	 * push our metadata into the bigalloc map. 
 	 * (Do we still index it at l1? NO, but this stores up complication when we need to promote it.  */
 	if (__builtin_expect(
-			modified_size > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072
+			PROMOTE_TO_BIGALLOC(new_userchunkaddr)
 			/* NOTE: no longer do we have to be page-aligned to use the bigalloc map */
-			/* && (uintptr_t) userptr_to_allocptr(new_userchunkaddr) % PAGE_SIZE <= MAXIMUM_MALLOC_HEADER_OVERHEAD */
 			, 
 		0))
 	{
@@ -388,13 +429,18 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 		if (b)
 		{
 			/* memset the covered entries with the bigalloc value,
-			 * to tell our lookup code that it should ask the page index. */
-			struct entry bigalloc_value = { 0, 1, 63 };
-			assert(IS_BIGALLOC_ENTRY(&bigalloc_value));
-			memset(INDEX_LOC_FOR_ADDR(new_userchunkaddr), *(char*) &bigalloc_value, 
-				nbytes_in_index_for_bigalloc_entry(new_userchunkaddr));
-			assert(IS_BIGALLOC_ENTRY(INDEX_LOC_FOR_ADDR(new_userchunkaddr)));
-			assert(IS_BIGALLOC_ENTRY(INDEX_LOC_FOR_ADDR((char*) new_userchunkaddr + modified_size - 1)));
+			 * to tell our lookup code that it should ask the page index.
+			 * CARE though: 
+			 * - in the first and last index lists, there might be other
+			 *   chunks.
+			 * - can we always get the answer we need from the page index?
+			 *    well, yes, if it really is a bigalloc then by definition
+			 *        the pageindex -- or, more precisely, the bigalloc
+			 *        parent/child tree structure -- will have it
+			 */
+			//struct entry bigalloc_value = { 0, 1, 63 };
+			//assert(IS_BIGALLOC_ENTRY(&bigalloc_value));
+			//memset_index_big_chunk(new_userchunkaddr, bigalloc_value);
 			
 			BIG_UNLOCK
 			return;
@@ -402,14 +448,17 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	}
 	
 	/* if we got here, it's going in l1 */
-	if (modified_size > biggest_l1_object) biggest_l1_object = modified_size;
+	if (modified_size > biggest_unpromoted_object) biggest_unpromoted_object = modified_size;
 
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(new_userchunkaddr);
 
 	/* DEBUGGING: sanity check entire bin */
 #ifdef TRACE_HEAP_INDEX
-	fprintf(stderr, "*** Inserting user chunk at %p into list indexed at %p\n", 
-		new_userchunkaddr, index_entry);
+	fprintf(stderr, "***[%09ld] Inserting user chunk at %p into list indexed at %p\n", 
+		index_insert_count, new_userchunkaddr, index_entry);
+#endif
+#if !defined(NDEBUG) || defined(TRACE_HEAP_INDEX)
+	++index_insert_count;
 #endif
 	list_sanity_check(index_entry, NULL);
 
@@ -526,9 +575,10 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	}
 #endif
 	
+	/* We promoted this entry into the bigalloc index. We still
+	 * kept its metadata locally, though. */
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(userptr);
-	/* unindex the bigalloc maps */
-	if (__builtin_expect(IS_BIGALLOC_ENTRY(index_entry), 0))
+	if (PROMOTE_TO_BIGALLOC(userptr))
 	{
 		void *allocptr = userptr_to_allocptr(userptr);
 		unsigned long size = malloc_usable_size(allocptr);
@@ -536,18 +586,18 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		fprintf(stderr, "*** Unindexing bigalloc entry for alloc chunk %p (size %lu)\n", 
 				allocptr, size);
 #endif
-		unsigned start_remainder = ((uintptr_t) allocptr) % PAGE_SIZE;
-		unsigned end_remainder = (((uintptr_t) allocptr) + size) % PAGE_SIZE;
+		//unsigned start_remainder = ((uintptr_t) allocptr) % PAGE_SIZE;
+		//unsigned end_remainder = (((uintptr_t) allocptr) + size) % PAGE_SIZE;
 		
-		unsigned expected_pagewise_size = size 
-				+ start_remainder
-				+ ((end_remainder == 0) ? 0 : PAGE_SIZE - end_remainder);
+		//unsigned expected_pagewise_size = size 
+		//		+ start_remainder
+		//		+ ((end_remainder == 0) ? 0 : PAGE_SIZE - end_remainder);
 		__liballocs_delete_bigalloc(userptr_to_allocptr(userptr), 
 			&__generic_malloc_allocator);
 		// memset the covered entries with the empty value
-		struct entry empty_value = { 0, 0, 0 };
-		assert(IS_EMPTY_ENTRY(&empty_value));
-		memset(index_entry, *(char*) &empty_value, nbytes_in_index_for_bigalloc_entry(userptr));
+		//struct entry empty_value = { 0, 0, 0 };
+		//assert(IS_EMPTY_ENTRY(&empty_value));
+		//memset_index_big_chunk(userptr, empty_value);
 		
 #ifdef TRACE_HEAP_INDEX
 		*next_recently_freed_to_replace = userptr;
@@ -665,6 +715,18 @@ void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller)
 	 * the allocator might trash our insert (by writing its own data over it). 
 	 * So we *must* delete the entry first,
 	 * then recreate it later, as it may not survive the realloc() uncorrupted. */
+	
+	/* Another complication: if we're realloc'ing a bigalloc, we might have to
+	 * move its children. BUT should the user ever do this? It's only sensible
+	 * to realloc a suballocated area if you know the realloc will happen in-place, 
+	 * i.e. if you're making it smaller (only). 
+	 * 
+	 * BUT some bigallocs are just big; they needn't have children. 
+	 * For those, does it matter if we delete and then re-create the bigalloc record?
+	 * I don't see why it should.
+	 */
+	// struct entry *index_entry = INDEX_LOC_FOR_ADDR(userptr);
+
 	index_delete(userptr/*, malloc_usable_size(ptr)*/);
 }
 void post_nonnull_nonzero_realloc(void *userptr, 
@@ -753,7 +815,7 @@ static inline _Bool find_next_nonempty_bin(struct entry **p_cur,
 		size_t *p_object_minimum_size
 		)
 {
-	size_t max_nbytes_coverage_to_scan = biggest_l1_object - *p_object_minimum_size;
+	size_t max_nbytes_coverage_to_scan = biggest_unpromoted_object - *p_object_minimum_size;
 	size_t max_nbuckets_to_scan = 
 			(max_nbytes_coverage_to_scan % entry_coverage_in_bytes) == 0 
 		?    max_nbytes_coverage_to_scan / entry_coverage_in_bytes
@@ -1077,7 +1139,9 @@ struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object
 		
 		if (__builtin_expect(IS_BIGALLOC_ENTRY(cur_head), 0))
 		{
-			return __lookup_bigalloc_with_insert(mem, &__generic_malloc_allocator, out_object_start);
+			// we shouldn't need this any more
+			abort();
+			// return __lookup_bigalloc_with_insert(mem, &__generic_malloc_allocator, out_object_start);
 		}
 	
 // 		if (__builtin_expect(IS_DEEP_ENTRY(cur_head), 0))
@@ -1125,7 +1189,7 @@ struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object
 #ifndef NDEBUG
 			/* Sanity check on the insert. */
 			if ((char*) cur_insert < (char*) cur_userchunk
-				|| (char*) cur_insert - (char*) cur_userchunk > biggest_l1_object)
+				|| (char*) cur_insert - (char*) cur_userchunk > biggest_unpromoted_object)
 			{
 				fprintf(stderr, "Saw insane insert address %p for chunk beginning %p "
 					"(usable size %zu, allocptr %p); memory corruption?\n", 

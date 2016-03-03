@@ -17,6 +17,7 @@
 #include "maps.h"
 #include "relf.h"
 #include "systrap.h"
+#include "raw-syscalls.h"
 #include "liballocs.h"
 #include "liballocs_private.h"
 
@@ -297,7 +298,8 @@ char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
 char *realpath_quick(const char *arg)
 {
 	static char buf[4096];
-	return realpath(arg, &buf[0]);
+	char *ret = realpath(arg, &buf[0]);
+	return ret;
 }
 
 const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr) __attribute__((visibility("hidden")));
@@ -322,7 +324,7 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 			/* HMM -- empty dlpi_name but non-zero load addr.
 			 * Is it the vdso? */
 			struct link_map *l = get_highest_loaded_object_below((char*) dlpi_addr);
-			ElfW(Dyn) *strtab_ent = (const char *) dynamic_lookup(l->l_ld, DT_STRTAB);
+			ElfW(Dyn) *strtab_ent = dynamic_lookup(l->l_ld, DT_STRTAB);
 			if (strtab_ent && (intptr_t) strtab_ent->d_un.d_val < 0)
 			{
 				/* BUGGY vdso, but good enough for me. */
@@ -469,6 +471,7 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
+	write_string("Blah10000\n");
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
@@ -526,6 +529,7 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 
 int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
+	write_string("Blah11000\n");
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
@@ -555,7 +559,7 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 		 = (struct frame_allocsite_entry *) dlsym(types_handle, "frame_vaddrs");
 		if (!first_frame_entry)
 		{
-			debug_printf(1, "Could not load frame vaddrs (%s)", dlerror());
+			debug_printf(1, "Could not load frame vaddrs (%s)\n", dlerror());
 			return 0;
 		}
 
@@ -824,6 +828,7 @@ char *private_strdup(const char *s)
 int __liballocs_global_init(void) __attribute__((constructor(103),visibility("protected")));
 int __liballocs_global_init(void)
 {
+	write_string("Hello from liballocs global init!\n");
 	if (__liballocs_is_initialized) return 0; // we are okay
 
 	// don't try more than once to initialize
@@ -883,7 +888,6 @@ int __liballocs_global_init(void)
 	 * 
 	 * It seems that option 1 is better. 
 	 */
-
 	
 	// grab the executable's basename
 	ssize_t readlink_ret = readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);

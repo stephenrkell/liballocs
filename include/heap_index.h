@@ -2,16 +2,9 @@
 #define __HEAP_INDEX_H
 
 #include <stdbool.h>
-#include "vas.h"
+#include "pageindex.h"
 #include "memtable.h"
 
-struct entry
-{
-	unsigned present:1;
-	unsigned removed:1;  /* whether this link is in the "removed" state in Harris's algorithm */
-	unsigned distance:6; /* distance from the base of this entry's region, in 8-byte units */
-} __attribute__((packed));
-struct insert;
 #define entry_coverage_in_bytes 512
 typedef struct entry entry_type;
 extern void *index_begin_addr;
@@ -34,7 +27,7 @@ extern void *index_end_addr;
 		entry_coverage_in_bytes, index_begin_addr, index_end_addr, (e))
 
 
-extern unsigned long biggest_l1_object __attribute__((weak,visibility("protected")));
+extern unsigned long biggest_unpromoted_object __attribute__((weak,visibility("protected")));
 #define MAX_SUBALLOCATED_CHUNKS ((unsigned long) MINIMUM_USER_ADDRESS)
 /* Inserts describing objects have user addresses. They may have the flag set or unset. */
 #define INSERT_DESCRIBES_OBJECT(ins) \
@@ -71,22 +64,7 @@ static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins);
 extern struct entry *index_region __attribute__((weak));
 int safe_to_call_malloc __attribute__((weak));
 
-struct ptrs 
-{
-	struct entry next;
-	struct entry prev;
-} __attribute__((packed));
-struct insert
-{
-	unsigned alloc_site_flag:1;
-	unsigned long alloc_site:(ADDR_BITSIZE-1);
-	union  __attribute__((packed))
-	{
-		struct ptrs ptrs;
-		unsigned bits:16;
-	} un;
 
-} __attribute__((packed));
 
 struct suballocated_chunk_rec
 {
@@ -116,7 +94,7 @@ static inline _Bool ALLOC_IS_SUBALLOCATED(const void *ptr, struct insert *ins)
 {
 	bool is_bigalloc = (__lookup_bigalloc_with_insert(ptr, &__generic_malloc_allocator, NULL) == ins);
 	bool is_sane_l01 = is_bigalloc || ((char*)(ins) - (char*)(ptr) >= 0
-			&& (char*)(ins) - (char*)(ptr) < (signed long) biggest_l1_object);
+			&& (char*)(ins) - (char*)(ptr) < (signed long) biggest_unpromoted_object);
 	return is_sane_l01 && INSERT_IS_SUBALLOC_CHAIN(ins);
 }
 struct insert *__liballocs_insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);

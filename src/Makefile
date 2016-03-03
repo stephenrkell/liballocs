@@ -110,6 +110,10 @@ LIBUNWIND_LDLIBS := -lunwind -lunwind-`uname -m`
 CFLAGS += -DUSE_REAL_LIBUNWIND
 endif
 
+ifneq ($(TRACE_HEAP_INDEX),)
+CFLAGS += -DTRACE_HEAP_INDEX
+endif
+
 uniqtypes.o: uniqtypes.c
 	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
 	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
@@ -181,7 +185,7 @@ event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 # of the basic uniqtypes, but this will get uniqued as appropriate.
 
 liballocs_preload.so: systrap.o liballocs_preload.a
-	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive "$<" -Wl,--no-whole-archive $(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
+	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive dlmalloc.a $(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
 liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+

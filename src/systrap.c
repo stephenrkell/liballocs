@@ -2,19 +2,21 @@
 #include "do-syscall.h"
 #define RELF_DEFINE_STRUCTURES
 #include "relf.h"
+#include "vas.h"
 #include "maps.h"
+#include "pageindex.h"
 
 /* We also get linked in from libcrunch's stubs file, which lacks most of liballocs. 
  * So only call out to the hooks if they're present. */
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller) __attribute__((weak));
-void __mmap_allocator_notify_munmap(void *addr, size_t length) __attribute__((weak));
-void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address)
+void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller) __attribute__((weak));
+void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address, void *caller)
 			__attribute__((weak));
-void __mmap_allocator_notify_mremap_after(void *ret, void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address)
+void __mmap_allocator_notify_mremap_after(void *ret, void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address, void *caller)
 			__attribute__((weak));
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, int prot, int flags,
-                  int fd, off_t offset)
+                  int fd, off_t offset, void *caller)
 			__attribute__((weak));
 
 /* avoid standard headers */
@@ -22,6 +24,11 @@ char *realpath(const char *path, char *resolved_path);
 int snprintf(char *str, size_t size, const char *format, ...);
 int open(const char *pathname, int flags);
 int close(int fd);
+
+#define GUESS_CALLER(uc) \
+	( (&pageindex && pageindex[ ((uintptr_t) ((uc).rsp)) >> LOG_PAGE_SIZE ] != 0) \
+		? *(void**) ((uintptr_t) ((uc).rsp)) \
+		: (void*) ((uc).rip) )
 
 void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void mmap_replacement(struct generic_syscall *s, post_handler *post)
@@ -55,7 +62,8 @@ void mmap_replacement(struct generic_syscall *s, post_handler *post)
 	/* If it did something, notify the allocator. */
 	if ((void*) ret != (void*) -1 && &__mmap_allocator_notify_mmap)
 	{
-		__mmap_allocator_notify_mmap((void*) ret, addr, length, prot, flags, fd, offset);
+		__mmap_allocator_notify_mmap((void*) ret, addr, length, prot, flags, fd, offset,
+			GUESS_CALLER(s->saved_context->uc.uc_mcontext));
 	}
 
 	/* Do the post-handling. */
@@ -76,7 +84,8 @@ void munmap_replacement(struct generic_syscall *s, post_handler *post)
 	long int ret = do_syscall2(s);
 	
 	/* If it did something, notify the allocator. */
-	if (ret == 0 && &__mmap_allocator_notify_munmap) __mmap_allocator_notify_munmap(addr, length);
+	if (ret == 0 && &__mmap_allocator_notify_munmap) __mmap_allocator_notify_munmap(addr, length, 
+		GUESS_CALLER(s->saved_context->uc.uc_mcontext));
 	
 	/* Do the post-handling. */
 	post(s, ret);
@@ -100,7 +109,7 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	if (&__mmap_allocator_notify_mremap_before)
 	{
 		__mmap_allocator_notify_mremap_before(old_addr, old_length, new_length, flags, 
-			maybe_new_address);
+			maybe_new_address, GUESS_CALLER(s->saved_context->uc.uc_mcontext));
 	}	
 	
 	/* Do the call. */
@@ -112,7 +121,7 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	if (&__mmap_allocator_notify_mremap_after)
 	{
 		__mmap_allocator_notify_mremap_after((void*) ret, old_addr, old_length, new_length, flags, 
-			maybe_new_address);
+			maybe_new_address, GUESS_CALLER(s->saved_context->uc.uc_mcontext));
 	}
 	
 	/* Do the post-handling. */
@@ -211,22 +220,21 @@ void __liballocs_systrap_init(void)
 			ElfW(Sym) *dynsym_end = dynsym + dynamic_symbol_count(l->l_ld);
 
 			/* Now we can look up symbols. */
-			ElfW(Sym) *found_mmap = symbol_lookup_linear(dynsym, dynsym_end, dynstr, 
-				dynstr + dynstrsz, "mmap");
-			if (found_mmap && found_mmap->st_shndx != STN_UNDEF)
-			{
-				trap_one_instruction_range((unsigned char *)(l->l_addr + found_mmap->st_value), 
-					(unsigned char *)(l->l_addr + found_mmap->st_value + found_mmap->st_size),
-					0, 1);
-			}
-			ElfW(Sym) *found_mmap64 = symbol_lookup_linear(dynsym, dynsym_end, dynstr, 
-				dynstr + dynstrsz, "mmap64");
-			if (found_mmap64 && found_mmap64->st_shndx != STN_UNDEF)
-			{
-				trap_one_instruction_range((unsigned char *)(l->l_addr + found_mmap64->st_value), 
-					(unsigned char *)(l->l_addr + found_mmap64->st_value + found_mmap64->st_size),
-					0, 1);
-			}
+#define TRAP_SYSCALLS_IN_SYMBOL_NAMED(n) do { \
+			ElfW(Sym) *found_ ## n = symbol_lookup_linear(dynsym, dynsym_end, dynstr, \
+				dynstr + dynstrsz, #n); \
+			if (found_ ## n && found_ ## n ->st_shndx != STN_UNDEF) \
+			{ \
+				trap_one_instruction_range((unsigned char *)(l->l_addr + found_ ## n ->st_value),  \
+					(unsigned char *)(l->l_addr + found_ ## n ->st_value + found_ ## n ->st_size), \
+					0, 1); \
+			} \
+			} while (0)
+			
+			TRAP_SYSCALLS_IN_SYMBOL_NAMED(mmap);
+			TRAP_SYSCALLS_IN_SYMBOL_NAMED(mmap64);
+			TRAP_SYSCALLS_IN_SYMBOL_NAMED(munmap);
+			TRAP_SYSCALLS_IN_SYMBOL_NAMED(mremap);
 		}
 	}
 	install_sigill_handler();

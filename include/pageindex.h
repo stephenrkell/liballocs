@@ -1,5 +1,30 @@
 #ifndef LIBALLOCS_PAGEINDEX_H_
 #define LIBALLOCS_PAGEINDEX_H_
+#include "vas.h"
+
+struct entry
+{
+	unsigned present:1;
+	unsigned removed:1;  /* whether this link is in the "removed" state in Harris's algorithm */
+	unsigned distance:6; /* distance from the base of this entry's region, in 8-byte units */
+} __attribute__((packed));
+struct insert;
+struct ptrs 
+{
+	struct entry next;
+	struct entry prev;
+} __attribute__((packed));
+struct insert
+{
+	unsigned alloc_site_flag:1;
+	unsigned long alloc_site:(ADDR_BITSIZE-1);
+	union  __attribute__((packed))
+	{
+		struct ptrs ptrs;
+		unsigned bits:16;
+	} un;
+
+} __attribute__((packed));
 
 /* We maintain two structures:
  *
@@ -65,7 +90,7 @@ extern struct big_allocation big_allocations[];
 
 typedef uint16_t bigalloc_num_t;
 
-extern bigalloc_num_t *pageindex __attribute__((visibility("hidden")));
+extern bigalloc_num_t *pageindex __attribute__((weak,visibility("protected")));
 
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
@@ -77,6 +102,7 @@ _Bool __liballocs_delete_bigalloc(const void *begin, struct allocator *a) __attr
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin);
+struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_allocation *b, const void *split_addr);
 
 struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
@@ -87,7 +113,6 @@ _Bool __liballocs_notify_unindexed_address(const void *);
 
 /* mappings of 4GB or more in size are assumed to be memtables and are ignored */
 #define BIGGEST_BIGALLOC BIGGEST_SANE_USER_ALLOC
-#include "vas.h"
 
 extern inline
 struct big_allocation *(__attribute__((always_inline,gnu_inline))

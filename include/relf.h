@@ -339,6 +339,32 @@ get_lowest_loaded_object_above(void *ptr)
 	}
 	return lowest_higher_seen;
 }
+
+static inline void *get_local_load_addr(void)
+{
+	return (void*) get_highest_loaded_object_below(&get_local_load_addr)->l_addr;
+}
+
+extern int _etext;
+static inline void *get_local_text_segment_end(void)
+{
+	char *our_load_addr = get_local_load_addr();
+	uintptr_t etext_value = (uintptr_t) &_etext;
+	// MONSTER HACK: sometimes _etext references are relocated, others not.
+	// FIXME: understand this.
+	if (etext_value > (uintptr_t) our_load_addr) return (char*) etext_value;
+	else return our_load_addr + etext_value;
+}
+
+// HACK: not actually possible in general, because we use phdrs
+static inline void *get_text_segment_end_from_load_addr(void *load_addr)
+{
+	/* monster HACK; consider searching for an _etext or etext symbol first */
+	ElfW(Ehdr) *ehdr = (ElfW(Ehdr) *) load_addr;
+	ElfW(Phdr) *phdrs = (ElfW(Phdr) *)((char*) ehdr + ehdr->e_phoff);
+	return load_addr + phdrs[0].p_memsz; // another monster HACK
+}
+
 static inline
 struct LINK_MAP_STRUCT_TAG*
 get_link_map(void *ptr)

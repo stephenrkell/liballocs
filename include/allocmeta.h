@@ -129,10 +129,10 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 
 void __mmap_allocator_init(void);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
-	int prot, int flags, int fd, off_t offset);
+	int prot, int flags, int fd, off_t offset, void *caller);
 void __mmap_allocator_notify_mremap(void *ret, void *old_addr, size_t old_size, 
-	size_t new_size, int flags, void *new_address);
-void __mmap_allocator_notify_munmap(void *addr, size_t length);
+	size_t new_size, int flags, void *new_address, void *caller);
+void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller);
 
 void __sbrk_allocator_init(void);
 _Bool __sbrk_allocator_notify_unindexed_address(const void *ptr);

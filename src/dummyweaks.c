@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdint.h>
 
 /* NOTE: is linking -R, i.e. "symbols only", the right solution for 
  * getting the weak references to pop out the way we want them?
@@ -33,6 +34,8 @@
  *
  * Can we use -R with a linker script?
  */
+
+uint16_t *pageindex __attribute__((visibility("protected")));
 
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {

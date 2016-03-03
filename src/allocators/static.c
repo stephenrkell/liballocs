@@ -13,6 +13,7 @@
 #include "relf.h"
 #include "liballocs_private.h"
 #include "pageindex.h"
+#include "raw-syscalls.h"
 
 struct allocator __static_allocator = {
 	.name = "static",
@@ -84,9 +85,11 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 	/* HACK: if we have an instance already running, quit early. */
 	if (running) /* return 1; */ abort(); // i.e. debug this
 	running = 1;
+	write_string("Blah9000\n");
 	const char *filename = (const char *) data;
-	if (filename == NULL || 0 == strcmp(filename, info->dlpi_name))
+	if (filename != NULL && 0 == strcmp(filename, info->dlpi_name))
 	{
+		write_string("Blah9001\n");
 		const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, 
 			(void*) info->dlpi_addr);
 		if (!dynobj_name) dynobj_name = "(unknown)";
@@ -129,8 +132,9 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 		}
 		
 		// if we were looking for a single file, and got here, then we found it; can stop now
-		if (filename != NULL) return 1;
+		if (filename != NULL) { running = 0; return 1; }
 	}
+	write_string("Blah9050\n");
 
 	running = 0;
 	
