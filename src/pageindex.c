@@ -215,6 +215,9 @@ static void unlink_child(struct big_allocation *child)
     PAGENUM((first))) ? \
 	(PAGENUM((second)) - PAGENUM((first))) \
 	: 0 )
+
+static struct big_allocation *find_deepest_bigalloc(const void *addr);
+
 static void bigalloc_del(struct big_allocation *b)
 {
 	SANITY_CHECK_BIGALLOC(b);
@@ -278,7 +281,7 @@ void __liballocs_print_l0_to_stream_err(void)
 
 static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const void *end);
 static struct big_allocation *bigalloc_new(const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, void *allocated_by);
+	struct meta_info meta, struct allocator *allocated_by);
 
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by) __attribute__((visibility("hidden")));
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by)
@@ -290,7 +293,7 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	int lock_ret;
 	BIG_LOCK
 	
-	char *chunk_end = (char*) ptr + size;
+	char *chunk_lastbyte = (char*) ptr + size - 1;
 	if (size > BIGGEST_SANE_USER_ALLOC) abort();
 
 	// ensure we have the parent entry
@@ -298,7 +301,18 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	if (maybe_parent) parent = maybe_parent;
 	else 
 	{
-		parent = get_common_parent_bigalloc(ptr, chunk_end);
+		// struct big_allocation *possible_parent = get_common_parent_bigalloc(ptr, chunk_lastbyte);
+		struct big_allocation *deepest_at_start = find_deepest_bigalloc(ptr);
+		struct big_allocation *deepest_at_end = find_deepest_bigalloc(chunk_lastbyte);
+		
+		/* These should all be equal. */
+		if (deepest_at_start != deepest_at_end)
+		{
+			abort();
+		}
+		// else looks okay -- we'll check for overlaps in the memset thing (but only if not NDEBUG)
+		else { parent = deepest_at_start; } // might still be NULL!
+		
 		if (!parent)
 		{
 			/* No parent is okay if we're sbrk (but bump it up) or 
@@ -311,7 +325,7 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 			else
 			{
 				if (ROUND_UP_PTR(ptr, PAGE_SIZE) != ptr) abort();
-				if (ROUND_UP_PTR(chunk_end, PAGE_SIZE) != chunk_end) abort();
+				if (ROUND_UP_PTR(chunk_lastbyte + 1, PAGE_SIZE) != chunk_lastbyte + 1) abort();
 			}
 		}
 	}
@@ -324,35 +338,42 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 }
 
 static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, void *allocated_by);
+	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator);
 
 static struct big_allocation *bigalloc_new(const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, void *allocated_by)
+	struct meta_info meta, struct allocator *allocated_by)
 {
 	struct big_allocation *b = find_free_bigalloc();
 	if (!b) return b;
-	bigalloc_init(b, ptr, size, parent, meta, allocated_by);
+	bigalloc_init(b, ptr, size, parent, meta, allocated_by, /* suballocator */ NULL);
 	return b;
 }
 
 static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, void *allocated_by)
+	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator)
 {
 	b->begin = (void*) ptr;
 	b->end = (char*) ptr + size;
 	b->meta = meta;
 	b->allocated_by = allocated_by;
+	b->suballocator = suballocator;
 	b->first_child = b->next_sib = b->prev_sib = NULL;
 	/* Add it to the child list of the parent, if we have one. */
-	if (parent) add_child(b, parent);
+	if (parent) 
+	{
+		add_child(b, parent);
+		/* Check that the parent thinks that this allocator is its suballocator. */
+		if (!parent->suballocator) parent->suballocator = allocated_by;
+		else if (parent->suballocator != allocated_by) abort();
+	}
 	
 	SANITY_CHECK_BIGALLOC(b);
 }
 
 static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, void *allocated_by)
+	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator)
 {
-	bigalloc_init_nomemset(b, ptr, size, parent, meta, allocated_by);
+	bigalloc_init_nomemset(b, ptr, size, parent, meta, allocated_by, suballocator);
 
 	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
 	/* For each page that this alloc spans, memset it in the page index. */
@@ -361,6 +382,8 @@ static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size
 			PAGE_DIST(ROUND_UP((unsigned long) b->begin, PAGE_SIZE),
 				      ROUND_DOWN((unsigned long) b->end, PAGE_SIZE))
 	);
+	
+	SANITY_CHECK_BIGALLOC(b);
 }
 
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end) __attribute__((visibility("protected")));
@@ -379,6 +402,58 @@ _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end)
 			          ROUND_DOWN((unsigned long) new_end, PAGE_SIZE))
 	);
 	
+	SANITY_CHECK_BIGALLOC(b);
+	
+	BIG_UNLOCK
+	return 1;
+}
+
+static _Bool is_one_or_more_levels_under(bigalloc_num_t maybe_lower_n, struct big_allocation *b)
+{
+	/* Equality means the answer is false. */
+	if (maybe_lower_n == b - &big_allocations[0]) return 0;
+	
+	/* Search b's children for bigalloc number maybe_lower_n. Be breadth-first. */
+	for (struct big_allocation *child = b->first_child; child; child = child->next_sib)
+	{
+		if (child - &big_allocations[0] == maybe_lower_n) return 1;
+	}
+	for (struct big_allocation *child = b->first_child; child; child = child->next_sib)
+	{
+		_Bool rec = is_one_or_more_levels_under(maybe_lower_n, child);
+		if (rec) return 1;
+	}
+	return 0;
+}
+
+_Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
+_Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin)
+{
+	int lock_ret;
+	BIG_LOCK
+	const void *old_begin = b->begin;
+	b->begin = (void*) new_begin;
+	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+	
+	/* For each page that this alloc spans, memset it in the page index. */
+	memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) new_begin, PAGE_SIZE)),
+		b - &big_allocations[0], parent_num,
+			PAGE_DIST(ROUND_UP((unsigned long) new_begin, PAGE_SIZE),
+			          /* GAH. Two cases: either we now cover the whole page that contains
+			           * old_begin (e.g. if b->end is on the *next* page or later), or
+			           * we don't (e.g. if b->end is later on the *same* page as old_begin).
+			           * How do we test for that? Looking at PAGENUM(b->end) is not quite enough,
+			           * because if a child was spanning the whole page, we don't want to
+			           * clobber its presence in the index. */
+			          ((PAGENUM(b->end) > PAGENUM(old_begin)) 
+			            && !is_one_or_more_levels_under(pageindex[PAGENUM(old_begin)], b)) 
+			              ? ROUND_UP((unsigned long) old_begin, PAGE_SIZE)
+			              : ROUND_DOWN((unsigned long) old_begin, PAGE_SIZE) )
+	);
+	// GAH. What if we now cover the whole "middle" page
+	
+	SANITY_CHECK_BIGALLOC(b);
+	
 	BIG_UNLOCK
 	return 1;
 }
@@ -396,6 +471,8 @@ static _Bool bigalloc_truncate_at_end(struct big_allocation *b, const void *new_
 			          ROUND_DOWN((unsigned long) old_end, PAGE_SIZE))
 	);
 	
+	SANITY_CHECK_BIGALLOC(b);
+	
 	return 1;
 }
 
@@ -404,6 +481,7 @@ _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void 
 	int lock_ret;
 	BIG_LOCK
 	_Bool ret = bigalloc_truncate_at_end(b, new_end);
+	SANITY_CHECK_BIGALLOC(b);
 	BIG_UNLOCK
 	return ret;
 }
@@ -422,7 +500,7 @@ _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const
 			PAGE_DIST(ROUND_UP((unsigned long) old_begin, PAGE_SIZE),
 			          ROUND_UP((unsigned long) new_begin, PAGE_SIZE))
 	);
-	
+	SANITY_CHECK_BIGALLOC(b);
 	BIG_UNLOCK
 	return 1;
 }
@@ -438,7 +516,8 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 	struct big_allocation *new_bigalloc = find_free_bigalloc();
 	if (!new_bigalloc) abort();
 	bigalloc_init_nomemset(new_bigalloc, 
-		split_addr, (char*) tmp.end - (char*) split_addr, tmp.parent, tmp.meta, tmp.allocated_by);
+		split_addr, (char*) tmp.end - (char*) split_addr, tmp.parent, tmp.meta, tmp.allocated_by,
+		tmp.suballocator);
 	/* Danger: the new bigalloc now have the *same* metadata as the old one. 
 	 * Our caller sorts this out, since the metadata is opaque to us. */
 	
@@ -482,7 +561,8 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 	{
 		if (*pos == (b - &big_allocations[0])) *pos = (new_bigalloc - &big_allocations[0]);
 	}
-
+	SANITY_CHECK_BIGALLOC(b);
+	SANITY_CHECK_BIGALLOC(new_bigalloc);
 	BIG_UNLOCK
 	return new_bigalloc;
 }
@@ -558,8 +638,8 @@ static struct big_allocation *find_deepest_bigalloc(const void *addr)
 	return find_deepest_bigalloc_recursive(&big_allocations[start_idx], addr);
 }
 
-_Bool __liballocs_delete_bigalloc(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
-_Bool __liballocs_delete_bigalloc(const void *begin, struct allocator *a)
+_Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
+_Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -630,6 +710,16 @@ struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 	struct big_allocation *b = find_deepest_bigalloc(mem);
 	BIG_UNLOCK
 	while (b && b->parent) b = b->parent;
+	return b;
+}
+
+struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_deepest_bigalloc(const void *mem)
+{
+	int lock_ret;
+	BIG_LOCK
+	struct big_allocation *b = find_deepest_bigalloc(mem);
+	BIG_UNLOCK
 	return b;
 }
 

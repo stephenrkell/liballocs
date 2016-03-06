@@ -199,7 +199,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				/* wholesale deletion */
 				remaining_length -= (char*) b->end - cur;
 				cur = b->end;
-				__liballocs_delete_bigalloc(b->begin, &__mmap_allocator);
+				__liballocs_delete_bigalloc_at(b->begin, &__mmap_allocator);
 			}
 			else
 			{
@@ -442,8 +442,13 @@ static _Bool extend_sequence(struct mapping_sequence *cur,
 	_Bool filename_is_consistent = 
 			(!filename && !cur->filename) // both anonymous -- continue sequence
 			|| (cur->nused == 0) // can always begin afresh
-			|| /* can append an anonymous (memsz > filesz) at the end (maybe >1 of them) */ 
-			   (!filename && !(cur->mappings[0].is_anon))
+			|| /* can append at most one anonymous (memsz > filesz) at the end 
+			    * (I had said "maybe >1 of them" -- WHY?) 
+			    * and provided that caller is in the same object (i.e. both ldso, say). */ 
+			   (!filename && cur->filename && !(cur->mappings[cur->nused - 1].is_anon)
+			    && ((!caller && !cur->mappings[cur->nused - 1].caller) ||
+					get_highest_loaded_object_below(caller)
+			      == get_highest_loaded_object_below(cur->mappings[cur->nused - 1].caller)))
 			// ... but if we're not beginning afresh, can't go from anonymous to with-name
 			|| (filename && cur->filename && 0 == strcmp(filename, cur->filename));
 	_Bool not_too_many = cur->nused != MAPPING_SEQUENCE_MAX_LEN;

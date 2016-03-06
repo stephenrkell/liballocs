@@ -18,7 +18,7 @@
 #include "pageindex.h"
 
 static 
-liballocs_err_t get_info(void * obj, struct uniqtype **out_type, 
+liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc, struct uniqtype **out_type, 
 	void **out_base, unsigned long *out_size, const void **out_site);
 
 struct allocator __sbrk_allocator = {
@@ -27,14 +27,16 @@ struct allocator __sbrk_allocator = {
 	.get_info = get_info
 };
 
-liballocs_err_t __generic_heap_get_info(void * obj, struct uniqtype **out_type, void **out_base, 
-unsigned long *out_size, const void **out_site);
+liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe_bigalloc, 
+	struct uniqtype **out_type, void **out_base, 
+	unsigned long *out_size, const void **out_site);
 
 static 
-liballocs_err_t get_info(void * obj, struct uniqtype **out_type, 
+liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc, struct uniqtype **out_type, 
 	void **out_base, unsigned long *out_size, const void **out_site)
 {
-	return __generic_heap_get_info(obj, out_type, out_base, out_size, out_site);
+	abort();
+	//return __generic_heap_get_info(obj, maybe_bigalloc, out_type, out_base, out_size, out_site);
 }
 
 static void *executable_end_addr;
@@ -113,6 +115,8 @@ void __sbrk_allocator_init(void)
 		/* parent -- let the code find the mmapping */ NULL,
 		/* allocated by? that's us */ &__sbrk_allocator
 	);
+	/* We expect our suballocator to be malloc, so pre-ordain that. */
+	bigalloc->suballocator = &__generic_malloc_allocator;
 	
 	trying_to_initialize = 0;
 	initialized = 1;

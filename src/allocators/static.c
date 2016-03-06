@@ -73,7 +73,7 @@ void __static_allocator_notify_unload(const char *copied_filename)
 				((struct segment_metadata *) b->meta.un.opaque_data.data_ptr)->filename))
 			{
 				/* It's a match, so delete. */
-				__liballocs_delete_bigalloc(b->begin, &__static_allocator);
+				__liballocs_delete_bigalloc_at(b->begin, &__static_allocator);
 			}
 		}
 	}
@@ -114,7 +114,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 				};
 				
 				const struct big_allocation *b = __liballocs_new_bigalloc(
-					segment_start_addr,
+					(void*) segment_start_addr,
 					segment_size,
 					(struct meta_info) {
 						.what = DATA_PTR,
@@ -180,7 +180,8 @@ static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 
 
 
-static liballocs_err_t get_info(void * obj, struct uniqtype **out_type, void **out_base, 
+static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc, 
+	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site)
 {
 	++__liballocs_hit_static_case;

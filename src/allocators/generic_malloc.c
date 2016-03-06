@@ -32,6 +32,7 @@ static inline size_t malloc_usable_size(void *ptr) __attribute__((visibility("pr
 size_t malloc_usable_size(void *ptr);
 #endif
 #include "liballocs_private.h"
+#include "relf.h"
 
 // HACK for libcrunch -- please remove (similar to malloc_usable_size -> __mallochooks_*)
 void __libcrunch_uncache_all(const void *allocptr, size_t size) __attribute__((weak));
@@ -374,6 +375,18 @@ static unsigned long index_insert_count;
 #define PROMOTE_TO_BIGALLOC(userchunk) \
 	(malloc_usable_size(userptr_to_allocptr((userchunk))) \
 				 > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072)
+/* We also apply a hack which helps performance: if a malloc chunk begins
+ * within a very short distance of a page boundary, pretend that it begins
+ * on the page boundary, for the purposes of bigallocs. This is to ensure
+ * that queries on the first page of a large object don't go down a slower
+ * path. FIXME: I've a feeling it currently breaks some alloca cases.
+ * ARGH. It actually breaks everything, because we need to undo the offset
+ * when interpreting the block's uniqtype. Don't do it, for now. */
+#define BIGALLOC_BEGIN(allocptr) (allocptr) /* \
+	(((uintptr_t)(allocptr)) % PAGE_SIZE <= MAXIMUM_MALLOC_HEADER_OVERHEAD) \
+	 ? (void*)(ROUND_DOWN_PTR((allocptr), PAGE_SIZE)) : (allocptr) \
+	)*/
+
 static void 
 index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 {
@@ -400,6 +413,24 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	}
 #endif
 	
+	/* Make sure the parent bigalloc knows we're suballocating it. */
+	char *allocptr = userptr_to_allocptr(new_userchunkaddr);
+	struct big_allocation *containing_bigalloc = __lookup_deepest_bigalloc(
+		userptr_to_allocptr(new_userchunkaddr));
+	if (!containing_bigalloc) abort();
+	if (unlikely(!containing_bigalloc->suballocator))
+	{
+		containing_bigalloc->suballocator = &__generic_malloc_allocator;
+	} else assert(containing_bigalloc->suballocator == &__generic_malloc_allocator
+		|| containing_bigalloc->suballocator == &__alloca_allocator);
+	// FIXME: split alloca off into a separate table?
+	
+	/* Populate our extra in-chunk fields */
+	struct insert *p_insert = insert_for_chunk(new_userchunkaddr);
+	p_insert->alloc_site_flag = 0U;
+	p_insert->alloc_site = (uintptr_t) caller;
+	
+	struct big_allocation *this_chunk_bigalloc = NULL;
 	/* If we're big enough, 
 	 * push our metadata into the bigalloc map. 
 	 * (Do we still index it at l1? NO, but this stores up complication when we need to promote it.  */
@@ -409,10 +440,21 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 			, 
 		0))
 	{
-		const struct big_allocation *b = __liballocs_new_bigalloc(
-			userptr_to_allocptr(new_userchunkaddr),
-			modified_size - sizeof (struct insert),
+		char *bigalloc_begin = BIGALLOC_BEGIN(allocptr);
+		size_t extra_size = allocptr - bigalloc_begin;
+		size_t bigalloc_size = modified_size - sizeof (struct insert) + extra_size;
+		/* Issue a query on the last byte of the allocation, to ensure that 
+		 * the sbrk allocator (or stack, even) is bumped up to include it. */
+		struct big_allocation *containing_bigalloc_lastbyte __attribute__((unused))
+		 = __lookup_deepest_bigalloc((char*) new_userchunkaddr + bigalloc_size - 1);
+		this_chunk_bigalloc = __liballocs_new_bigalloc(
+			bigalloc_begin,
+			bigalloc_size,
 			(struct meta_info) {
+				/* HMM: we could use an opaque pointer to the "real" insert, but 
+				 * instead we make a copy of that insert. This is perhaps better for
+				 * locality, since the big_allocation record is more likely
+				 * to be in the cache. FIXME: measure this. Would be cleaner to use ptr. */
 				.what = INS_AND_BITS,
 				.un = {
 					ins_and_bits: { 
@@ -423,28 +465,26 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 					}
 				}
 			},
-			NULL,
+			containing_bigalloc,
 			&__generic_malloc_allocator
 		);
-		if (b)
-		{
-			/* memset the covered entries with the bigalloc value,
-			 * to tell our lookup code that it should ask the page index.
-			 * CARE though: 
-			 * - in the first and last index lists, there might be other
-			 *   chunks.
-			 * - can we always get the answer we need from the page index?
-			 *    well, yes, if it really is a bigalloc then by definition
-			 *        the pageindex -- or, more precisely, the bigalloc
-			 *        parent/child tree structure -- will have it
-			 */
-			//struct entry bigalloc_value = { 0, 1, 63 };
-			//assert(IS_BIGALLOC_ENTRY(&bigalloc_value));
-			//memset_index_big_chunk(new_userchunkaddr, bigalloc_value);
-			
-			BIG_UNLOCK
-			return;
-		}
+		
+		/* memset the covered entries with the bigalloc value,
+		 * to tell our lookup code that it should ask the page index.
+		 * CARE though: 
+		 * - in the first and last index lists, there might be other
+		 *   chunks.
+		 * - can we always get the answer we need from the page index?
+		 *    well, yes, if it really is a bigalloc then by definition
+		 *        the pageindex -- or, more precisely, the bigalloc
+		 *        parent/child tree structure -- will have it
+		 */
+		//struct entry bigalloc_value = { 0, 1, 63 };
+		//assert(IS_BIGALLOC_ENTRY(&bigalloc_value));
+		//memset_index_big_chunk(new_userchunkaddr, bigalloc_value);
+
+		BIG_UNLOCK
+		return;
 	}
 	
 	/* if we got here, it's going in l1 */
@@ -464,10 +504,6 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 
 	void *head_chunkptr = entry_ptr_to_addr(index_entry);
 	
-	/* Populate our extra fields */
-	struct insert *p_insert = insert_for_chunk(new_userchunkaddr);
-	p_insert->alloc_site_flag = 0U;
-	p_insert->alloc_site = (uintptr_t) caller;
 
 	/* Add it to the index. We always add to the start of the list, for now. */
 	/* 1. Initialize our insert. */
@@ -592,7 +628,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		//unsigned expected_pagewise_size = size 
 		//		+ start_remainder
 		//		+ ((end_remainder == 0) ? 0 : PAGE_SIZE - end_remainder);
-		__liballocs_delete_bigalloc(userptr_to_allocptr(userptr), 
+		__liballocs_delete_bigalloc_at(userptr_to_allocptr(userptr), 
 			&__generic_malloc_allocator);
 		// memset the covered entries with the empty value
 		//struct entry empty_value = { 0, 0, 0 };
@@ -1223,10 +1259,11 @@ fail:
 	/* FIXME: use the actual biggest allocated object, not a guess. */
 }
 
-liballocs_err_t __generic_heap_get_info(void * obj, struct uniqtype **out_type, void **out_base, 
+liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe_bigalloc, 
+	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site)
 {
-	++__liballocs_hit_heap_case;
+	++__liballocs_hit_heap_case; // FIXME: needn't be heap -- could be alloca
 	/* For heap allocations, we look up the allocation site.
 	 * (This also yields an offset within a toplevel object.)
 	 * Then we translate the allocation site to a uniqtypes rec location.
@@ -1236,10 +1273,17 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct uniqtype **out_type, 
 	 * is initialized during load, but can be extended as new allocsites
 	 * are discovered, e.g. indirect ones.)
 	 */
-	struct suballocated_chunk_rec *containing_suballoc = NULL;
 	struct insert *heap_info = NULL;
 	size_t alloc_chunksize;
-	heap_info = lookup_object_info(obj, out_base, &alloc_chunksize, &containing_suballoc);
+	
+	if (maybe_bigalloc)
+	{
+		/* We already have the metadata. */
+		heap_info = &maybe_bigalloc->meta.un.ins_and_bits.ins;
+		alloc_chunksize = (char*) maybe_bigalloc->end - (char*) maybe_bigalloc->begin;
+		*out_base = maybe_bigalloc->begin;
+	} else heap_info = lookup_object_info(obj, out_base, &alloc_chunksize, NULL);
+	
 	if (!heap_info)
 	{
 		++__liballocs_aborted_unindexed_heap;
@@ -1251,8 +1295,6 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct uniqtype **out_type, 
 	 * the uniqtype will have been installed in the heap header already.
 	 * This is the expected case.
 	 */
-do_alloca_as_if_heap:
-	;
 	struct uniqtype *alloc_uniqtype;
 	if (__builtin_expect(heap_info->alloc_site_flag, 1))
 	{

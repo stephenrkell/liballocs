@@ -80,8 +80,8 @@ struct big_allocation
 	struct big_allocation *next_sib;
 	struct big_allocation *prev_sib;
 	struct big_allocation *first_child;
-	struct allocator *allocated_by;       // should always be parent->allocator?
-	struct allocator *suballocator;       // may be null?
+	struct allocator *allocated_by; // should always be parent->suballocator
+	struct allocator *suballocator; // ... suballocated bigallocs may have only small children
 	struct meta_info meta;
 };
 #define BIGALLOC_IN_USE(b) ((b)->begin && (b)->end)
@@ -98,8 +98,9 @@ void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protect
 
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a) __attribute__((visibility("hidden")));
 
-_Bool __liballocs_delete_bigalloc(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
+_Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end);
+_Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
 _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin);
 struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_allocation *b, const void *split_addr);
@@ -107,6 +108,7 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
 struct allocator *__lookup_top_level_allocator(const void *mem) __attribute__((visibility("hidden")));
 
 _Bool __liballocs_notify_unindexed_address(const void *);
@@ -127,8 +129,8 @@ struct big_allocation *(__attribute__((always_inline,gnu_inline))
 __liballocs_get_bigalloc_containing)
 (const void *obj)
 {
-	if (__builtin_expect(obj == 0, 0)) return NULL;
-	if (__builtin_expect(obj == (void*) -1, 0)) return NULL;
+	// if (__builtin_expect(obj == 0, 0)) return NULL;
+	// if (__builtin_expect(obj == (void*) -1, 0)) return NULL;
 	/* More heuristics go here. */
 	bigalloc_num_t bigalloc_num = pageindex[PAGENUM(obj)];
 	if (bigalloc_num == 0) return NULL;
@@ -139,52 +141,61 @@ __liballocs_get_bigalloc_containing)
 extern inline
 struct allocator *(__attribute__((always_inline,gnu_inline))
 __liballocs_leaf_allocator_for)
-(const void *obj, struct big_allocation **out_containing_bigalloc);
+(const void *obj, struct big_allocation **out_containing_bigalloc, struct big_allocation **out_maybe_the_allocation);
 extern inline
 struct allocator *(__attribute__((always_inline,gnu_inline))
 __liballocs_leaf_allocator_for)
-(const void *obj, struct big_allocation **out_containing_bigalloc)
+(const void *obj, struct big_allocation **out_containing_bigalloc, struct big_allocation **out_maybe_the_allocation)
 {
-	struct big_allocation *cur = __liballocs_get_bigalloc_containing(obj);
-	
-	while (1)
+	struct big_allocation *deepest = NULL;
+	for (struct big_allocation *cur = __liballocs_get_bigalloc_containing(obj);
+			__builtin_expect(cur != NULL, 1);
+			)
 	{
-		/* Does one of the children overlap? */
+		deepest = cur;
+
+		/* Increment: does one of the children overlap? */
 		for (struct big_allocation *child = cur->first_child;
-				child;
+				__builtin_expect(child != NULL, 0);
 				child = child->next_sib)
 		{
 			if ((char*) child->begin <= (char*) obj && 
 					(char*) child->end > (char*) obj)
 			{
 				cur = child;
-				goto descend;
 			}
 		}
 		
-		/* No child overlaps. */
-		break;
-	descend:
-		continue;
+		if (cur == deepest) cur = NULL;
 	}
+	/* Now cur is null, and deepest is the deepest overlapping.
+	 * If the deepest is not suballocated, then it's definitely
+	 * the leaf. If it is suballocated, then *either* the suballocator
+	 * *or* the bigalloc allocator might be responsible for the
+	 * memory under ptr. We assume that it's the suballocator.
+	 * 
+	 * ... but that's wrong. All we know is that if a deeper
+	 * allocation exists, it's not big, and it's exactly one level
+	 * down (there's no nesting in non-big allocations). 
+	 * FIMXE: we should really *try* the suballocator and then,
+	 * if ptr actually falls between the cracks, return the 
+	 * bigalloc's allocator. But that makes things slower than
+	 * we want. So we should add a slower call for this. */
 	
-	/* We didn't find an overlapping child. That doesn't mean 
-	 * no deeper allocation spans this address -- only that if 
-	 * one does, it's not big. Moreover, there's no nesting in
-	 * non-big allocations. */
-	if (__builtin_expect(cur->suballocator != NULL, 0))
+	if (__builtin_expect(!deepest, 0)) return NULL;
+	else if (__builtin_expect(deepest->suballocator != NULL, 1))
 	{
-		/* We should really *try* the suballocator and then,
-		 * if ptr actually falls between the cracks, return the 
-		 * bigalloc's allocator. But that makes things slower than
-		 * we want. FIXME: add a slower call for this. */
-		if (out_containing_bigalloc) *out_containing_bigalloc = cur;
-		return cur->suballocator;
+		/* The allocator is the suballocator, and the containing bigalloc
+		 * is deepest. */
+		if (out_containing_bigalloc) *out_containing_bigalloc = deepest;
+		if (out_maybe_the_allocation) *out_maybe_the_allocation = NULL;
+		return deepest->suballocator;
 	}
 	else
 	{
-		if (out_containing_bigalloc) *out_containing_bigalloc = cur->parent;
-		return cur->allocated_by;
+		if (out_containing_bigalloc) *out_containing_bigalloc = deepest->parent;
+		if (out_maybe_the_allocation) *out_maybe_the_allocation = deepest;
+		return deepest->allocated_by;
 	}
 }
 

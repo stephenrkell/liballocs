@@ -95,7 +95,7 @@ fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
 fun(void *             ,get_base,      arg(void *, obj))  /* base address? */ \
 fun(unsigned long      ,get_size,      arg(void *, obj))  /* size? */ \
 fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
-fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
+fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct big_allocation *, maybe_alloc), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
 fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static*/ \
 fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
 fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
@@ -118,6 +118,7 @@ struct allocator
 };
 
 extern struct allocator __stack_allocator;
+extern struct allocator __stackframe_allocator;
 extern struct allocator __mmap_allocator; /* mmaps */
 extern struct allocator __sbrk_allocator; /* sbrk() */
 extern struct allocator __static_allocator; /* ldso; nests under file? */
@@ -130,7 +131,9 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 void __mmap_allocator_init(void);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
 	int prot, int flags, int fd, off_t offset, void *caller);
-void __mmap_allocator_notify_mremap(void *ret, void *old_addr, size_t old_size, 
+void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, 
+	size_t new_size, int flags, void *new_address, void *caller);
+void __mmap_allocator_notify_mremap_after(void *ret_addr, void *old_addr, size_t old_size, 
 	size_t new_size, int flags, void *new_address, void *caller);
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller);
 
@@ -149,6 +152,10 @@ void __alloca_allocator_init(void);
 void __generic_malloc_allocator_init(void);
 void __generic_small_allocator_init(void);
 void __generic_uniform_allocator_init(void);
+
+liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe_bigalloc, 
+	struct uniqtype **out_type, void **out_base, 
+	unsigned long *out_size, const void **out_site);
 
 /* liballocs assumes some fixed structure in the first couple of levels of the hierarchy.
  * 

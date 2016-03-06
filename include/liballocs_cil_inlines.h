@@ -5,7 +5,8 @@ int __liballocs_global_init (void);
 void __assert_fail(const char * assertion, const char * file, unsigned int line, const char * function);
 /* Heap index hooks -- these also aren't weak, for the usual reason. */
 void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_size, 
-		const void *caller);
+		unsigned long *frame_counter, const void *caller, 
+		const void *caller_sp, const void *caller_bp);
 void __liballocs_index_delete(void*);
 struct uniqtype; /* forward decl */
 
@@ -42,6 +43,24 @@ extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_alloca
 }
 
 /* alloca helpers */
+extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_sp)(void);
+extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_sp)(void)
+{
+	unsigned long our_sp;
+	#ifdef UNW_TARGET_X86
+		__asm__ volatile ("movl %%esp, %0\n" :"=r"(our_sp));
+	#else // assume X86_64 for now
+		__asm__ volatile ("movq %%rsp, %0\n" : "=r"(our_sp));
+	#endif
+	return (const void*) our_sp;
+}
+
+extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_bp)(void);
+extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_bp)(void)
+{
+	return (const void *) __builtin_frame_address(0);
+}
+
 extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller);
 extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller)
 {
@@ -61,7 +80,8 @@ extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloc
 	
 	/* Note that we pass the caller directly; __current_allocsite is not required. */
 	void *userptr = (char*) alloc + ALLOCA_HEADER_SIZE;
-	__alloca_allocator_notify(userptr, chunk_size, caller);
+	__alloca_allocator_notify(userptr, chunk_size, frame_counter, caller,
+		__liballocs_get_sp(), __liballocs_get_bp());
 	
 	return userptr;
 }

@@ -30,10 +30,11 @@ void __auxv_allocator_init(void)
 	
 }
 
-static liballocs_err_t get_info(void * obj, struct uniqtype **out_type, void **out_base, 
+static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc, 
+	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site)
 {
-
+	abort();
 }
 
 struct allocator __auxv_allocator = {

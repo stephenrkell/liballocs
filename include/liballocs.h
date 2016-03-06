@@ -555,13 +555,15 @@ __liballocs_get_alloc_info
 {
 	struct liballocs_err *err = 0;
 
-	struct allocator *a = __liballocs_leaf_allocator_for(obj, NULL);
+	struct big_allocation *containing_bigalloc;
+	struct big_allocation *maybe_the_allocation;
+	struct allocator *a = __liballocs_leaf_allocator_for(obj, &containing_bigalloc, &maybe_the_allocation);
 	if (__builtin_expect(!a, 0))
 	{
 		_Bool fixed = __liballocs_notify_unindexed_address(obj);
 		if (fixed)
 		{
-			a = __liballocs_leaf_allocator_for(obj, NULL);
+			a = __liballocs_leaf_allocator_for(obj, &containing_bigalloc, &maybe_the_allocation);
 			if (!a) abort();
 		}
 		else
@@ -572,7 +574,7 @@ __liballocs_get_alloc_info
 		}
 	}
 	if (out_allocator) *out_allocator = a;
-	return a->get_info((void*) obj, out_alloc_uniqtype, (void**) out_alloc_start,
+	return a->get_info((void*) obj, maybe_the_allocation, out_alloc_uniqtype, (void**) out_alloc_start,
 			out_alloc_size_bytes, out_alloc_site);
 }
 

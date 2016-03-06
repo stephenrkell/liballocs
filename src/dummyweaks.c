@@ -40,6 +40,9 @@ uint16_t *pageindex __attribute__((visibility("protected")));
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {
 }
+void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_size, 
+		unsigned long *frame_counter, const void *caller, 
+		const void *caller_sp, const void *caller_bp) {}
 
 int __index_deep_alloc(void *ptr, int level, unsigned size_bytes) { return 2; }
 void __unindex_deep_alloc(void *ptr, int level) {}
