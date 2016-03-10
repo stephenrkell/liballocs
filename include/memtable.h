@@ -83,6 +83,7 @@ INLINE_DECL int INLINE_ATTRS nlz1(unsigned long x)
 #define TOP_N_BITS_SET(n)      (BOTTOM_N_BITS_CLEAR(8*(sizeof(uintptr_t))-((n))))
 #define TOP_N_BITS_CLEAR(n)    (BOTTOM_N_BITS_SET(8*(sizeof(uintptr_t))-((n))))
 #define NBITS(t) ((sizeof (t))<<3)
+#define UNSIGNED_LONG_NBITS (NBITS(unsigned long))
 /* Thanks to Martin Buchholz -- <http://www.wambold.com/Martin/writings/alignof.html> */
 #ifndef ALIGNOF
 #define ALIGNOF(type) offsetof (struct { char c; type member; }, member)
@@ -111,6 +112,75 @@ INLINE_DECL unsigned INLINE_ATTRS integer_log2(size_t i)
 	while ((i & 0x1) == 0) { ++count; i >>= 1; }
 	assert(i == 1);
 	return count;
+}
+
+/* Some bitmap stuff. */
+static inline _Bool bitmap_get(unsigned long *p_bitmap, unsigned long index)
+{
+	return p_bitmap[index / UNSIGNED_LONG_NBITS] & (1ul << (index % UNSIGNED_LONG_NBITS));
+}
+static inline void bitmap_set(unsigned long *p_bitmap, unsigned long index)
+{
+	p_bitmap[index / UNSIGNED_LONG_NBITS] |= (1ul << (index % UNSIGNED_LONG_NBITS));
+}
+static inline void bitmap_clear(unsigned long *p_bitmap, unsigned long index)
+{
+	p_bitmap[index / UNSIGNED_LONG_NBITS] &= ~(1ul << (index % UNSIGNED_LONG_NBITS));
+}
+static inline unsigned long bitmap_find_first_set(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long *out_test_bit)
+{
+	unsigned long *p_initial_bitmap;
+			
+	while (*p_bitmap == (unsigned long) 0
+				&& p_bitmap < p_limit) ++p_bitmap;
+	if (p_bitmap == p_limit) return (unsigned long) -1;
+	
+	/* Find the lowest free bit in this bitmap. */
+	unsigned long test_bit = 1;
+	unsigned test_bit_index = 0;
+	// while the test bit is unset...
+	while (!(*p_bitmap & test_bit))
+	{
+		if (__builtin_expect(test_bit != 1ul<<(UNSIGNED_LONG_NBITS - 1), 1))
+		{
+			test_bit <<= 1;
+			++test_bit_index;
+		}
+		else assert(0); // all 1s --> we shouldn't have got here
+	}
+	/* FIXME: thread-safety */
+	unsigned free_index = (p_bitmap - p_initial_bitmap) * UNSIGNED_LONG_NBITS
+			+ test_bit_index;
+	
+	if (out_test_bit) *out_test_bit = test_bit;
+	return free_index;	
+}
+static inline unsigned long bitmap_find_first_clear(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long *out_test_bit)
+{
+	unsigned long *p_initial_bitmap;
+			
+	while (*p_bitmap == (unsigned long) -1
+				&& p_bitmap < p_limit) ++p_bitmap;
+	if (p_bitmap == p_limit) return (unsigned long) -1;
+	
+	/* Find the lowest free bit in this bitmap. */
+	unsigned long test_bit = 1;
+	unsigned test_bit_index = 0;
+	while (*p_bitmap & test_bit)
+	{
+		if (__builtin_expect(test_bit != 1ul<<(UNSIGNED_LONG_NBITS - 1), 1))
+		{
+			test_bit <<= 1;
+			++test_bit_index;
+		}
+		else assert(0); // all 1s --> we shouldn't have got here
+	}
+	/* FIXME: thread-safety */
+	unsigned free_index = (p_bitmap - p_initial_bitmap) * UNSIGNED_LONG_NBITS
+			+ test_bit_index;
+	
+	if (out_test_bit) *out_test_bit = test_bit;
+	return free_index;
 }
 
 INLINE_DECL size_t memtable_mapping_size(
@@ -168,7 +238,8 @@ INLINE_DECL void *INLINE_ATTRS memtable_new(
 #define MEMTABLE_NEW_WITH_TYPE(t, range, addr_begin, addr_end) \
 	(t*) memtable_new(sizeof(t), (range), (addr_begin), (addr_end))
 
-/* FIXME: instead of page bitmaps, generalise to a "sparseness bitmap hierarchy" 
+#if 0 /* FIXME: finish this */
+/* Instead of page bitmaps, generalise to a "sparseness bitmap hierarchy" 
  * of user-defined branching factor. E.g. we might want one-bit-per-cacheline,
  * i.e. a branching factor of 2^9 for 64B cache lines,
  * meaning a 2^46-entry memtable (the biggest, 1B per entry) will be
@@ -263,6 +334,8 @@ INLINE_DECL size_t INLINE_ATTRS memtable_l3_page_bitmap_size(
 }
 #define MEMTABLE_L3_PAGE_BITMAP_SIZE_WITH_TYPE(t, range, addr_begin, addr_end) \
 	memtable_l3_page_bitmap_size(sizeof(t), (range), (addr_begin), (addr_end))
+
+#endif
 
 /* Get a pointer to the index-th entry. */
 INLINE_DECL void *memtable_index(

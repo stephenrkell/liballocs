@@ -108,41 +108,14 @@ void *index_end_addr;
 struct lookup_cache_entry;
 static void install_cache_entry(void *object_start,
 	size_t usable_size, unsigned short depth, _Bool is_deepest,
-	struct suballocated_chunk_rec *containing_chunk,
 	struct insert *insert);
 static void invalidate_cache_entries(void *object_start,
 	unsigned short depths_mask,
-	struct suballocated_chunk_rec *sub, struct insert *ins, signed nentries);
+	struct insert *ins, signed nentries);
 static int cache_clear_deepest_flag_and_update_ins(void *object_start,
 	unsigned short depths_mask,
-	struct suballocated_chunk_rec *sub, struct insert *ins, signed nentries,
+	struct insert *ins, signed nentries,
 	struct insert *new_ins);
-
-static struct suballocated_chunk_rec *suballocated_chunks;
-
-static void delete_suballocated_chunk(struct suballocated_chunk_rec *p_rec)
-{
-#if 0
-	/* Remove it from the bitmap. */
-	unsigned long *p_bitmap_word = suballocated_chunks_bitmap
-			 + (p_rec - &suballocated_chunks[0]) / UNSIGNED_LONG_NBITS;
-	int bit_index = (p_rec - &suballocated_chunks[0]) % UNSIGNED_LONG_NBITS;
-	*p_bitmap_word &= ~(1ul<<bit_index);
-
-	/* munmap it. */
-	int ret = munmap(p_rec->metadata_recs, (sizeof (struct insert)) * p_rec->size);
-	assert(ret == 0);
-	ret = munmap(p_rec->starts_bitmap,
-		sizeof (unsigned long) * (p_rec->real_size / UNSIGNED_LONG_NBITS));
-	assert(ret == 0);
-	
-	// bzero the chunk rec
-	bzero(p_rec, sizeof (struct suballocated_chunk_rec));
-			
-	/* We might want to restore the previous alloc_site bits in the higher-level 
-	 * chunk. But we assume that's been/being deleted, so we don't bother. */
-#endif
-}
 
 /* The (unsigned) -1 conversion here provokes a compiler warning,
  * which we suppress. There are two ways of doing this.
@@ -655,10 +628,10 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	
 	unsigned suballocated_region_number = 0;
 	struct insert *ins = insert_for_chunk(userptr);
-	if (ALLOC_IS_SUBALLOCATED(userptr, ins)) 
-	{
-		suballocated_region_number = (uintptr_t) ins->alloc_site;
-	}
+	//if (ALLOC_IS_SUBALLOCATED(userptr, ins)) 
+	//{
+	//	suballocated_region_number = (uintptr_t) ins->alloc_site;
+	//}
 
 	list_sanity_check(index_entry, userptr);
 	INSERT_SANITY_CHECK(insert_for_chunk/*_with_usable_size*/(userptr/*, freed_usable_size*/));
@@ -720,12 +693,7 @@ out:
 		next_recently_freed_to_replace = &recently_freed[0];
 	}
 #endif
-	/* If there were suballocated chunks under here, delete the whole lot. */
-	if (suballocated_region_number != 0)
-	{
-		delete_suballocated_chunk(&suballocated_chunks[suballocated_region_number]);
-	}
-	invalidate_cache_entries(userptr, (unsigned short) -1, NULL, NULL, -1);
+	invalidate_cache_entries(userptr, (unsigned short) -1, NULL, -1);
 	list_sanity_check(index_entry, NULL);
 	
 	BIG_UNLOCK
@@ -887,7 +855,6 @@ struct lookup_cache_entry
 	size_t usable_size:60;
 	unsigned short depth:3;
 	unsigned short is_deepest:1;
-	struct suballocated_chunk_rec *containing_chunk;
 	struct insert *insert;
 } lookup_cache[LOOKUP_CACHE_SIZE];
 static struct lookup_cache_entry *next_to_evict = &lookup_cache[0];
@@ -908,7 +875,6 @@ static void install_cache_entry(void *object_start,
 	size_t object_size,
 	unsigned short depth, 
 	_Bool is_deepest,
-	struct suballocated_chunk_rec *containing_chunk,
 	struct insert *insert)
 {
 	check_cache_sanity();
@@ -917,7 +883,7 @@ static void install_cache_entry(void *object_start,
 	assert(INSERT_DESCRIBES_OBJECT(insert));
 	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
 	*next_to_evict = (struct lookup_cache_entry) {
-		object_start, object_size, depth, is_deepest, containing_chunk, insert
+		object_start, object_size, depth, is_deepest, insert
 	}; // FIXME: thread safety
 	// don't immediately evict the entry we just created
 	next_to_evict = &lookup_cache[(next_to_evict + 1 - &lookup_cache[0]) % LOOKUP_CACHE_SIZE];
@@ -927,7 +893,6 @@ static void install_cache_entry(void *object_start,
 
 static void invalidate_cache_entries(void *object_start,
 	unsigned short depths_mask,
-	struct suballocated_chunk_rec *containing,
 	struct insert *ins,
 	signed nentries)
 {
@@ -936,12 +901,11 @@ static void invalidate_cache_entries(void *object_start,
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
 		if ((!object_start || object_start == lookup_cache[i].object_start)
-				&& (!containing || containing == lookup_cache[i].containing_chunk)
 				&& (!ins || ins == lookup_cache[i].insert)
 				&& (0 != (1<<lookup_cache[i].depth & depths_mask))) 
 		{
 			lookup_cache[i] = (struct lookup_cache_entry) {
-				NULL, 0, 0, 0, NULL, NULL
+				NULL, 0, 0, 0, NULL
 			};
 			next_to_evict = &lookup_cache[i];
 			check_cache_sanity();
@@ -954,7 +918,6 @@ static void invalidate_cache_entries(void *object_start,
 
 static int cache_clear_deepest_flag_and_update_ins(void *object_start,
 	unsigned short depths_mask,
-	struct suballocated_chunk_rec *containing,
 	struct insert *ins,
 	signed nentries,
 	struct insert *new_ins)
@@ -966,7 +929,6 @@ static int cache_clear_deepest_flag_and_update_ins(void *object_start,
 	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
 	{
 		if ((!object_start || object_start == lookup_cache[i].object_start)
-				&& (!containing || containing == lookup_cache[i].containing_chunk)
 				&& (ins == lookup_cache[i].insert)
 				&& (0 != (1<<lookup_cache[i].depth & depths_mask))) 
 		{
@@ -989,18 +951,12 @@ struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object
 static 
 struct insert *object_insert(const void *obj, struct insert *ins)
 {
-	if (__builtin_expect(!INSERT_DESCRIBES_OBJECT(ins), 0))
-	{
-		struct suballocated_chunk_rec *p_rec = &suballocated_chunks[(unsigned) ins->alloc_site];
-		assert(p_rec);
-		return &p_rec->higherlevel_ins; // FIXME: generalise to depth > 2
-	}
 	return ins;
 }
 
 /* A client-friendly lookup function with cache. */
 struct insert *lookup_object_info(const void *mem, void **out_object_start, size_t *out_object_size,
-		struct suballocated_chunk_rec **out_containing_chunk)
+		void **ignored)
 {
 	/* Unlike our malloc hooks, we might get called before initialization,
 	   e.g. if someone tries to do a lookup before the first malloc of the
@@ -1042,7 +998,6 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 
 				if (out_object_start) *out_object_start = lookup_cache[i].object_start;
 				if (out_object_size) *out_object_size = lookup_cache[i].usable_size;
-				if (out_containing_chunk) *out_containing_chunk = lookup_cache[i].containing_chunk;
 				// ... so ensure we're not about to evict this guy
 				if (next_to_evict - &lookup_cache[0] == i)
 				{
@@ -1070,17 +1025,15 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 		found = lookup_l01_object_info_nocache(mem, &l01_object_start);
 	}
 	size_t size;
-	struct suballocated_chunk_rec *containing_chunk_rec = NULL; // initialized shortly...
 
 	if (found)
 	{
 		size = usersize(l01_object_start);
 		object_start = l01_object_start;
-		containing_chunk_rec = NULL;
 		_Bool is_deepest = INSERT_DESCRIBES_OBJECT(found);
 		
 		// cache the l01 entry
-		install_cache_entry(object_start, size, 1, is_deepest, NULL, object_insert(object_start, found));
+		install_cache_entry(object_start, size, 1, is_deepest, object_insert(object_start, found));
 		
 		if (!is_deepest)
 		{
@@ -1092,13 +1045,14 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 					&deep_object_size, &containing_chunk_rec);*/
 			if (found_deeper)
 			{
+				assert(0);
 				// override the values we assigned just now
 				object_start = deep_object_start;
 				found = found_deeper;
 				size = deep_object_size;
 				// cache this too
-				install_cache_entry(object_start, size, 2 /* FIXME */, 1 /* FIXME */, 
-					containing_chunk_rec, found);
+				//g_entry(object_start, size, 2 /* FIXME */, 1 /* FIXME */, 
+				//	found);
 			}
 			else
 			{
@@ -1111,7 +1065,6 @@ struct insert *lookup_object_info(const void *mem, void **out_object_start, size
 
 		if (out_object_start) *out_object_start = object_start;
 		if (out_object_size) *out_object_size = size;
-		if (out_containing_chunk) *out_containing_chunk = containing_chunk_rec;
 	}
 	
 	assert(!found || INSERT_DESCRIBES_OBJECT(found));
@@ -1204,7 +1157,7 @@ struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object
 // 				if (out_deep) *out_deep = found;
 // 				void *object_start = (char*) region->base_addr + (found->distance_4bytes << 2);
 // 				if (out_object_start) *out_object_start = object_start;
-// 				install_cache_entry(object_start, (found->size_4bytes << 2), found, &found->u_tail.ins);
+// 				install_cache_entry(object_start, (found->size_4bytes << 2), &found->u_tail.ins);
 // 				return &found->u_tail.ins;
 // 			}
 // 			else

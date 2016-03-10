@@ -15,10 +15,6 @@
 #include "pageindex.h"
 #include "raw-syscalls.h"
 
-struct allocator __static_allocator = {
-	.name = "static",
-	.is_cacheable = 1
-};
 
 static _Bool trying_to_initialize;
 static _Bool initialized;
@@ -87,7 +83,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 	running = 1;
 	write_string("Blah9000\n");
 	const char *filename = (const char *) data;
-	if (filename != NULL && 0 == strcmp(filename, info->dlpi_name))
+	if (filename == NULL || 0 == strcmp(filename, info->dlpi_name))
 	{
 		write_string("Blah9001\n");
 		const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, 
@@ -212,3 +208,9 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	if (out_size) *out_size = alloc_uniqtype->pos_maxoff;
 	return NULL;
 }
+
+struct allocator __static_allocator = {
+	.name = "static",
+	.is_cacheable = 1,
+	.get_info = get_info
+};

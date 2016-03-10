@@ -16,8 +16,8 @@ int __currently_freeing __attribute__((weak)); // defined by heap_index_hooks
 int __currently_allocating __attribute__((weak)); // defined by heap_index_hooks
 #endif
 
-int  __index_deep_alloc(void *ptr, int level, unsigned size_bytes); // defined by heap_index_hooks
-void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
+int  __index_small_alloc(void *ptr, int level, unsigned size_bytes); // defined by heap_index_hooks
+void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 
 /* these are our per-allocfn wrappers */
 
@@ -122,9 +122,9 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
 			} \
 			name ## _alloclevel = 0/*__current_alloclevel*/; \
 		} \
-		if (&__index_deep_alloc) \
+		if (&__index_small_alloc) \
 		{ \
-			int seen_alloclevel = __index_deep_alloc(retval, /* name ## _alloclevel */ -1, __current_allocsz); \
+			int seen_alloclevel = __index_small_alloc(retval, /* name ## _alloclevel */ -1, __current_allocsz); \
 			assert(name ## _alloclevel == 0 || seen_alloclevel == name ## _alloclevel); \
 			if (name ## _alloclevel == 0) name ## _alloclevel = seen_alloclevel; \
 		} \
@@ -162,6 +162,6 @@ void __unindex_deep_alloc(void *ptr, int level); // defined by heap_index_hooks
 		else we_are_toplevel_free = 0; \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 1; \
 		__real_ ## name( arglist_ ## name (make_argname) ); \
-		__unindex_deep_alloc(ptr_arg_ ## name, alloc_name ## _alloclevel); \
+		__unindex_small_alloc(ptr_arg_ ## name, alloc_name ## _alloclevel); \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 0; \
 	}

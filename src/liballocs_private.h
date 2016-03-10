@@ -54,12 +54,10 @@ int dl_for_one_object_phdrs(void *handle,
 	void *data) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 
-extern char exe_fullname[4096];
-extern char exe_basename[4096];
 extern FILE *stream_err;
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \
-      fprintf(stream_err, "%s: " fmt, exe_basename, ## __VA_ARGS__ );  \
+      fprintf(stream_err, "%s: " fmt, get_exe_basename(), ## __VA_ARGS__ );  \
     } \
   } while (0)
 

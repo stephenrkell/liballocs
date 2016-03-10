@@ -66,7 +66,7 @@ void __stack_allocator_notify_init_stack_mapping(void *begin, void *end)
 		(struct meta_info) {
 			.what = DATA_PTR,
 			.un = {
-				opaque_data: { 
+				opaque_data: {
 					.data_ptr = NULL,
 					.free_func = NULL
 				}

@@ -524,11 +524,24 @@ let rec indirectionLevel someTs = match someTs with
 let rec ultimatePointeeTs someTs = match someTs with
     TSPtr(subTs, _) -> ultimatePointeeTs subTs
   | _ -> someTs
+  
+let rec ultimatePointeeT someT = match someT with
+    TPtr(pt, _) -> ultimatePointeeT pt
+  | TNamed(ti, _) -> ultimatePointeeT ti.ttype
+  | _ -> someT
+  
+let rec penultimatePointeeT someT = match someT with
+    TPtr(pt, _) when tsIsPointer (Cil.typeSig pt) -> penultimatePointeeT pt
+  | TPtr(pt, _) -> (* pt *not* a pointer *) someT
+  | TNamed(ti, _) -> penultimatePointeeT ti.ttype
+  | _ -> someT
 
 let instrLoc (maybeInst : Cil.instr option) =
    match maybeInst with 
    Some(i) -> Cil.get_instrLoc i
  | None -> locUnknown
 
-let tsIsMultiplyIndirectedVoid ts = 
-    ((ultimatePointeeTs ts) = Cil.typeSig(voidType)) && (indirectionLevel ts) > 1
+let tsIsMultiplyIndirectedGenericPointer ts = 
+    let upts = ultimatePointeeTs ts
+    in (upts = Cil.typeSig(voidType) || upts = Cil.typeSig(charType))
+         && (indirectionLevel ts) > 1

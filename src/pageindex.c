@@ -338,25 +338,29 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 }
 
 static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator);
+	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator,
+		void *suballocator_meta, void(*suballocator_free)(void*));
 
 static struct big_allocation *bigalloc_new(const void *ptr, size_t size, struct big_allocation *parent, 
 	struct meta_info meta, struct allocator *allocated_by)
 {
 	struct big_allocation *b = find_free_bigalloc();
 	if (!b) return b;
-	bigalloc_init(b, ptr, size, parent, meta, allocated_by, /* suballocator */ NULL);
+	bigalloc_init(b, ptr, size, parent, meta, allocated_by, /* suballocator */ NULL, NULL, NULL);
 	return b;
 }
 
 static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator)
+	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator,
+	void *suballocator_meta, void (*suballocator_free_func)(void*))
 {
 	b->begin = (void*) ptr;
 	b->end = (char*) ptr + size;
 	b->meta = meta;
 	b->allocated_by = allocated_by;
 	b->suballocator = suballocator;
+	b->suballocator_meta = suballocator_meta;
+	b->suballocator_free_func = suballocator_free_func;
 	b->first_child = b->next_sib = b->prev_sib = NULL;
 	/* Add it to the child list of the parent, if we have one. */
 	if (parent) 
@@ -371,9 +375,11 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 }
 
 static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator)
+	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator,
+		void *suballocator_meta, void (*suballocator_free_func)(void*))
 {
-	bigalloc_init_nomemset(b, ptr, size, parent, meta, allocated_by, suballocator);
+	bigalloc_init_nomemset(b, ptr, size, parent, meta, allocated_by, suballocator,
+		suballocator_meta, suballocator_free_func);
 
 	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
 	/* For each page that this alloc spans, memset it in the page index. */
@@ -450,7 +456,6 @@ _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_
 			              ? ROUND_UP((unsigned long) old_begin, PAGE_SIZE)
 			              : ROUND_DOWN((unsigned long) old_begin, PAGE_SIZE) )
 	);
-	// GAH. What if we now cover the whole "middle" page
 	
 	SANITY_CHECK_BIGALLOC(b);
 	
@@ -517,7 +522,7 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 	if (!new_bigalloc) abort();
 	bigalloc_init_nomemset(new_bigalloc, 
 		split_addr, (char*) tmp.end - (char*) split_addr, tmp.parent, tmp.meta, tmp.allocated_by,
-		tmp.suballocator);
+		tmp.suballocator, tmp.suballocator_meta, tmp.suballocator_free_func);
 	/* Danger: the new bigalloc now have the *same* metadata as the old one. 
 	 * Our caller sorts this out, since the metadata is opaque to us. */
 	

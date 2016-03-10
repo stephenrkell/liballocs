@@ -17,7 +17,7 @@
 
 struct allocator __alloca_allocator = {
 	.name = "alloca",
-	.is_cacheable = 0,
+	.is_cacheable = 1,   // HMM: am I sure that we're cacheable?
 	.get_info = __generic_heap_get_info
 };
 

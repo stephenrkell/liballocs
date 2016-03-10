@@ -53,8 +53,40 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 }
 #endif
 
-char exe_basename[4096] __attribute__((visibility("hidden")));
-char exe_fullname[4096] __attribute__((visibility("hidden")));
+char *get_exe_fullname(void) __attribute__((visibility("hidden")));
+char *get_exe_fullname(void)
+{
+	static char exe_fullname[4096];
+	static _Bool tried;
+	if (!exe_fullname[0] && !tried)
+	{
+		tried = 1;
+		// grab the executable's basename
+		readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);
+	}
+	if (exe_fullname[0]) return exe_fullname;
+	else return NULL;
+}
+
+char *get_exe_basename(void) __attribute__((visibility("hidden")));
+char *get_exe_basename(void)
+{
+	static char exe_basename[4096];
+	static _Bool tried;
+	if (!exe_basename[0] && !tried)
+	{
+		tried = 1;
+		char *exe_fullname = get_exe_fullname();
+		if (exe_fullname)
+		{
+			strncpy(exe_basename, basename(exe_fullname), sizeof exe_basename); // GNU basename
+			exe_basename[sizeof exe_basename - 1] = '\0';
+		}
+	}
+	if (exe_basename[0]) return exe_basename;
+	else return NULL;
+}
+
 const char __ldso_name[] = "/lib64/ld-linux-x86-64.so.2"; // FIXME: sysdep
 FILE *stream_err __attribute__((visibility("hidden")));
 
@@ -313,12 +345,7 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 		 * - itself;
 		 * - any others? vdso?
 		 */
-		if (dlpi_addr == 0)
-		{
-			assert(exe_fullname[0] != '\0');
-			// use this filename now
-			return exe_fullname;
-		}
+		if (dlpi_addr == 0) return get_exe_fullname();
 		else
 		{
 			/* HMM -- empty dlpi_name but non-zero load addr.
@@ -819,6 +846,7 @@ char *private_strdup(const char *s)
 	size_t len = strlen(s);
 	char *mem = malloc(len + 1);
 	strncpy(mem, s, len);
+	mem[len] = '\0';
 	return mem;
 }
 
@@ -888,14 +916,6 @@ int __liballocs_global_init(void)
 	 * 
 	 * It seems that option 1 is better. 
 	 */
-	
-	// grab the executable's basename
-	ssize_t readlink_ret = readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);
-	if (readlink_ret != -1)
-	{
-		strncpy(exe_basename, basename(exe_fullname), sizeof exe_basename); // GNU basename
-		exe_basename[sizeof exe_basename - 1] = '\0';
-	}
 	
 	int ret_types = dl_iterate_phdr(load_types_for_one_object, NULL);
 	assert(ret_types == 0);

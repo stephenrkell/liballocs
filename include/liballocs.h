@@ -73,6 +73,8 @@ extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
 Dl_info dladdr_with_cache(const void *addr);
 
 extern void *__liballocs_main_bp; // beginning of main's stack frame
+char *get_exe_fullname(void) __attribute__((visibility("hidden")));
+char *get_exe_basename(void) __attribute__((visibility("hidden")));
 
 extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
 extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtype(const void *allocsite)
