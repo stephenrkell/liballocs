@@ -88,6 +88,12 @@ class AllocsCC(AllocsCompilerWrapper):
     def getUnderlyingCompilerCommand(self, sourceFiles):
         return [cilly_cmd] + self.getCillyArgs(sourceFiles)
     
+    def getVerboseArgs(self):
+        if "DEBUG_CC" in os.environ:
+            return ["--verbose", "--live_debug"]
+        else:
+            return []
+    
     # HACK HACK HACK override buildOneObjectFile so that if we fail, we try the vanilla cc
     def runUnderlyingCompiler(self, sourceFiles, options):
         ret1 = AllocsCompilerWrapper.runUnderlyingCompiler(self, sourceFiles, options)

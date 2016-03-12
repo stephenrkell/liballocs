@@ -170,19 +170,25 @@ class AllocsCompilerWrapper(CompilerWrapper):
             self.debugMsg("No need to globalize\n")
             return 0
 
+    def getVerboseArgs(self):
+        return []
 
     def main(self):
         # un-export CC from the env if it's set to allocscc, because 
         # we don't want to recursively crunchcc the -uniqtypes.c files
         # that this make invocation will be compiling for us.
-        # NOTE that we really do mean CC and not CXX here, because
+        # NOTE that we really do mean CC and not CXX or FC here, because
         # all the stuff we build ourselves is built from C.
         #if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
         if "CC" in os.environ:# and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
            del os.environ["CC"]
         self.debugMsg(sys.argv[0] + " called with args  " + " ".join(sys.argv) + "\n")
 
-        sourceInputFiles, objectInputFiles, outputFile = self.parseInputAndOutputFiles(sys.argv)
+        (sourceInputFiles, objectInputFiles, outputFile, isLinkCommand) = self.parseInputAndOutputFiles(sys.argv)
+        if isLinkCommand:
+            self.debugMsg("We are a link command\n")
+        else:
+            self.debugMsg("We are not a link command\n")
 
         # If we're a linker command, then we have to handle allocation functions
         # specially.
@@ -209,7 +215,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             mallocWrapArgs += ["-Wl,--wrap," + sym]
 
         linkArgs = []
-        if self.isLinkCommand():
+        if isLinkCommand:
             # we need to build the .o files first, 
             # then link in the uniqtypes they reference, 
             # then resume linking these .o files
@@ -424,11 +430,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
         else:
             passedThroughArgs = sys.argv[1:]
 
-        if "DEBUG_CC" in os.environ:
-            verboseArgs = ["--verbose", "--live_debug"]
-        else:
-            verboseArgs = []
-
+        verboseArgs = self.getVerboseArgs()
+        
         argsToExec = verboseArgs + allocsccCustomArgs \
         + passedThroughArgs \
         + linkArgs
@@ -447,7 +450,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # __uniqtype references to the actual binary-compatible type
         # definitions which the compiler generated.
 
-        if not self.isLinkCommand():
+        if not isLinkCommand:
             if not self.commandStopsBeforeObjectOutput():
                 if outputFile:
                     # we have a single named output file
@@ -459,7 +462,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         for (nameStem, nameExtension) in map(os.path.splitext, sourceInputFiles)]:
                         self.fixupDotO(outputFilename, None)
 
-        else: # isLinkCommand()
+        else: # isLinkCommand
             if not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
                 # We've just output an object, so invoke make to collect the allocsites, 
                 # with our target name as the file we've just built, using ALLOCSITES_BASE 
@@ -487,9 +490,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     return 1
 
     # expose base class methods to derived classes
-    def isLinkCommand(self):
-        return CompilerWrapper.isLinkCommand(self)
-    
     def parseInputAndOutputFiles(self, args):
         return CompilerWrapper.parseInputAndOutputFiles(self, args)
 

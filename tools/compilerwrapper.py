@@ -52,40 +52,11 @@ class CompilerWrapper:
     def getCustomCompileArgs(self, sourceInputFiles):
         return []
     
-    def isLinkCommand(self):
-        seenLib = False
-        seenNonExecutableOutput = False
-        # By default, the compiler will try to output an executable.
-        # But if we see options for other kinds of output, we take note.
-        for argnum in range(0,len(sys.argv)):
-            arg = sys.argv[argnum]
-            if arg.startswith('-l'):
-                seenLib = True
-            if arg == '-shared' or arg == '-G':
-                return True
-            if arg == '-c':
-                return False
-            if arg == '-E' or arg == '-S':
-                return False
-            # -M options: if we use -MF or -MD or -MMD, we might actually be doing the compile. 
-            if (arg == '-M' or arg == '-MM') and not ("-MF" in sys.argv):
-                return False
-            if arg == "-o" and len(sys.argv) >= argnum + 2:
-                outputFilename = os.path.basename(sys.argv[argnum + 1])
-                # HACK: is this really necessary?
-                if outputFilename.endswith(".o") or outputFilename.endswith(".i"):
-                    seenNonExecutableOutput = True
-        if seenNonExecutableOutput:
-            return False
-        return True
-        # NOTE: we don't use seenLib currently, since we often link simple progs without any -l
-    
     def commandStopsBeforeObjectOutput(self):
         return "-E" in sys.argv or "-S" in sys.argv
    
     def allWrappedSymNames(self):
         return []
-    
     
     def parseInputAndOutputFiles(self, args):
         skipNext = False
@@ -93,53 +64,100 @@ class CompilerWrapper:
         currentLang = None
         sourceInputFiles = []
         objectInputFiles = []
+        seenLib = False
+        seenNonExecutableOutput = False
+        seenSomeInput = False
+        seenNoMoreOptionsMarker = False
+        isDefinitelyLink = False
+        isDefinitelyNotLink = False
         for num in range(0,len(args)):
-            if skipNext: 
+            if num == 0:
+                pass # "allocscc" or whatevre
+            elif skipNext: 
                 skipNext = False
                 continue
             #if args[num] == "-V":
             #    args[num] = "-0"
-            if args[num] == "-o":
+            elif not seenNoMoreOptionsMarker and args[num] == "-o" and len(args) >= num + 2:
                 outputFile = args[num + 1]
+                outputFilename = os.path.basename(args[num + 1])
                 skipNext = True
-            if args[num] == "-x":
+                # HACK: is this really necessary?
+                if outputFilename.endswith(".o") or outputFilename.endswith(".i"):
+                    seenNonExecutableOutput = True
+            elif not seenNoMoreOptionsMarker and args[num].startswith('-l'):
+                seenLib = True
+            elif not seenNoMoreOptionsMarker and (args[num] == '-shared' or args[num] == '-G'):
+                isDefinitelyLink = True
+            elif not seenNoMoreOptionsMarker and args[num] == '-c':
+                isDefinitelyNotLink = True
+            elif not seenNoMoreOptionsMarker and (args[num] == '-E' or args[num] == '-S'):
+                isDefinitelyNotLink = True
+            elif not seenNoMoreOptionsMarker and args[num] == "-x":
                 if args[num + 1] == "none":
                     currentLang = None
                 else:
                     currentLang = args[num + 1]
                 skipNext = True
-            if args[num] == "-include" or args[num] == "-isystem" \
+            elif not seenNoMoreOptionsMarker and \
+                  (args[num] == "-include" or args[num] == "-isystem" \
                   or args[num] == "-include" or args[num] == "-idirafter" \
                   or args[num] == "-imacros" or args[num] == "-iprefix" \
                   or args[num] == "-iquote" or args[num] == "-iwithprefix" \
-                  or args[num] == "-iwithprefixbefore":
+                  or args[num] == "-iwithprefixbefore"):
                 skipNext = True # HMM -- want to save this somehow?
-            if args[num] == '-param' or args[num] == '--param':
+            elif not seenNoMoreOptionsMarker and (args[num] == '-param' or args[num] == '--param'):
                 skipNext = True
-            if args[num] == '-MT' or args[num] == "-MF":
+            elif args[num] == '-MT' or args[num] == "-MF":
                 skipNext = True
-            if args[num] != "-" and args[num].startswith('-'):
-                continue
-            if num == 0:
-                continue # this means we have "allocscc" as the arg
+            # -M options: if we use -MF or -MD or -MMD, we might actually be doing the compile. 
+            elif not seenNoMoreOptionsMarker and (args[num] == '-M' or args[num] == '-MM') and not ("-MF" in args):
+                isDefinitelyNotLink = True
+            elif not seenNoMoreOptionsMarker and args[num] != "-" and args[num].startswith('-'):
+                pass
+            elif not seenNoMoreOptionsMarker and args[num] == '--':
+                seenNoMoreOptionsMarker = True
+            elif args[num] != '-' and args[num].startswith('-') and not seenNoMoreOptionsMarker:
+                # looks like an option
+                pass
             # glibc builds some files with ".os" extensions
-            if args[num].endswith('.o') or args[num].endswith('.os') or args[num].endswith('.a'):
+            elif args[num].endswith('.o') or args[num].endswith('.os') or args[num].endswith('.a'):
                 objectInputFiles += [args[num]]
-                continue
-            if args[num].endswith('.so'):
+                seenSomeInput = True
+            elif args[num].endswith('.so'):
                 # HMM: what does this mean exactly? it's like "-lBLAH" but giving an explicit path
                 objectInputFiles += [args[num]]
-                continue
             else:
                 self.debugMsg("guessed that source file is " + args[num] + "\n")
+                seenSomeInput = True
                 sourceFileToAdd = SourceFile(args[num])
                 if currentLang != None:
                     sourceFileToAdd.lang = currentLang
                 sourceInputFiles += [sourceFileToAdd]
-                    
-        if outputFile == None and self.isLinkCommand() and not "-shared" in args:
+        
+        if seenNonExecutableOutput:
+            self.debugMsg("Outputting something other than a linked binary (by the looks of it), so not linking\n")
+            isLink = False
+        elif isDefinitelyLink:
+            self.debugMsg("Saw an option to make us think we ought to be linking\n")
+            if isDefinitelyNotLink:
+                sys.stderr.write("command cannot both link and not link\n")
+                exit(1)
+            isLink = True
+        elif isDefinitelyNotLink:
+            self.debugMsg("Saw an option to make us think we ought not to be linking\n")
+            isLink = False
+        elif seenSomeInput:    # so long as we have some input, we could be linking
+            self.debugMsg("Saw some input, so we could be linking\n")
+            isLink = True
+        else:
+            # it's probably an error, but don't do linky stuff
+            self.debugMsg("No input of note, so we can't be linking\n")
+            isLink = False
+
+        if outputFile == None and isLink and not "-shared" in args:
             outputFile = "a.out"
-        return (sourceInputFiles, objectInputFiles, outputFile)
+        return (sourceInputFiles, objectInputFiles, outputFile, isLink)
 
     # by default, fixup does nothing
     def fixupDotO(self, filename, errfile):
