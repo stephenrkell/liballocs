@@ -89,8 +89,11 @@ vpath dlmalloc.c $(TRAP_SYSCALLS)/src
 dlmalloc.a: dlmalloc.o
 	$(AR) r "$@" $^
 dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0 -DUSE_DL_PREFIX -fPIC
+dlmalloc-ext.o: CFLAGS += -fPIC
 liballocs_preload.so: dlmalloc.a
-liballocs_preload.so: LDFLAGS += -Wl,--whole-archive dlmalloc.a  -Wl,--no-whole-archive \
+liballocs_preload.so: LDFLAGS += -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
+ -Wl,--wrap,dlfree -Wl,--wrap,dlrealloc -Wl,--wrap,dlmemalign -Wl,-wrap,dlposix_memalign \
+ -Wl,--whole-archive dlmalloc.a  -Wl,--no-whole-archive \
  -Wl,--defsym,__private_malloc=dlmalloc \
  -Wl,--defsym,__private_calloc=dlcalloc \
  -Wl,--defsym,__private_free=dlfree \
@@ -184,10 +187,12 @@ event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 # Easiest is just to treat them like exes. They will get their own copy 
 # of the basic uniqtypes, but this will get uniqued as appropriate.
 
-liballocs_preload.so: systrap.o liballocs_preload.a
-	$(CC) $(CFLAGS) -shared -o "$@" -Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive dlmalloc.a $(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
+liballocs_preload.so: systrap.o liballocs_preload.a dlmalloc.a
+	$(CC) $(CFLAGS) -shared -o "$@" \
+	-Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive \
+	$(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
 
-liballocs_preload.a: $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
+liballocs_preload.a: dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
 
 liballocs_nonshared.a: uniqtypes.o

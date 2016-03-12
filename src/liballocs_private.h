@@ -54,6 +54,17 @@ int dl_for_one_object_phdrs(void *handle,
 	void *data) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 
+/* We contain our own private malloc, and we wrap it using the linker 
+ * to keep track of whether it's active on the current thread. */
+extern _Bool __thread __private_malloc_active __attribute__((visibility("hidden")));
+extern _Bool __thread __private_calloc_active __attribute__((visibility("hidden")));
+extern _Bool __thread __private_free_active __attribute__((visibility("hidden")));
+extern _Bool __thread __private_realloc_active __attribute__((visibility("hidden")));
+extern _Bool __thread __private_memalign_active __attribute__((visibility("hidden")));
+extern _Bool __thread __private_posix_memalign_active __attribute__((visibility("hidden")));
+extern _Bool __thread __private_malloc_usable_size_active __attribute__((visibility("hidden")));
+
+
 extern FILE *stream_err;
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \

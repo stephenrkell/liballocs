@@ -111,7 +111,18 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 
 static void (__attribute__((constructor(101))) init)(void)
 {
-	write_string("Hello from pageindex init!\n");
+	write_string("Hello from pageindex init! exe basename is: ");
+	raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
+	write_string("; pid is ");
+	int pid = raw_getpid();
+	char a;
+	a = '0' + ((pid / 10000) % 10); raw_write(2, &a, 1);
+	a = '0' + ((pid / 1000) % 10); raw_write(2, &a, 1);
+	a = '0' + ((pid / 100) % 10); raw_write(2, &a, 1);
+	a = '0' + ((pid / 10) % 10); raw_write(2, &a, 1);
+	a = '0' + (pid % 10); raw_write(2, &a, 1);
+	raw_write(2, "\n", 1);
+	
 	if (!pageindex)
 	{
 		/* Mmap our region. We map one 16-bit number for every page in the user address region. */
@@ -290,11 +301,16 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	 * page size, is big enough and fills (more-or-less) the alloc'd region. If so,  
 	 * create a bigalloc record including the caller-supplied metadata. We will fish 
 	 * it out in get_alloc_info. */
+	write_string("BlahA001\n");
 	int lock_ret;
 	BIG_LOCK
 	
 	char *chunk_lastbyte = (char*) ptr + size - 1;
-	if (size > BIGGEST_SANE_USER_ALLOC) abort();
+	if (size > BIGGEST_SANE_USER_ALLOC) 
+	{
+		write_string("BlahAEEE!!!!!!!\n");
+		abort();
+	}
 
 	// ensure we have the parent entry
 	struct big_allocation *parent = NULL;
@@ -302,16 +318,20 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	else 
 	{
 		// struct big_allocation *possible_parent = get_common_parent_bigalloc(ptr, chunk_lastbyte);
+		write_string("BlahA002\n");
 		struct big_allocation *deepest_at_start = find_deepest_bigalloc(ptr);
 		struct big_allocation *deepest_at_end = find_deepest_bigalloc(chunk_lastbyte);
+		write_string("BlahA003\n");
 		
 		/* These should all be equal. */
 		if (deepest_at_start != deepest_at_end)
 		{
+			write_string("BlahAFFF!!!!!!!\n");
 			abort();
 		}
 		// else looks okay -- we'll check for overlaps in the memset thing (but only if not NDEBUG)
 		else { parent = deepest_at_start; } // might still be NULL!
+		write_string("BlahA004\n");
 		
 		if (!parent)
 		{
@@ -331,6 +351,7 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	}
 	
 	/* Grab a new bigalloc. */
+	write_string("BlahA005\n");
 	struct big_allocation *b = bigalloc_new(ptr, size, parent, meta, allocated_by);
 	
 	BIG_UNLOCK
@@ -378,18 +399,22 @@ static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size
 	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator,
 		void *suballocator_meta, void (*suballocator_free_func)(void*))
 {
+	write_string("BlahB001\n");
 	bigalloc_init_nomemset(b, ptr, size, parent, meta, allocated_by, suballocator,
 		suballocator_meta, suballocator_free_func);
 
 	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
 	/* For each page that this alloc spans, memset it in the page index. */
+	write_string("BlahB002\n");
 	memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) b->begin, PAGE_SIZE)),
 		b - &big_allocations[0], parent_num, 
 			PAGE_DIST(ROUND_UP((unsigned long) b->begin, PAGE_SIZE),
 				      ROUND_DOWN((unsigned long) b->end, PAGE_SIZE))
 	);
+	write_string("BlahB003\n");
 	
 	SANITY_CHECK_BIGALLOC(b);
+	write_string("BlahB004\n");
 }
 
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end) __attribute__((visibility("protected")));

@@ -89,6 +89,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 		const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, 
 			(void*) info->dlpi_addr);
 		if (!dynobj_name) dynobj_name = "(unknown)";
+		write_string("Blah9002\n");
 
 		// this is the file we care about, so iterate over its phdrs
 		for (int i = 0; i < info->dlpi_phnum; ++i)
@@ -101,13 +102,16 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 				struct big_allocation *containing_mapping = __lookup_bigalloc(
 					segment_start_addr, &__mmap_allocator, NULL);
 				if (!containing_mapping) abort();
+				write_string("Blah9003\n");
 				struct segment_metadata *m = malloc(sizeof (struct segment_metadata));
+				write_string("Blah9004\n");
 				*m = (struct segment_metadata) {
 					/* We strdup once per segment, even though the filename could be 
 					 * shared, in order to simplify the cleanup logic. */
 					.filename = private_strdup(dynobj_name),
 					.phdr = &info->dlpi_phdr[i]
 				};
+				write_string("Blah9005\n");
 				
 				const struct big_allocation *b = __liballocs_new_bigalloc(
 					(void*) segment_start_addr,
@@ -124,6 +128,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 					containing_mapping,
 					&__static_allocator
 				);
+				write_string("Blah9006\n");
 			}
 		}
 		

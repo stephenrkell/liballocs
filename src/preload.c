@@ -139,7 +139,19 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	/* We only start hooking mmap after we read /proc, which is also when we 
 	 * enable the systrap stuff. */
 	if (!__liballocs_systrap_is_initialized || length > BIGGEST_BIGALLOC
-		|| is_self_call(__builtin_return_address(0)))
+		//|| 
+		//	(is_self_call(__builtin_return_address(0))
+		//	&& )
+		// ... actually, observing our own mmaps might be... okay? CARE, because
+		// the mmap allocator does call malloc itself, for its metadata, so we might
+		// become reentrant at this point, which we *don't* want. Note that we're
+		// not in a signal handler here; this path is only for LD_PRELOAD-based hooking,
+		// and we don't trap our own mmap syscalls, so things are slightly less hairy than
+		// they otherwise might be.
+		// Current approach: mmap allocator tests for private malloc active, and 
+		// just does a more minimalist metadata-free bigalloc creation in such cases.
+		// FIXME: whatever we decide to do here, also do it for mremap and munmap
+	)
 	{
 		// skip hooking logic
 		return ret;

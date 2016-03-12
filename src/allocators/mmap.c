@@ -76,21 +76,17 @@ struct mapping_sequence
 
 /* How are we supposed to allocate the mapping sequence metadata? */
 
-static void add_mapping_sequence(struct mapping_sequence *seq)
+static struct big_allocation *add_bigalloc(void *begin, size_t size)
 {
-	/* Note that this will use early_malloc if we would otherwise be reentrant. */
-	struct mapping_sequence *copy = malloc(sizeof (struct mapping_sequence));
-	if (!copy) abort();
-	memcpy(copy, seq, sizeof (struct mapping_sequence));
-	const struct big_allocation *b = __liballocs_new_bigalloc(
-		seq->begin,
-		(char*) seq->end - (char*) seq->begin,
+	struct big_allocation *b = __liballocs_new_bigalloc(
+		begin,
+		size,
 		(struct meta_info) {
 			.what = DATA_PTR,
 			.un = {
 				opaque_data: {
-					.data_ptr = copy,
-					.free_func = free
+					.data_ptr = NULL, // placeholder
+					.free_func = NULL
 				}
 			}
 		},
@@ -98,6 +94,28 @@ static void add_mapping_sequence(struct mapping_sequence *seq)
 		&__mmap_allocator
 	);
 	if (!b) abort();
+	return b;
+}
+
+static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
+{
+	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
+	if (!b) abort();
+	
+	/* Note that this will use early_malloc if we would otherwise be reentrant. */
+	struct mapping_sequence *copy = malloc(sizeof (struct mapping_sequence));
+	if (!copy) abort();
+	memcpy(copy, seq, sizeof (struct mapping_sequence));
+	
+	b->meta = (struct meta_info) {
+		.what = DATA_PTR,
+		.un = {
+			opaque_data: {
+				.data_ptr = copy,
+				.free_func = free
+			}
+		}
+	};
 }
 
 /* HACK: we have a special link to the stack allocator. */
@@ -370,10 +388,19 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		/* If we got here, we have to create a new bigalloc. */
 		struct mapping_sequence new_seq;
 		memset(&new_seq, 0, sizeof new_seq);
+		/* "Extend" the empty sequence. */
 		_Bool success = extend_sequence(&new_seq, mapped_addr, (char*) mapped_addr + mapped_length, 
 				prot, flags, offset, filename, caller);
 		if (!success) abort();
-		add_mapping_sequence(&new_seq);
+		if (!__private_realloc_active && !__private_memalign_active && !__private_posix_memalign_active
+				&& !__private_calloc_active && !__private_malloc_active)
+		{
+			add_mapping_sequence_bigalloc(&new_seq);
+		}
+		else /* HMM */
+		{
+			add_bigalloc(mapped_addr, mapped_length);
+		}		
 	}
 }
 void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_t length, 
@@ -406,7 +433,7 @@ void add_missing_mappings_from_proc(void)
 	};
 	for_each_maps_entry(fd, linebuf, sizeof linebuf, &entry, add_missing_cb, &current);
 	/* Finish off the last mapping. */
-	if (current.nused > 0) add_mapping_sequence(&current);
+	if (current.nused > 0) add_mapping_sequence_bigalloc(&current);
 
 	close(fd);
 }
@@ -431,6 +458,7 @@ static _Bool extend_sequence(struct mapping_sequence *cur,
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename,
 	void *caller)
 {
+	if (!cur) return 0;
 	/* Can we extend the current mapping sequence?
 	 * This is tricky because ELF segments, "allocated" by __static_allocator,
 	 * must have a single parent mapping sequence.
@@ -542,7 +570,7 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 		_Bool extended = extend_current(cur, ent);
 		if (!extended)
 		{
-			add_mapping_sequence(cur);
+			add_mapping_sequence_bigalloc(cur);
 			memset(cur, 0, sizeof (struct mapping_sequence));
 			_Bool began_new = extend_current(cur, ent);
 			if (!began_new) abort();
