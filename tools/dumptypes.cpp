@@ -732,6 +732,11 @@ int main(int argc, char **argv)
 	unsigned offset_from_frame_base;\n\
 	struct allocsite_entry entry;\n\
 };\n";
+	cout << "struct static_allocsite_entry\n\
+{ \n\
+	const char *name;\n\
+	struct allocsite_entry entry;\n\
+};\n";
 	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
 
 	unsigned total_emitted = 0;
@@ -838,7 +843,7 @@ int main(int argc, char **argv)
 		sorted_statics.insert(make_pair(addr, i.as_a<program_element_die>()));
 	}
 	
-	cout << "struct allocsite_entry statics[] = {" << endl;
+	cout << "struct static_allocsite_entry statics[] = {" << endl;
 	
 	for (auto i_var_pair = sorted_statics.begin(); i_var_pair != sorted_statics.end(); ++i_var_pair)
 	{
@@ -850,12 +855,16 @@ int main(int argc, char **argv)
 		cout << "\n\t/* static alloc record for object "
 			 << (i_var.name_here() ? *i_var.name_here() : ("anonymous, DIE " + anon_name.str())) 
 			 << " at vaddr " << std::hex << "0x" << addr << std::dec << " */";
-		cout << "\n\t{ (void*)0, (void*)0, "
+		ostringstream name_token;
+		if (i_var.name_here()) name_token << "\"" << cxxgen::escape(*i_var.name_here()) << "\"";
+		else name_token << "(void*)0";
+		cout << "\n\t{ " << name_token.str() << ","
+			<< "\n\t  { (void*)0, (void*)0, "
 			<< "(char*) " << "0" // will fix up at load time
 			<< " + " << addr << "UL, " 
 			<< "&" << mangle_typename(canonical_key_from_type(
 				i_var.is_a<subprogram_die>() ? i_var.as_a<type_die>() : i_var.as_a<variable_die>()->find_type()))
-			<< " }";
+			<< " }\n\t}";
 		cout << ",";
 	}
 
