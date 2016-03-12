@@ -520,3 +520,24 @@ static void init(void)
 	write_string("Hello from preload init!\n");
 	
 }
+
+void abort(void) __attribute__((visibility("protected")));
+void abort(void)
+{
+	/* Give ourselves time to attach a debugger. */
+	write_string("Aborting program ");
+	raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
+	write_string(", pid ");
+	int pid = raw_getpid();
+	char a;
+	a = '0' + ((pid / 10000) % 10); raw_write(2, &a, 1);
+	a = '0' + ((pid / 1000) % 10); raw_write(2, &a, 1);
+	a = '0' + ((pid / 100) % 10); raw_write(2, &a, 1);
+	a = '0' + ((pid / 10) % 10); raw_write(2, &a, 1);
+	a = '0' + (pid % 10); raw_write(2, &a, 1);
+	write_string(", in 10 seconds\n");
+
+	sleep(10);
+	raw_kill(pid, 6);
+	__builtin_unreachable();
+}

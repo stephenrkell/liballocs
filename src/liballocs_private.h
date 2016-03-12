@@ -41,6 +41,8 @@ const char *format_symbolic_address(const void *addr) __attribute__((visibility(
 
 #include "pageindex.h"
 
+extern struct big_allocation *executable_data_segment_bigalloc __attribute__((visibility("hidden")));
+
 void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void munmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void mremap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
@@ -63,7 +65,6 @@ extern _Bool __thread __private_realloc_active __attribute__((visibility("hidden
 extern _Bool __thread __private_memalign_active __attribute__((visibility("hidden")));
 extern _Bool __thread __private_posix_memalign_active __attribute__((visibility("hidden")));
 extern _Bool __thread __private_malloc_usable_size_active __attribute__((visibility("hidden")));
-
 
 extern FILE *stream_err;
 #define debug_printf(lvl, fmt, ...) do { \
@@ -99,6 +100,11 @@ vaddr_to_stack_uniqtype(const void *vaddr)
 struct uniqtype *
 static_addr_to_uniqtype(const void *static_addr, void **out_object_start) 
 		__attribute__((visibility("hidden")));
+
+#define TYPES_OBJ_SUFFIX "-types.so"
+#define ALLOCSITES_OBJ_SUFFIX "-allocsites.so"
+_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, const char *meta_suffix)
+			__attribute__((visibility("hidden")));
 
 /* avoid dependency on libc headers (in this header only) */
 void __assert_fail(const char *assertion, 

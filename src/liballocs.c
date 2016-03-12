@@ -448,6 +448,22 @@ int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *data
 	return 0;
 }
 
+_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, const char *meta_suffix)
+{
+	// get the canonical libfile name
+	const char *canon_l_objname = dynobj_name_from_dlpi_name(l->l_name,
+		(void*) l->l_addr);
+	const char *types_objname_not_norm = helper_libfile_name(canon_l_objname, meta_suffix);
+	const char *types_objname_norm = realpath_quick(types_objname_not_norm);
+	char types_objname_buf[4096];
+	strncpy(types_objname_buf, types_objname_norm, sizeof types_objname_buf - 1);
+	types_objname_buf[sizeof types_objname_buf - 1] = '\0';
+	const char *canon_types_objname = dynobj_name_from_dlpi_name(maybe_types->l_name,
+		(void*) maybe_types->l_addr);
+	if (0 == strcmp(types_objname_buf, canon_types_objname)) return 1;
+	else return 0;
+}
+
 static void chain_allocsite_entries(struct allocsite_entry *cur_ent, 
 	struct allocsite_entry *prev_ent, unsigned *p_current_bucket_size, 
 	intptr_t load_addr, intptr_t extrabits)
@@ -507,9 +523,9 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
 	
 	// get the -allocsites.so object's name
-	const char *libfile_name = helper_libfile_name(canon_objname, "-allocsites.so");
+	const char *libfile_name = helper_libfile_name(canon_objname, ALLOCSITES_OBJ_SUFFIX);
 	// don't load if we end with "-allocsites.so"
-	if (0 == strcmp("-allocsites.so", canon_objname + strlen(canon_objname) - strlen("-allocsites.so")))
+	if (0 == strcmp(ALLOCSITES_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(ALLOCSITES_OBJ_SUFFIX)))
 	{
 		return 0;
 	}
@@ -565,9 +581,9 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
 	
 	// get the -allocsites.so object's name
-	const char *libfile_name = helper_libfile_name(canon_objname, "-types.so");
+	const char *libfile_name = helper_libfile_name(canon_objname, TYPES_OBJ_SUFFIX);
 	// don't load if we end with "-types.so"
-	if (0 == strcmp("-types.so", canon_objname + strlen(canon_objname) - strlen("-types.so")))
+	if (0 == strcmp(TYPES_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(TYPES_OBJ_SUFFIX)))
 	{
 		return 0;
 	}
@@ -611,7 +627,7 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 	/* Now a similar job for the statics. */
 	{
 		dlerror();
-		struct allocsite_entry *first_static_entry = (struct allocsite_entry *) dlsym(types_handle, "statics");
+		struct static_allocsite_entry *first_static_entry = (struct static_allocsite_entry *) dlsym(types_handle, "statics");
 		if (!first_static_entry)
 		{
 			debug_printf(1, "Could not load statics (%s)", dlerror());
@@ -620,18 +636,20 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 
 		/* We chain these much like the allocsites, BUT we OR each vaddr with 
 		 * STACK_BEGIN<<1 first.  */
-		struct allocsite_entry *cur_static_ent = first_static_entry;
-		struct allocsite_entry *prev_static_ent = NULL;
+		struct static_allocsite_entry *cur_static_ent = first_static_entry;
+		struct static_allocsite_entry *prev_static_ent = NULL;
 		unsigned current_static_bucket_size = 1; // out of curiosity...
-		for (; cur_static_ent->allocsite; prev_static_ent = cur_static_ent++)
+		for (; cur_static_ent->entry.allocsite; prev_static_ent = cur_static_ent++)
 		{
-			chain_allocsite_entries(cur_static_ent, prev_static_ent, &current_static_bucket_size,
+			chain_allocsite_entries(cur_static_ent ? &cur_static_ent->entry : NULL, 
+					prev_static_ent ? &prev_static_ent->entry : NULL,
+					&current_static_bucket_size,
 				info->dlpi_addr, 0x800000000000ul<<1);
 		}
 
 		// debugging: check that we can look up the first entry, if we are non-empty
-		assert(!first_static_entry || !first_static_entry->allocsite || 
-			static_addr_to_uniqtype(first_static_entry->allocsite, NULL) == first_static_entry->uniqtype);
+		assert(!first_static_entry || !first_static_entry->entry.allocsite || 
+			static_addr_to_uniqtype(first_static_entry->entry.allocsite, NULL) == first_static_entry->entry.uniqtype);
 	}
 	
 	// always continue with further objects
@@ -864,6 +882,10 @@ int __liballocs_global_init(void)
 	if (tried_to_initialize) return -1;
 	tried_to_initialize = 1;
 	
+	static _Bool trying_to_initialize;
+	if (trying_to_initialize) return 0;
+	trying_to_initialize = 1;
+	
 	// print a summary when the program exits
 	atexit(print_exit_summary);
 	
@@ -940,12 +962,15 @@ int __liballocs_global_init(void)
 	assert(ret_stackaddr == 0);
 #endif
 	
-	// DANGER: these want to malloc. I don't think this is okay. FIXME.
-	__stack_allocator_init();
-	__mmap_allocator_init();
-	__static_allocator_init();
-	__auxv_allocator_init();
+	/* Don't do this. They all have constructors. Moreover, the mmap allocator
+	 * calls *us* because it can't start the systrap before we've loaded all the
+	 * metadata for the loaded objects (the "__brk" problem). */
+	// __stack_allocator_init();
+	// __mmap_allocator_init();
+	// __static_allocator_init();
+	// __auxv_allocator_init();
 
+	trying_to_initialize = 0;
 	__liballocs_is_initialized = 1;
 
 	debug_printf(1, "liballocs successfully initialized\n");

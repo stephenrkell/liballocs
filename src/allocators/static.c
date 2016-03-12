@@ -38,9 +38,12 @@ void __static_allocator_init(void)
 
 void __static_allocator_notify_load(void *handle)
 {
-	int dlpi_ret = dl_iterate_phdr(add_all_loaded_segments, 
-		((struct link_map *) handle)->l_name);
-	assert(dlpi_ret != 0);
+	if (initialized)
+	{
+		int dlpi_ret = dl_iterate_phdr(add_all_loaded_segments, 
+			((struct link_map *) handle)->l_name);
+		assert(dlpi_ret != 0);
+	}
 }
 
 struct segment_metadata
@@ -58,18 +61,21 @@ static void free_segment_metadata(void *sm)
 
 void __static_allocator_notify_unload(const char *copied_filename)
 {
-	assert(copied_filename);
-	/* For all big allocations, if we're the allocator and the filename matches, 
-	 * delete them. */
-	for (struct big_allocation *b = &big_allocations[0]; b != &big_allocations[NBIGALLOCS]; ++b)
+	if (initialized)
 	{
-		if (BIGALLOC_IN_USE(b) && b->allocated_by == &__static_allocator)
+		assert(copied_filename);
+		/* For all big allocations, if we're the allocator and the filename matches, 
+		 * delete them. */
+		for (struct big_allocation *b = &big_allocations[0]; b != &big_allocations[NBIGALLOCS]; ++b)
 		{
-			if (0 == strcmp(copied_filename, 
-				((struct segment_metadata *) b->meta.un.opaque_data.data_ptr)->filename))
+			if (BIGALLOC_IN_USE(b) && b->allocated_by == &__static_allocator)
 			{
-				/* It's a match, so delete. */
-				__liballocs_delete_bigalloc_at(b->begin, &__static_allocator);
+				if (0 == strcmp(copied_filename, 
+					((struct segment_metadata *) b->meta.un.opaque_data.data_ptr)->filename))
+				{
+					/* It's a match, so delete. */
+					__liballocs_delete_bigalloc_at(b->begin, &__static_allocator);
+				}
 			}
 		}
 	}
@@ -213,6 +219,41 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	if (out_size) *out_size = alloc_uniqtype->pos_maxoff;
 	return NULL;
 }
+
+// nasty hack
+_Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
+	void **out_addr, size_t *out_len)
+{
+	for (struct link_map *inner_l = _r_debug.r_map; inner_l; inner_l = inner_l->l_next)
+	{
+		if (is_meta_object_for_lib(inner_l, l, "-types.so" /* HACK */))
+		{
+			void *statics = symbol_lookup_in_object(inner_l, "statics");
+			if (!statics) abort();
+			for (struct static_allocsite_entry *cur_ent = (struct static_allocsite_entry *) statics;
+					cur_ent->entry.allocsite;
+					cur_ent++)
+			{
+				if (0 == strcmp(cur_ent->name, name))
+				{
+					// found it! it'd better not be the last in the table...
+					if (!(cur_ent + 1)->entry.allocsite) abort();
+					void *this_static = cur_ent->entry.allocsite;
+					void *next_static = (char*) (cur_ent + 1)->entry.allocsite;
+					*out_addr = this_static;
+					*out_len = (char*) next_static - (char*) this_static;
+					return 1;
+				}
+			}
+
+			// didn't find the symbol we were looking for -- oh well
+			return 0;
+		}
+	}
+	
+	return 0;
+}
+
 
 struct allocator __static_allocator = {
 	.name = "static",

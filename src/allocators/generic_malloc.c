@@ -163,7 +163,6 @@ do_init(void)
 	if (index_region) return; /* already done */
 
 	/* Initialize what we depend on. */
-	__sbrk_allocator_init();
 	__mmap_allocator_init();
 	
 	index_begin_addr = (void*) 0U;

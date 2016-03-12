@@ -14,7 +14,11 @@ struct frame_allocsite_entry
 	unsigned offset_from_frame_base;
 	struct allocsite_entry entry;
 };
-
+struct static_allocsite_entry
+{
+	const char *name;
+	struct allocsite_entry entry;
+};
 /* allocsmt is a memtable lookup mainly because it's easy 
  * and reduces code dependencies. In particular, it's easy to 
  * initialize using a single linear scan, assuming that allocsites info

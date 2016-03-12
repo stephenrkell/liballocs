@@ -440,6 +440,19 @@ void add_missing_mappings_from_proc(void)
 static _Bool initialized;
 static _Bool trying_to_initialize;
 
+static void *executable_end_addr;
+static void *data_segment_start_addr;
+
+// we always define a __curbrk -- it may override one in glibc, but fine
+void *__curbrk;
+static void *current_sbrk(void)
+{
+	return __curbrk;
+}
+void __mmap_allocator_notify_brk(void *new_curbrk);
+
+struct big_allocation *executable_data_segment_bigalloc __attribute__((visibility("hidden")));
+
 void __mmap_allocator_init(void) __attribute__((constructor(101)));
 void __mmap_allocator_init(void)
 {
@@ -447,8 +460,62 @@ void __mmap_allocator_init(void)
 	{
 		trying_to_initialize = 1;
 		add_missing_mappings_from_proc();
+		
+		/* Grab the executable's end address
+		 * We used to try dlsym()'ing "_end", but that doesn't work:
+		 * not all executables have _end and _begin exported as dynamic syms.
+		 * Also, we don't want to call dlsym since it might not be safe to malloc.
+		 * Instead, get the executable's program headers directly from the auxv. */
+		char dummy;
+		ElfW(auxv_t) *auxv = get_auxv((const char **) environ, &dummy);
+		assert(auxv);
+		ElfW(auxv_t) *ph_auxv = auxv_lookup(auxv, AT_PHDR);
+		ElfW(auxv_t) *phnum_auxv = auxv_lookup(auxv, AT_PHNUM);
+		assert(ph_auxv);
+		assert(phnum_auxv);
+		uintptr_t biggest_seen = 0;
+		for (int i = 0; i < phnum_auxv->a_un.a_val; ++i)
+		{
+			ElfW(Phdr) *phdr = ((ElfW(Phdr)*) ph_auxv->a_un.a_val) + i;
+			if (phdr->p_type == PT_LOAD)
+			{
+				/* We can round down to int because vaddrs *within* an object 
+				 * will not be more than 2^31 from the object base. */
+				uintptr_t max_plus_one = (int) (phdr->p_vaddr + phdr->p_memsz);
+				if (max_plus_one > biggest_seen) biggest_seen = max_plus_one;
+
+				if (!(phdr->p_flags & PF_X) &&
+					(char*) phdr->p_vaddr > (char*) data_segment_start_addr)
+				{
+					data_segment_start_addr = (void*) phdr->p_vaddr;
+				}
+			}
+		}
+		executable_end_addr = (void*) biggest_seen;
+		assert(executable_end_addr != 0);
+		assert((char*) executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
+		
+		/* Which bigalloc is the executable's data segment mapping? */
+		for (int i = 1; BIGALLOC_IN_USE(&big_allocations[i]); ++i)
+		{
+			/* Does this end at the data segment end? */
+			if ((uintptr_t) big_allocations[i].end == ROUND_UP(executable_end_addr, PAGE_SIZE))
+			{
+				executable_data_segment_bigalloc = &big_allocations[i];
+				break;
+			}
+		}
+		if (!executable_data_segment_bigalloc) abort();
+
+		/* We expect the data segment's suballocator to be malloc, so pre-ordain that.
+		 * NOTE that there will also be a nested allocation under it, that is the 
+		 * static allocator's segment bigalloc. We don't consider the sbrk area
+		 * to be a child of that; it's a sibling. FIXME: is this okay? */
+		executable_data_segment_bigalloc->suballocator = &__generic_malloc_allocator;
+		
 		/* Now we're ready to take traps for subsequent mmaps. */
 		__liballocs_systrap_init();
+		
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -578,4 +645,34 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, v
 	} // end if size > 0
 
 	return 0; // keep going
+}
+
+void __mmap_allocator_notify_brk(void *new_curbrk)
+{
+	if (!initialized)
+	{
+		/* HMM. This is happening in a signal context so it's probably not 
+		 * safe to just do the init now. What we're worried about is not
+		 * having a stale value of sbrk. Since we're not yet init'd, we trivially
+		 * don't, so there's no need to do anything... */
+		return;
+	}
+	
+	struct mapping_sequence *seq
+	 = executable_data_segment_bigalloc->meta.un.opaque_data.data_ptr;
+	
+	/* We also update the metadata. */
+	if ((char*) new_curbrk < (char*) __curbrk)
+	{
+		/* We're contracting. */
+		__liballocs_truncate_bigalloc_at_end(executable_data_segment_bigalloc, new_curbrk);
+		delete_mapping_sequence_span(seq, new_curbrk, (char*) __curbrk - (char*) new_curbrk);
+	}
+	else if ((char*) new_curbrk > (char*) __curbrk)
+	{
+		/* We're expanding. */
+		__liballocs_extend_bigalloc(executable_data_segment_bigalloc, new_curbrk);
+		if (!seq->mappings[seq->nused - 1].is_anon) abort();
+		seq->mappings[seq->nused - 1].end = new_curbrk;
+	}
 }

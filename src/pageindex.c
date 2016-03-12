@@ -111,20 +111,20 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 
 static void (__attribute__((constructor(101))) init)(void)
 {
-	write_string("Hello from pageindex init! exe basename is: ");
-	raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
-	write_string("; pid is ");
-	int pid = raw_getpid();
-	char a;
-	a = '0' + ((pid / 10000) % 10); raw_write(2, &a, 1);
-	a = '0' + ((pid / 1000) % 10); raw_write(2, &a, 1);
-	a = '0' + ((pid / 100) % 10); raw_write(2, &a, 1);
-	a = '0' + ((pid / 10) % 10); raw_write(2, &a, 1);
-	a = '0' + (pid % 10); raw_write(2, &a, 1);
-	raw_write(2, "\n", 1);
-	
 	if (!pageindex)
 	{
+		write_string("Hello from pageindex init! exe basename is: ");
+		raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
+		write_string("; pid is ");
+		int pid = raw_getpid();
+		char a;
+		a = '0' + ((pid / 10000) % 10); raw_write(2, &a, 1);
+		a = '0' + ((pid / 1000) % 10); raw_write(2, &a, 1);
+		a = '0' + ((pid / 100) % 10); raw_write(2, &a, 1);
+		a = '0' + ((pid / 10) % 10); raw_write(2, &a, 1);
+		a = '0' + (pid % 10); raw_write(2, &a, 1);
+		raw_write(2, "\n", 1);
+		
 		/* Mmap our region. We map one 16-bit number for every page in the user address region. */
 		pageindex = MEMTABLE_NEW_WITH_TYPE(bigalloc_num_t, PAGE_SIZE, (void*) 0, (void*) (MAXIMUM_USER_ADDRESS + 1));
 		if (pageindex == MAP_FAILED) abort();
@@ -267,6 +267,7 @@ static void bigalloc_del(struct big_allocation *b)
 struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attribute__((visibility("protected")));
 struct allocator *__liballocs_get_allocator_upper_bound(const void *obj)
 {
+	if (!pageindex) init();
 	struct big_allocation *alloc = __liballocs_get_bigalloc_containing(obj);
 	if (alloc) return alloc->allocated_by;
 	else return NULL;
@@ -277,7 +278,7 @@ void __liballocs_print_l0_to_stream_err(void)
 {
 	int lock_ret;
 	BIG_LOCK
-			
+	
 	if (!pageindex) init();
 	for (struct big_allocation *b = &big_allocations[1]; b < &big_allocations[NBIGALLOCS]; ++b)
 	{
@@ -301,6 +302,7 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	 * page size, is big enough and fills (more-or-less) the alloc'd region. If so,  
 	 * create a bigalloc record including the caller-supplied metadata. We will fish 
 	 * it out in get_alloc_info. */
+	if (!pageindex) init();
 	write_string("BlahA001\n");
 	int lock_ret;
 	BIG_LOCK
@@ -335,23 +337,15 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 		
 		if (!parent)
 		{
-			/* No parent is okay if we're sbrk (but bump it up) or 
-			 * page-aligned mmap. NOTE that sbrk does not have a parent
-			 * mmap-allocated bigalloc! Hmm, is that weird? */
-			if (allocated_by == &__sbrk_allocator)
-			{
-				// okay
-			}
-			else
-			{
-				if (ROUND_UP_PTR(ptr, PAGE_SIZE) != ptr) abort();
-				if (ROUND_UP_PTR(chunk_lastbyte + 1, PAGE_SIZE) != chunk_lastbyte + 1) abort();
-			}
+			write_string("BlahA005\n");
+			/* No parent is okay only if we're page-aligned (mmap or stack). */
+			if (ROUND_UP_PTR(ptr, PAGE_SIZE) != ptr) abort();
+			if (ROUND_UP_PTR(chunk_lastbyte + 1, PAGE_SIZE) != chunk_lastbyte + 1) abort();
 		}
 	}
 	
 	/* Grab a new bigalloc. */
-	write_string("BlahA005\n");
+	write_string("BlahA006\n");
 	struct big_allocation *b = bigalloc_new(ptr, size, parent, meta, allocated_by);
 	
 	BIG_UNLOCK
@@ -387,9 +381,13 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 	if (parent) 
 	{
 		add_child(b, parent);
-		/* Check that the parent thinks that this allocator is its suballocator. */
+		/* Check that the parent thinks that this allocator is its suballocator. 
+		 * EXCEPTION: the executable's data segment also contains the sbrk area. */
 		if (!parent->suballocator) parent->suballocator = allocated_by;
-		else if (parent->suballocator != allocated_by) abort();
+		else if (parent->suballocator != allocated_by
+			&& !(parent == executable_data_segment_bigalloc
+				 && parent->suballocator == &__generic_malloc_allocator)
+		) abort();
 	}
 	
 	SANITY_CHECK_BIGALLOC(b);
@@ -420,6 +418,7 @@ static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end) __attribute__((visibility("protected")));
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	const void *old_end = b->end;
@@ -460,6 +459,7 @@ static _Bool is_one_or_more_levels_under(bigalloc_num_t maybe_lower_n, struct bi
 _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
 _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	const void *old_begin = b->begin;
@@ -508,6 +508,7 @@ static _Bool bigalloc_truncate_at_end(struct big_allocation *b, const void *new_
 
 _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	_Bool ret = bigalloc_truncate_at_end(b, new_end);
@@ -518,6 +519,7 @@ _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void 
 
 _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	const void *old_begin = b->begin;
@@ -537,6 +539,7 @@ _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const
 
 struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_allocation *b, const void *split_addr)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	struct big_allocation tmp = *b;
@@ -671,6 +674,7 @@ static struct big_allocation *find_deepest_bigalloc(const void *addr)
 _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
 _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	
@@ -696,6 +700,7 @@ _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
 struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	
@@ -715,6 +720,7 @@ struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, v
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	
@@ -735,6 +741,7 @@ struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	struct big_allocation *b = find_deepest_bigalloc(mem);
@@ -756,6 +763,7 @@ struct big_allocation *__lookup_deepest_bigalloc(const void *mem)
 struct allocator *__lookup_top_level_allocator(const void *mem) __attribute__((visibility("hidden")));
 struct allocator *__lookup_top_level_allocator(const void *mem)
 {
+	if (!pageindex) init();
 	struct big_allocation *b = __lookup_bigalloc_top_level(mem);
 	if (!b) return NULL;
 	else return b->allocated_by;
@@ -788,14 +796,12 @@ static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const 
 
 _Bool __liballocs_notify_unindexed_address(const void *ptr)
 {
+	if (!pageindex) init();
 	/* We get called if the caller finds an address that's not indexed anywhere. 
 	 * It's a way of asking us to check. 
 	 * We ask all our allocators in turn whether they own this address.
-	 * Only stack and sbrk are expected to reply positively, so we put them
-	 * at the top. */
+	 * Only stack is expected to reply positively. */
 	_Bool ret = __stack_allocator_notify_unindexed_address(ptr);
-	if (ret) return 1;
-	ret = __sbrk_allocator_notify_unindexed_address(ptr);
 	if (ret) return 1;
 	// FIXME: loop through the others
 	return 0;

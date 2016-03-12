@@ -3,6 +3,7 @@
 #define RELF_DEFINE_STRUCTURES
 #include "relf.h"
 #include "vas.h"
+#include "allocsmt.h"
 #include "maps.h"
 #include "pageindex.h"
 
@@ -18,7 +19,11 @@ void __mmap_allocator_notify_mremap_after(void *ret, void *old_addr, size_t old_
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, int prot, int flags,
                   int fd, off_t offset, void *caller)
 			__attribute__((weak));
-
+void __mmap_allocator_notify_brk(void *new_curbrk);
+extern _Bool __liballocs_is_initialized;
+int __liballocs_global_init(void);
+_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, const char *meta_suffix)
+			__attribute__((visibility("hidden")));
 /* avoid standard headers */
 char *realpath(const char *path, char *resolved_path);
 int snprintf(char *str, size_t size, const char *format, ...);
@@ -29,6 +34,23 @@ int close(int fd);
 	( (&pageindex && pageindex[ ((uintptr_t) ((uc).rsp)) >> LOG_PAGE_SIZE ] != 0) \
 		? *(void**) ((uintptr_t) ((uc).rsp)) \
 		: (void*) ((uc).rip) )
+
+void brk_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
+void brk_replacement(struct generic_syscall *s, post_handler *post)
+{
+	/* Linux gives us the old value on failure, and the new value on success. 
+	 * In other words it always gives us the current sbrk. */
+	void *brk_asked_for = (void*) s->args[0];
+	long int ret = do_syscall1(s);
+	void *brk_returned = (void*) ret;
+	__mmap_allocator_notify_brk(brk_returned);
+	
+	/* Do the post-handling. */
+	post(s, ret);
+	
+	/* We need to do our own resumption also. */
+	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+}
 
 void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void mmap_replacement(struct generic_syscall *s, post_handler *post)
@@ -144,13 +166,31 @@ static int trap_ldso_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, voi
 	return 0;
 }
 
+static _Bool trap_syscalls_in_symbol_named(const char *name, struct link_map *l,
+	ElfW(Sym) *dynsym, ElfW(Sym) *dynsym_end, const char *dynstr, const char *dynstr_end)
+{
+	ElfW(Sym) *found = symbol_lookup_linear(dynsym, dynsym_end, dynstr, 
+		dynstr_end, name);
+	if (found && found->st_shndx != STN_UNDEF)
+	{
+		trap_one_instruction_range((unsigned char *)(l->l_addr + found->st_value),
+			(unsigned char *)(l->l_addr + found->st_value + found->st_size),
+			0, 1);
+		return 1;
+	} else return 0;
+}
+
 extern ElfW(Dyn) _DYNAMIC[];
 _Bool __liballocs_systrap_is_initialized; /* globally visible, so that it gets overridden. */
+_Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
+	void **out_addr, size_t *out_len) __attribute__((weak));
+
 /* This is logically a constructor, since it's important that it happens before
  * much stuff has been memory-mapped. BUT we have to hand off smoothly from the
  * mmap allocator, which processes /proc. So it will call us when it's done that.
- * Does this also avoid the "two copies" problem we had before. But it does mean
- * that libcrunch's stubs library has to call us explicitly. */
+ * This also avoids the "two copies" problem we had before, because only one copy
+ * of this symbol will be callable, and the library initializer doesn't call it. 
+ * But it does mean that libcrunch's stubs library has to call us explicitly. */
 void __liballocs_systrap_init(void)
 {
 	/* NOTE: in a preload libcrunch run, there are two copies of this code running!
@@ -164,11 +204,17 @@ void __liballocs_systrap_init(void)
 	 * ARGH, but -Bsymbolic may have screwed with this. Oh, but we don't use it for the 
 	 * stubs library, I don't think. Indeed, we don't. */
 	if (__liballocs_systrap_is_initialized) return;
+	
+	/* To figure out what to trap, we're going to use the static allocation metadata from
+	 * liballocs. So make sure we've done that. */
+	if (!__liballocs_is_initialized) __liballocs_global_init();
+	
 	static char realpath_buf[4096]; /* bit of a HACK */
 	/* Make sure we're trapping all syscalls within ld.so. */
 	replaced_syscalls[SYS_mmap] = mmap_replacement;
 	replaced_syscalls[SYS_munmap] = munmap_replacement;
 	replaced_syscalls[SYS_mremap] = mremap_replacement;
+	replaced_syscalls[SYS_brk] = brk_replacement;
 	/* Get a hold of the ld.so's link map entry. How? We get it from the auxiliary
 	 * vector. */
 	const char *interpreter_fname = NULL;
@@ -220,6 +266,7 @@ void __liballocs_systrap_init(void)
 			ElfW(Sym) *dynsym_end = dynsym + dynamic_symbol_count(l->l_ld);
 
 			/* Now we can look up symbols. */
+			int found_one = 
 #define TRAP_SYSCALLS_IN_SYMBOL_NAMED(n) do { \
 			ElfW(Sym) *found_ ## n = symbol_lookup_linear(dynsym, dynsym_end, dynstr, \
 				dynstr + dynstrsz, #n); \
@@ -231,10 +278,31 @@ void __liballocs_systrap_init(void)
 			} \
 			} while (0)
 			
-			TRAP_SYSCALLS_IN_SYMBOL_NAMED(mmap);
-			TRAP_SYSCALLS_IN_SYMBOL_NAMED(mmap64);
-			TRAP_SYSCALLS_IN_SYMBOL_NAMED(munmap);
-			TRAP_SYSCALLS_IN_SYMBOL_NAMED(mremap);
+			trap_syscalls_in_symbol_named("mmap",   l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			trap_syscalls_in_symbol_named("mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			trap_syscalls_in_symbol_named("munmap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			trap_syscalls_in_symbol_named("mremap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			_Bool found_sbrk = trap_syscalls_in_symbol_named("sbrk", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			// we want to trap syscalls in "__brk"; // glibc HACK!
+			// but "__brk" in glibc isn't an exportd symbol.
+			// instead, we need to walk its allocations
+			if (found_sbrk) // glibc HACK!
+			{
+				if (&__lookup_static_allocation_by_name)
+				{
+					/* We want to trap syscalls in "__brk" but "__brk" in glibc 
+					 * isn't an exported symbol. So consult our allocs data for 
+					 * a definition named "__brk" and trap that. */
+					void *addr;
+					size_t len;
+					_Bool success = __lookup_static_allocation_by_name(l, "__brk", &addr, &len);
+					if (success)
+					{
+						trap_one_instruction_range((unsigned char*) addr, 
+							(unsigned char*) addr + len, 0, 1);
+					}
+				}
+			}
 		}
 	}
 	install_sigill_handler();
