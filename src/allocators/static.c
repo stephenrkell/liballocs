@@ -228,13 +228,14 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 	{
 		if (is_meta_object_for_lib(inner_l, l, "-types.so" /* HACK */))
 		{
-			void *statics = symbol_lookup_in_object(inner_l, "statics");
-			if (!statics) abort();
-			for (struct static_allocsite_entry *cur_ent = (struct static_allocsite_entry *) statics;
-					cur_ent->entry.allocsite;
+			ElfW(Sym) *statics_sym = symbol_lookup_in_object(inner_l, "statics");
+			if (!statics_sym) abort();
+			struct static_allocsite_entry *statics = sym_to_addr(statics_sym);
+			for (struct static_allocsite_entry *cur_ent = statics;
+					!STATIC_ALLOCSITE_IS_NULL(cur_ent);
 					cur_ent++)
 			{
-				if (0 == strcmp(cur_ent->name, name))
+				if (cur_ent->name && 0 == strcmp(cur_ent->name, name))
 				{
 					// found it! it'd better not be the last in the table...
 					if (!(cur_ent + 1)->entry.allocsite) abort();

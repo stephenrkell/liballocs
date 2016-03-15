@@ -627,7 +627,8 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 	/* Now a similar job for the statics. */
 	{
 		dlerror();
-		struct static_allocsite_entry *first_static_entry = (struct static_allocsite_entry *) dlsym(types_handle, "statics");
+		struct static_allocsite_entry *first_static_entry
+		 = (struct static_allocsite_entry *) dlsym(types_handle, "statics");
 		if (!first_static_entry)
 		{
 			debug_printf(1, "Could not load statics (%s)", dlerror());
@@ -639,7 +640,7 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 		struct static_allocsite_entry *cur_static_ent = first_static_entry;
 		struct static_allocsite_entry *prev_static_ent = NULL;
 		unsigned current_static_bucket_size = 1; // out of curiosity...
-		for (; cur_static_ent->entry.allocsite; prev_static_ent = cur_static_ent++)
+		for (; !STATIC_ALLOCSITE_IS_NULL(cur_static_ent); prev_static_ent = cur_static_ent++)
 		{
 			chain_allocsite_entries(cur_static_ent ? &cur_static_ent->entry : NULL, 
 					prev_static_ent ? &prev_static_ent->entry : NULL,
@@ -648,8 +649,9 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 		}
 
 		// debugging: check that we can look up the first entry, if we are non-empty
-		assert(!first_static_entry || !first_static_entry->entry.allocsite || 
-			static_addr_to_uniqtype(first_static_entry->entry.allocsite, NULL) == first_static_entry->entry.uniqtype);
+		assert(!first_static_entry || STATIC_ALLOCSITE_IS_NULL(first_static_entry) || 
+			static_addr_to_uniqtype(first_static_entry->entry.allocsite, NULL)
+				== first_static_entry->entry.uniqtype);
 	}
 	
 	// always continue with further objects

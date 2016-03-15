@@ -849,6 +849,14 @@ int main(int argc, char **argv)
 	{
 		auto addr = i_var_pair->first;
 		auto& i_var = i_var_pair->second;
+		
+		/* Addr 0 is problematic. It generally refers to thinks that aren't really 
+		 * there, like weak symbols (that somehow have debug info) or __evoke_link_warning_*
+		 * things. But it could also be a legitimate vaddr. Hmm. Well, skip it for now.
+		 * If we leave it, the addr lookup function becomes ambiguous if there are many
+		 * allocs at address zero, and this confuses us (e.g. our assertion after chaining
+		 * allocsites). FIXME: better to filter out based on the *type* of the thing? */
+		if (addr == 0) continue;
 
 		ostringstream anon_name; anon_name << "0x" << std::hex << i_var.offset_here();
 
@@ -869,7 +877,7 @@ int main(int argc, char **argv)
 	}
 
 	// output a null terminator entry
-	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 }";
+	cout << "\n\t{ (void*)0, { (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 } }";
 	
 	// close the list
 	cout << "\n};\n";
