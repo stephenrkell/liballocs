@@ -71,7 +71,7 @@ $(ALLOCSITES_BASE)/%-allocsites.c: $(ALLOCSITES_BASE)/%.allocs
 $(ALLOCSITES_BASE)/%-types.so: $(ALLOCSITES_BASE)/%-types.o
 	# use ld --defsym to define alias symbols for any C base types
 	# FIXME: need a prefix to indicate "built-ins for a given C impl", cf. Java or non-GNU C....
-	$(CC) -shared \
+	$(CC) -shared -Wl,--hash-style=both \
 	-o "$@" "$<"
 	#`nm -fposix "$<" | $(dir $(THIS_MAKEFILE))/alias-linker-opts-for-base-types.sh)` "$<"
 
