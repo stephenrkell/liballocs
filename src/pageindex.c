@@ -385,7 +385,7 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 		 * EXCEPTION: the executable's data segment also contains the sbrk area. */
 		if (!parent->suballocator) parent->suballocator = allocated_by;
 		else if (parent->suballocator != allocated_by
-			&& !(parent == executable_data_segment_bigalloc
+			&& !(parent == executable_data_segment_mapping_bigalloc
 				 && parent->suballocator == &__generic_malloc_allocator)
 		) abort();
 	}

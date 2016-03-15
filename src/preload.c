@@ -535,6 +535,8 @@ void abort(void)
 	a = '0' + ((pid / 100) % 10); raw_write(2, &a, 1);
 	a = '0' + ((pid / 10) % 10); raw_write(2, &a, 1);
 	a = '0' + (pid % 10); raw_write(2, &a, 1);
+	write_string(", from address ");
+	write_ulong((unsigned long) __builtin_return_address(0));
 	write_string(", in 10 seconds\n");
 
 	sleep(10);
