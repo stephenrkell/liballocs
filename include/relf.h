@@ -504,7 +504,7 @@ ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sy
 	ElfW(Sym) *symtab = (ElfW(Sym) *) dynamic_xlookup(l->l_ld, DT_SYMTAB)->d_un.d_ptr;
 	ElfW(Sym) *symtab_end = symtab + dynamic_symbol_count(l->l_ld);
 	const char *strtab = (const char *) dynamic_xlookup(l->l_ld, DT_STRTAB)->d_un.d_ptr;
-	const char *strtab_end = strtab + local_dynamic_xlookup(DT_STRSZ)->d_un.d_val;
+	const char *strtab_end = strtab + dynamic_xlookup(l->l_ld, DT_STRSZ)->d_un.d_val;
 	
 	/* Try the hash lookup, if we can. FIXME: support GNU hash. */
 	ElfW(Sym) *found_sym = NULL;
