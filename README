@@ -21,14 +21,27 @@ Here are some things you'll need in order to build this software.
 * libdwarf (a recent version)
 * libelf1
 
-Then you'll also need the following other codebases of mine, which you
-can find wherever you found this one (e.g. my GitHub page). Build them
-in order! You have a choice: build and install them, like third-party
-libraries, or simply build them and use their build tree in-place. For
-the latter, you'll need to set the relevant environment variables to
-point to them at configure time. If you expect to be hacking on any of
-my code, I recommend the latter approach, because your hacking might
-easily stray into these other codebases.
+There are also a lot of dependencies on my other codebases. These are
+now included as git submodules under contrib/, so you can try the (new)
+contrib/Makefile method of building them:
+
+  $ make -C contrib
+
+... after which you should get files contrib/config.mk and
+contrib/env.sh. Then you can configure and build as follows.
+
+  $ . contrib/env.sh && ./configure <configure options> && make
+
+If any of that doesn't work (tell me, but...) you can still proceed
+manually by grabbing and building the following other codebases of mine.
+You can find them wherever you found this one (e.g. my GitHub page).
+They depend on each other, so build them in order! You have a choice:
+build and install them, like third-party libraries, or simply build them
+and use their build tree in-place. For the latter, you'll need to set
+the relevant environment variables to point to them at configure time.
+If you expect to be hacking on any of my code, I recommend the latter
+approach, because your hacking might easily stray into these other
+codebases.
 
 * libc++fileno
 * libsrk31c++

@@ -4,3 +4,27 @@
 [submodule "tools/lang/c/cil"]
 	path = tools/lang/c/cil
 	url = https://github.com/kerneis/cil
+[submodule "contrib/libc++fileno"]
+	path = contrib/libc++fileno
+	url = git://github.com/stephenrkell/libcxxfileno.git
+[submodule "contrib/libsrk31c++"]
+	path = contrib/libsrk31c++
+	url = git://github.com/stephenrkell/libsrk31cxx.git
+[submodule "contrib/libdwarfpp"]
+	path = contrib/libdwarfpp
+	url = git://github.com/stephenrkell/libdwarfpp.git
+[submodule "contrib/m4ntlr"]
+	path = contrib/m4ntlr
+	url = git://github.com/stephenrkell/m4ntlr.git
+[submodule "contrib/dwarfidl"]
+	path = contrib/dwarfidl
+	url = git://github.com/stephenrkell/dwarfidl.git
+[submodule "contrib/trap-syscalls"]
+	path = contrib/trap-syscalls
+	url = git://github.com/stephenrkell/trap-syscalls.git
+[submodule "contrib/libantlr3c++"]
+	path = contrib/libantlr3c++
+	url = git://github.com/stephenrkell/libantlr3cxx.git
+[submodule "contrib/libcxxgen"]
+	path = contrib/libcxxgen
+	url = git://github.com/stephenrkell/libcxxgen.git
