@@ -1,0 +1,13 @@
+--- libantlr3c-3.4/src/antlr3commontree.c	2011-07-20 19:45:03.000000000 +0100
++++ libantlr3c-3.4-mod/src/antlr3commontree.c	2013-12-02 11:54:55.000000000 +0000
+@@ -503,7 +503,9 @@
+ static pANTLR3_BASE_TREE	
+ getParent				(pANTLR3_BASE_TREE tree)
+ {
+-	return & (((pANTLR3_COMMON_TREE)(tree->super))->parent->baseTree);
++	if (((pANTLR3_COMMON_TREE)(tree->super))->parent)
++		return & (((pANTLR3_COMMON_TREE)(tree->super))->parent->baseTree);
++	else return NULL;
+ }
+ 
+ static void					
