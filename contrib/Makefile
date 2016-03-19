@@ -20,7 +20,7 @@ CONTRIB_ROOT := $(realpath $(dir $(THIS_MAKEFILE)))
 # - everything in trap-syscalls/contrib
 # - cil (in liballocs/tools/lang/c)
 
-default: config.mk trap-syscalls/libsystrap/libsystrap.a \
+default: env.sh config.mk trap-syscalls/libsystrap/libsystrap.a \
 build-dwarfidl build-libdwarfpp build-libcxxgen build-libsrk31c++ build-libc++fileno \
 build-libantlr3c++ build-libantlr3c
 
@@ -77,8 +77,8 @@ libc++fileno/config.status:
 clean::
 	$(MAKE) -C libc++fileno clean
 
-CONFIG_MK += "\\nCXXFLAGS += -I$(CONTRIB_ROOT)/libc++fileno/include"
-CONFIG_MK += "\\nLDFLAGS += -L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib"
+CONFIG_MK += "\\nLIBCXXFILENO_CXXFLAGS += -I$(CONTRIB_ROOT)/libc++fileno/include"
+CONFIG_MK += "\\nLIBCXXFILENO_LIBS += -L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib -lc++fileno"
 
 # ----------------------------libsrk31c++
 
@@ -95,8 +95,8 @@ libsrk31c++/config.status:
 clean::
 	$(MAKE) -C libsrk31c++ clean
 
-CONFIG_MK += "\\nCXXFLAGS += -I$(CONTRIB_ROOT)/libsrk31c++/include"
-CONFIG_MK += "\\nLDFLAGS += -L$(CONTRIB_ROOT)/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib"
+CONFIG_MK += "\\nLIBSRK31CXX_CXXFLAGS += -I$(CONTRIB_ROOT)/libsrk31c++/include"
+CONFIG_MK += "\\nLIBSRK31CXX_LIBS += -L$(CONTRIB_ROOT)/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib -lsrk31c++"
 
 # ----------------------------libdwarfpp
 
@@ -115,8 +115,8 @@ build-libdwarfpp: libdwarfpp/config.status build-libc++fileno build-libsrk31c++
 clean::
 	$(MAKE) -C libdwarfpp clean
 
-CONFIG_MK += "\\nCXXFLAGS += -I$(CONTRIB_ROOT)/libdwarfpp/include"
-CONFIG_MK += "\\nLDFLAGS += -L$(CONTRIB_ROOT)/libdwarfpp/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib"
+CONFIG_MK += "\\nLIBDWARFPP_CXXFLAGS += -I$(CONTRIB_ROOT)/libdwarfpp/include"
+CONFIG_MK += "\\nLIBDWARFPP_LDFLAGS += -L$(CONTRIB_ROOT)/libdwarfpp/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib"
 
 # ----------------------------libcxxgen
 
@@ -142,8 +142,8 @@ build-libcxxgen: libcxxgen/config.status build-libdwarfpp build-libsrk31c++ buil
 clean::
 	$(MAKE) -C libcxxgen clean
 
-CONFIG_MK += "\\nCXXFLAGS += -I$(CONTRIB_ROOT)/libcxxgen/include"
-CONFIG_MK += "\\nLDFLAGS += -L$(CONTRIB_ROOT)/libcxxgen/lib -Wl,-rpath,$(CONTRIB_ROOT)/libcxxgen/lib"
+CONFIG_MK += "\\nLIBCXXGEN_CXXFLAGS += -I$(CONTRIB_ROOT)/libcxxgen/include"
+CONFIG_MK += "\\nLIBCXXGEN_LIBS += -L$(CONTRIB_ROOT)/libcxxgen/lib -Wl,-rpath,$(CONTRIB_ROOT)/libcxxgen/lib -lcxxgen"
 
 # ----------------------------libantlr3cxx
 
@@ -158,8 +158,8 @@ build-libantlr3c++: libantlr3c++/config.status
 clean::
 	$(MAKE) -C libantlr3c++ clean
 
-CONFIG_MK += "\\nCXXFLAGS += -I$(CONTRIB_ROOT)/libantlr3c++/include"
-CONFIG_MK += "\\nLDFLAGS += -L$(CONTRIB_ROOT)/libantlr3c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libantlr3c++/lib"
+CONFIG_MK += "\\nLIBANTLR3CXX_CXXFLAGS += -I$(CONTRIB_ROOT)/libantlr3c++/include"
+CONFIG_MK += "\\nLIBANTLR3CXX_LIBS += -L$(CONTRIB_ROOT)/libantlr3c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libantlr3c++/lib"
 
 # ----------------------------dwarfidl
 
@@ -189,8 +189,8 @@ build-dwarfidl: dwarfidl/config.status build-libdwarfpp build-libcxxgen build-li
 clean::
 	$(MAKE) -C dwarfidl clean
 
-CONFIG_MK += "\\nCXXFLAGS += -I$(CONTRIB_ROOT)/dwarfidl/include"
-CONFIG_MK += "\\nLDFLAGS += -L$(CONTRIB_ROOT)/dwarfidl/lib -Wl,-rpath,$(CONTRIB_ROOT)/dwarfidl/lib"
+CONFIG_MK += "\\nDWARFIDL_CXXFLAGS += -I$(CONTRIB_ROOT)/dwarfidl/include"
+CONFIG_MK += "\\nDWARFIDL_LIBS += -L$(CONTRIB_ROOT)/dwarfidl/lib -Wl,-rpath,$(CONTRIB_ROOT)/dwarfidl/lib -ldwarfidl"
 
 # ----------------------------trap-syscalls
 
@@ -201,8 +201,9 @@ trap-syscalls/contrib/config.mk:
 trap-syscalls/libsystrap/libsystrap.a: trap-syscalls/contrib/config.mk
 	CFLAGS=-I$(CONTRIB_ROOT)/../include $(MAKE) -C trap-syscalls/libsystrap
 
-CONFIG_MK += "\\nCFLAGS += -I$(CONTRIB_ROOT)/trap-syscalls/libsystrap"
-CONFIG_MK += "\\nLDFLAGS += -L$(CONTRIB_ROOT)/trap-syscalls/libsystrap"
+#CONFIG_MK += "\\nCFLAGS += -I$(CONTRIB_ROOT)/trap-syscalls/libsystrap"
+#CONFIG_MK += "\\nLDFLAGS += -L$(CONTRIB_ROOT)/trap-syscalls/libsystrap"
+CONFIG_MK += "\\nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls"
 
 # ----------------------------config.mk
 

@@ -25,11 +25,14 @@ There are also a lot of dependencies on my other codebases. These are
 now included as git submodules under contrib/, so you can try the (new)
 contrib/Makefile method of building them:
 
+  $ git submodule init
+  $ git submodule update
   $ make -C contrib
 
 ... after which you should get files contrib/config.mk and
 contrib/env.sh. Then you can configure and build as follows.
 
+  $ ./autogen.sh     # if not already done
   $ . contrib/env.sh && ./configure <configure options> && make
 
 If any of that doesn't work (tell me, but...) you can still proceed
