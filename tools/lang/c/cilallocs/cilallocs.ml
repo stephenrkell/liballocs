@@ -506,6 +506,11 @@ let makeInlineFunctionInFile fl ourFun nm proto body referencedValues = begin
 let tsIsPointer testTs = match testTs with 
    TSPtr(_, _) -> true
  | _ -> false
+
+let rec tIsPointer testT = match testT with 
+   TPtr(_, _) -> true
+ | TNamed(ti, _) -> tIsPointer ti.ttype
+ | _ -> false
       
 let tsIsFunction ts = 
     match ts with
@@ -522,19 +527,15 @@ let rec indirectionLevel someTs = match someTs with
   | _ -> 0
 
 let rec ultimatePointeeTs someTs = match someTs with
-    TSPtr(subTs, _) -> ultimatePointeeTs subTs
-  | _ -> someTs
+    TSPtr(TSPtr(subTs, attrs), _) -> ultimatePointeeTs (TSPtr(subTs, attrs))
+  | TSPtr(subTs, _) -> subTs
+  | _ -> raise Not_found
   
 let rec ultimatePointeeT someT = match someT with
-    TPtr(pt, _) -> ultimatePointeeT pt
+    TPtr(pt, _) when tIsPointer pt -> ultimatePointeeT pt
   | TNamed(ti, _) -> ultimatePointeeT ti.ttype
-  | _ -> someT
-  
-let rec penultimatePointeeT someT = match someT with
-    TPtr(pt, _) when tsIsPointer (Cil.typeSig pt) -> penultimatePointeeT pt
-  | TPtr(pt, _) -> (* pt *not* a pointer *) someT
-  | TNamed(ti, _) -> penultimatePointeeT ti.ttype
-  | _ -> someT
+  | TPtr(pt, _) -> pt
+  | _ -> raise Not_found
 
 let instrLoc (maybeInst : Cil.instr option) =
    match maybeInst with 
