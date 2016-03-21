@@ -37,6 +37,13 @@
 
 uint16_t *pageindex __attribute__((visibility("protected")));
 
+__thread void *__current_allocfn;
+__thread _Bool __currently_allocating;
+__thread void *__current_allocsite;
+__thread size_t __current_allocsz;
+__thread int __currently_freeing;
+int __liballocs_global_init(void) { return 0; }
+
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {
 }
@@ -44,8 +51,8 @@ void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_s
 		unsigned long *frame_counter, const void *caller, 
 		const void *caller_sp, const void *caller_bp) {}
 
-int __index_deep_alloc(void *ptr, int level, unsigned size_bytes) { return 2; }
-void __unindex_deep_alloc(void *ptr, int level) {}
+int __index_small_alloc(void *ptr, int level, unsigned size_bytes) { return 2; }
+void __unindex_small_alloc(void *ptr, int level) {}
 
 void 
 __liballocs_index_delete(void *userptr)
