@@ -60,7 +60,12 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 			if (set_currently_allocating) __currently_allocating = 0; \
 			return retval; \
 		} \
-		else return __real_ ## name( arglist_ ## name (make_argname) ); \
+		else \
+		{ \
+			/* printf("&__current_allocfn: %p    ", &__current_allocfn); */ \
+			/* if (&__current_allocfn) printf("__current_allocfn: %d", __current_allocfn); */ \
+			 return __real_ ## name( arglist_ ## name (make_argname) ); \
+		} \
 	}
 
 /* For "size-only" wrappers, we leave the size *set* on return. 
