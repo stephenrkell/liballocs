@@ -19,8 +19,8 @@ void __mmap_allocator_notify_mremap_after(void *ret, void *old_addr, size_t old_
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, int prot, int flags,
                   int fd, off_t offset, void *caller)
 			__attribute__((weak));
-void __mmap_allocator_notify_brk(void *new_curbrk);
-extern _Bool __liballocs_is_initialized;
+void __mmap_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
+extern _Bool __liballocs_is_initialized __attribute__((weak));
 int __liballocs_global_init(void);
 _Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, const char *meta_suffix)
 			__attribute__((visibility("hidden")));
@@ -43,7 +43,7 @@ void brk_replacement(struct generic_syscall *s, post_handler *post)
 	void *brk_asked_for = (void*) s->args[0];
 	long int ret = do_syscall1(s);
 	void *brk_returned = (void*) ret;
-	__mmap_allocator_notify_brk(brk_returned);
+	if (&__mmap_allocator_notify_brk) __mmap_allocator_notify_brk(brk_returned);
 	
 	/* Do the post-handling. */
 	post(s, ret);
@@ -207,7 +207,7 @@ void __liballocs_systrap_init(void)
 	
 	/* To figure out what to trap, we're going to use the static allocation metadata from
 	 * liballocs. So make sure we've done that. */
-	if (!__liballocs_is_initialized) __liballocs_global_init();
+	if (&__liballocs_is_initialized && !__liballocs_is_initialized) __liballocs_global_init();
 	
 	static char realpath_buf[4096]; /* bit of a HACK */
 	/* Make sure we're trapping all syscalls within ld.so. */
