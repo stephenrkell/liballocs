@@ -514,7 +514,7 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
-	write_string("Blah10000\n");
+	// write_string("Blah10000\n");
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
@@ -572,7 +572,7 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 
 int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
-	write_string("Blah11000\n");
+	// write_string("Blah11000\n");
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
@@ -876,7 +876,7 @@ char *private_strdup(const char *s)
 int __liballocs_global_init(void) __attribute__((constructor(103),visibility("protected")));
 int __liballocs_global_init(void)
 {
-	write_string("Hello from liballocs global init!\n");
+	// write_string("Hello from liballocs global init!\n");
 	if (__liballocs_is_initialized) return 0; // we are okay
 
 	// don't try more than once to initialize
