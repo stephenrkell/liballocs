@@ -370,11 +370,14 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         stubs_pp]
                     self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
                         % (stubs_pp, stubs_bin, " ".join(stubs_cc_cmd)))
+                    stubs_output = None
                     try:
                         stubs_output = subprocess.check_output(stubs_cc_cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError, e:
-                        self.debugMsg("Could not compile stubs file %s: compiler returned %d and said \"%s\"\n" \
-                            % (stubs_pp, e.returncode, stubs_output))
+                        self.debugMsg("Could not compile stubs file %s: compiler returned %d\n" \
+                            % (stubs_pp, e.returncode))
+                        if stubs_output:
+                            self.debugMsg("Compiler said: %s\n" % stubs_output)
                         exit(1)
                     if stubs_output != "":
                         self.debugMsg("Compiling stubs file %s: compiler said \"%s\"\n" \
