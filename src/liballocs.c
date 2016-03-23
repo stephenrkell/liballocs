@@ -1046,6 +1046,95 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 	return (struct uniqtype *) returned;
 }
 
+liballocs_err_t extract_and_output_alloc_site_and_type(
+    struct insert *p_ins,
+    struct uniqtype **out_type,
+    void **out_site
+)
+{
+	if (!p_ins)
+	{
+		++__liballocs_aborted_unindexed_heap;
+		return &__liballocs_err_unindexed_heap_object;
+	}
+	void *alloc_site_addr = (void *) ((uintptr_t) p_ins->alloc_site);
+
+	/* Now we have a uniqtype or an allocsite. For long-lived objects 
+	 * the uniqtype will have been installed in the heap header already.
+	 * This is the expected case.
+	 */
+	struct uniqtype *alloc_uniqtype;
+	if (__builtin_expect(p_ins->alloc_site_flag, 1))
+	{
+		if (out_site) *out_site = NULL;
+		/* Clear the low-order bit, which is available as an extra flag 
+		 * bit. libcrunch uses this to track whether an object is "loose"
+		 * or not. Loose objects have approximate type info that might be 
+		 * "refined" later, typically e.g. from __PTR_void to __PTR_T. */
+		alloc_uniqtype = (struct uniqtype *)((uintptr_t)(p_ins->alloc_site) & ~0x1ul);
+	}
+	else
+	{
+		/* Look up the allocsite's uniqtype, and install it in the heap info 
+		 * (on NDEBUG builds only, because it reduces debuggability a bit). */
+		uintptr_t alloc_site_addr = p_ins->alloc_site;
+		void *alloc_site = (void*) alloc_site_addr;
+		if (out_site) *out_site = alloc_site;
+		alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, p_ins*/);
+		/* Remember the unrecog'd alloc sites we see. */
+		if (!alloc_uniqtype && alloc_site && 
+				!__liballocs_addrlist_contains(&__liballocs_unrecognised_heap_alloc_sites, alloc_site))
+		{
+			__liballocs_addrlist_add(&__liballocs_unrecognised_heap_alloc_sites, alloc_site);
+		}
+#ifdef NDEBUG
+		// install it for future lookups
+		// FIXME: make this atomic using a union
+		// Is this in a loose state? NO. We always make it strict.
+		// The client might override us by noticing that we return
+		// it a dynamically-sized alloc with a uniqtype.
+		// This means we're the first query to rewrite the alloc site,
+		// and is the client's queue to go poking in the insert.
+		p_ins->alloc_site_flag = 1;
+		p_ins->alloc_site = (uintptr_t) alloc_uniqtype /* | 0x0ul */;
+#endif
+	}
+
+	// if we didn't get an alloc uniqtype, we abort
+	if (!alloc_uniqtype) 
+	{
+		//if (__builtin_expect(k == HEAP, 1))
+		//{
+			++__liballocs_aborted_unrecognised_allocsite;
+		//}
+		//else ++__liballocs_aborted_stack;
+			
+		/* We used to do this in clear_alloc_site_metadata in libcrunch... 
+		 * In cases where heap classification failed, we null out the allocsite 
+		 * to avoid repeated searching. We only do this for non-debug
+		 * builds because it makes debugging a bit harder.
+		 * NOTE that we don't want the insert to look like a deep-index
+		 * terminator, so we set the flag.
+		 */
+		if (p_ins)
+		{
+	#ifdef NDEBUG
+			p_ins->alloc_site_flag = 1;
+			p_ins->alloc_site = 0;
+	#endif
+			assert(INSERT_DESCRIBES_OBJECT(p_ins));
+			assert(!INSERT_IS_NULL(p_ins));
+		}
+			
+		return &__liballocs_err_unrecognised_alloc_site;;
+	}
+	// else output it
+	if (out_type) *out_type = alloc_uniqtype;
+	
+	/* return success */
+	return NULL;
+}
+
 _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,

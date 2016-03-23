@@ -113,18 +113,22 @@ static void (__attribute__((constructor(101))) init)(void)
 {
 	if (!pageindex)
 	{
-		// write_string("Hello from pageindex init! exe basename is: ");
-		// raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
-		// write_string("; pid is ");
-// 		int pid = raw_getpid();
-// 		char a;
-// 		a = '0' + ((pid / 10000) % 10); raw_write(2, &a, 1);
-// 		a = '0' + ((pid / 1000) % 10); raw_write(2, &a, 1);
-// 		a = '0' + ((pid / 100) % 10); raw_write(2, &a, 1);
-// 		a = '0' + ((pid / 10) % 10); raw_write(2, &a, 1);
-// 		a = '0' + (pid % 10); raw_write(2, &a, 1);
-// 		raw_write(2, "\n", 1);
-		
+		write_string("liballocs: process name ");
+		raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
+		write_string(", pid ");
+		int pid = raw_getpid();
+		char a;
+		_Bool seen_nonzero = 0;
+#define CHAR_TO_PRINT(ord) ( ((pid/(ord)) % 10) ? \
+        (seen_nonzero |= 1, '0' + ((pid/(ord)) % 10)) : \
+		(seen_nonzero ? '0' : ' '))
+		a = CHAR_TO_PRINT(10000); raw_write(2, &a, 1);
+		a = CHAR_TO_PRINT(1000); raw_write(2, &a, 1);
+		a = CHAR_TO_PRINT(100); raw_write(2, &a, 1);
+		a = CHAR_TO_PRINT(10); raw_write(2, &a, 1);
+		a = CHAR_TO_PRINT(1); raw_write(2, &a, 1);
+		raw_write(2, "\n", 1);
+#undef CHAR_TO_PRINT
 		/* Mmap our region. We map one 16-bit number for every page in the user address region. */
 		pageindex = MEMTABLE_NEW_WITH_TYPE(bigalloc_num_t, PAGE_SIZE, (void*) 0, (void*) (MAXIMUM_USER_ADDRESS + 1));
 		if (pageindex == MAP_FAILED) abort();
@@ -289,6 +293,21 @@ void __liballocs_print_l0_to_stream_err(void)
 	}
 	
 	BIG_UNLOCK
+}
+
+void __liballocs_report_wild_address(const void *ptr)
+{
+	if (ROUND_DOWN_PTR(ptr, PAGE_SIZE) == 0
+			|| ROUND_UP_PTR(ptr, PAGE_SIZE) == 0)
+	{
+		/* suppress it if it's in the first or last pages,
+		 * since some programs use these values quasi-legitimately. */
+	}
+	else
+	{
+		fprintf(stream_err, "*** saw wild pointer %p\n", ptr);
+		__liballocs_print_l0_to_stream_err();
+	}
 }
 
 static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const void *end);
@@ -792,6 +811,11 @@ static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const 
 	unsigned depth1 = bigalloc_depth(b1);
 	unsigned depth2 = bigalloc_depth(b2);
 	return get_common_parent_bigalloc_recursive(b1, depth1, b2, depth2);
+}
+
+struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr, const void *end)
+{
+	return get_common_parent_bigalloc(ptr, end);
 }
 
 _Bool __liballocs_notify_unindexed_address(const void *ptr)

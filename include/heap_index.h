@@ -141,5 +141,4 @@ static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, siz
 			);
 }
 
-
 #endif

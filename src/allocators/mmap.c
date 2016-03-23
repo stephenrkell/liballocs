@@ -47,6 +47,8 @@ static const char *filename_for_fd(int fd)
 	static char __thread out_buf[8192];
 	
 	static char __thread proc_path[4096];
+	/* FIXME: snprintf is not async-signal-safe, but we might be called 
+	 * from the mmap syscall signal handler. */
 	int ret = snprintf(proc_path, sizeof proc_path, "/proc/%d/fd/%d", getpid(), fd);
 	assert(ret > 0);
 	ret = readlink(proc_path, out_buf, sizeof out_buf);
@@ -462,6 +464,15 @@ void __mmap_allocator_init(void)
 	if (!initialized && !trying_to_initialize)
 	{
 		trying_to_initialize = 1;
+		
+		/* Do the liballocs global init first. This is important! It's 
+		 * going to walk the loaded objects and load the types/allocsites
+		 * objects. We have to do this before we init systrap, because
+		 * systrap needs that metadata. We also have to do it before we
+		 * add the missing mappings; if we do it afterwards, the mappings
+		 * created when loading the metadata objects won't be seen. */
+		__liballocs_global_init();
+		
 		add_missing_mappings_from_proc();
 		
 		/* Grab the executable's end address
@@ -493,9 +504,9 @@ void __mmap_allocator_init(void)
 					biggest_end_seen = end;
 					biggest_start_seen = (uintptr_t) phdr->p_vaddr;
 				}
-				write_string("Saw executable phdr end address: ");
-				write_ulong((unsigned long) end);
-				write_string("\n");
+				// write_string("Saw executable phdr end address: ");
+				// write_ulong((unsigned long) end);
+				// write_string("\n");
 
 				if (!(phdr->p_flags & PF_X) &&
 					(char*) phdr->p_vaddr > (char*) data_segment_start_addr)
@@ -504,13 +515,13 @@ void __mmap_allocator_init(void)
 				}
 			}
 		}
-		executable_end_addr = biggest_end_seen;
+		executable_end_addr = (void*) biggest_end_seen;
 		uintptr_t executable_data_segment_start_addr = biggest_start_seen;
 		assert(executable_end_addr != 0);
 		assert((char*) executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
-		write_string("Executable highest phdr end address: ");
-		write_ulong((unsigned long) executable_end_addr);
-		write_string("\n");
+		// write_string("Executable highest phdr end address: ");
+		// write_ulong((unsigned long) executable_end_addr);
+		// write_string("\n");
 		
 		/* Which bigalloc is top-level and spans the executable's data segment
 		 * *start* */
@@ -518,9 +529,9 @@ void __mmap_allocator_init(void)
 		{
 			if (!big_allocations[i].parent)
 			{
-				write_string("Top-level bigalloc end ");
-				write_ulong((unsigned long) big_allocations[i].end);
-				write_string("\n");
+				// write_string("Top-level bigalloc end ");
+				// write_ulong((unsigned long) big_allocations[i].end);
+				// write_string("\n");
 				/* Does this include the data segment? */
 				if ((uintptr_t) big_allocations[i].end >= executable_data_segment_start_addr
 						&& (uintptr_t) big_allocations[i].begin <= executable_data_segment_start_addr)

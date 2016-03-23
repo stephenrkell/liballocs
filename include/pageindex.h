@@ -97,6 +97,7 @@ extern bigalloc_num_t *pageindex __attribute__((weak,visibility("protected")));
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
 void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));
+void __liballocs_report_wild_address(const void *ptr) __attribute__((visibility("protected")));
 
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a) __attribute__((visibility("hidden")));
 
@@ -106,7 +107,8 @@ _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_
 _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin);
 struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_allocation *b, const void *split_addr);
-
+struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr, const void *end);
+		
 struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));

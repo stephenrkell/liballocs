@@ -88,6 +88,10 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 ((u)->pos_maxoff > 0) && \
 ((u)->neg_maxoff == 0) && !(u)->is_array && (u)->nmemb == 0)
 
+#define UNIQTYPE_IS_BASE_TYPE(u) \
+UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u) 
+// FIXME: how to distinguish base from enum?
+
 /* FIXME: does anybody use this one? it used to enumerate all the builtin base types,
  * but now define it to the proper thing. Except (FIXME) it also matches enums! */
 // #define UNIQTYPE_IS_BASE(u) UNIQTYPE_IS_BASE_TYPE(u)

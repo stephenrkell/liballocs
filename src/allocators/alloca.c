@@ -24,8 +24,8 @@ struct allocator __alloca_allocator = {
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {
 	struct big_allocation *b = __lookup_bigalloc(bytes_counter, &__stackframe_allocator, NULL);
-	if (!b) abort();
 	if (*bytes_counter == 0) goto out;
+	if (!b) abort();
 	
 	/* Starting at the stack pointer, we look for indexed chunks and 
 	 * keep unindexing until we have unindexed exactly *bytes_counter bytes. */
@@ -84,7 +84,7 @@ void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, 
 	assert(0);
 	
 out:
-	__liballocs_delete_bigalloc_at(bytes_counter, &__stackframe_allocator);
+	if (b) __liballocs_delete_bigalloc_at(bytes_counter, &__stackframe_allocator);
 }
 
 /* We have a special connection here. */

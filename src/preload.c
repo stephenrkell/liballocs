@@ -30,9 +30,21 @@ size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("pr
 #include <stdint.h>
 #include <string.h>
 #include <stdarg.h>
+#include <errno.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include "liballocs_private.h"
 #include "relf.h"
 #include "raw-syscalls.h"
+#include "allocmeta.h"
+
+/* including signal.h breaks asm includes, so just supply the decls here. */
+typedef void (*sighandler_t)(int);
+sighandler_t signal(int signum, sighandler_t handler);
+struct __libc_sigaction;
+int sigaction(int signum, const struct __libc_sigaction *act,
+             struct __libc_sigaction *oldact);
+
 
 /* We should be safe to use it once malloc is initialized. */
 // #define safe_to_use_bigalloc (__liballocs_is_initialized)
@@ -60,6 +72,7 @@ _Bool __avoid_libdl_calls;
 #pragma GCC push_options
 #pragma GCC optimize("no-optimize-sibling-calls")
 
+extern void *__curbrk;
 size_t __wrap_malloc_usable_size (void *ptr) __attribute__((visibility("protected")));
 size_t malloc_usable_size (void *ptr) __attribute__((alias("__wrap_malloc_usable_size"),visibility("default")));
 size_t __wrap_malloc_usable_size (void *ptr)
@@ -90,14 +103,45 @@ size_t __wrap_malloc_usable_size (void *ptr)
 		__asm__("movq %%rsp, %0\n" : "=r"(sp));
 	#endif
 
-	_Bool is_stack = (__lookup_top_level_allocator(ptr) == &__stack_allocator);
+	/* The only time a stack address (any suballocator) can be valid for us
+	 * is if the arg is the base of an alloca. If so, we stored the size
+	 * one word below the base. */
+	// FIXME: none of this should be necessary. Use a separate memtable for alloca?
+	// NOTE: this isn't as unsound as it looks, since our mmap nudger won't ever place
+	// a new mapping here
+#define INITIAL_STACK_MINIMUM_SIZE 81920
+	_Bool is_definitely_not_stack = (char*) ptr <= (char*) __curbrk
+			|| 
+			big_allocations[pageindex[(uintptr_t) ptr >> LOG_PAGE_SIZE]].allocated_by
+				== &__mmap_allocator
+			||
+			big_allocations[pageindex[(uintptr_t) ptr >> LOG_PAGE_SIZE]].allocated_by
+				== &__generic_malloc_allocator
+			;
+	_Bool is_definitely_stack = 
+		(   // anywhere on the initial stack
+			/* Austin-style unsigned wrap-around hack... */
+			((uintptr_t) __top_of_initial_stack - (uintptr_t) ptr)
+			< (__stack_lim_cur == RLIM_INFINITY ? INITIAL_STACK_MINIMUM_SIZE : __stack_lim_cur)
+		)
+		|| // same page on the current stack
+		(
+			(((uintptr_t) ptr & ~(PAGE_SIZE - 1))
+			    == ((uintptr_t) sp & ~(PAGE_SIZE - 1)))
+		);
 	
-	if (is_stack)
+	if (is_definitely_stack)
 	{
 		return *(((unsigned long *) ptr) - 1);
 	}
-	else return //__real_malloc_usable_size(ptr);
-       	__mallochooks_malloc_usable_size(ptr);
+	if (is_definitely_not_stack)
+	{
+		return //__real_malloc_usable_size(ptr);
+			__mallochooks_malloc_usable_size(ptr);
+	}
+	return (__lookup_top_level_allocator(ptr) == &__stack_allocator)
+		? *(((unsigned long *) ptr) - 1)
+		: __mallochooks_malloc_usable_size(ptr);
 }
 #pragma GCC pop_options
 
@@ -542,4 +586,54 @@ void abort(void)
 	sleep(10);
 	raw_kill(pid, 6);
 	__builtin_unreachable();
+}
+
+sighandler_t signal(int signum, sighandler_t handler)
+{
+	static sighandler_t (*orig_signal)(int, sighandler_t);
+	
+	sighandler_t ret;
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	if (!orig_signal)
+	{
+		if (__avoid_libdl_calls && !we_set_flag) abort();
+		orig_signal = dlsym(RTLD_NEXT, "signal");
+		if (!orig_signal) abort();
+	}
+
+	if (signum == SIGILL)
+	{
+		debug_printf(0, "Ignoring program's request to install a SIGILL handler.\n");
+		errno = ENOTSUP;
+		ret = SIG_ERR;
+	} else ret = orig_signal(signum, handler);
+out:
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
+}
+
+int sigaction(int signum, const struct __libc_sigaction *act,
+                     struct __libc_sigaction *oldact)
+{
+	static int (*orig_sigaction)(int, const struct __libc_sigaction *, struct __libc_sigaction *);
+	
+	int ret;
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+	if (!orig_sigaction)
+	{
+		if (__avoid_libdl_calls && !we_set_flag) abort();
+		orig_sigaction = dlsym(RTLD_NEXT, "sigaction");
+		if (!orig_sigaction) abort();
+	}
+	
+	if (signum == SIGILL && act != NULL)
+	{
+		debug_printf(0, "Ignoring program's request to install a SIGILL handler.\n");
+		ret = orig_sigaction(SIGILL, NULL, oldact);
+	} else ret = orig_sigaction(signum, act, oldact);
+out:
+	if (we_set_flag) __avoid_libdl_calls = 0;
+	return ret;
 }

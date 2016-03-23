@@ -208,6 +208,7 @@ void post_init(void)
 }
 
 static inline struct insert *insert_for_chunk(void *userptr);
+static void index_delete(void *userptr);
 
 #ifndef NDEBUG
 /* In this newer, more space-compact implementation, we can't do as much
@@ -358,7 +359,63 @@ static unsigned long index_insert_count;
 	(((uintptr_t)(allocptr)) % PAGE_SIZE <= MAXIMUM_MALLOC_HEADER_OVERHEAD) \
 	 ? (void*)(ROUND_DOWN_PTR((allocptr), PAGE_SIZE)) : (allocptr) \
 	)*/
+	
+static struct big_allocation *fresh_big(void *allocptr, size_t bigalloc_size, 
+	struct insert ins, struct big_allocation *containing_bigalloc)
+{
+	char *bigalloc_begin = BIGALLOC_BEGIN(allocptr);
+	struct big_allocation *b = __liballocs_new_bigalloc(
+		bigalloc_begin,
+		bigalloc_size,
+		(struct meta_info) {
+			/* HMM: we could use an opaque pointer to the "real" insert, but 
+			 * instead we make a copy of that insert. This is perhaps better for
+			 * locality, since the big_allocation record is more likely
+			 * to be in the cache. FIXME: measure this. Would be cleaner to use ptr. */
+			.what = INS_AND_BITS,
+			.un = {
+				ins_and_bits: { 
+					.ins = ins
+				}
+			}
+		},
+		containing_bigalloc,
+		&__generic_malloc_allocator
+	);
+		
+	if (!b) abort();
+	return b;
+}
 
+static struct big_allocation *become_big(void *allocptr, size_t bigalloc_size, 
+	struct insert ins, struct big_allocation *containing_bigalloc)
+{
+	/* It's only legal call this if allocptr is already an allocation. */
+	index_delete(allocptr_to_userptr(allocptr));
+	return fresh_big(allocptr, bigalloc_size, ins, containing_bigalloc);
+}
+
+static struct big_allocation *ensure_big(void *addr)
+{
+	void *start;
+	struct big_allocation *maybe_already = __lookup_bigalloc(addr, 
+		&__generic_malloc_allocator, &start);
+	if (maybe_already) return maybe_already;
+	
+	size_t size;
+	const void *site;
+	struct uniqtype *t;
+	liballocs_err_t err = __generic_heap_get_info(addr, NULL, &t, &start, &size, &site);
+	if (err && err != &__liballocs_err_unrecognised_alloc_site) abort();
+	
+	return become_big(userptr_to_allocptr(start), size, t ? (struct insert) {
+						.alloc_site_flag = 1,
+						.alloc_site = (uintptr_t) t
+					} : (struct insert) {
+						.alloc_site_flag = 0,
+						.alloc_site = (uintptr_t) site
+					}, __lookup_deepest_bigalloc(start));
+}
 static void 
 index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 {
@@ -415,46 +472,12 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 		char *bigalloc_begin = BIGALLOC_BEGIN(allocptr);
 		size_t extra_size = allocptr - bigalloc_begin;
 		size_t bigalloc_size = modified_size - sizeof (struct insert) + extra_size;
-		/* Issue a query on the last byte of the allocation, to ensure that 
-		 * the sbrk allocator (or stack, even) is bumped up to include it. */
-		struct big_allocation *containing_bigalloc_lastbyte __attribute__((unused))
-		 = __lookup_deepest_bigalloc((char*) new_userchunkaddr + bigalloc_size - 1);
-		this_chunk_bigalloc = __liballocs_new_bigalloc(
-			bigalloc_begin,
-			bigalloc_size,
-			(struct meta_info) {
-				/* HMM: we could use an opaque pointer to the "real" insert, but 
-				 * instead we make a copy of that insert. This is perhaps better for
-				 * locality, since the big_allocation record is more likely
-				 * to be in the cache. FIXME: measure this. Would be cleaner to use ptr. */
-				.what = INS_AND_BITS,
-				.un = {
-					ins_and_bits: { 
-						.ins = (struct insert) {
-							.alloc_site_flag = 0,
-							.alloc_site = (uintptr_t) caller
-						}
-					}
-				}
-			},
-			containing_bigalloc,
-			&__generic_malloc_allocator
-		);
-		
-		/* memset the covered entries with the bigalloc value,
-		 * to tell our lookup code that it should ask the page index.
-		 * CARE though: 
-		 * - in the first and last index lists, there might be other
-		 *   chunks.
-		 * - can we always get the answer we need from the page index?
-		 *    well, yes, if it really is a bigalloc then by definition
-		 *        the pageindex -- or, more precisely, the bigalloc
-		 *        parent/child tree structure -- will have it
-		 */
-		//struct entry bigalloc_value = { 0, 1, 63 };
-		//assert(IS_BIGALLOC_ENTRY(&bigalloc_value));
-		//memset_index_big_chunk(new_userchunkaddr, bigalloc_value);
-
+		this_chunk_bigalloc = fresh_big(allocptr, bigalloc_size,
+			(struct insert) {
+						.alloc_site_flag = 0,
+						.alloc_site = (uintptr_t) caller
+					}, containing_bigalloc);
+		if (!this_chunk_bigalloc) abort();
 		BIG_UNLOCK
 		return;
 	}
@@ -586,7 +609,10 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	/* We promoted this entry into the bigalloc index. We still
 	 * kept its metadata locally, though. */
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(userptr);
-	if (PROMOTE_TO_BIGALLOC(userptr))
+	/* Are we a bigalloc? */
+	struct big_allocation *b = __lookup_bigalloc(userptr, 
+			&__generic_malloc_allocator, NULL);
+	if (b)
 	{
 		void *allocptr = userptr_to_allocptr(userptr);
 		unsigned long size = malloc_usable_size(allocptr);
@@ -750,7 +776,18 @@ void post_nonnull_nonzero_realloc(void *userptr,
 		 * allocating it, so we pass it as the modified_size to
 		 * index_insert. */
 		index_insert(userptr, old_usable_size, __current_allocsite ? __current_allocsite : caller);
-	} 
+	}
+	
+	if (modified_size < old_usable_size)
+	{
+		/* Are we a bigalloc? */
+		struct big_allocation *b = __lookup_bigalloc(userptr, 
+				&__generic_malloc_allocator, NULL);
+		if (b)
+		{
+			__liballocs_truncate_bigalloc_at_end(b, (char*) userptr + modified_size);
+		}
+	}
 }
 
 // same but zero bytes, not bits
@@ -1241,70 +1278,15 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 		++__liballocs_aborted_unindexed_heap;
 		return &__liballocs_err_unindexed_heap_object;
 	}
-	void *alloc_site_addr = (void *) ((uintptr_t) heap_info->alloc_site);
-
-	/* Now we have a uniqtype or an allocsite. For long-lived objects 
-	 * the uniqtype will have been installed in the heap header already.
-	 * This is the expected case.
-	 */
-	struct uniqtype *alloc_uniqtype;
-	if (__builtin_expect(heap_info->alloc_site_flag, 1))
-	{
-		if (out_site) *out_site = NULL;
-		/* Clear the low-order bit, which is available as an extra flag 
-		 * bit. libcrunch uses this to track whether an object is "loose"
-		 * or not. Loose objects have approximate type info that might be 
-		 * "refined" later, typically e.g. from __PTR_void to __PTR_T. */
-		alloc_uniqtype = (struct uniqtype *)((uintptr_t)(heap_info->alloc_site) & ~0x1ul);
-	}
-	else
-	{
-		/* Look up the allocsite's uniqtype, and install it in the heap info 
-		 * (on NDEBUG builds only, because it reduces debuggability a bit). */
-		uintptr_t alloc_site_addr = heap_info->alloc_site;
-		void *alloc_site = (void*) alloc_site_addr;
-		if (out_site) *out_site = alloc_site;
-		alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, heap_info*/);
-		/* Remember the unrecog'd alloc sites we see. */
-		if (!alloc_uniqtype && alloc_site && 
-				!__liballocs_addrlist_contains(&__liballocs_unrecognised_heap_alloc_sites, alloc_site))
-		{
-			__liballocs_addrlist_add(&__liballocs_unrecognised_heap_alloc_sites, alloc_site);
-		}
-#ifdef NDEBUG
-		// install it for future lookups
-		// FIXME: make this atomic using a union
-		// Is this in a loose state? NO. We always make it strict.
-		// The client might override us by noticing that we return
-		// it a dynamically-sized alloc with a uniqtype.
-		// This means we're the first query to rewrite the alloc site,
-		// and is the client's queue to go poking in the insert.
-		heap_info->alloc_site_flag = 1;
-		heap_info->alloc_site = (uintptr_t) alloc_uniqtype /* | 0x0ul */;
-#endif
-	}
 
 	if (out_size) *out_size = alloc_chunksize - sizeof (struct insert);
-
-	// if we didn't get an alloc uniqtype, we abort
-	if (!alloc_uniqtype) 
-	{
-		//if (__builtin_expect(k == HEAP, 1))
-		//{
-			++__liballocs_aborted_unrecognised_allocsite;
-		//}
-		//else ++__liballocs_aborted_stack;
-		return &__liballocs_err_unrecognised_alloc_site;;
-	}
-	// else output it
-	if (out_type) *out_type = alloc_uniqtype;
 	
-	// success
-	return NULL;
+	return extract_and_output_alloc_site_and_type(heap_info, out_type, out_site);
 }
 
 struct allocator __generic_malloc_allocator = {
 	.name = "generic malloc",
 	.get_info = __generic_heap_get_info,
-	.is_cacheable = 1
+	.is_cacheable = 1,
+	.ensure_big = ensure_big
 };

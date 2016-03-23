@@ -30,7 +30,7 @@ struct allocator __stack_allocator = {
 static _Bool trying_to_initialize;
 static _Bool initialized;
 
-static rlim_t stack_lim_cur;
+rlim_t __stack_lim_cur __attribute__((visibility("protected")));
 
 struct suballocated_chunk_rec; // FIXME: remove once heap_index has been refactored
 
@@ -46,7 +46,7 @@ void __stack_allocator_init(void)
 		int rlret = getrlimit(RLIMIT_STACK, &rlim);
 		if (rlret == 0)
 		{
-			stack_lim_cur = rlim.rlim_cur;
+			__stack_lim_cur = rlim.rlim_cur;
 		}
 		
 		initialized = 1;
@@ -58,8 +58,10 @@ void __stack_allocator_init(void)
 	}
 }
 
+void *__top_of_initial_stack __attribute__((visibility("protected")));
 void __stack_allocator_notify_init_stack_mapping(void *begin, void *end)
 {
+	__top_of_initial_stack = end; /* i.e. the highest address */
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		begin,
 		(char*) end - (char*) begin,

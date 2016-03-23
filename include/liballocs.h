@@ -93,7 +93,6 @@ extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtyp
 	return NULL;
 }
 
-
 extern inline _Bool 
 __attribute__((always_inline,gnu_inline))
 __liballocs_first_subobject_spanning(
@@ -168,6 +167,12 @@ extern struct liballocs_err __liballocs_err_unrecognised_static_object;
 extern struct liballocs_err __liballocs_err_object_of_unknown_storage;
 
 const char *__liballocs_errstring(struct liballocs_err *err);
+liballocs_err_t extract_and_output_alloc_site_and_type(
+    struct insert *p_ins,
+    struct uniqtype **out_type,
+    void **out_site
+) __attribute__((visibility("hidden")));
+
 
 /* We define a dladdr that caches stuff. */
 Dl_info dladdr_with_cache(const void *addr);
@@ -570,7 +575,7 @@ __liballocs_get_alloc_info
 		}
 		else
 		{
-			__liballocs_print_l0_to_stream_err();
+			__liballocs_report_wild_address(obj);
 			++__liballocs_aborted_unknown_storage;
 			return &__liballocs_err_object_of_unknown_storage;
 		}

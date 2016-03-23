@@ -1,3 +1,9 @@
+#ifndef ALLOCMETA_H_
+#define ALLOCMETA_H_
+
+#include <sys/resource.h> /* for rlim_t */
+#include <sys/time.h>
+
 /* A tentative meta-protocol for allocators. 
  * 
  * Assume:
@@ -96,6 +102,7 @@ fun(void *             ,get_base,      arg(void *, obj))  /* base address? */ \
 fun(unsigned long      ,get_size,      arg(void *, obj))  /* size? */ \
 fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
 fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct big_allocation *, maybe_alloc), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
+fun(struct big_allocation *,ensure_big,arg(void *, obj)) \
 fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static*/ \
 fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
 fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
@@ -137,15 +144,14 @@ void __mmap_allocator_notify_mremap_after(void *ret_addr, void *old_addr, size_t
 	size_t new_size, int flags, void *new_address, void *caller);
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller);
 
-void __sbrk_allocator_init(void);
-_Bool __sbrk_allocator_notify_unindexed_address(const void *ptr);
-
 void __static_allocator_init(void);
 void __static_allocator_notify_load(void *handle);
 void __static_allocator_notify_unload(const char *copied_filename);
 
 void __stack_allocator_init(void);
 _Bool __stack_allocator_notify_unindexed_address(const void *ptr);
+extern void *__top_of_initial_stack __attribute__((visibility("protected")));
+rlim_t __stack_lim_cur __attribute__((visibility("protected")));
 
 void __auxv_allocator_init(void);
 void __alloca_allocator_init(void);
@@ -215,3 +221,5 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
  * we want something more local that just compiles into
  * a few instructions' work on hot/local memory.
  */
+
+#endif
