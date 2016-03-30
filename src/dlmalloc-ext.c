@@ -93,14 +93,20 @@ int __wrap_dlposix_memalign(void **memptr, size_t alignment, size_t size)
 	return ret;
 	
 }
-_Bool __thread __private_malloc_usable_size_active __attribute__((visibility("hidden")));
-size_t __wrap_dlmalloc_usable_size(void *userptr)
-{
-	__private_malloc_usable_size_active = 1;
-	size_t ret = __real_dlmalloc_usable_size(userptr);
-	__private_malloc_usable_size_active = 0;
-	return ret;
-}
+
+/* Since our malloc hooks don't touch __private_malloc_usable_size, 
+ * this doesn't get pulled in, and we end up with the __real_ reference
+ * being dangling. FIXME: the right thing is probably to have malloc
+ * hooks also hook malloc_usable_size. I haven't thought that through
+ * yet, so just get rid of this function for now.  */
+//_Bool __thread __private_malloc_usable_size_active __attribute__((visibility("hidden")));
+//size_t __wrap_dlmalloc_usable_size(void *userptr)
+//{
+//	__private_malloc_usable_size_active = 1;
+//	size_t ret = __real_dlmalloc_usable_size(userptr);
+//	__private_malloc_usable_size_active = 0;
+//	return ret;
+//}
 _Bool __private_malloc_is_chunk_start(void *ptr) __attribute__((visibility("hidden")));
 _Bool __private_malloc_is_chunk_start(void *ptr)
 {

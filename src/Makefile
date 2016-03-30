@@ -90,7 +90,6 @@ dlmalloc.a: dlmalloc.o
 	$(AR) r "$@" $^
 dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0 -DUSE_DL_PREFIX -fPIC
 dlmalloc-ext.o: CFLAGS += -fPIC
-liballocs_preload.so: dlmalloc.a
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
  -Wl,--wrap,dlfree -Wl,--wrap,dlrealloc -Wl,--wrap,dlmemalign -Wl,-wrap,dlposix_memalign \
  -Wl,--whole-archive dlmalloc.a  -Wl,--no-whole-archive \
@@ -100,6 +99,7 @@ liballocs_preload.so: LDFLAGS += -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
  -Wl,--defsym,__private_realloc=dlrealloc \
  -Wl,--defsym,__private_memalign=dlmemalign \
  -Wl,--defsym,__private_posix_memalign=dlposix_memalign \
+ -Wl,--defsym,__real_dlmalloc_usable_size=dlmalloc_usable_size \
  -Wl,--exclude-libs=dlmalloc.a \
  -Bsymbolic # important for _etext in preload hooks
 
