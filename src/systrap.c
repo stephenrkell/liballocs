@@ -1,11 +1,12 @@
-#include "systrap.h"
+#define _GNU_SOURCE
+#define SYSTRAP_DEFINE_FILE
 #include "do-syscall.h"
-#define RELF_DEFINE_STRUCTURES
-#include "relf.h"
+#include "systrap.h"
 #include "vas.h"
 #include "allocsmt.h"
 #include "maps.h"
 #include "pageindex.h"
+#include "relf.h"
 
 /* We also get linked in from libcrunch's stubs file, which lacks most of liballocs. 
  * So only call out to the hooks if they're present. */
