@@ -106,3 +106,5 @@ tests/uniqtype-walk/uniqtype-walk
 tools/.deps/*
 .dirstamp
 tools/ifacetypes
+contrib/libantlr3c-3.4/*
+contrib/antlr-3.4.tar.gz
