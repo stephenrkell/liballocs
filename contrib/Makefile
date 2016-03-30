@@ -53,6 +53,8 @@ libantlr3c-3.4/Makefile: libantlr3c-3.4/configure
 build-libantlr3c: libantlr3c-3.4/Makefile
 	$(MAKE) -C libantlr3c-3.4
 
+libantlr3c-3.4/antlr3config.h: build-libantlr3c
+
 clean::
 	rm -f antlr-3.4.tar.gz
 	rm -rf libantlr3c-3.4
@@ -163,7 +165,7 @@ CONFIG_MK += "\\nLIBANTLR3CXX_LIBS += -L$(CONTRIB_ROOT)/libantlr3c++/lib -Wl,-rp
 
 # ----------------------------dwarfidl
 
-dwarfidl/config.status:
+dwarfidl/config.status: libantlr3c-3.4/antlr3config.h
 	cd dwarfidl && ./autogen.sh && \
 	LIBCXXFILENO_CXXFLAGS=-I$(CONTRIB_ROOT)/libc++fileno/include \
 	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libc++fileno/lib \
@@ -178,7 +180,10 @@ dwarfidl/config.status:
 	LIBCXXGEN_LIBS="-L$(CONTRIB_ROOT)/libcxxgen/lib \
         -Wl,-rpath,$(CONTRIB_ROOT)/libcxxgen/lib -lcxxgen" \
 	LIBANTLR3CXX_CXXFLAGS=-I$(CONTRIB_ROOT)/libantlr3c++/include \
-	LIBANTLR3CXX_LIBS=-Wl,-g ./configure --prefix=$(CONTRIB_ROOT)/usr
+	LIBANTLR3CXX_LIBS=-Wl,-g \
+	CPPFLAGS="-I$(CONTRIB_ROOT)/libantlr3c-3.4/ -I$(CONTRIB_ROOT)/libantlr3c-3.4/include $(CPPFLAGS)" \
+	LDFLAGS="-L$(CONTRIB_ROOT)/libantlr3c-3.4/.libs $(LDFLAGS)" \
+	./configure --prefix=$(CONTRIB_ROOT)/usr
 
 .PHONY: build-dwarfidl
 build-dwarfidl: dwarfidl/config.status build-libdwarfpp build-libcxxgen build-libsrk31c++ build-libc++fileno build-libantlr3c++ build-libantlr3c antlr-3.4-complete.jar
