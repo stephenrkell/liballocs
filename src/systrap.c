@@ -6,6 +6,7 @@
 #include "allocsmt.h"
 #include "maps.h"
 #include "pageindex.h"
+#define RELF_DEFINE_STRUCTURES
 #include "relf.h"
 
 /* We also get linked in from libcrunch's stubs file, which lacks most of liballocs. 
