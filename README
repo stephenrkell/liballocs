@@ -20,6 +20,9 @@ Here are some things you'll need in order to build this software.
 * boost 1.55 or later (1.55 is "known good" as of this writing)
 * libdwarf (a recent version)
 * libelf1
+* OCaml 4.01.0 or newer
+* a Java 6 (or newer) runtime 
+* libunwind
 
 There are also a lot of dependencies on my other codebases. These are
 now included as git submodules under contrib/, so you can try the (new)

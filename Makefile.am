@@ -3,7 +3,7 @@ ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = . tools/lang src
 
 # NOTE: being C++, these only affect build of the tools, not the liballocs core.
-AM_CXXFLAGS = -std=c++11 -ggdb -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(DWARFIDL_CFLAGS)
+AM_CXXFLAGS = -std=c++11 -ggdb -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS)
 
 AM_CFLAGS = -Wall -std=gnu99 -ggdb -O3 -flto -Iinclude -fPIC -Wp,-w
 
@@ -22,15 +22,15 @@ lib_LIBRARIES = tools/liballocstool.a
 tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
 
 tools_dumptypes_SOURCES = tools/dumptypes.cpp
-tools_dumptypes_LDADD = tools/liballocstool.a
+tools_dumptypes_LDADD = tools/liballocstool.a -ldwarf -lelf
 tools_allocsites_SOURCES = tools/allocsites.cpp $(HELPERS)
-tools_allocsites_LDADD = tools/liballocstool.a
+tools_allocsites_LDADD = tools/liballocstool.a -ldwarf -lelf
 tools_usedtypes_SOURCES = tools/usedtypes.cpp $(HELPERS)
-tools_usedtypes_LDADD = tools/liballocstool.a
+tools_usedtypes_LDADD = tools/liballocstool.a -ldwarf -lelf
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
-tools_ifacetypes_LDADD = tools/liballocstool.a
+tools_ifacetypes_LDADD = tools/liballocstool.a -ldwarf -lelf
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
-tools_find_allocated_type_size_LDADD = tools/liballocstool.a
+tools_find_allocated_type_size_LDADD = tools/liballocstool.a -ldwarf -lelf
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.
@@ -60,6 +60,11 @@ LIBSRK31CXX_CXXFLAGS = $(USER_LIBSRK31CXX_CFLAGS)
 else
 LIBSRK31CXX_CXXFLAGS = $(LIBSRK31CXX_CFLAGS)
 endif
+if SUPPLIED_LIBANTLR3CXX_CFLAGS
+LIBANTLR3CXX_CXXFLAGS = $(USER_LIBANTLR3CXX_CFLAGS)
+else
+LIBANTLR3CXX_CXXFLAGS = $(LIBANTLR3CXX_CFLAGS)
+endif
 if SUPPLIED_DWARFIDL_CFLAGS
 DWARFIDL_CXXFLAGS = $(USER_DWARFIDL_CFLAGS)
 else
@@ -70,4 +75,5 @@ export LIBCXXFILENO_CXXFLAGS LIBCXXFILENO_LIBS \
 LIBSRK31CXX_CXXFLAGS LIBSRK31CXX_LIBS \
 LIBDWARFPP_CXXFLAGS LIBDWARFPP_LIBS \
 LIBCXXGEN_CXXFLAGS LIBCXXGEN_LIBS \
+LIBANTLR3CXX_CXXFLAGS LIBANTLR3CXX_LIBS \
 DWARFIDL_CXXFLAGS DWARFIDL_LIBS

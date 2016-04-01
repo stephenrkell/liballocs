@@ -43,7 +43,7 @@ libantlr3c-3.4/configure: antlr-3.4.tar.gz
 	touch "$@"
 
 antlr-3.4-complete.jar: antlr-3.4.tar.gz
-	tar --strip-components=2 -k -xvzf "$(CONTRIB_ROOT)/$<" antlr-3.4/lib/antlr-3.4-complete.jar
+	tar --strip-components=2 --keep-newer-files -xvzf "$(CONTRIB_ROOT)/$<" antlr-3.4/lib/antlr-3.4-complete.jar
 
 .PHONY: build-antlr
 libantlr3c-3.4/Makefile: libantlr3c-3.4/configure
@@ -60,7 +60,7 @@ clean::
 	rm -rf libantlr3c-3.4
 
 CONFIG_MK += "\\nANTLR3C_DIR := $(realpath $(CONTRIB_ROOT)/libantlr3c-3.4)\\\#"
-CONFIG_MK += "\\nCXXFLAGS += -I\$$\(ANTLR3C_DIR\)/include"
+CONFIG_MK += "\\nCXXFLAGS += -I\$$\(ANTLR3C_DIR\)/include -I\$$\(ANTLR3C_DIR\)/"
 
 # ----------------------------other libs that are autotools'd
 # ----------------------------libc++fileno
@@ -118,7 +118,7 @@ clean::
 	$(MAKE) -C libdwarfpp clean
 
 CONFIG_MK += "\\nLIBDWARFPP_CXXFLAGS += -I$(CONTRIB_ROOT)/libdwarfpp/include"
-CONFIG_MK += "\\nLIBDWARFPP_LDFLAGS += -L$(CONTRIB_ROOT)/libdwarfpp/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib"
+CONFIG_MK += "\\nLIBDWARFPP_LIBS += -L$(CONTRIB_ROOT)/libdwarfpp/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib -ldwarfpp"
 
 # ----------------------------libcxxgen
 
@@ -183,12 +183,12 @@ dwarfidl/config.status: libantlr3c-3.4/antlr3config.h
 	LIBANTLR3CXX_LIBS=-Wl,-g \
 	CPPFLAGS="-I$(CONTRIB_ROOT)/libantlr3c-3.4/ -I$(CONTRIB_ROOT)/libantlr3c-3.4/include $(CPPFLAGS)" \
 	LDFLAGS="-L$(CONTRIB_ROOT)/libantlr3c-3.4/.libs $(LDFLAGS)" \
+	ANTLR_M4_PATH=$(CONTRIB_ROOT)/m4ntlr \
+	ANTLR="java -classpath .:$(CONTRIB_ROOT)/antlr-3.4-complete.jar:$(CLASSPATH) org.antlr.Tool" \
 	./configure --prefix=$(CONTRIB_ROOT)/usr
 
 .PHONY: build-dwarfidl
 build-dwarfidl: dwarfidl/config.status build-libdwarfpp build-libcxxgen build-libsrk31c++ build-libc++fileno build-libantlr3c++ build-libantlr3c antlr-3.4-complete.jar
-	ANTLR_M4_PATH=$(CONTRIB_ROOT)/m4ntlr \
-	ANTLR="java -classpath .:$(CONTRIB_ROOT)/antlr-3.4-complete.jar:$(CLASSPATH) org.antlr.Tool" \
 	$(MAKE) -C dwarfidl
 
 clean::
@@ -213,7 +213,17 @@ CONFIG_MK += "\\nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls"
 # ----------------------------config.mk
 
 # CONFIG_MK += "\\n\\nenv.sh:\\n\\techo \>\"\$$@\" \<\<EOF\\\\\\\nexport CXXFLAGS=\$$\(CXXFLAGS\)\;\\\\\\\nexport CFLAGS=\$$\(CFLAGS\)\;\\\\\\\nLDFLAGS=\$$\(LDFLAGS\)\;\\\\\\\nEOF"
-CONFIG_MK += "\\n\\nenv.sh:\\n\\techo "'"export CXXFLAGS=\"\$$\(CXXFLAGS\)\"\; export CFLAGS=\"\$$\(CFLAGS\)\"\; export LDFLAGS=\"\$$\(LDFLAGS\)\""'" \>\"\$$@\""
+
+varlist := CXXFLAGS CPPFLAGS CFLAGS LDFLAGS \
+TRAP_SYSCALLS \
+DWARFIDL_CXXFLAGS DWARFIDL_LIBS \
+LIBANTLR3CXX_CXXFLAGS LIBANTLR3CXX_LIBS \
+LIBCXXGEN_CXXFLAGS LIBCXXGEN_LIBS \
+LIBDWARFPP_CXXFLAGS LIBDWARFPP_LIBS \
+LIBCXXFILENO_CXXFLAGS LIBCXXFILENO_LIBS \
+LIBSRK31CXX_CXXFLAGS LIBSRK31CXX_LIBS
+
+CONFIG_MK += "\\n\\nenv.sh:\\n\\techo "'"$(foreach var,$(varlist),export $(var)=\"\$$\($(var)\)\"\; )"'" \>\"\$$@\""
 
 config.mk:
 	/bin/echo -e "$(CONFIG_MK)" > "$@" || (rm -f "$@"; false)
