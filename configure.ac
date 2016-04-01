@@ -88,6 +88,9 @@ PKG_CHECK_MODULES([LIBCXXGEN], [libcxxgen])
 PKG_CHECK_MODULES([DWARFIDL], [dwarfidl])
 PKG_CHECK_MODULES([LIBANTLR3CXX], [libantlr3cxx])
 
+AC_SUBST(TRAP_SYSCALLS, $TRAP_SYSCALLS)
+AC_SUBST(MALLOC_HOOKS, $MALLOC_HOOKS)
+
 AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [Enable debug mode]))
 AC_ARG_ENABLE([real-libunwind], AS_HELP_STRING([--enable-real-libunwind], [Use real libunwind (by default we have our own)]))
 
