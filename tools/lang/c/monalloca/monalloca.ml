@@ -148,8 +148,8 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
              in
              ChangeTo([Asm([(* attrs *)], 
                            [(* template strings *)
-                                "   callq "^ labelString1 ^"\n\
-                                "^ labelString1 ^": \n\
+                                "   callq "^ labelString1 ^"_%=\n\
+                                "^ labelString1 ^"_%=: \n\
                                     pop %0\n"
                            ], 
                            [(* outputs: (string option * string * lval) *)
