@@ -2,7 +2,7 @@ DEPS :=
 
 ALLOCSTOOL ?= ../../../
 
-CXXFLAGS += -std=c++0x -g -O0 -I$(ALLOCSTOOL)
+CXXFLAGS += -std=c++0x -g -O2 -I$(ALLOCSTOOL)
 CXXFLAGS += -Wno-deprecated-declarations # while we're using old libdwarfpp -- FIXME
 
 # use the pkg-config vars
