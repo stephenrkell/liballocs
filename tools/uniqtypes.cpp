@@ -430,7 +430,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			for (auto i_edge = members.first; i_edge != members.second; ++i_edge)
 			{
 				/* if we don't have a byte offset, skip it ( -- it's a static var?) */
-				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(root, true);
+				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(root, false /* true */);
 				if (!opt_offset) continue;
 				else
 				{ 
