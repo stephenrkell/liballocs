@@ -13,6 +13,10 @@ liballocs_base = os.path.realpath(os.path.dirname(__file__) + "/../../../..")
 sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
 cilly_cmd = liballocs_base + "/tools/lang/c/cil/bin/cilly"
+existing_ocamlpath = os.environ.get("OCAMLPATH")
+if existing_ocamlpath == None:
+    existing_ocamlpath = ""
+os.putenv("OCAMLPATH", (liballocs_base + "/tools/lang/c/cil/lib:") + existing_ocamlpath)
 
 class AllocsCC(AllocsCompilerWrapper):
 
