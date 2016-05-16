@@ -52,6 +52,9 @@ endif
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
 LDFLAGS += -Wl,-O2 -flto -Bsymbolic-functions -fPIC 
 
+# until binutils bug 13600 is fixed, gold is the linker we need
+LDFLAGS += -Wl,-fuse-ld=gold
+
 # We define our own malloc_usable_size to catch the alloca case.
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size
 
