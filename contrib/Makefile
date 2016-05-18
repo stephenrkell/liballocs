@@ -13,7 +13,6 @@ CONTRIB_ROOT := $(realpath $(dir $(THIS_MAKEFILE)))
 # - binutils-gdb?
 #
 # things that just sit here, but we have to set config for:
-# - m4ntlr
 # - libmallochooks
 #
 # contrib things that live elsewhere
@@ -166,7 +165,7 @@ CONFIG_MK += "\\nLIBANTLR3CXX_LIBS += -L$(CONTRIB_ROOT)/libantlr3c++/lib -Wl,-rp
 # ----------------------------dwarfidl
 
 dwarfidl/config.status: libantlr3c-3.4/antlr3config.h
-	cd dwarfidl && ./autogen.sh && \
+	cd dwarfidl && git submodule init && git submodule update && ./autogen.sh && \
 	LIBCXXFILENO_CXXFLAGS=-I$(CONTRIB_ROOT)/libc++fileno/include \
 	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libc++fileno/lib \
         -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno -lc++fileno" \
@@ -183,7 +182,6 @@ dwarfidl/config.status: libantlr3c-3.4/antlr3config.h
 	LIBANTLR3CXX_LIBS=-Wl,-g \
 	CPPFLAGS="-I$(CONTRIB_ROOT)/libantlr3c-3.4/ -I$(CONTRIB_ROOT)/libantlr3c-3.4/include $(CPPFLAGS)" \
 	LDFLAGS="-L$(CONTRIB_ROOT)/libantlr3c-3.4/.libs $(LDFLAGS)" \
-	ANTLR_M4_PATH=$(CONTRIB_ROOT)/m4ntlr \
 	ANTLR="java -classpath .:$(CONTRIB_ROOT)/antlr-3.4-complete.jar:$(CLASSPATH) org.antlr.Tool" \
 	./configure --prefix=$(CONTRIB_ROOT)/usr
 
