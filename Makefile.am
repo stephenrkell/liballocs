@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = . tools/lang src
+SUBDIRS = . tools/lang src lib
 
 # NOTE: being C++, these only affect build of the tools, not the liballocs core.
 AM_CXXFLAGS = -std=c++11 -ggdb -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS)
