@@ -100,8 +100,12 @@ class AllocsCompilerWrapper(CompilerWrapper):
         return self.getLinkPath()
     
     def getCustomCompileArgs(self, sourceInputFiles):
-        return ["-gdwarf-4", "-gstrict-dwarf", "-fvar-tracking-assignments", \
-        "-fno-omit-frame-pointer", "-ffunction-sections"]
+        gccOnlyOpts = ["-fvar-tracking-assignments"]
+        commonOpts = ["-gdwarf-4", "-gstrict-dwarf", "-fno-omit-frame-pointer", "-ffunction-sections" ]
+        if "CC_IS_CLANG" in os.environ:
+            return commonOpts
+        else:
+            return commonOpts + gccOnlyOpts
     
     def fixupDotO(self, filename, errfile):
         self.debugMsg("Fixing up .o file: %s\n" % filename)
