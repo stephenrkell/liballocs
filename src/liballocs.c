@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <link.h>
+#include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #ifdef USE_REAL_LIBUNWIND
@@ -170,6 +171,26 @@ int dl_for_one_object_phdrs(void *handle,
 	return dl_iterate_phdr(dl_for_one_phdr_cb, &args);
 }
 
+static int swap_out_segment_pages(struct dl_phdr_info *info, size_t size, void *load_addr)
+{
+	for (int i = 0; i < info->dlpi_phnum; ++i)
+	{
+		const ElfW(Phdr) *phdr = &info->dlpi_phdr[i];
+		if (phdr->p_type == PT_LOAD)
+		{
+			uintptr_t begin_addr = (uintptr_t) load_addr + phdr->p_vaddr;
+			uintptr_t end_addr = (uintptr_t) begin_addr + phdr->p_memsz;
+			void *base = (void*) ROUND_DOWN(begin_addr, PAGE_SIZE);
+			size_t len = ROUND_UP(end_addr, PAGE_SIZE) - (uintptr_t) base;
+			/* FIXME: I don't think this is the right call. 
+			 * In fact I don't think Linux lets us forcibly swap out
+			 * a private mapping, which is what we're asking. */
+			int ret = 0; // msync(base, len, MS_SYNC|MS_INVALIDATE);
+			if (ret == -1) warnx("msync() returned %s\n", strerror(errno));
+		}
+	}
+	return 0; // "keep going"
+}
 
 static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg);
 
@@ -254,6 +275,8 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 			}
 		}
 	}
+	
+	dl_for_one_object_phdrs(typelib_handle, swap_out_segment_pages, load_addr);
 	
 	return cb_ret;
 }
@@ -377,6 +400,9 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 
 static const char *helper_libfile_name(const char *objname, const char *suffix)
 {
+	/* we must have a canonical filename */
+	if (objname[0] != '/') return NULL;
+	
 	static char libfile_name[4096];
 	unsigned bytes_left = sizeof libfile_name - 1;
 	
@@ -413,6 +439,7 @@ int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *data
 	
 	// get the -types.so object's name
 	const char *libfile_name = helper_libfile_name(canon_objname, "-types.so");
+	if (!libfile_name) return 0;
 	// don't load if we end with "-types.so"
 	if (0 == strcmp("-types.so", canon_objname + strlen(canon_objname) - strlen("-types.so")))
 	{
@@ -454,6 +481,7 @@ _Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, c
 	const char *canon_l_objname = dynobj_name_from_dlpi_name(l->l_name,
 		(void*) l->l_addr);
 	const char *types_objname_not_norm = helper_libfile_name(canon_l_objname, meta_suffix);
+	if (!types_objname_not_norm) return 0;
 	const char *types_objname_norm = realpath_quick(types_objname_not_norm);
 	char types_objname_buf[4096];
 	strncpy(types_objname_buf, types_objname_norm, sizeof types_objname_buf - 1);
@@ -474,7 +502,7 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 	*((unsigned char **) &cur_ent->allocsite) += load_addr;
 
 	// debugging: print out entry
-	debug_printf(3, "allocsite entry: %p, extrabits %p, to uniqtype at %p\n", 
+	debug_printf(4, "allocsite entry: %p, extrabits %p, to uniqtype at %p\n", 
 		cur_ent->allocsite, (void*) extrabits, cur_ent->uniqtype);
 
 	// if we've moved to a different bucket, point the table entry at us
@@ -488,7 +516,7 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 	{
 		// fresh bucket, so should be null
 		assert(*bucketpos == NULL);
-		debug_printf(3, "starting a new bucket for allocsite %p, mapped from %p\n", 
+		debug_printf(4, "starting a new bucket for allocsite %p, mapped from %p\n", 
 			cur_ent->allocsite, bucketpos);
 		*bucketpos = cur_ent;
 	}
@@ -524,6 +552,7 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 	
 	// get the -allocsites.so object's name
 	const char *libfile_name = helper_libfile_name(canon_objname, ALLOCSITES_OBJ_SUFFIX);
+	if (!libfile_name) return 0;
 	// don't load if we end with "-allocsites.so"
 	if (0 == strcmp(ALLOCSITES_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(ALLOCSITES_OBJ_SUFFIX)))
 	{
@@ -543,7 +572,7 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 		debug_printf(1, "loading allocsites object: %s\n", dlerror());
 		return 0;
 	}
-	debug_printf(1, "loaded allocsites object: %s\n", libfile_name);
+	debug_printf(3, "loaded allocsites object: %s\n", libfile_name);
 	
 	dlerror();
 	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(allocsites_handle, "allocsites");
@@ -582,6 +611,7 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 	
 	// get the -allocsites.so object's name
 	const char *libfile_name = helper_libfile_name(canon_objname, TYPES_OBJ_SUFFIX);
+	if (!libfile_name) return 0;
 	// don't load if we end with "-types.so"
 	if (0 == strcmp(TYPES_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(TYPES_OBJ_SUFFIX)))
 	{
@@ -990,10 +1020,19 @@ static void *typeobj_handle_for_addr(void *caller)
 	
 	// dlopen the typeobj
 	const char *types_libname = helper_libfile_name(dynobj_name_from_dlpi_name(info.dli_fname, info.dli_fbase), "-types.so");
-	assert(types_libname != NULL);
+	if (!types_libname)
+	{
+		debug_printf(1, "No typeobj handle for addr %p", caller);
+		return NULL;
+	}
+	
 	void *handle = (orig_dlopen ? orig_dlopen : dlopen)(types_libname, RTLD_NOW | RTLD_NOLOAD);
 	if (handle == NULL)
-		printf("Error: %s\n", dlerror());
+	{
+		debug_printf(1, "No typeobj loaded for addr %p, typeobj name %s", caller, types_libname);
+		return NULL;
+	}
+	// FIXME: this has bumped the refcount and we'll never unbump it
 	return handle;
 }
 
