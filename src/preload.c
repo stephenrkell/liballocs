@@ -312,7 +312,7 @@ void *dlopen(const char *filename, int flag)
 			// write_string("Blah3004.7\n");
 			const char *lm_ent_realname = dynobj_name_from_dlpi_name(l->l_name, (void*) l->l_addr);
 			// write_string("Blah3004.8\n");
-			file_already_loaded |= (l->l_name && 
+			file_already_loaded |= (lm_ent_realname && 
 					(0 == strcmp(lm_ent_realname, file_realname)));
 			if (file_already_loaded) break;
 		}
