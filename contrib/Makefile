@@ -226,7 +226,7 @@ LIBDWARFPP_CXXFLAGS LIBDWARFPP_LIBS \
 LIBCXXFILENO_CXXFLAGS LIBCXXFILENO_LIBS \
 LIBSRK31CXX_CXXFLAGS LIBSRK31CXX_LIBS
 
-CONFIG_MK += "\\n\\nenv.sh:\\n\\techo "'"$(foreach var,$(varlist),export $(var)=\"\$$\($(var)\)\"\; )"'" \>\"\$$@\""
+CONFIG_MK += "\\n\\nenv.sh:\\n\\t/bin/echo -e "'"$(foreach var,$(varlist),export $(var)=\"\$$\($(var)\)\"\; )"'" \>\"\$$@\""
 
 config.mk: build-libantlr3c
 	/bin/echo -e "$(CONFIG_MK)" > "$@" || (rm -f "$@"; false)
