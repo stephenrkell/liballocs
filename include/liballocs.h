@@ -327,9 +327,12 @@ __liballocs_walk_subobjects_spanning_rec(
 
 		if (lower_ind + 1 == upper_ind)
 		{
-			/* We found one offset */
-			__liballocs_private_assert(u->contained[lower_ind].offset <= target_offset_within_u,
-				"offset underapproximates", __FILE__, __LINE__, __func__);
+			/* We found one offset; we may still have overshot, in the case of a 
+			 * stack frame where offset zero might not be used. */
+			if (u->contained[lower_ind].offset > target_offset_within_u)
+			{
+				return 0; // FIXME: cb not called; what should our return value be then?
+			}
 
 			/* ... but we might not have found the *lowest* index, in the 
 			 * case of a union. Scan backwards so that we have the lowest. 
@@ -425,6 +428,12 @@ __liballocs_first_subobject_spanning(
 
 		if (lower_ind + 1 == upper_ind)
 		{
+			/* We found one offset; we may still have overshot, in the case of a 
+			 * stack frame where offset zero might not be used. */
+			if (cur_obj_uniqtype->contained[lower_ind].offset > target_offset_within_uniqtype)
+			{
+				return 0;
+			}
 			/* We found one offset */
 			__liballocs_private_assert(cur_obj_uniqtype->contained[lower_ind].offset <= target_offset_within_uniqtype,
 				"offset underapproximates", __FILE__, __LINE__, __func__);
