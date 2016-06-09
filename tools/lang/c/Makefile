@@ -37,6 +37,10 @@ cil/configure:
 %.cma: %.cmo
 	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -a $+
 
+# build cilallocs first
+dumpallocs/dumpallocs.cmx: cilallocs/cilallocs.cmx
+monalloca/monalloca.cmx: cilallocs/cilallocs.cmx
+
 # for testing
 %.cil.o: %.c
 	cd "$(dir $<)" && $(CILLY) --do$$( echo $(dir $<) | tr -d '/' ) --save-temps -c -o "$(notdir $@)" "$(notdir $<)"
