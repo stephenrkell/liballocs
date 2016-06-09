@@ -30,9 +30,9 @@ cil/configure:
 
 %.cmxs: %.cmx 
 	$(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
-%.cmx %.cmi: %.ml
+%.cmx %.cmi: %.ml cil
 	$(OCAMLFIND) ocamlopt -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) -c "$<"
-%.cmo %.cmi: %.ml
+%.cmo %.cmi: %.ml cil
 	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -c "$<"
 %.cma: %.cmo
 	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -a $+
