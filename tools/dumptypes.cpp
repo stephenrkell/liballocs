@@ -798,7 +798,7 @@ int main(int argc, char **argv)
 		boost::icl::interval_map<Dwarf_Addr, Dwarf_Unsigned> intervals;
 		if (i.tag_here() == DW_TAG_variable
 			&& i.has_attribute_here(DW_AT_location)
-			&& i.as_a<variable_die>()->has_static_storage(root))
+			&& i.as_a<variable_die>()->has_static_storage())
 		{
 			iterator_df<variable_die> i_var = i.as_a<variable_die>();
 			try

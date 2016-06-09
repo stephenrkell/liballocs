@@ -328,7 +328,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				bool signedness = (base_t->get_encoding() == DW_ATE_signed);
 
 				// HACK: for now, skip weird cases with bit size/offset
-				if (base_t->get_bit_offset() != 0 || 
+				if ((base_t->get_bit_offset() && *base_t->get_bit_offset() != 0) || 
 					(base_t->get_bit_size() && *base_t->get_bit_size() != 8 * size))
 				{
 					continue;
@@ -430,7 +430,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			for (auto i_edge = members.first; i_edge != members.second; ++i_edge)
 			{
 				/* if we don't have a byte offset, skip it ( -- it's a static var?) */
-				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(root, false /* true */);
+				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(false /* true */);
 				if (!opt_offset) continue;
 				else
 				{ 
@@ -443,7 +443,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		unsigned array_len;
 		if  (i_vert->second.is_a<array_type_die>())
 		{
-			auto opt_array_len = i_vert->second.as_a<array_type_die>()->element_count(root);
+			auto opt_array_len = i_vert->second.as_a<array_type_die>()->element_count();
 			if (opt_array_len) array_len = *opt_array_len;
 			else array_len = 0;
 		} 

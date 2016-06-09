@@ -174,7 +174,7 @@ name_for_complement_base_type(iterator_df<base_type_die> base_t)
 	auto encoding = base_t->get_encoding();
 	assert(encoding == DW_ATE_signed || encoding == DW_ATE_unsigned);
 	// assert we're not a weird bitty case
-	assert(base_t->get_bit_offset() == 0 && 
+	assert((!base_t->get_bit_offset() || *base_t->get_bit_offset() == 0) && 
 		(!base_t->get_bit_size() || *base_t->get_bit_size() == 8 * size));
 	
 	name << ((base_t->get_encoding() == DW_ATE_signed) ? "uint" : "int")
@@ -205,7 +205,7 @@ name_for_base_type(iterator_df<base_type_die> base_t)
 	}
 
 	// weird cases of bit size/offset
-	if (base_t->get_bit_offset() != 0 || 
+	if ((base_t->get_bit_offset() && *base_t->get_bit_offset() != 0) || 
 		(base_t->get_bit_size() && *base_t->get_bit_size() != 8 * size))
 	{
 		// use the bit size and add a bit offset
