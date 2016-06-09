@@ -194,8 +194,9 @@ do_init(void)
 		index_end_addr = one_past_max_indexed_address;
 	}
 	
-	index_region = MEMTABLE_NEW_WITH_TYPE(struct entry, 
-		entry_coverage_in_bytes, index_begin_addr, index_end_addr);
+	/* HACK: always place at 0x400000000000, to avoid problems with shadow space. */
+	index_region = MEMTABLE_NEW_WITH_TYPE_AT_ADDR(struct entry, 
+		entry_coverage_in_bytes, index_begin_addr, index_end_addr, (const void*) 0x400000000000ul);
 	debug_printf(3, "heap_index at %p\n", index_region);
 	
 	assert(index_region != MAP_FAILED);

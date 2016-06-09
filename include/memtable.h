@@ -223,20 +223,40 @@ INLINE_DECL void *memtable_new(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
+INLINE_DECL void *memtable_new_at_addr(
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end,
+	const void *placement_addr) INLINE_ATTRS;
+
 INLINE_DECL void *INLINE_ATTRS memtable_new(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
 {
+	return memtable_new_at_addr(entry_size_in_bytes, 
+		entry_coverage_in_bytes,
+		addr_begin, addr_end,
+		NULL);
+}
+INLINE_DECL void *INLINE_ATTRS memtable_new_at_addr(
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end,
+	const void *placement_addr)
+{
 	size_t mapping_size = memtable_mapping_size(entry_size_in_bytes,
 		entry_coverage_in_bytes, addr_begin, addr_end);
 	assert(mapping_size <= BIGGEST_MMAP_ALLOWED);
-	void *ret = MEMTABLE_MMAP(NULL, mapping_size, PROT_READ|PROT_WRITE, 
-		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
+	void *ret = MEMTABLE_MMAP((void*) placement_addr, mapping_size, PROT_READ|PROT_WRITE, 
+		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|
+			(placement_addr ? MAP_FIXED : 0), -1, 0);
 	return ret; /* MAP_FAILED on error */
 }
 #define MEMTABLE_NEW_WITH_TYPE(t, range, addr_begin, addr_end) \
 	(t*) memtable_new(sizeof(t), (range), (addr_begin), (addr_end))
+#define MEMTABLE_NEW_WITH_TYPE_AT_ADDR(t, range, addr_begin, addr_end, placement_addr) \
+	(t*) memtable_new_at_addr(sizeof(t), (range), (addr_begin), (addr_end), (placement_addr))
 
 #if 0 /* FIXME: finish this */
 /* Instead of page bitmaps, generalise to a "sparseness bitmap hierarchy" 

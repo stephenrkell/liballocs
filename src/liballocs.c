@@ -981,9 +981,11 @@ int __liballocs_global_init(void)
 	 * with STACK_BEGIN. 
 	 * And we store static objects' addres in the same table, with addresses ORed
 	 * with STACK_BEGIN<<1. 
-	 * So quadruple up the size of the table accordingly. */
-	__liballocs_allocsmt = MEMTABLE_NEW_WITH_TYPE(allocsmt_entry_type, allocsmt_entry_coverage, 
-		(void*) 0, (void*) (0x800000000000ul << 2));
+	 * So quadruple up the size of the table accordingly.
+	 * To avoid the address space getting into a configuration that screws up our
+	 * shadow-space arrangement, always place this table at 0x300000000000. */
+	__liballocs_allocsmt = MEMTABLE_NEW_WITH_TYPE_AT_ADDR(allocsmt_entry_type, allocsmt_entry_coverage, 
+		(void*) 0, (void*) (0x800000000000ul << 2), (const void*) 0x300000000000ul);
 	if (__liballocs_allocsmt == MAP_FAILED) abort();
 	debug_printf(3, "allocsmt at %p\n", __liballocs_allocsmt);
 	
