@@ -40,6 +40,8 @@ cil/configure:
 # build cilallocs first
 dumpallocs/dumpallocs.cmx: cilallocs/cilallocs.cmx
 monalloca/monalloca.cmx: cilallocs/cilallocs.cmx
+dumpallocs/dumpallocs.cmo: cilallocs/cilallocs.cmo
+monalloca/monalloca.cmo: cilallocs/cilallocs.cmo
 
 # for testing
 %.cil.o: %.c
