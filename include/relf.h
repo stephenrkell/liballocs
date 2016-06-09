@@ -403,6 +403,7 @@ static inline
 ElfW(Sym) *hash_lookup_local(const char *sym)
 {
 	ElfW(Word) *hash = (ElfW(Word) *) local_dynamic_xlookup(DT_HASH)->d_un.d_ptr;
+	if ((intptr_t) hash < 0) return NULL; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab = (ElfW(Sym) *) local_dynamic_xlookup(DT_SYMTAB)->d_un.d_ptr;
 	const char *strtab = (const char *) local_dynamic_xlookup(DT_STRTAB)->d_un.d_ptr;
 	return hash_lookup(hash, symtab, strtab, sym);
@@ -451,7 +452,9 @@ static inline
 ElfW(Sym) *symbol_lookup_linear_local(const char *sym)
 {
 	ElfW(Sym) *symtab = (ElfW(Sym) *) local_dynamic_xlookup(DT_SYMTAB)->d_un.d_ptr;
+	if ((intptr_t) symtab < 0) return NULL; // HACK: x86-64 vdso workaround
 	const char *strtab = (const char *) local_dynamic_xlookup(DT_STRTAB)->d_un.d_ptr;
+	if ((intptr_t) strtab < 0) return NULL; // HACK: x86-64 vdso workaround
 	const char *strtab_end = strtab + local_dynamic_xlookup(DT_STRSZ)->d_un.d_val;
 	/* Round down to the alignment of ElfW(Sym). */
 	ElfW(Sym) *symtab_end = ROUND_DOWN_PTR(strtab, sizeof (ElfW(Sym)));
@@ -467,6 +470,7 @@ unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn)
 	ElfW(Dyn) *dynsym_ent = dynamic_lookup(dyn, DT_SYMTAB);
 	if (!dynsym_ent) return 0;
 	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
+	if ((intptr_t) dynsym < 0) return 0; // HACK: x86-64 vdso workaround
 	
 	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_HASH);
 	ElfW(Word) *hash = NULL;
@@ -474,6 +478,7 @@ unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn)
 	{
 		/* Got the SysV-style hash table. */
 		hash = (ElfW(Word) *) hash_ent->d_un.d_ptr;
+		if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
 		nsyms = hash[1]; /* nchain, which equals the number of symbols */
 	}
 	else if (NULL != (hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_GNU_HASH)))
@@ -489,6 +494,7 @@ dynsym_nasty_hack:
 		dynstr_ent = dynamic_lookup(dyn, DT_STRTAB);
 		assert(dynstr_ent);
 		dynstr = (unsigned char *) dynstr_ent->d_un.d_ptr;
+		if ((intptr_t) dynstr < 0) return 0; // HACK: x86-64 vdso workaround
 		assert((unsigned char *) dynstr > (unsigned char *) dynsym);
 		// round down, because dynsym might be padded
 		nsyms = (dynstr - (unsigned char *) dynsym) / sizeof (ElfW(Sym));
@@ -501,9 +507,12 @@ ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sy
 {
 	ElfW(Dyn) *hash_ent = dynamic_lookup(l->l_ld, DT_HASH);
 	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
+	if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab = (ElfW(Sym) *) dynamic_xlookup(l->l_ld, DT_SYMTAB)->d_un.d_ptr;
+	if ((intptr_t) symtab < 0) return 0; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab_end = symtab + dynamic_symbol_count(l->l_ld);
 	const char *strtab = (const char *) dynamic_xlookup(l->l_ld, DT_STRTAB)->d_un.d_ptr;
+	if ((intptr_t) strtab < 0) return 0; // HACK: x86-64 vdso workaround
 	const char *strtab_end = strtab + dynamic_xlookup(l->l_ld, DT_STRSZ)->d_un.d_val;
 	
 	/* Try the hash lookup, if we can. FIXME: support GNU hash. */
