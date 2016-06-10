@@ -483,6 +483,7 @@ _Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, c
 	const char *types_objname_not_norm = helper_libfile_name(canon_l_objname, meta_suffix);
 	if (!types_objname_not_norm) return 0;
 	const char *types_objname_norm = realpath_quick(types_objname_not_norm);
+	if (!types_objname_norm) return 0; /* meta obj does not exist */
 	char types_objname_buf[4096];
 	strncpy(types_objname_buf, types_objname_norm, sizeof types_objname_buf - 1);
 	types_objname_buf[sizeof types_objname_buf - 1] = '\0';
