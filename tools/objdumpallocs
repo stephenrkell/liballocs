@@ -1,8 +1,6 @@
 #!/bin/bash
 
-. ~/lib/bash/util
-
-# Build a list of allocation sites with the power of objdump.
+# Build a list of allocation sites using the power of objdump.
 # We record them as the string inside the < >
 # i.e. <symname+0xoffset>, without the < >.
 
