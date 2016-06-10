@@ -257,10 +257,12 @@ void __liballocs_systrap_init(void)
 			ElfW(Dyn) *dynsym_ent = dynamic_lookup(l->l_ld, DT_SYMTAB);
 			if (!dynsym_ent) continue;
 			ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
+			if ((intptr_t) dynsym < 0) continue; /* HACK x86-64 vdso bug */
 			/* nasty hack for getting the end of dynsym */
 			ElfW(Dyn) *dynstr_ent = dynamic_lookup(l->l_ld, DT_STRTAB);
 			if (!dynstr_ent) continue;
 			char *dynstr = (char *) dynstr_ent->d_un.d_ptr;
+			if ((intptr_t) dynsym < 0) continue; /* HACK x86-64 vdso bug */
 			assert((char *) dynstr > (char *) dynsym);
 			ElfW(Dyn) *dynstrsz_ent = dynamic_lookup(l->l_ld, DT_STRSZ);
 			if (!dynstrsz_ent) continue;
