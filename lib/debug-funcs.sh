@@ -1,3 +1,5 @@
+# NOTE: these functions use lots of GNU bashisms.
+
 echo_then_sudo () {
     echo "About to execute privileged command: $@" 1>&2
     sudo -k "$@"
