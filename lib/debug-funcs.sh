@@ -67,6 +67,25 @@ read_debuglink () {
     return 1
 }
 
+find_debug_file_for () {
+    file="$1"
+    # handle the case where there's no DWARF in the file, but is a debug link
+    if ! readelf -wi "$file" | grep -m1 . >/dev/null; then
+        debuglink_val="$( read_debuglink "$file" )"
+        if [[ -n "$debuglink_val" ]]; then
+            echo "Read debuglink val: $debuglink_val" 1>&2
+            resolved_debuglink="$( resolve_debuglink "$file" "$debuglink_val" )"
+            echo "Resolved debuglink to: $resolved_debuglink" 1>&2
+            echo "$resolved_debuglink"
+        else
+            echo "No debuglink found" 1>&2
+            echo "$file"
+        fi
+    else
+        echo "$file"
+    fi
+}
+
 readelf_debug () {
     declare -a args
     ctr=1
@@ -78,21 +97,8 @@ readelf_debug () {
     file=${args[$(( $ctr - 1 ))]}
     echo "Slurped args: ${args[@]}" 1>&2
     echo "Guessed file arg: $file" 1>&2
-    readelf_test_output="$( readelf ${args[@]} | head -n1 )"
-    # read from the $1 if it has debug sections, 
-    # else try to follow its debuglnk and read from that
-    if [[ -z "$readelf_test_output" ]]; then
-        debuglink_val="$( read_debuglink "$file" )"
-        if [[ -n "$debuglink_val" ]]; then
-            echo "Read debuglink val: $debuglink_val" 1>&2
-            resolved_debuglink="$( resolve_debuglink "$file" "$debuglink_val" )"
-            echo "Resolved debuglink to: $resolved_debuglink" 1>&2
-            args[$(( $ctr - 1 ))]="$resolved_debuglink"
-        else
-            echo "No debuglink found" 1>&2
-        fi
-    fi
-    readelf ${args[@]}
+    unset args[$(( $ctr - 1 ))]
+    readelf ${args[@]} "$( find_debug_file_for "$file" )"
 }
 
 get_cu_info () {
