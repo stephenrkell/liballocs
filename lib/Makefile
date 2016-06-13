@@ -12,3 +12,6 @@ $(SYMLINKS): %: $(SRCROOT)/src/%
 
 liballocs_systrap.o: $(SRCROOT)/src/systrap.o
 	ln -sf "$<" "$@"
+
+clean:
+	rm -f $(SYMLINKS) liballocs_systrap.o
