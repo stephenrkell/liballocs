@@ -15,11 +15,11 @@ fixup_debuglink () {
     has_debuglink=$?
     
     if [[ $has_debuglink -eq 0 ]] && [[ "$current_debuglink" == "$debuglink" ]]; then
-        echo "detected that debuglink $debuglink_value is already valid"
+        echo "detected that debuglink $debuglink_value is already valid" 1>&2
         return 0
     else
         if [[ $has_debuglink -eq 0 ]]; then 
-            echo "detected that debuglink $current_debuglink needs fixing up to $debuglink"
+            echo "detected that debuglink $current_debuglink needs fixing up to $debuglink" 1>&2
             # For safety, we use a tempfile
             tmpfile="$(mktemp)"
             saved_ug="$( stat -c "%u:%g" "$( readlink -f "$obj" )" )"
@@ -39,8 +39,8 @@ fixup_debuglink () {
             echo_then_sudo chown "$saved_ug" "$tmpfile" && \
             echo_then_sudo chmod "$saved_mode" "$tmpfile" && \
             echo_then_sudo mv "$tmpfile" "$obj" && \
-            echo "success" && return 0 || \
-            (echo "objcopy failed"; return 1)
+            echo "success" 1>&2 && return 0 || \
+            (echo "objcopy failed" 1>&2; return 1)
     fi
 }
 
