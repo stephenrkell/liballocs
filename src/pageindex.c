@@ -163,6 +163,12 @@ is_unindexed(void *begin, void *end)
 	return 0;
 }
 
+_Bool __pages_unused(void *begin, void *end)
+{
+	return is_unindexed(begin, end);
+}
+
+
 static void check_page_size(void) __attribute__((constructor));
 static void check_page_size(void)
 {

@@ -990,6 +990,20 @@ struct insert *object_insert(const void *obj, struct insert *ins)
 {
 	return ins;
 }
+/* A client-friendly lookup function that knows about bigallocs.
+ * FIXME: this needs to go away! Clients shouldn't have to know about inserts,
+ * and not all allocators maintain them. */
+struct insert *__liballocs_get_insert(const void *mem)
+{
+	struct big_allocation *b = __lookup_bigalloc(mem,
+		&__generic_malloc_allocator, NULL);
+	if (b)
+	{
+		assert(b->meta.what == INS_AND_BITS);
+		return &b->meta.un.ins_and_bits.ins;
+	}
+	else return lookup_object_info(mem, NULL, NULL, NULL);
+}
 
 /* A client-friendly lookup function with cache. */
 struct insert *lookup_object_info(const void *mem, void **out_object_start, size_t *out_object_size,

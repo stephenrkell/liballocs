@@ -192,7 +192,7 @@ static int swap_out_segment_pages(struct dl_phdr_info *info, size_t size, void *
 	return 0; // "keep going"
 }
 
-static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg);
+// static int iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg);
 
 static int print_type_cb(struct uniqtype *t, void *ignored)
 {
@@ -202,84 +202,90 @@ static int print_type_cb(struct uniqtype *t, void *ignored)
 	return 0;
 }
 
-int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg) __attribute__((visibility("protected")));
-int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg)
-{
-	/* Don't use dladdr() to iterate -- too slow! Instead, iterate 
-	 * directly over the dynsym section. */
-	struct link_map *h = typelib_handle;
-	unsigned char *load_addr = (unsigned char *) h->l_addr;
-	
-	/* If load address is greater than STACK_BEGIN, it's suspicious -- 
-	 * perhaps a vdso-like thing. Skip it. The vdso itself is detected
-	 * below (it lives in user memory, but points into kernel memory). */
-	if (!load_addr || (intptr_t) load_addr < 0) return 0;
-	
-	/* We don't have to add load_addr, because ld.so has already done it. */
-	ElfW(Dyn) *dynsym_ent = dynamic_lookup(h->l_ld, DT_SYMTAB);
-	assert(dynsym_ent);
-	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
-	assert(dynsym);
-	/* Catch the vdso case. */
-	if (!dynsym || (intptr_t) dynsym < 0) return 0;
-	
-	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(h->l_ld, DT_HASH);
-	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
-	if ((intptr_t) dynsym < 0 || (intptr_t) hash < 0)
-	{
-		/* We've got a pointer to kernel memory, probably vdso. 
-		 * On some kernels, the vdso mapping address is randomized
-		 * but its contents are not fixed up appropriately. This 
-		 * means that addresses read from the vdso can't be trusted
-		 * and will probably segfault.
-		 */
-		debug_printf(2, "detected risk of buggy VDSO with unrelocated (kernel-address) content... skipping\n");
-		return 0;
-	}
-	// check that we start with a null symtab entry
-	static const ElfW(Sym) nullsym = { 0, 0, 0, 0, 0, 0 };
-	assert(0 == memcmp(&nullsym, dynsym, sizeof nullsym));
-	if ((dynsym && (char*) dynsym < MINIMUM_USER_ADDRESS) || (hash && (char*) hash < MINIMUM_USER_ADDRESS))
-	{
-		/* We've got a pointer to a very low address, probably from
-		 * an unrelocated .dynamic section entry. This happens most
-		 * often with the VDSO. The ld.so is supposed to relocate these
-		 * addresses, but when VDSO handling changed in Linux
-		 * (some time between 3.8.0 and 3.18.0) to use load-relative addresses
-		 * instead of pre-relocated addresses, ld.so still hadn't caught on
-		 * that it now needed to relocate these. 
-		 */
-		debug_printf(2, "detected likely-unrelocated (load-relative) .dynamic content... skipping\n");
-		return 0;
-	}
-	// get the symtab size
-	unsigned long nsyms = dynamic_symbol_count(h->l_ld);
-	ElfW(Dyn) *dynstr_ent = dynamic_lookup(h->l_ld, DT_STRTAB);
-	assert(dynstr_ent);
-	char *dynstr = (char*) dynstr_ent->d_un.d_ptr;
-
-	int cb_ret = 0;
-
-	for (ElfW(Sym) *p_sym = dynsym; p_sym <  dynsym + nsyms; ++p_sym)
-	{
-		if (ELF64_ST_TYPE(p_sym->st_info) == STT_OBJECT && 
-			p_sym->st_shndx != SHN_UNDEF &&
-			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8))
-		{
-			struct uniqtype *t = (struct uniqtype *) (load_addr + p_sym->st_value);
-			// if our name comes out as null, we've probably done something wrong
-			if (t->name)
-			{
-				cb_ret = cb(t, arg);
-				if (cb_ret != 0) break;
-			}
-		}
-	}
-	
-	dl_for_one_object_phdrs(typelib_handle, swap_out_segment_pages, load_addr);
-	
-	return cb_ret;
-}
+// int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg) __attribute__((visibility("protected")));
+// int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t, void *arg), void *arg)
+// {
+// 	/* Don't use dladdr() to iterate -- too slow! Instead, iterate 
+// 	 * directly over the dynsym section.
+// 	 * FIXME: this seems broken. We don't get the unique "active" definition
+// 	 * of the uniqtype, necessarily, cf. the overridden ones.
+// 	 * In libcrunch we scan the typelibs "in link order" of the corresponding
+// 	 * actual libs, and hit the  first def we get; this is *probably* correct, but... */
+// 	struct link_map *h = typelib_handle;
+// 	unsigned char *load_addr = (unsigned char *) h->l_addr;
+// 	
+// 	/* If load address is greater than STACK_BEGIN, it's suspicious -- 
+// 	 * perhaps a vdso-like thing. Skip it. The vdso itself is detected
+// 	 * below (it lives in user memory, but points into kernel memory). */
+// 	if (!load_addr || (intptr_t) load_addr < 0) return 0;
+// 	
+// 	/* We don't have to add load_addr, because ld.so has already done it. */
+// 	ElfW(Dyn) *dynsym_ent = dynamic_lookup(h->l_ld, DT_SYMTAB);
+// 	assert(dynsym_ent);
+// 	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
+// 	assert(dynsym);
+// 	/* Catch the vdso case. */
+// 	if (!dynsym || (intptr_t) dynsym < 0) return 0;
+// 	
+// 	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(h->l_ld, DT_HASH);
+// 	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
+// 	if ((intptr_t) dynsym < 0 || (intptr_t) hash < 0)
+// 	{
+// 		/* We've got a pointer to kernel memory, probably vdso. 
+// 		 * On some kernels, the vdso mapping address is randomized
+// 		 * but its contents are not fixed up appropriately. This 
+// 		 * means that addresses read from the vdso can't be trusted
+// 		 * and will probably segfault.
+// 		 */
+// 		debug_printf(2, "detected risk of buggy VDSO with unrelocated (kernel-address) content... skipping\n");
+// 		return 0;
+// 	}
+// 	// check that we start with a null symtab entry
+// 	static const ElfW(Sym) nullsym = { 0, 0, 0, 0, 0, 0 };
+// 	assert(0 == memcmp(&nullsym, dynsym, sizeof nullsym));
+// 	if ((dynsym && (char*) dynsym < MINIMUM_USER_ADDRESS) || (hash && (char*) hash < MINIMUM_USER_ADDRESS))
+// 	{
+// 		/* We've got a pointer to a very low address, probably from
+// 		 * an unrelocated .dynamic section entry. This happens most
+// 		 * often with the VDSO. The ld.so is supposed to relocate these
+// 		 * addresses, but when VDSO handling changed in Linux
+// 		 * (some time between 3.8.0 and 3.18.0) to use load-relative addresses
+// 		 * instead of pre-relocated addresses, ld.so still hadn't caught on
+// 		 * that it now needed to relocate these. 
+// 		 */
+// 		debug_printf(2, "detected likely-unrelocated (load-relative) .dynamic content... skipping\n");
+// 		return 0;
+// 	}
+// 	// get the symtab size
+// 	unsigned long nsyms = dynamic_symbol_count(h->l_ld);
+// 	ElfW(Dyn) *dynstr_ent = dynamic_lookup(h->l_ld, DT_STRTAB);
+// 	assert(dynstr_ent);
+// 	char *dynstr = (char*) dynstr_ent->d_un.d_ptr;
+// 
+// 	int cb_ret = 0;
+// 
+// 	for (ElfW(Sym) *p_sym = dynsym; p_sym <  dynsym + nsyms; ++p_sym)
+// 	{
+// 		if (ELF64_ST_TYPE(p_sym->st_info) == STT_OBJECT && 
+// 			p_sym->st_shndx != SHN_UNDEF &&
+// 			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8))
+// 		{
+// 			struct uniqtype *t = (struct uniqtype *) (load_addr + p_sym->st_value);
+// 			// if our name comes out as null, we've probably done something wrong
+// 			if (t->name)
+// 			{
+// 				cb_ret = cb(t, arg);
+// 				if (cb_ret != 0) break;
+// 			}
+// 		}
+// 	}
+// 	
+// 	/* HACK: after we do a pass over the types, our memory consumption will appear
+// 	 * huge, even though we don't need this stuff any more. */
+// 	dl_for_one_object_phdrs(typelib_handle, swap_out_segment_pages, load_addr);
+// 	
+// 	return cb_ret;
+// }
 /* FIXME: invalidate cache entries on dlclose(). */
 #ifndef DLADDR_CACHE_SIZE
 #define DLADDR_CACHE_SIZE 16
@@ -467,10 +473,10 @@ int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *data
 	debug_printf(3, "loaded types object: %s\n", libfile_name);
 	
 	// if we want maximum output, print it
-	if (__liballocs_debug_level >= 6)
-	{
-		__liballocs_iterate_types(handle, print_type_cb, NULL);
-	}
+// 	if (__liballocs_debug_level >= 6)
+// 	{
+// 		__liballocs_iterate_types(handle, print_type_cb, NULL);
+// 	}
 	
 	// HACK: scan it for lazy-heap-alloc types
 	if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(handle);

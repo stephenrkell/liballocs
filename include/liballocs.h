@@ -617,6 +617,8 @@ __liballocs_get_type_inside(void *obj, struct uniqtype *t);
 struct uniqtype * 
 __liballocs_get_innermost_type(void *obj);
 
+struct insert *__liballocs_get_insert(const void *mem); // HACK: please remove (see libcrunch)
+
 inline 
 const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
 {
