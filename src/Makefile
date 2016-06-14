@@ -125,14 +125,15 @@ uniqtypes.o: uniqtypes.c
 	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
 ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard allocators/*.c))
-UTIL_OBJS := pageindex.o addrlist.o uniqtypes.o uniqtype-bfs.o
+UTIL_OBJS := pageindex.o addrlist.o uniqtype-bfs.o
+NOPRELOAD_OBJS := uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
 MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ) $(ALLOCATOR_OBJS)
 MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 PRELOAD_OBJS := preload.o
 # HOOKS_*_OBJS are defined at the top
 
 # build src backwards 
-C_SRC := $(sort $(patsubst %.o,%.c,$(MAIN_OBJS) $(PRELOAD_OBJS) $(HOOKS_PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) liballocs_nomemtable.o))
+C_SRC := $(sort $(patsubst %.o,%.c,$(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(HOOKS_PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) liballocs_nomemtable.o))
 dep_fname = $(dir $1)$(patsubst %.c,.%.d,$(notdir $1))
 C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
 # patsubst %.c,$(dir %.c).$(patsubst %.c,%.d$(notdir %.c).d,$(C_SRC))
@@ -157,9 +158,9 @@ $(CC_DEPS): $(dir %.cc)$(patsubst %.cc,.%.d,$(notdir %.cc)) : %.cc
 	$(CC) $(CFLAGS) -c -o "$@" "$<"
 
 ifeq ($(DEBUG),1)
-systrap.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(DEBUG_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(DEBUG_EXTRA_CFLAGS) # hooks have either fpic or fPIC
 else
-systrap.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(FAST_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(FAST_EXTRA_CFLAGS) # hooks have either fpic or fPIC
 endif 
 .SECONDARY: heap_index_hooks_fast.c
 heap_index_hooks_fast.o: CFLAGS += $(HOOKS_FAST_CFLAGS)
@@ -199,10 +200,10 @@ liballocs_preload.so: systrap.o liballocs_preload.a dlmalloc.a
 liballocs_preload.a: dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
 
-liballocs_nonshared.a: uniqtypes.o
+liballocs_nonshared.a: $(NOPRELOAD_OBJS)
 	$(AR) r "$@" $+
 
-liballocs.a: systrap.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
+liballocs.a: systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
 	$(AR) r "$@" $+
 
 # HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option.
