@@ -16,13 +16,15 @@ pkgconfig_DATA = liballocs.pc
 liballocs_includedir = $(includedir)/liballocs
 liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/relf.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsmt.h include/vas.h 
 
-bin_PROGRAMS = tools/dumptypes tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size
+bin_PROGRAMS = tools/dumptypes tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size
 lib_LIBRARIES = tools/liballocstool.a 
 
 tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
 
 tools_dumptypes_SOURCES = tools/dumptypes.cpp
 tools_dumptypes_LDADD = tools/liballocstool.a -ldwarf -lelf
+tools_dumpptrs_SOURCES = tools/dumpptrs.cpp
+tools_dumpptrs_LDADD = tools/liballocstool.a -ldwarf -lelf
 tools_allocsites_SOURCES = tools/allocsites.cpp $(HELPERS)
 tools_allocsites_LDADD = tools/liballocstool.a -ldwarf -lelf
 tools_usedtypes_SOURCES = tools/usedtypes.cpp $(HELPERS)
