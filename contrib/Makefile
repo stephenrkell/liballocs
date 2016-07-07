@@ -1,6 +1,9 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB_ROOT := $(realpath $(dir $(THIS_MAKEFILE)))
 
+# trap-syscalls's contrib needs to be able to find liballocs
+export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
+
 # things we need to build:
 # - libc++fileno
 # - libsrk31c++
