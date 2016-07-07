@@ -404,6 +404,8 @@ ElfW(Sym) *hash_lookup_local(const char *sym)
 {
 	ElfW(Word) *hash = (ElfW(Word) *) local_dynamic_xlookup(DT_HASH)->d_un.d_ptr;
 	if ((intptr_t) hash < 0) return NULL; // HACK: x86-64 vdso workaround
+	unsigned long local_base = (unsigned long) get_local_load_addr();
+	if ((unsigned long) hash < local_base) return NULL; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab = (ElfW(Sym) *) local_dynamic_xlookup(DT_SYMTAB)->d_un.d_ptr;
 	const char *strtab = (const char *) local_dynamic_xlookup(DT_STRTAB)->d_un.d_ptr;
 	return hash_lookup(hash, symtab, strtab, sym);
@@ -479,6 +481,7 @@ unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn)
 		/* Got the SysV-style hash table. */
 		hash = (ElfW(Word) *) hash_ent->d_un.d_ptr;
 		if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
+		if ((char*) hash < (char*) get_highest_loaded_object_below(dyn)->l_addr) return 0; // HACK: x86-64 vdso workaround
 		nsyms = hash[1]; /* nchain, which equals the number of symbols */
 	}
 	else if (NULL != (hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_GNU_HASH)))
