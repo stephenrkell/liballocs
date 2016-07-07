@@ -155,7 +155,7 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
 }
 
-static int trap_ldso_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, void *interpreter_fname_as_void)
+static int trap_ldso_cb(struct proc_entry *ent, char *linebuf, void *interpreter_fname_as_void)
 {
 	const char *interpreter_fname = (const char *) interpreter_fname_as_void;
 	if (ent->x == 'x' && 0 == strcmp(interpreter_fname, ent->rest))

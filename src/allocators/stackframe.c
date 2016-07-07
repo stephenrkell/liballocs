@@ -328,9 +328,8 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		// is still higher than our object's addr, we must have gone past it
 		if (frame_allocation_base > (unsigned char *) obj)
 		{
-			struct suballocated_chunk_rec *containing_suballoc = NULL;
 			struct insert *heap_info = lookup_object_info(obj, (void**) out_base, 
-				out_size, &containing_suballoc);
+				out_size, NULL);
 			if (heap_info)
 			{
 				/* It looks like this is an alloca chunk, so proceed. */

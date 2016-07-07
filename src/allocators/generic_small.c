@@ -608,7 +608,7 @@ struct insert *lookup_small_alloc(const void *ptr,
 	 * would index* an object starting at ptr. 
 	 * If it has itself been sub-allocated, we recurse (FIXME), 
 	 * and if that fails, stick with the result we have. */
-	unsigned start_bucket_num = memrect_nbucket_of(ptr, container->begin, p_chunk_rec->log_pitch);
+	unsigned start_bucket_num = memrect_nbucket_of((void*) ptr, container->begin, p_chunk_rec->log_pitch);
 	struct insert *p_start_bucket = &p_chunk_rec->metadata_recs[start_bucket_num];
 	struct insert *p_bucket = p_start_bucket;
 	_Bool must_see_continuation = 0; // a bit like seen_object_starting_earlier
@@ -782,7 +782,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		return &__liballocs_err_unindexed_heap_object;
 	}
 	
-	return extract_and_output_alloc_site_and_type(heap_info, out_type, out_site);
+	return extract_and_output_alloc_site_and_type(heap_info, out_type, (void**) out_site);
 }
 
 struct allocator __generic_small_allocator = {

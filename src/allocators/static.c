@@ -49,7 +49,7 @@ void __static_allocator_notify_load(void *handle)
 struct segment_metadata
 {
 	const char *filename;
-	Elf64_Phdr *phdr;
+	const Elf64_Phdr *phdr;
 };
 
 static void free_segment_metadata(void *sm)

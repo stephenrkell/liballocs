@@ -1296,7 +1296,7 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 
 	if (out_size) *out_size = alloc_chunksize - sizeof (struct insert);
 	
-	return extract_and_output_alloc_site_and_type(heap_info, out_type, out_site);
+	return extract_and_output_alloc_site_and_type(heap_info, out_type, (void**) out_site);
 }
 
 struct allocator __generic_malloc_allocator = {

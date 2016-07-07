@@ -415,7 +415,7 @@ void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_
 	do_mmap(mapped_addr, requested_addr, length, prot, flags, filename_for_fd(fd), offset, caller);
 }
 
-static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg);
+static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg);
 void add_missing_mappings_from_proc(void)
 {
 	struct proc_entry entry;
@@ -645,7 +645,7 @@ static _Bool extend_current(struct mapping_sequence *cur, struct proc_entry *ent
 				filename, NULL);
 };
 
-static int add_missing_cb(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg)
+static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg)
 {
 	unsigned long size = ent->second - ent->first;
 	struct mapping_sequence *cur = (struct mapping_sequence *) arg;

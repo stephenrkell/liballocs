@@ -46,28 +46,36 @@ struct proc_entry
 	unsigned inode;
 	char rest[4096];
 };
-typedef int maps_cb_t(struct proc_entry *ent, char *linebuf, size_t bufsz, void *arg);
+typedef int maps_cb_t(struct proc_entry *ent, char *linebuf, void *arg);
+
+static inline int process_one_maps_entry(char *linebuf, struct proc_entry *entry_buf,
+		maps_cb_t *cb, void *arg)
+{
+	#define NUM_FIELDS 11
+	entry_buf->rest[0] = '\0';
+	int fields_read = sscanf(linebuf, 
+		"%lx-%lx %c%c%c%c %8x %2x:%2x %d %4095[\x01-\x09\x0b-\xff]\n",
+		&entry_buf->first, &entry_buf->second, &entry_buf->r, &entry_buf->w, &entry_buf->x, 
+		&entry_buf->p, &entry_buf->offset, &entry_buf->devmaj, &entry_buf->devmin, 
+		&entry_buf->inode, entry_buf->rest);
+
+	assert(fields_read >= (NUM_FIELDS-1)); // we might not get a "rest"
+	#undef NUM_FIELDS
+
+	int ret = cb(entry_buf, linebuf, arg);
+	if (ret) return ret;
+	else return 0;
+}
 
 static inline int for_each_maps_entry(int fd, char *linebuf, size_t bufsz, struct proc_entry *entry_buf, 
 		maps_cb_t *cb, void *arg)
 {
-	#define NUM_FIELDS 11
 	while (get_a_line(linebuf, bufsz, fd) != -1)
 	{
-		entry_buf->rest[0] = '\0';
-		int fields_read = sscanf(linebuf, 
-			"%lx-%lx %c%c%c%c %8x %2x:%2x %d %4095[\x01-\x09\x0b-\xff]\n",
-			&entry_buf->first, &entry_buf->second, &entry_buf->r, &entry_buf->w, &entry_buf->x, 
-			&entry_buf->p, &entry_buf->offset, &entry_buf->devmaj, &entry_buf->devmin, 
-			&entry_buf->inode, entry_buf->rest);
-
-		assert(fields_read >= (NUM_FIELDS-1)); // we might not get a "rest"
-		
-		int ret = cb(entry_buf, linebuf, bufsz, arg);
+		int ret = process_one_maps_entry(linebuf, entry_buf, cb, arg);
 		if (ret) return ret;
 	}
 	return 0;
-	#undef NUM_FIELDS
 	
 	/* Here's how we open-coded it in trap-syscalls's saw_mapping(), 
 	 * before we started using selected C library calls in there.
