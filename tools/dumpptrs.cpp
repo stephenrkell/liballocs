@@ -67,6 +67,15 @@ using boost::match_default;
 using boost::format_all;
 using boost::icl::interval_map;
 
+template<typename _Key, typename _Compare = std::less<_Key>,
+	   typename _Alloc = std::allocator<_Key> >
+bool sanity_check_set(const std::set<_Key, _Compare, _Alloc>& s)
+{
+	unsigned count = 0;
+	for (auto i = s.begin(); i != s.end(); ++i, ++count);
+	return count == s.size();
+}
+
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval);
 
@@ -86,6 +95,12 @@ static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp,
 		<< interval.upper() << std::dec;
 
 	return s_typename.str();
+}
+
+static string ptrs_typename(const pair<string, string>& strs)
+{
+	string s = mangle_typename(strs);
+	return boost::replace_first_copy(s, "__uniqtype_","__ptrs_");
 }
 
 // FIXME: other CPUs/ABIs
@@ -146,7 +161,6 @@ int main(int argc, char **argv)
 	interval_map< Dwarf_Addr, std::set< iterator_df<subprogram_die> > > subprogram_intervals;
 	
 	// now output for the subprograms
-	cout << "/* Begin stack frame types. */" << endl;
 	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
 	{
 		if (i.is_a<subprogram_die>())
@@ -235,7 +249,7 @@ int main(int argc, char **argv)
 	using dwarf::lib::Dwarf_Unsigned;
 	
 	// we can represent save locations that are "in register number X" or "on stack at offset Y"
-	struct local_location : pair< int, Dwarf_Signed >
+	struct store_location : pair< int, Dwarf_Signed >
 	{
 		using pair::pair;
 		const int& regnum() const { return this->first; }
@@ -243,54 +257,50 @@ int main(int argc, char **argv)
 		const Dwarf_Signed& cfa_offset() const { if (this->regnum() == -1) return this->second; else throw No_entry(); }
 		      Dwarf_Signed& cfa_offset()       { if (this->regnum() == -1) return this->second; else throw No_entry(); }
 		
-		local_location(int regnum) : pair(regnum, -1) {}
-		local_location() : pair(-1, -1) {}
+		store_location(int regnum) : pair(regnum, -1) {}
+		store_location() : pair(-1, -1) {}
 	};
 	
-	struct saved_caller_register : pair < int, local_location >
+	struct saved_caller_register : pair < int, store_location >
 	{
-		// NOTE: can save a register in a register, sometimes, so second is local_location
+		// NOTE: can save a register in a register, sometimes, so second is store_location
 		using pair::pair;
 		
 		const int& regnum() const { return this->first; }
 		      int& regnum()       { return this->first; }
-		const local_location& saved_location() const { return this->second; }
-		      local_location& saved_location()       { return this->second; }
+		const store_location& saved_location() const { return this->second; }
+		      store_location& saved_location()       { return this->second; }
 	};
 	
 	struct retained_element
 	{
-		bool is_local;
-		// union
-		// {
-		local_location local_loc;
-		iterator_df<with_dynamic_location_die> local_die;
-		saved_caller_register saved_reg;
-		// }
+		bool is_local; // else is reg
+		store_location loc;
+		iterator_df<with_dynamic_location_die> local_die; // if any
+		int reg; // else -1
 		
+		/* Simple lexicographic ordering -- but we want to make sure that 
+		 * they are sorted by stack offset*/
 		bool operator<(const struct retained_element& arg) const
 		{
-			return 
-				(!is_local && arg.is_local)
-				|| (is_local == arg.is_local
-					&& (is_local ? local_loc < arg.local_loc : saved_reg < arg.saved_reg));
+			return loc < arg.loc
+			|| (loc == arg.loc && is_local && arg.is_local && local_die < arg.local_die)
+			|| (loc == arg.loc && !is_local && !arg.is_local && reg < arg.reg);
 		}
 		bool operator==(const struct retained_element& arg) const
 		{
-			return is_local == arg.is_local
-				&& (is_local ? 
-					(local_loc == arg.local_loc && local_die == arg.local_die)
-					: (saved_reg == arg.saved_reg));
+			return loc == arg.loc
+				&& (is_local ? local_die == arg.local_die : reg == arg.reg);
 		}
 		bool operator!=(const struct retained_element& arg) const { return !(*this == arg); }
 		bool operator<=(const struct retained_element& arg) const { return *this == arg || *this < arg; }
 		bool operator>=(const struct retained_element& arg) const { return !(*this < arg); }
 		bool operator> (const struct retained_element& arg) const { return *this != arg && *this >= arg; }
 		
-		retained_element(const local_location& local_loc,
-			iterator_df<with_dynamic_location_die> i_d) : is_local(true), local_loc(local_loc), local_die(i_d) {}
-		retained_element(const saved_caller_register& saved_reg) : is_local(false), saved_reg(saved_reg)
-		{ assert(saved_reg.regnum() != -1); }
+		retained_element(const store_location& local_loc,
+			iterator_df<with_dynamic_location_die> i_d) : is_local(true), loc(local_loc), local_die(i_d) {}
+		retained_element(const store_location& loc, int reg) : is_local(false), loc(loc), reg(reg)
+		{ assert(reg != -1); }
 	};
 	
 	typedef std::set< pair< iterator_df<with_dynamic_location_die>, encap::loc_expr > > live_set_t;
@@ -366,6 +376,47 @@ int main(int argc, char **argv)
 			if (i->second.size() != 1) cout << " }" << endl;
 		}
 	}
+	
+	cout << "struct ucontext;\n"
+"struct stored_ptrs\n"
+"{\n"
+"	unsigned long low_addr;\n"
+"	unsigned long high_addr;\n"
+"	unsigned nstored;\n"
+"	struct stored\n"
+"	{\n"
+"		enum what_stored_t { LOCAL, CALLER_REG } what;\n"
+"		union\n"
+"		{\n"
+"			struct\n"
+"			{\n"
+"				const char *name;\n"
+"			} local;\n"
+"			struct\n"
+"			{\n"
+"				unsigned num;\n"
+"			} caller_reg;\n"
+"		} what_info;\n"
+"		enum where_stored_t { REG, STACK, NON_MANIFEST } where;\n"
+"		union\n"
+"		{\n"
+"			struct\n"
+"			{\n"
+"				unsigned num;\n"
+"			} reg;\n"
+"			struct\n"
+"			{\n"
+"				signed cfa_offset;\n"
+"			} stack;\n"
+"			struct\n"
+"			{\n"
+"				unsigned long (*compute)(struct ucontext *ctxt);\n"
+"			} non_manifest;\n"
+"			\n"
+"		} where_info;\n"
+"	} stored[];\n"
+"};\n";
+
 	
 	for (auto i_i_subp = subprograms_list.begin(); i_i_subp != subprograms_list.end(); ++i_i_subp)
 	{
@@ -478,7 +529,7 @@ int main(int argc, char **argv)
 				
 				// handle "for all vaddrs" entries
 				boost::icl::discrete_interval<Dwarf_Off> our_interval;
-				auto print_sp_expr = [&our_interval, &root]() {
+				auto print_sp_expr = [&our_interval, &root, elf_machine]() {
 					/* Last question. What's the stack pointer in terms of the 
 					 * CFA? We can answer this question by faking up a location
 					 * list referring to the stack pointer, and asking libdwarfpp
@@ -486,7 +537,7 @@ int main(int argc, char **argv)
 					cerr << "Calculating rewritten-SP loclist..." << endl;
 					auto sp_loclist = encap::rewrite_loclist_in_terms_of_cfa(
 						encap::loclist(dwarf_stack_pointer_expr_for_elf_machine(
-							root.get_frame_section().get_elf_machine(),
+							elf_machine,
 							our_interval.lower(), 
 							our_interval.upper()
 						)),
@@ -641,6 +692,50 @@ int main(int argc, char **argv)
 					continue;
 				}
 				
+#ifndef NDEBUG
+				auto count_intervals = [](const retained_intervals_t& f) -> unsigned {
+					unsigned count = 0;
+					for (auto i = f.begin(); i != f.end(); ++i, ++count);
+					return count;
+				};
+				auto sanity_check_post = [count_intervals](const retained_intervals_t& f, unsigned previous_size) {
+					unsigned count = count_intervals(f);
+					if (count != f.size())
+					{
+						cerr << "Warning: count " << count << " != iterative size " << f.iterative_size() 
+							<< " (previous size: " << previous_size << ")" 
+							<< endl;
+					}
+					assert(count == f.iterative_size());
+					/* Also sanity-check the member sets. */
+					for (auto i = f.begin(); i != f.end(); ++i, ++count)
+					{
+						unsigned set_size = 0;
+						for (auto i_s = i->second.begin(); i_s != i->second.end(); ++i_s, ++set_size)
+						{
+
+						}
+						if (set_size != i->second.size())
+						{
+							cerr << "Warning: set iterative size " << set_size
+								 << " != claimed size() " << i->second.size()
+							<< endl;
+						}
+					}
+				};
+				#define SANITY_CHECK_PRE(f) /* do { unsigned count = count_intervals(f); \
+					cerr << "Adding an interval (width " << (i.upper() - i.lower()) \
+					    << " to a map of size " << f.size() << ", count " << count << endl; */ \
+						do { for (auto i = f.begin(); i != f.end(); ++i) { \
+							assert(sanity_check_set(i->second)); \
+						} } while (0)
+					
+				#define SANITY_CHECK_POST(f) /* sanity_check_post(f, count); } while (0) */
+#else
+				#define SANITY_CHECK_PRE(f) do { 
+				#define SANITY_CHECK_POST(f)  } while (0)
+#endif
+				
 				/* Is the loclist just saying "in register X"? 
 				 * If so, handle this first. */
 				 if (i_el_pair->second.size() == 1
@@ -656,9 +751,12 @@ int main(int argc, char **argv)
 						<< endl;
 					set< retained_element > singleton_set;
 					singleton_set.insert(retained_element(
-						(const local_location&) make_pair(num, 0), *i_el
+						(const store_location&) make_pair(num, 0), *i_el
 					));
+					unsigned previous_size = frame_intervals.size();
+					SANITY_CHECK_PRE(frame_intervals);
 					frame_intervals += make_pair(i_int->first, singleton_set);
+					SANITY_CHECK_POST(frame_intervals);
 					continue;
 				}
 				else
@@ -715,7 +813,10 @@ int main(int argc, char **argv)
 					//by_frame_off[frame_offset] = *i_el;
 					set< retained_element > singleton_set;
 					singleton_set.insert(retained_element(make_pair(-1, frame_offset), *i_el));
+					unsigned previous_size = frame_intervals.size();
+					SANITY_CHECK_PRE(frame_intervals);
 					frame_intervals += make_pair(i_int->first, singleton_set);
+					SANITY_CHECK_POST(frame_intervals);
 				}
 				else
 				{
@@ -812,10 +913,14 @@ int main(int argc, char **argv)
 							break;
 
 						case FrameSection::register_def::REGISTER: {
-							// register is saved in a register
+							// register "col" is saved in register "regnum"
 							int regnum = found_col->second.register_plus_offset_r().first;
 							std::set< retained_element > singleton_set;
-							singleton_set.insert(saved_caller_register(col, local_location(regnum)));
+							//singleton_set.insert(retained_element(col, store_location(regnum)));
+							singleton_set.insert(retained_element(
+								(const store_location&) make_pair(regnum, 0), col
+							));
+							SANITY_CHECK_PRE(frame_intervals);
 							frame_intervals += make_pair(
 								boost::icl::interval<Dwarf_Addr>::right_open(
 									fde_lopc,
@@ -823,12 +928,17 @@ int main(int argc, char **argv)
 								),
 								singleton_set
 							);
+							SANITY_CHECK_POST(frame_intervals);
 						} break;
 
 						case FrameSection::register_def::SAVED_AT_OFFSET_FROM_CFA: {
 							int saved_offset = found_col->second.saved_at_offset_from_cfa_r();
 							std::set< retained_element > singleton_set;
-							singleton_set.insert(saved_caller_register(col, make_pair(-1, saved_offset)));
+							//singleton_set.insert(saved_caller_register(col, make_pair(-1, saved_offset)));
+							singleton_set.insert(retained_element(
+								(const store_location&) make_pair(-1, saved_offset), col
+							));
+							SANITY_CHECK_PRE(frame_intervals);
 							frame_intervals += make_pair(
 								boost::icl::interval<Dwarf_Addr>::right_open(
 									fde_lopc,
@@ -836,6 +946,7 @@ int main(int argc, char **argv)
 								),
 								singleton_set
 							);
+							SANITY_CHECK_POST(frame_intervals);
 						} break;
 						case FrameSection::register_def::SAVED_AT_EXPR:
 							// we can't represent this. :-(
@@ -869,7 +980,7 @@ int main(int argc, char **argv)
 			++i_frame_int)
 		{
 			/* Output in offset order, CHECKing that there is no overlap (sanity). */
-			cout << "\n/* uniqtype for stack frame ";
+			cout << "\n/* for stack frame ";
 			string unmangled_typename = typename_for_vaddr_interval(i_subp, i_frame_int->first);
 			
 			string cu_name = *i_subp.enclosing_cu().name_here();
@@ -878,68 +989,108 @@ int main(int argc, char **argv)
 				 << " defined in " << cu_name << ", "
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 				 
-			cout << "struct uniqtype " << mangle_typename(make_pair(cu_name, unmangled_typename))
+			cout << "struct stored_ptrs " << ptrs_typename(make_pair(cu_name, unmangled_typename))
 				<< " = {\n\t" 
-				<< "{ 0, 0, 0 },\n\t"
-				<< "\"" << unmangled_typename << "\",\n\t"
-				<< 0 << " /* pos_maxoff */,\n\t"
-				<< 0 << " /* neg_maxoff */,\n\t"
-				<< i_frame_int->second.size() << " /* nmemb */,\n\t"
-				<< "0 /* is_array */,\n\t"
-				<< "0 /* array_len */,\n\t"
-				<< /* contained[0] */ "/* contained */ {\n\t\t";
-			long elf_machine = root.get_frame_section().get_elf_machine();
+				<< "0x" << std::hex << i_frame_int->first.lower() 
+				<< ", 0x" << i_frame_int->first.upper() << std::dec << ",\n\t"
+				<< i_frame_int->second.size() << " /* nstored */,\n\t"
+				<< /* contained[] */ "/* stored */ {\n\t\t";
+			unsigned set_iterative_size = 0;
+			for (auto i_by_off = i_frame_int->second.begin(); // dummy to keep in scope for debugging
+				i_by_off != i_frame_int->second.end(); ++i_by_off, ++set_iterative_size);
+			auto set_copy = i_frame_int->second;
+			cerr << "Frame retained element set has " << set_iterative_size << " items, size " 
+				<< i_frame_int->second.size() << endl;
+			unsigned copy_iterative_size = 0;
+			for (auto i_by_off = set_copy.begin(); // dummy to keep in scope for debugging
+				i_by_off != set_copy.end(); ++i_by_off, ++copy_iterative_size);
+			cerr << "Copy of it has " << copy_iterative_size << " items, size " 
+				<< set_copy.size() << endl;
 			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
 			{
 				if (i_by_off != i_frame_int->second.begin()) cout << ",\n\t\t";
 				/* begin the struct */
-				cout << "{ ";
+				cout << "{\n\t\t\t.what = ";
+				/*
+					{
+						.what = CALLER_REG,
+						.what_info = { caller_reg: { 0 /* rbx * / } },
+						.where = STACK,
+						.where_info = { stack: { -56 } }
+					},
+				*/
+				// what
 				if (i_by_off->is_local)
 				{
-					string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->local_die->find_type()));
-					if (i_by_off->local_loc.regnum() == -1)
-					{
-						cout << i_by_off->local_loc.cfa_offset();
-					}
-					else
-					{
-						cout << "\"" << "register "
-							<< dwarf_regnames_for_elf_machine(elf_machine)[i_by_off->local_loc.regnum()] << "\"";
-					}
-					cout << ", "
-						 << "&" << mangled_name
-						 << "}"
-						 << " /* ";
-					if (i_by_off->local_die.name_here()) cout << *i_by_off->local_die.name_here();
-					else cout << "(anonymous)"; 
-					cout << " -- " << i_by_off->local_die.spec_here().tag_lookup(
-							i_by_off->local_die.tag_here())
-						<< " @" << std::hex << i_by_off->local_die.offset_here() << std::dec;
-					cout << " */ ";
+					cout << "LOCAL,\n\t\t\t";
+					cout << ".what_info = { local: { \"" 
+						<< (i_by_off->local_die.name_here() 
+							? *i_by_off->local_die.name_here() : "(anonymous)")
+						<< "\" } },\n\t\t\t";
 				}
-				else // saved register
+				else
 				{
-					assert(i_by_off->saved_reg.regnum() != -1);
-					if (i_by_off->saved_reg.saved_location().regnum() == -1)
-					{
-						cout << i_by_off->saved_reg.saved_location().cfa_offset();
-					}
-					else
-					{
-						cout << "\"" << "register "
-							<< dwarf_regnames_for_elf_machine(elf_machine)[
-								i_by_off->saved_reg.saved_location().regnum()]
-							<< "\"";
-					}
-					cout << ", ";
-					cout << "(void*)0 /* saved caller reg -- word-sized but no fixed type */ "
-						 << "}"
-						 << " /* ";
-					cout << "caller's saved " 
-						<< dwarf_regnames_for_elf_machine(elf_machine)[i_by_off->saved_reg.regnum()]
-						<< ")";
-					cout << " */ ";
+					cout << "CALLER_REG,\n\t\t\t";
+					cout << ".what_info = { caller_reg: { " 
+						<< i_by_off->reg << " /* register " 
+						<< dwarf_regnames_for_elf_machine(elf_machine)[i_by_off->reg]
+						<< " */ } },\n\t\t\t";
 				}
+				
+				if (i_by_off->loc.regnum() == -1)
+				{
+					cout << ".where = STACK,\n\t\t\t"
+						 << ".where_info = { stack: { " << i_by_off->loc.cfa_offset() 
+						 << " } }\n\t\t}";
+				}
+				else
+				{
+					cout << ".where = REG,\n\t\t\t"
+						 << ".where_info = { reg: { " << i_by_off->loc.regnum() 
+						 << " /* register " 
+						 << dwarf_regnames_for_elf_machine(elf_machine)[i_by_off->loc.regnum()]
+						 << " */ } }\n\t\t}";
+				}
+// 					string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->local_die->find_type()));
+// 					else
+// 					{
+// 						cout << "\"" << "register "
+// 							<< dwarf_regnames_for_elf_machine(elf_machine)[i_by_off->loc.regnum()] << "\"";
+// 					}
+// 					cout << ", "
+// 						 << "&" << mangled_name
+// 						 << "}"
+// 						 << " /* ";
+// 					if (i_by_off->local_die.name_here()) cout << *i_by_off->local_die.name_here();
+// 					else cout << "(anonymous)"; 
+// 					cout << " -- " << i_by_off->local_die.spec_here().tag_lookup(
+// 							i_by_off->local_die.tag_here())
+// 						<< " @" << std::hex << i_by_off->local_die.offset_here() << std::dec;
+// 					cout << " */ ";
+// 				}
+// 				else // saved register
+// 				{
+// 					assert(i_by_off->saved_reg.regnum() != -1);
+// 					if (i_by_off->saved_reg.saved_location().regnum() == -1)
+// 					{
+// 						cout << i_by_off->saved_reg.saved_location().cfa_offset();
+// 					}
+// 					else
+// 					{
+// 						cout << "\"" << "register "
+// 							<< dwarf_regnames_for_elf_machine(elf_machine)[
+// 								i_by_off->saved_reg.saved_location().regnum()]
+// 							<< "\"";
+// 					}
+// 					cout << ", ";
+// 					cout << "(void*)0 /* saved caller reg -- word-sized but no fixed type */ "
+// 						 << "}"
+// 						 << " /* ";
+// 					cout << "caller's saved " 
+// 						<< dwarf_regnames_for_elf_machine(elf_machine)[i_by_off->saved_reg.regnum()]
+// 						<< ")";
+// 					cout << " */ ";
+//				}
 			}
 			cout << "\n\t}";
 			cout << "\n};\n";
