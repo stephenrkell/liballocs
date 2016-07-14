@@ -63,6 +63,7 @@ clean::
 
 CONFIG_MK += \\nANTLR3C_DIR := $(realpath $(CONTRIB_ROOT)/libantlr3c-3.4)\\n
 CONFIG_MK += \\nCXXFLAGS += -I\$$(ANTLR3C_DIR)/include -I\$$(ANTLR3C_DIR)/\\n
+CONFIG_MK += \\nLDFLAGS += -L\$$(ANTLR3C_DIR)/.libs -Wl,-rpath,\$$(ANTLR3C_DIR)/.libs\\n
 
 # ----------------------------other libs that are autotools'd
 # ----------------------------libc++fileno
