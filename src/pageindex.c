@@ -122,15 +122,21 @@ static void (__attribute__((constructor(101))) init)(void)
 #define CHAR_TO_PRINT(ord) ( ((pid/(ord)) % 10) ? \
         (seen_nonzero |= 1, '0' + ((pid/(ord)) % 10)) : \
 		(seen_nonzero ? '0' : ' '))
-		a = CHAR_TO_PRINT(10000); raw_write(2, &a, 1);
-		a = CHAR_TO_PRINT(1000); raw_write(2, &a, 1);
-		a = CHAR_TO_PRINT(100); raw_write(2, &a, 1);
-		a = CHAR_TO_PRINT(10); raw_write(2, &a, 1);
+		a = CHAR_TO_PRINT(10000); if (a != ' ') raw_write(2, &a, 1);
+		a = CHAR_TO_PRINT(1000); if (a != ' ') raw_write(2, &a, 1);
+		a = CHAR_TO_PRINT(100); if (a != ' ') raw_write(2, &a, 1);
+		a = CHAR_TO_PRINT(10); if (a != ' ') raw_write(2, &a, 1);
 		a = CHAR_TO_PRINT(1); raw_write(2, &a, 1);
 		raw_write(2, "\n", 1);
 #undef CHAR_TO_PRINT
 		/* Mmap our region. We map one 16-bit number for every page in the user address region. */
-		pageindex = MEMTABLE_NEW_WITH_TYPE(bigalloc_num_t, PAGE_SIZE, (void*) 0, (void*) (MAXIMUM_USER_ADDRESS + 1));
+		/* HACK: always place at 0x410000000000, to avoid problems with shadow space.
+		 * The generic malloc index goes at 0x400000000000 
+		 *          and is 2 ** 38 bytes or   0x4000000000 in size
+		 *          but we don't want to assume too much about its size.
+		 */
+		pageindex = MEMTABLE_NEW_WITH_TYPE_AT_ADDR(bigalloc_num_t, PAGE_SIZE, (void*) 0,
+			(void*) (MAXIMUM_USER_ADDRESS + 1), (const void *) 0x410000000000ul);
 		if (pageindex == MAP_FAILED) abort();
 		debug_printf(3, "pageindex at %p\n", pageindex);
 	}

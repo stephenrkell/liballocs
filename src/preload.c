@@ -151,7 +151,7 @@ _Bool
 is_self_call(const void *caller)
 {
 	static char *our_load_addr;
-	if (!our_load_addr) our_load_addr = (char*) get_highest_loaded_object_below(&is_self_call)->l_addr;
+	if (!our_load_addr) our_load_addr = (char*) get_highest_loaded_object_below(is_self_call)->l_addr;
 	if (!our_load_addr) abort(); /* we're supposed to be preloaded, not executable */
 	static char *text_segment_end;
 	if (!text_segment_end) text_segment_end = get_local_text_segment_end();
