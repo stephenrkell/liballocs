@@ -287,21 +287,22 @@ elf64_hash(const unsigned char *name)
 static inline 
 struct R_DEBUG_STRUCT_TAG *find_r_debug(void)
 {
-	/* If we have DT_DEBUG in our _DYNAMIC, try that. */
-	ElfW(Dyn) *found = &_DYNAMIC ? dynamic_lookup(_DYNAMIC, DT_DEBUG) : NULL;
-	if (found) return (struct R_DEBUG_STRUCT_TAG *) found->d_un.d_ptr;
-	else
-	{
-		/* HMM. We need to get the _DYNAMIC section from another object, 
-		 * like ld.so or the executable. Can we do this portably? I don't think so. */
-		
-		/* Fall back to the _r_debug "convention" */
-		if (NULL != &_r_debug)
-		{
-			return &_r_debug;
-		}
-		__assert_fail("found r_debug", __FILE__, __LINE__, __func__);
-	}
+// 	/* If we have DT_DEBUG in our _DYNAMIC, try that. */
+// 	ElfW(Dyn) *found = &_DYNAMIC ? dynamic_lookup(_DYNAMIC, DT_DEBUG) : NULL;
+// 	if (found) return (struct R_DEBUG_STRUCT_TAG *) found->d_un.d_ptr;
+// 	else
+// 	{
+// 		/* HMM. We need to get the _DYNAMIC section from another object, 
+// 		 * like ld.so or the executable. Can we do this portably? I don't think so. */
+// 		
+// 		/* Fall back to the _r_debug "convention" */
+// 		if (NULL != &_r_debug)
+// 		{
+// 			return &_r_debug;
+// 		}
+// 		__assert_fail("found r_debug", __FILE__, __LINE__, __func__);
+// 	}
+	return &_r_debug;
 }
 static inline
 struct LINK_MAP_STRUCT_TAG*
@@ -309,17 +310,17 @@ get_highest_loaded_object_below(void *ptr)
 {
 	/* Walk all the loaded objects' load addresses. 
 	 * The load address we want is the next-lower one. */
-	struct LINK_MAP_STRUCT_TAG *highest_seen = NULL;
+	struct LINK_MAP_STRUCT_TAG *highest_lower_seen = NULL;
 	for (struct LINK_MAP_STRUCT_TAG *l = find_r_debug()->r_map; l; l = l->l_next)
 	{
-		if (!highest_seen || 
-				((char*) l->l_addr > (char*) highest_seen->l_addr
-					&& (char*) l->l_addr <= (char*) ptr))
+		if ((char*) l->l_addr <= (char*) ptr
+			&& (!highest_lower_seen || 
+				(char*) l->l_addr > (char*) highest_lower_seen->l_addr))
 		{
-			highest_seen = l;
+			highest_lower_seen = l;
 		}
 	}
-	return highest_seen;
+	return highest_lower_seen;
 }
 static inline
 struct LINK_MAP_STRUCT_TAG *
