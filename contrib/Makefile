@@ -47,7 +47,6 @@ libantlr3c-3.4/configure: antlr-3.4.tar.gz
 antlr-3.4-complete.jar: antlr-3.4.tar.gz
 	tar --strip-components=2 --keep-newer-files -xvzf "$(CONTRIB_ROOT)/$<" antlr-3.4/lib/antlr-3.4-complete.jar
 
-.PHONY: build-antlr
 libantlr3c-3.4/Makefile: libantlr3c-3.4/configure
 	cd libantlr3c-3.4 && ./configure --enable-64bit
 
