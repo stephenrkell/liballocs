@@ -114,7 +114,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 				*m = (struct segment_metadata) {
 					/* We strdup once per segment, even though the filename could be 
 					 * shared, in order to simplify the cleanup logic. */
-					.filename = private_strdup(dynobj_name),
+					.filename = __liballocs_private_strdup(dynobj_name),
 					.phdr = &info->dlpi_phdr[i]
 				};
 				// write_string("Blah9005\n");

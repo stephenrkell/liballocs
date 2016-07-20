@@ -305,7 +305,7 @@ void *dlopen(const char *filename, int flag)
 			/* The file does not exist. */
 			goto skip_load;
 		}
-		const char *file_realname = private_strdup(file_realname_raw);
+		const char *file_realname = __liballocs_private_strdup(file_realname_raw);
 		// write_string("Blah3004.6\n");
 		for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
 		{

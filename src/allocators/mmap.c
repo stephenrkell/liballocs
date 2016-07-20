@@ -590,7 +590,7 @@ static _Bool extend_sequence(struct mapping_sequence *cur,
 	{
 		if (!cur->begin) cur->begin = begin;
 		cur->end = end;
-		if (!cur->filename) cur->filename = filename ? private_strdup(filename) : NULL;
+		if (!cur->filename) cur->filename = filename ? __liballocs_private_strdup(filename) : NULL;
 		cur->mappings[cur->nused] = (struct mapping_entry) {
 			.begin = begin,
 			.end = end,

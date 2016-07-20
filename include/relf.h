@@ -465,7 +465,7 @@ ElfW(Sym) *symbol_lookup_linear_local(const char *sym)
 }
 
 static inline
-unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn)
+unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn, struct LINK_MAP_STRUCT_TAG *l)
 {
 	unsigned long nsyms = 0;
 	ElfW(Dyn) *dynstr_ent = NULL;
@@ -482,7 +482,7 @@ unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn)
 		/* Got the SysV-style hash table. */
 		hash = (ElfW(Word) *) hash_ent->d_un.d_ptr;
 		if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
-		if ((char*) hash < (char*) get_highest_loaded_object_below(dyn)->l_addr) return 0; // HACK: x86-64 vdso workaround
+		if ((char*) hash < (char*) l->l_addr) return 0; // HACK: x86-64 vdso workaround
 		nsyms = hash[1]; /* nchain, which equals the number of symbols */
 	}
 	else if (NULL != (hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_GNU_HASH)))
@@ -514,7 +514,7 @@ ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sy
 	if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab = (ElfW(Sym) *) dynamic_xlookup(l->l_ld, DT_SYMTAB)->d_un.d_ptr;
 	if ((intptr_t) symtab < 0) return 0; // HACK: x86-64 vdso workaround
-	ElfW(Sym) *symtab_end = symtab + dynamic_symbol_count(l->l_ld);
+	ElfW(Sym) *symtab_end = symtab + dynamic_symbol_count(l->l_ld, l);
 	const char *strtab = (const char *) dynamic_xlookup(l->l_ld, DT_STRTAB)->d_un.d_ptr;
 	if ((intptr_t) strtab < 0) return 0; // HACK: x86-64 vdso workaround
 	const char *strtab_end = strtab + dynamic_xlookup(l->l_ld, DT_STRSZ)->d_un.d_val;

@@ -67,7 +67,7 @@ void mmap_replacement(struct generic_syscall *s, post_handler *post)
 	
 	/* Nudge them. */
 	if (&__liballocs_nudge_mmap)
-	{	
+	{
 		__liballocs_nudge_mmap(&addr, &length, &prot, &flags, 
 			&fd, &offset, s->saved_context->pretcode);
 	}
@@ -134,7 +134,7 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	{
 		__mmap_allocator_notify_mremap_before(old_addr, old_length, new_length, flags, 
 			maybe_new_address, GUESS_CALLER(s->saved_context->uc.uc_mcontext));
-	}	
+	}
 	
 	/* Do the call. */
 	long int ret = do_syscall5(s);
@@ -249,6 +249,8 @@ void __liballocs_systrap_init(void)
 	 * We don't! Instead, look for anything called "mmap" in any *other* object
 	 * than ourselves (... HACK/workaround: that doesn't have a weird address
 	 * or absent name -- these are vdso or other abominations). */
+	_Bool found_an_mmap = 0;
+	_Bool found_a_brk_or_sbrk = 0;
 	for (struct link_map *l = find_r_debug()->r_map; l; l = l->l_next)
 	{
 		if ((const void *) l->l_ld != &_DYNAMIC && (intptr_t) l->l_addr > 0
@@ -258,21 +260,20 @@ void __liballocs_systrap_init(void)
 			if (!dynsym_ent) continue;
 			ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
 			if ((intptr_t) dynsym < 0) continue; /* HACK x86-64 vdso bug */
-			if ((char*) dynsym < (char*) get_highest_loaded_object_below(l->l_ld)->l_addr) continue; /* HACK x86-64 vdso bug */
+			if ((char*) dynsym < (char*) get_highest_loaded_object_below((void*) l->l_addr)->l_addr) continue; /* HACK x86-64 vdso bug */
 			/* nasty hack for getting the end of dynsym */
 			ElfW(Dyn) *dynstr_ent = dynamic_lookup(l->l_ld, DT_STRTAB);
 			if (!dynstr_ent) continue;
 			char *dynstr = (char *) dynstr_ent->d_un.d_ptr;
 			if ((intptr_t) dynstr < 0) continue; /* HACK x86-64 vdso bug */
-			if ((char*) dynstr < (char*) get_highest_loaded_object_below(l->l_ld)->l_addr) continue; /* HACK x86-64 vdso bug */
+			if ((char*) dynstr < (char*) get_highest_loaded_object_below((void*) l->l_addr)->l_addr) continue; /* HACK x86-64 vdso bug */
 			assert((char *) dynstr > (char *) dynsym);
 			ElfW(Dyn) *dynstrsz_ent = dynamic_lookup(l->l_ld, DT_STRSZ);
 			if (!dynstrsz_ent) continue;
 			unsigned long dynstrsz = dynstrsz_ent->d_un.d_val;
-			ElfW(Sym) *dynsym_end = dynsym + dynamic_symbol_count(l->l_ld);
+			ElfW(Sym) *dynsym_end = dynsym + dynamic_symbol_count(l->l_ld, l);
 
 			/* Now we can look up symbols. */
-			int found_one = 
 #define TRAP_SYSCALLS_IN_SYMBOL_NAMED(n) do { \
 			ElfW(Sym) *found_ ## n = symbol_lookup_linear(dynsym, dynsym_end, dynstr, \
 				dynstr + dynstrsz, #n); \
@@ -284,16 +285,18 @@ void __liballocs_systrap_init(void)
 			} \
 			} while (0)
 			
-			trap_syscalls_in_symbol_named("mmap",   l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-			trap_syscalls_in_symbol_named("mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			found_an_mmap |= trap_syscalls_in_symbol_named("mmap",   l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			found_an_mmap |= trap_syscalls_in_symbol_named("mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 			trap_syscalls_in_symbol_named("munmap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 			trap_syscalls_in_symbol_named("mremap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 			_Bool found_sbrk = trap_syscalls_in_symbol_named("sbrk", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+
 			// we want to trap syscalls in "__brk"; // glibc HACK!
 			// but "__brk" in glibc isn't an exportd symbol.
 			// instead, we need to walk its allocations
 			if (found_sbrk) // glibc HACK!
 			{
+				found_a_brk_or_sbrk = 1;
 				if (&__lookup_static_allocation_by_name)
 				{
 					/* We want to trap syscalls in "__brk" but "__brk" in glibc 
@@ -311,6 +314,12 @@ void __liballocs_systrap_init(void)
 			}
 		}
 	}
+
+	/* There's no hope of us working if we didn't find these. ACTUALLY don't abort
+	 * though, because aborting during startup stops gdb from taking control. */
+	// if (!found_an_mmap) abort();
+	// if (!found_a_brk_or_sbrk) abort();
+
 	install_sigill_handler();
 	__liballocs_systrap_is_initialized = 1;
 }

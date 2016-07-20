@@ -124,7 +124,8 @@ extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 /* We're allowed to malloc, thanks to __private_malloc(), but we 
  * we shouldn't call strdup because libc will do the malloc. */
-char *private_strdup(const char *s);
+char *__liballocs_private_strdup(const char *s) __attribute__((visibility("hidden")));
+char *__liballocs_private_strndup(const char *s, size_t n) __attribute__((visibility("hidden")));
 
 /* Our handling of mmap is in two phases: before systrapping enabled,
  * and after. */

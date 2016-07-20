@@ -258,7 +258,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 		return 0;
 	}
 	// get the symtab size
-	unsigned long nsyms = dynamic_symbol_count(h->l_ld);
+	unsigned long nsyms = dynamic_symbol_count(h->l_ld, h);
 	ElfW(Dyn) *dynstr_ent = dynamic_lookup(h->l_ld, DT_STRTAB);
 	assert(dynstr_ent);
 	char *dynstr = (char*) dynstr_ent->d_un.d_ptr;
@@ -351,7 +351,9 @@ void __liballocs_main_init(void) __attribute__((constructor(101),visibility("pro
 void __liballocs_main_init(void)
 {
 	assert(!done_init);
-	
+
+	/* This is a dummy: we choose not to initialise anything at this point, for now. */
+
 	done_init = 1;
 }
 
@@ -903,7 +905,7 @@ void *biggest_vaddr_in_obj(void *handle)
 
 /* We're allowed to malloc, thanks to __private_malloc(), but we 
  * we shouldn't call strdup because libc will do the malloc. */
-char *private_strdup(const char *s)
+char *__liballocs_private_strdup(const char *s)
 {
 	size_t len = strlen(s);
 	char *mem = malloc(len + 1);
@@ -911,10 +913,18 @@ char *private_strdup(const char *s)
 	mem[len] = '\0';
 	return mem;
 }
+char *__liballocs_private_strndup(const char *s, size_t n)
+{
+	size_t maxlen = strlen(s);
+	size_t len = (n > maxlen) ? maxlen : n;
+	char *mem = malloc(len + 1);
+	strncpy(mem, s, len);
+	mem[len] = '\0';
+	return mem;
+}
 
-/* This is *not* a constructor. We don't want to be called too early,
- * because it might not be safe to open the -uniqtypes.so handle yet.
- * So, initialize on demand. */
+/* We want to be called early, but not too early, ecause it might not be safe 
+ * to open the -uniqtypes.so handle yet. */
 int __liballocs_global_init(void) __attribute__((constructor(103),visibility("protected")));
 int __liballocs_global_init(void)
 {
