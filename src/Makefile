@@ -136,7 +136,7 @@ PRELOAD_OBJS := preload.o
 # HOOKS_*_OBJS are defined at the top
 
 # build src backwards 
-C_SRC := $(sort $(patsubst %.o,%.c,$(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(HOOKS_PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) liballocs_nomemtable.o))
+C_SRC := $(sort $(patsubst %.o,%.c,$(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(HOOKS_PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) liballocs_nomemtable.o systrap.o))
 dep_fname = $(dir $1)$(patsubst %.c,.%.d,$(notdir $1))
 C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
 # patsubst %.c,$(dir %.c).$(patsubst %.c,%.d$(notdir %.c).d,$(C_SRC))
