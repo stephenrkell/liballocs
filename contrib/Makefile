@@ -60,9 +60,9 @@ clean::
 	rm -f antlr-3.4.tar.gz
 	rm -rf libantlr3c-3.4
 
-CONFIG_MK += \\nANTLR3C_DIR := $(realpath $(CONTRIB_ROOT)/libantlr3c-3.4)\\n
-CONFIG_MK += \\nCXXFLAGS += -I\$$(ANTLR3C_DIR)/include -I\$$(ANTLR3C_DIR)/\\n
-CONFIG_MK += \\nLDFLAGS += -L\$$(ANTLR3C_DIR)/.libs -Wl,-rpath,\$$(ANTLR3C_DIR)/.libs\\n
+CONFIG_MK += \nANTLR3C_DIR := $(realpath $(CONTRIB_ROOT)/libantlr3c-3.4)\n
+CONFIG_MK += \nCXXFLAGS += -I\$$(ANTLR3C_DIR)/include -I\$$(ANTLR3C_DIR)/\n
+CONFIG_MK += \nLDFLAGS += -L\$$(ANTLR3C_DIR)/.libs -Wl,-rpath,\$$(ANTLR3C_DIR)/.libs\n
 
 # ----------------------------other libs that are autotools'd
 # ----------------------------libc++fileno
@@ -81,8 +81,8 @@ libc++fileno/config.status:
 clean::
 	$(MAKE) -C libc++fileno clean
 
-CONFIG_MK += \\nLIBCXXFILENO_CXXFLAGS += -I$(CONTRIB_ROOT)/libc++fileno/include\\n
-CONFIG_MK += \\nLIBCXXFILENO_LIBS += -L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib -lc++fileno\\n
+CONFIG_MK += \nLIBCXXFILENO_CXXFLAGS += -I$(CONTRIB_ROOT)/libc++fileno/include\n
+CONFIG_MK += \nLIBCXXFILENO_LIBS += -L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib -lc++fileno\n
 
 # ----------------------------libsrk31c++
 
@@ -99,8 +99,8 @@ libsrk31c++/config.status:
 clean::
 	$(MAKE) -C libsrk31c++ clean
 
-CONFIG_MK += \\nLIBSRK31CXX_CXXFLAGS += -I$(CONTRIB_ROOT)/libsrk31c++/include\\n
-CONFIG_MK += \\nLIBSRK31CXX_LIBS += -L$(CONTRIB_ROOT)/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib -lsrk31c++\\n
+CONFIG_MK += \nLIBSRK31CXX_CXXFLAGS += -I$(CONTRIB_ROOT)/libsrk31c++/include\n
+CONFIG_MK += \nLIBSRK31CXX_LIBS += -L$(CONTRIB_ROOT)/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib -lsrk31c++\n
 
 # ----------------------------libdwarfpp
 
@@ -119,8 +119,8 @@ build-libdwarfpp: libdwarfpp/config.status build-libc++fileno build-libsrk31c++
 clean::
 	$(MAKE) -C libdwarfpp clean
 
-CONFIG_MK += \\nLIBDWARFPP_CXXFLAGS += -I$(CONTRIB_ROOT)/libdwarfpp/include\\n
-CONFIG_MK += \\nLIBDWARFPP_LIBS += -L$(CONTRIB_ROOT)/libdwarfpp/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib -ldwarfpp\\n
+CONFIG_MK += \nLIBDWARFPP_CXXFLAGS += -I$(CONTRIB_ROOT)/libdwarfpp/include\n
+CONFIG_MK += \nLIBDWARFPP_LIBS += -L$(CONTRIB_ROOT)/libdwarfpp/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib -ldwarfpp\n
 
 # ----------------------------libcxxgen
 
@@ -146,8 +146,8 @@ build-libcxxgen: libcxxgen/config.status build-libdwarfpp build-libsrk31c++ buil
 clean::
 	$(MAKE) -C libcxxgen clean
 
-CONFIG_MK += \\nLIBCXXGEN_CXXFLAGS += -I$(CONTRIB_ROOT)/libcxxgen/include\\n
-CONFIG_MK += \\nLIBCXXGEN_LIBS += -L$(CONTRIB_ROOT)/libcxxgen/lib -Wl,-rpath,$(CONTRIB_ROOT)/libcxxgen/lib -lcxxgen\\n
+CONFIG_MK += \nLIBCXXGEN_CXXFLAGS += -I$(CONTRIB_ROOT)/libcxxgen/include\n
+CONFIG_MK += \nLIBCXXGEN_LIBS += -L$(CONTRIB_ROOT)/libcxxgen/lib -Wl,-rpath,$(CONTRIB_ROOT)/libcxxgen/lib -lcxxgen\n
 
 # ----------------------------libantlr3cxx
 
@@ -162,8 +162,8 @@ build-libantlr3c++: libantlr3c++/config.status
 clean::
 	$(MAKE) -C libantlr3c++ clean
 
-CONFIG_MK += \\nLIBANTLR3CXX_CXXFLAGS += -I$(CONTRIB_ROOT)/libantlr3c++/include\\n
-CONFIG_MK += \\nLIBANTLR3CXX_LIBS += -L$(CONTRIB_ROOT)/libantlr3c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libantlr3c++/lib\\n
+CONFIG_MK += \nLIBANTLR3CXX_CXXFLAGS += -I$(CONTRIB_ROOT)/libantlr3c++/include\n
+CONFIG_MK += \nLIBANTLR3CXX_LIBS += -L$(CONTRIB_ROOT)/libantlr3c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libantlr3c++/lib\n
 
 # ----------------------------dwarfidl
 
@@ -195,8 +195,8 @@ build-dwarfidl: dwarfidl/config.status build-libdwarfpp build-libcxxgen build-li
 clean::
 	$(MAKE) -C dwarfidl clean
 
-CONFIG_MK += \\nDWARFIDL_CXXFLAGS += -I$(CONTRIB_ROOT)/dwarfidl/include\\n
-CONFIG_MK += \\nDWARFIDL_LIBS += -L$(CONTRIB_ROOT)/dwarfidl/lib -Wl,-rpath,$(CONTRIB_ROOT)/dwarfidl/lib -ldwarfidl\\n
+CONFIG_MK += \nDWARFIDL_CXXFLAGS += -I$(CONTRIB_ROOT)/dwarfidl/include\n
+CONFIG_MK += \nDWARFIDL_LIBS += -L$(CONTRIB_ROOT)/dwarfidl/lib -Wl,-rpath,$(CONTRIB_ROOT)/dwarfidl/lib -ldwarfidl\n
 
 # ----------------------------trap-syscalls
 
@@ -207,11 +207,11 @@ trap-syscalls/contrib/config.mk:
 trap-syscalls/libsystrap/libsystrap.a: trap-syscalls/contrib/config.mk
 	CFLAGS=-I$(CONTRIB_ROOT)/../include $(MAKE) -C trap-syscalls/libsystrap
 
-CONFIG_MK += \\nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls\\n
+CONFIG_MK += \nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls\n
 
 # ----------------------------malloc-hooks
 
-CONFIG_MK += \\nMALLOC_HOOKS := $(CONTRIB_ROOT)/libmallochooks\\n
+CONFIG_MK += \nMALLOC_HOOKS := $(CONTRIB_ROOT)/libmallochooks\n
 
 # ----------------------------config.mk
 
@@ -224,10 +224,10 @@ LIBDWARFPP_CXXFLAGS LIBDWARFPP_LIBS \
 LIBCXXFILENO_CXXFLAGS LIBCXXFILENO_LIBS \
 LIBSRK31CXX_CXXFLAGS LIBSRK31CXX_LIBS
 
-CONFIG_MK += \\n\\nenv.sh:\\n\\tprintf "'"$(foreach var,$(varlist),export $(var)=\"$$($(var))\"; )"'" >\"\$$@\" || (rm -f \"\$$@\"; false)
+CONFIG_MK += \n\nenv.sh:\n\tprintf '"'"'$(foreach var,$(varlist),export $(var)="$$($(var))"; )'"'"' >"$$@" || (rm -f "$$@"; false)
 
 config.mk:
-	printf "$(CONFIG_MK)" > "$@" || (rm -f "$@"; false)
+	printf '$(CONFIG_MK)' > "$@" || (rm -f "$@"; false)
 
 env.sh: config.mk
 	$(MAKE) -f "$<" "$@"
