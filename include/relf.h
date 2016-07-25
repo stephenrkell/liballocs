@@ -20,8 +20,6 @@ ELF introspection routines.
 
 Some properties:
 
-- ElfW macro
-
 - do not use libdl/ldso calls likely to do allocation or syscalls (dlopen, dlsym)
 - hence safe to use from a no-syscalls-please context (e.g. syscall emulator, allocator instrumentation)
 
@@ -391,9 +389,131 @@ ElfW(Sym) *hash_lookup(ElfW(Word) *hash, ElfW(Sym) *symtab, const char *strtab, 
 		ElfW(Sym) *p_sym = &symtab[symind];
 		if (0 == strcmp(&strtab[p_sym->st_name], sym))
 		{
-			/* match */
+			/* match! FIXME: symbol type filter, FIXME: versioning */
 			found_sym = p_sym;
 			break;
+		}
+	}
+	
+	return found_sym;
+}
+
+static inline uint_fast32_t
+dl_new_hash(const char *s)
+{
+	uint_fast32_t h = 5381;
+	for (unsigned char c = *s; c != '\0'; c = *++s)
+	{
+		h = h * 33 + c;
+	}
+	return h & 0xffffffff;
+}
+
+static inline
+ElfW(Sym) *gnu_hash_lookup(ElfW(Word) *gnu_hash, ElfW(Sym) *symtab, const char *strtab, const char *sym)
+{
+	ElfW(Sym) *found_sym = NULL;
+	uint32_t hashval = dl_new_hash(sym);
+	/* see: https://sourceware.org/ml/binutils/2006-10/msg00377.html */
+	uint32_t *gnu_hash_words = (uint32_t *) gnu_hash;
+	uint32_t nbuckets = gnu_hash_words[0];
+	uint32_t symbias = gnu_hash_words[1]; // only symbols at symbias up are gnu_hash'd
+	uint32_t maskwords = gnu_hash_words[2]; // number of ELFCLASS-sized words in pt2 of table
+	uint32_t shift2 = gnu_hash_words[3];
+
+	ElfW(Off) *bloom = (ElfW(Off) *) &gnu_hash_words[4];
+	uint32_t *buckets = (uint32_t*) (bloom + maskwords);
+	uint32_t *hasharr = buckets + nbuckets;
+	
+	
+	/* Symbols in dynsyn (from symbias up) are sorted by ascending hash % nbuckets.
+	 * The Bloom filter has k == 2, where the two different hash functions are
+	 *   (1) the low-order 5 or 6 bits of dl_new_hash  (resp. on 32- and 64-bit ELF)
+	 *   (2) the 5 or 6 bits starting from bit index `shift2' of the same. 
+	 * 
+	 * EXCEPT wait. both of these hash values are used to index the *same* word
+	 * of the Bloom filter. So it's not one Bloom filter; it's a vector of one-word
+	 * Bloom filters, of length `maskwords'. The particular word is extracted via
+
+	  ElfW(Addr) bitmask_word
+	    = bitmask[(new_hash / __ELF_NATIVE_CLASS)
+		      & map->l_gnu_bitmask_idxbits]; // means maskwords - 1
+	
+	  meaning we wrap around: each word-sized Bloom filter covers a family of
+	  hash values, each with varying low-order bits (we divide away the 5 or 6 lower bits)
+	  but the same middle-order bits (the number depends on the choice of maskwords,
+	  being some power of two; e.g. if we have 32 words, hashes with the same middle 
+	  5 bits will be directed into the same word-sized Bloom filter).
+	
+	  Or I suppose you can think of this as one big Bloom filter where the two hash 
+	  functions say:
+	  
+	  "take the high-and-middle-order bits of dl_new_hash,
+	        append the low- (k==1) or somewhere-in-middle- (k==2) order 5 or 6 bits,
+	        then look at the bottom ~14 bits of that" (for maskwords == 256 a.k.a. 2^8)
+	
+	  i.e. we've chosen shift2 and maskwords so that the middle-order bits we append
+	  for the second hash function DON'T overlap with the high-and-middle-order
+	  bits that we actually look at (bits 6..13 in the example above,
+	  cf. shift2 which is 14, so positions 0..5 contain bits 14..19 of the dl_new_hash).
+	  This does mean that the two hash values share their high-order bits (both are
+	  bits 6..13 of the dl_new_hash value). I'm sure this increases the false-positive
+	  rate of the Bloom filter, since for any given hashval, we hash it to the same
+	  word of the filter. Oh well... we still have 32--64 bits to play with.
+	
+	  The Bloom filter has no correspondence with the bucket structure -- it just records
+	  whether a given hash is in the table or not.
+	 */
+
+	ElfW(Off) bloom_word
+		= bloom[(hashval / (8*sizeof(ElfW(Off))))
+				& (maskwords - 1)];
+
+	unsigned int hash1_bitoff = hashval & (8*sizeof(ElfW(Off)) - 1);
+	unsigned int hash2_bitoff = ((hashval >> shift2) & (8*sizeof(ElfW(Off)) - 1));
+
+	if ((bloom_word >> hash1_bitoff) & 0x1 
+			&& (bloom_word >> hash2_bitoff) & 0x1)
+	{
+		/* buckets are in the range 0..nbuckets.
+		 * and bucket N contain the lowest M
+		 * for which the hash % nbuckets of dynsym entry M's name
+		 * equals N, or 0 for no such M.
+		 * 
+		 * The hash array (part four of the table) contains words such that word M
+		 * is the hash of dynsyn N, with the low bit cleared,
+		 * ORed with a new value for the low bit: 
+		 * 1 if N is the maximum value (dynsymcount - 1)
+		 *   or if symbol N was hashed into a different bucket than symbol N+1,
+		 * 0 otherwise.
+		 * 
+		 * How do we use this array to walk a particular bucket?
+		 * Recall that symbols in dynsym are sorted by ascending hash % nbuckets.
+		 * In other words, they are grouped into ranges of equal hash % nbuckets already.
+		 * The order in part four mirrors this ordering, but stores hashes (and one bit).
+		 * So we basically want to walk this range of the array, from first to last.
+		 * The low bit tells us when we've hit the end of the range.
+		 * The bucket array tells us the starting index.
+		 * Simples!
+		 */
+		
+		uint32_t lowest_symidx = buckets[hashval % nbuckets]; // might be 0
+		for (uint32_t symidx = lowest_symidx; 
+				symidx; 
+				symidx = (!(hasharr[symidx - symbias] & 1)) ? symidx + 1 : 0)
+		{
+			/* We know that hash-mod-nbuckets equals the right value,
+			 * but what about the hash itself? Test this before we bother
+			 * doing the full comparison. We have to live with not being
+			 * able to test the lowest bit. */
+			if (((hasharr[symidx - symbias] ^ hashval) >> 1) == 0)
+			{
+				if (0 == strcmp(&strtab[symtab[symidx].st_name], sym))
+				{
+					found_sym = &symtab[symidx];
+					break;
+				}
+			}
 		}
 	}
 	
@@ -410,6 +530,18 @@ ElfW(Sym) *hash_lookup_local(const char *sym)
 	ElfW(Sym) *symtab = (ElfW(Sym) *) local_dynamic_xlookup(DT_SYMTAB)->d_un.d_ptr;
 	const char *strtab = (const char *) local_dynamic_xlookup(DT_STRTAB)->d_un.d_ptr;
 	return hash_lookup(hash, symtab, strtab, sym);
+}
+
+static inline
+ElfW(Sym) *gnu_hash_lookup_local(const char *sym)
+{
+	ElfW(Word) *hash = (ElfW(Word) *) local_dynamic_xlookup(DT_GNU_HASH)->d_un.d_ptr;
+	if ((intptr_t) hash < 0) return NULL; // HACK: x86-64 vdso workaround
+	unsigned long local_base = (unsigned long) get_local_load_addr();
+	if ((unsigned long) hash < local_base) return NULL; // HACK: x86-64 vdso workaround
+	ElfW(Sym) *symtab = (ElfW(Sym) *) local_dynamic_xlookup(DT_SYMTAB)->d_un.d_ptr;
+	const char *strtab = (const char *) local_dynamic_xlookup(DT_STRTAB)->d_un.d_ptr;
+	return gnu_hash_lookup(hash, symtab, strtab, sym);
 }
 
 static inline 
@@ -512,6 +644,11 @@ ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sy
 	ElfW(Dyn) *hash_ent = dynamic_lookup(l->l_ld, DT_HASH);
 	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
 	if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
+	if ((uintptr_t) hash < l->l_addr) return 0; // HACK: x86-64 vdso workaround
+	ElfW(Dyn) *gnu_hash_ent = dynamic_lookup(l->l_ld, DT_GNU_HASH);
+	ElfW(Word) *gnu_hash = gnu_hash_ent ? (ElfW(Word) *) gnu_hash_ent->d_un.d_ptr : NULL;
+	if ((intptr_t) gnu_hash < 0) return 0; // HACK: x86-64 vdso workaround
+	if ((uintptr_t) gnu_hash < l->l_addr) return 0; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab = (ElfW(Sym) *) dynamic_xlookup(l->l_ld, DT_SYMTAB)->d_un.d_ptr;
 	if ((intptr_t) symtab < 0) return 0; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab_end = symtab + dynamic_symbol_count(l->l_ld, l);
@@ -519,10 +656,12 @@ ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sy
 	if ((intptr_t) strtab < 0) return 0; // HACK: x86-64 vdso workaround
 	const char *strtab_end = strtab + dynamic_xlookup(l->l_ld, DT_STRSZ)->d_un.d_val;
 	
-	/* Try the hash lookup, if we can. FIXME: support GNU hash. */
+	/* Try the GNU hash lookup, if we can. Or else try SvsV hash. 
+	 * If we found no hash table of either kind, try linear. */
 	ElfW(Sym) *found_sym = NULL;
 	ElfW(Sym) *found = NULL;
-	if (hash) found = hash_lookup(hash, symtab, strtab, sym);
+	if (gnu_hash) found = gnu_hash_lookup(gnu_hash, symtab, strtab, sym);
+	else if (hash) found = hash_lookup(hash, symtab, strtab, sym);
 	else found = symbol_lookup_linear(symtab, symtab_end, strtab, strtab_end, sym);
 	return found;
 }

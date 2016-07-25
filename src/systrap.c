@@ -171,8 +171,8 @@ static int trap_ldso_cb(struct proc_entry *ent, char *linebuf, void *interpreter
 static _Bool trap_syscalls_in_symbol_named(const char *name, struct link_map *l,
 	ElfW(Sym) *dynsym, ElfW(Sym) *dynsym_end, const char *dynstr, const char *dynstr_end)
 {
-	ElfW(Sym) *found = symbol_lookup_linear(dynsym, dynsym_end, dynstr, 
-		dynstr_end, name);
+	uint32_t *gnu_hash = (uint32_t *) dynamic_xlookup(l->l_ld, DT_GNU_HASH)->d_un.d_ptr;
+	ElfW(Sym) *found = gnu_hash_lookup(gnu_hash, dynsym, dynstr, name);
 	if (found && found->st_shndx != STN_UNDEF)
 	{
 		trap_one_instruction_range((unsigned char *)(l->l_addr + found->st_value),
