@@ -14,7 +14,10 @@ typedef bool _Bool;
 #endif
 
 #include <sys/types.h>
+#ifdef HAVE_ALLOCA_H
 #include <alloca.h>
+#endif
+#include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
 #include <link.h>

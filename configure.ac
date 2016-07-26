@@ -43,7 +43,8 @@ CFLAGS="$my_save_cflags"
 OLD_CPPFLAGS=$CPPFLAGS
 CPPFLAGS="-std=c++11 $CPPFLAGS"
 
-AC_CHECK_HEADERS([alloca.h assert.h cassert cctype cmath cstddef cstdint cstdio cstdlib deque dlfcn.h elf.h err.h errno.h fstream iomanip iostream libunwind.h link.h map memory pthread.h search.h set sstream stdarg.h stdbool.h stddef.h stdint.h stdio.h stdlib.h string string.h strings.h sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h sys/types.h unistd.h vector wchar.h], [], [AC_MSG_FAILURE([required standard headers: alloca.h assert.h cassert cctype cmath cstddef cstdint cstdio cstdlib deque dlfcn.h elf.h err.h errno.h fstream iomanip iostream libunwind.h link.h map memory pthread.h search.h set sstream stdarg.h stdbool.h stddef.h stdint.h stdio.h stdlib.h string string.h strings.h sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h sys/types.h unistd.h vector wchar.h])])
+AC_CHECK_HEADERS([assert.h cassert cctype cmath cstddef cstdint cstdio cstdlib deque dlfcn.h elf.h err.h errno.h fstream iomanip iostream libunwind.h link.h map memory pthread.h search.h set sstream stdarg.h stdbool.h stddef.h stdint.h stdio.h stdlib.h string string.h strings.h sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h sys/types.h unistd.h vector wchar.h], [], [AC_MSG_FAILURE([required standard headers: alloca.h assert.h cassert cctype cmath cstddef cstdint cstdio cstdlib deque dlfcn.h elf.h err.h errno.h fstream iomanip iostream libunwind.h link.h map memory pthread.h search.h set sstream stdarg.h stdbool.h stddef.h stdint.h stdio.h stdlib.h string string.h strings.h sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h sys/types.h unistd.h vector wchar.h])])
+AC_CHECK_HEADERS([alloca.h], [], [])
 
 AX_BOOST_BASE
 
