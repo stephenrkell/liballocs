@@ -110,7 +110,7 @@ libdwarfpp/config.status:
 	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib" \
 	LIBSRK31CXX_CXXFLAGS="-I$(CONTRIB_ROOT)/libsrk31c++/include" \
 	LIBSRK31CXX_LIBS="-L$(CONTRIB_ROOT)/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib" \
-	 ./configure --prefix=$(CONTRIB_ROOT)/usr
+	 ./configure --prefix=$(CONTRIB_ROOT)/usr $(LIBDWARFPP_CONFIGURE_FLAGS)
 
 .PHONY: build-libdwarfpp
 build-libdwarfpp: libdwarfpp/config.status build-libc++fileno build-libsrk31c++
