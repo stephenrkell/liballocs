@@ -21,18 +21,20 @@ lib_LIBRARIES = tools/liballocstool.a
 
 tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
 
+LIBELF ?= -lelf
+
 tools_dumptypes_SOURCES = tools/dumptypes.cpp
-tools_dumptypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf -lelf
+tools_dumptypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
 tools_dumpptrs_SOURCES = tools/dumpptrs.cpp
-tools_dumpptrs_LDADD = tools/liballocstool.a -lantlr3c -ldwarf -lelf
+tools_dumpptrs_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
 tools_allocsites_SOURCES = tools/allocsites.cpp $(HELPERS)
-tools_allocsites_LDADD = tools/liballocstool.a -lantlr3c -ldwarf -lelf
+tools_allocsites_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
 tools_usedtypes_SOURCES = tools/usedtypes.cpp $(HELPERS)
-tools_usedtypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf -lelf
+tools_usedtypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
-tools_ifacetypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf -lelf
+tools_ifacetypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
-tools_find_allocated_type_size_LDADD = tools/liballocstool.a -ldwarf -lelf
+tools_find_allocated_type_size_LDADD = tools/liballocstool.a -ldwarf $(LIBELF)
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.
