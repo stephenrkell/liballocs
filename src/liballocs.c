@@ -913,7 +913,7 @@ void *biggest_vaddr_in_obj(void *handle)
 char *__liballocs_private_strdup(const char *s)
 {
 	size_t len = strlen(s);
-	char *mem = malloc(len + 1);
+	char *mem = __wrap_dlmalloc(len + 1);
 	strncpy(mem, s, len);
 	mem[len] = '\0';
 	return mem;
@@ -922,7 +922,7 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 {
 	size_t maxlen = strlen(s);
 	size_t len = (n > maxlen) ? maxlen : n;
-	char *mem = malloc(len + 1);
+	char *mem = __wrap_dlmalloc(len + 1);
 	strncpy(mem, s, len);
 	mem[len] = '\0';
 	return mem;

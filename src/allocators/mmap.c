@@ -107,7 +107,8 @@ static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
 	if (!b) abort();
 	
 	/* Note that this will use early_malloc if we would otherwise be reentrant. */
-	struct mapping_sequence *copy = malloc(sizeof (struct mapping_sequence));
+	struct mapping_sequence *copy = __wrap_dlmalloc(sizeof (struct mapping_sequence));
+	/* FIXME: free this somewhere? */
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
 	
@@ -258,7 +259,8 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				if (!second_half) abort();
 				__liballocs_truncate_bigalloc_at_end(b, addr);
 				/* Now the bigallocs are in the right place, but their metadata is wrong. */
-				struct mapping_sequence *new_seq = malloc(sizeof (struct mapping_sequence));
+				struct mapping_sequence *new_seq = __wrap_dlmalloc(sizeof (struct mapping_sequence));
+				/* FIXME: free this somewhere! */
 				struct mapping_sequence *orig_seq = b->meta.un.opaque_data.data_ptr;
 				memcpy(new_seq, orig_seq, sizeof (struct mapping_sequence));
 				/* From the first, delete from the hole all the way. */
@@ -404,7 +406,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		else /* HMM */
 		{
 			add_bigalloc(mapped_addr, mapped_length);
-		}		
+		}
 	}
 }
 void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_t length, 
@@ -489,36 +491,43 @@ void __mmap_allocator_init(void)
 		assert(phnum_auxv);
 		uintptr_t biggest_start_seen = 0;
 		uintptr_t biggest_end_seen = 0;
+		uintptr_t executable_load_addr = 0; /* might get overridden by PHDR */
 		for (int i = 0; i < phnum_auxv->a_un.a_val; ++i)
 		{
 			ElfW(Phdr) *phdr = ((ElfW(Phdr)*) ph_auxv->a_un.a_val) + i;
-			if (phdr->p_type == PT_LOAD)
+			if (phdr->p_type == PT_PHDR)
+			{
+				executable_load_addr = (char*) phdr - (char*) phdr->p_vaddr;
+			}
+			else if (phdr->p_type == PT_LOAD)
 			{
 				/* Kernel's treatment of extra-memsz is not reliable -- i.e. the 
 				 * memsz bit needn't show up in /proc/<pid>/maps -- so use the
 				 * beginning. */
 				// FIXME: assumes executable load addr is 0
-				uintptr_t end = (uintptr_t) phdr->p_vaddr + phdr->p_memsz;
+				uintptr_t end = executable_load_addr + 
+					(uintptr_t) phdr->p_vaddr + phdr->p_memsz;
 				if (end > biggest_end_seen)
 				{
 					biggest_end_seen = end;
-					biggest_start_seen = (uintptr_t) phdr->p_vaddr;
+					biggest_start_seen = executable_load_addr + 
+						(uintptr_t) phdr->p_vaddr;
 				}
 				// write_string("Saw executable phdr end address: ");
 				// write_ulong((unsigned long) end);
 				// write_string("\n");
 
 				if (!(phdr->p_flags & PF_X) &&
-					(char*) phdr->p_vaddr > (char*) data_segment_start_addr)
+					(char*) executable_load_addr + phdr->p_vaddr > (char*) data_segment_start_addr)
 				{
-					data_segment_start_addr = (void*) phdr->p_vaddr;
+					data_segment_start_addr = (void*) (executable_load_addr + phdr->p_vaddr);
 				}
 			}
 		}
 		executable_end_addr = (void*) biggest_end_seen;
 		uintptr_t executable_data_segment_start_addr = biggest_start_seen;
 		assert(executable_end_addr != 0);
-		assert((char*) executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
+		// assert((char*) executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
 		// write_string("Executable highest phdr end address: ");
 		// write_ulong((unsigned long) executable_end_addr);
 		// write_string("\n");
@@ -542,7 +551,6 @@ void __mmap_allocator_init(void)
 			}
 		}
 		if (!executable_data_segment_mapping_bigalloc) abort();
-
 		/* We expect the data segment's suballocator to be malloc, so pre-ordain that.
 		 * NOTE that there will also be a nested allocation under it, that is the 
 		 * static allocator's segment bigalloc. We don't consider the sbrk area
@@ -551,7 +559,7 @@ void __mmap_allocator_init(void)
 		
 		/* Also extend the data segment to account for the current brk. */
 		update_data_segment_end(sbrk(0));
-		
+
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
 		
