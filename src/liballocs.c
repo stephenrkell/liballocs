@@ -397,7 +397,12 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 				//	return "[vdso]";
 				//}
 			}
-			abort();
+			else
+			{
+				/* This is probably a PIE executable or a shared object
+				 * being interpreted as an executable. */
+				return get_exe_fullname();
+			}
 		}
 	}
 	else
