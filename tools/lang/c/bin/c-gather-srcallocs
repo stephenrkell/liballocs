@@ -17,9 +17,23 @@ if [[ -z "$cu_allocspath" ]]; then
     cu_allocspath="$( echo "$cu_sourcepath" | grep '\.c$' | sed 's/\.[ci]/.i.allocs/' )"
 fi
 
+echo "Warning: cu_allocspath is $cu_allocspath" 1>&2
+
 if [[ ! -r "$cu_allocspath" ]]; then
     echo "Warning: missing expected allocs file ($cu_allocspath) for source file: $cu_sourcepath" 1>&2
 else
     # we need to sed its symnames
-    cat "$cu_allocspath" | translate_symnames "$obj" "$cu_fname" "$cu_compdir"
+    cat "$cu_allocspath" | \
+    while read fname rest; do
+        # if the filename is relative, it's relative to the compilation directory.
+        # prepend the full path *as the compiler saw it*, i.e. cu_compdir.
+        case "$fname" in
+            ('/'*)
+                echo "$fname"$'\t'"$rest"
+                ;;
+            (*)
+                echo "$cu_compdir"/"$fname"$'\t'"$rest"
+                ;;
+        esac
+    done | translate_symnames "$obj" "$cu_fname" "$cu_compdir"
 fi

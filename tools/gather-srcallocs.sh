@@ -39,4 +39,4 @@ cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
             ;;
         esac
     done
-done | pad_numbers | use_src_realpaths | sort -t$'\t' -k1 -k2 | uniq
+done | pad_numbers | sort -t$'\t' -k1 -k2 | uniq        #use_src_realpaths | 

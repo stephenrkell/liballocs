@@ -255,7 +255,7 @@ generate_output_lines () {
         echo "Warning: could not find source line for ${sym}${offset}, skipping" 1>&2
         echo "Context attempt was:"$'\n'"$with_file_line_header" 1>&2
     else
-        filename="$( readlink -f "$( echo "$file_line_header" | sed -r 's/:[0-9]+( \(discriminator [0-9]*\))?$//' )" )"
+        filename="$( echo "$file_line_header" | sed -r 's/:[0-9]+( \(discriminator [0-9]*\))?$//' )"
         line_number="$( echo "$file_line_header" | sed -r 's/.*:([0-9]+)( \(discriminator [0-9]*\))?$/\1/' )"
         # How many source lines are in the chunk?
         # We grep -v out the header and anything that looks like an instruction disassembly line
@@ -299,7 +299,7 @@ generate_output_lines () {
     # 5. Compare with addr2line
     addr2line_filename="$( echo "$addr2line_line" | sed 's/:.*//' )"
     if [[ "$addr2line_filename" != "??" ]]; then
-        addr2line_filename="$( readlink -f "$addr2line_filename" )"
+        addr2line_filename="$addr2line_filename"
     fi
     addr2line_line_number="$( echo "$addr2line_line" | sed -r 's/.*:([0-9]+)( \(discriminator [0-9]*\))?$/\1/' | sed 's/.*://' )"
     if [[ "$addr2line_line_number" == "?" ]]; then

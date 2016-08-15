@@ -666,7 +666,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
              | Some(s) -> s
              | None    -> Pervasives.stderr
             in
-            let fileAndLine = (abspath l.file) ^ "\t" ^ (string_of_int l.line) 
+            let fileAndLine = l.file ^ "\t" ^ (string_of_int l.line) 
             in
             begin
               (* Here we need to identify the size argument and
