@@ -36,7 +36,7 @@ else
     #DEFAULT_EXTRA_CFLAGS := -O4 -flto -DNDEBUG
 
     # Summary of the above: -O3 -DNDEBUG is the fastest
-    FAST_EXTRA_CFLAGS := -O3 -DNDEBUG
+    FAST_EXTRA_CFLAGS := -O3 -DNDEBUG -flto -ffat-lto-objects
     DEBUG_EXTRA_CFLAGS := -O0
 endif
 

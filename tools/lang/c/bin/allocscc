@@ -80,7 +80,9 @@ class AllocsCC(AllocsCompilerWrapper):
         return [\
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/cilallocs/cilallocs.cmxs"), \
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"), \
+        "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpmemacc/dumpmemacc.cmxs"), \
            "--dodumpallocs", \
+           "--dodumpmemacc", \
             "--keepunused"] \
             + includeArgs + \
             ["-Wno-unused-variable", "-Wno-unused-label"]
