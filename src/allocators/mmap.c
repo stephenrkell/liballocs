@@ -267,7 +267,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				/* From the second, delete from the old begin to the end of the hole. */
 				delete_mapping_sequence_span(new_seq, b->begin, 
 						((char*) addr + length) - (char*) b->begin);
-				second_half->meta.un.opaque_data = new_seq;
+				second_half->meta.un.opaque_data.data_ptr = new_seq;
 				/* same free function as before */
 			}
 		}
