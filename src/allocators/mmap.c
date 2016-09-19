@@ -260,7 +260,6 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				__liballocs_truncate_bigalloc_at_end(b, addr);
 				/* Now the bigallocs are in the right place, but their metadata is wrong. */
 				struct mapping_sequence *new_seq = __wrap_dlmalloc(sizeof (struct mapping_sequence));
-				/* FIXME: free this somewhere! */
 				struct mapping_sequence *orig_seq = b->meta.un.opaque_data.data_ptr;
 				memcpy(new_seq, orig_seq, sizeof (struct mapping_sequence));
 				/* From the first, delete from the hole all the way. */
@@ -268,7 +267,8 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				/* From the second, delete from the old begin to the end of the hole. */
 				delete_mapping_sequence_span(new_seq, b->begin, 
 						((char*) addr + length) - (char*) b->begin);
-
+				second_half->meta.un.opaque_data = new_seq;
+				/* same free function as before */
 			}
 		}
 	}
