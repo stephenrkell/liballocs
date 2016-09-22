@@ -1278,23 +1278,30 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 	 * are discovered, e.g. indirect ones.)
 	 */
 	struct insert *heap_info = NULL;
-	size_t alloc_chunksize;
 	
+	/* NOTE: bigallocs already have the size adjusted by the insert. */
 	if (maybe_bigalloc)
 	{
 		/* We already have the metadata. */
 		heap_info = &maybe_bigalloc->meta.un.ins_and_bits.ins;
-		alloc_chunksize = (char*) maybe_bigalloc->end - (char*) maybe_bigalloc->begin;
-		*out_base = maybe_bigalloc->begin;
-	} else heap_info = lookup_object_info(obj, out_base, &alloc_chunksize, NULL);
+		if (out_base) *out_base = maybe_bigalloc->begin;
+		if (out_size) *out_size = (char*) maybe_bigalloc->end - (char*) maybe_bigalloc->begin;
+	} 
+	else
+	{
+		size_t alloc_chunksize;
+		heap_info = lookup_object_info(obj, out_base, &alloc_chunksize, NULL);
+		if (heap_info)
+		{
+			if (out_size) *out_size = alloc_chunksize - sizeof (struct insert);
+		}
+	}
 	
 	if (!heap_info)
 	{
 		++__liballocs_aborted_unindexed_heap;
 		return &__liballocs_err_unindexed_heap_object;
 	}
-
-	if (out_size) *out_size = alloc_chunksize - sizeof (struct insert);
 	
 	return extract_and_output_alloc_site_and_type(heap_info, out_type, (void**) out_site);
 }
