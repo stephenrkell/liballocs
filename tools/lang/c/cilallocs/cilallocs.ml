@@ -52,9 +52,9 @@ let list_empty l = not (List.exists (fun x -> true) l)
 let expToString e      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp e))
 let instToString i     = (Pretty.sprint 80 (Pretty.dprintf "%a" d_instr i))
 let lvalToString lv    = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv))
+let offsetToString o   = (Pretty.sprint 80 (Pretty.dprintf "%a" (d_offset (d_formatarg () (Fg("")))) o))
 let typToString t      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
 let typsigToString ts  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig ts))
-
 let expToCilString e   = (Pretty.sprint 80 (printExp  (new plainCilPrinterClass) () e))
 let lvalToCilString lv = (Pretty.sprint 80 (printLval (new plainCilPrinterClass) () lv))
 
