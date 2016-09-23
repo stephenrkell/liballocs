@@ -456,6 +456,8 @@ let rec tsIsUndefinedType ts wholeFile =
             tsIsUndefinedType returnTs wholeFile
     |   _                                           -> false
 
+let tsIsIncompleteType ts wholeFile = tsIsUndefinedType ts wholeFile
+
 let findOrCreateExternalFunctionInFile fl nm proto : fundec = (* findOrCreateFunc fl nm proto *) (* NO! doesn't let us have the fundec *)
   let rec findFun gs = match gs with
       [] -> None
