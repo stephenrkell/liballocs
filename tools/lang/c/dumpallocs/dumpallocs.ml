@@ -67,10 +67,6 @@ let rec sizeExprHasNoSizeof (e: exp) =
  | AlignOfE(t) -> true
  | _ -> true
 
-let rec decayArrayInTypesig ts = match ts with
-   TSArray(tsig, optSz, attrs) -> decayArrayInTypesig tsig (* recurse for multidim arrays *)
- | _ -> ts
-
 type sz = 
     Undet
   | Existing of typsig
