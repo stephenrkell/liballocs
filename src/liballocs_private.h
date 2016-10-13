@@ -136,6 +136,25 @@ char *__liballocs_private_strndup(const char *s, size_t n) __attribute__((visibi
  * and after. */
 extern _Bool __liballocs_systrap_is_initialized;
 
+/* If this weak function is defined, it will be called when we've loaded
+ * the metadata for one object. */
+struct object_metadata
+{
+	void *types_handle;
+	void *allocsites_handle;
+};
+int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *object_metadata) __attribute__((weak));
+int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
+	__attribute__((visibility("hidden")));
+
+extern struct uniqtype *pointer_to___uniqtype__void __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype__signed_char __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype__unsigned_char __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype____PTR_signed_char __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype____ARR0_signed_char __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype__intptr_t __attribute__((visibility("hidden")));
 #ifdef __cplusplus
 } /* end extern "C" */
 #endif

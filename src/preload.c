@@ -336,14 +336,8 @@ skip_load:
 
 		/* Also load the types and allocsites for this object. These callbacks
 		 * also have to be tolerant of already-loadedness. */
-		int ret_types = dl_for_one_object_phdrs(ret, load_types_for_one_object, NULL);
-		assert(ret_types == 0);
-	#ifndef NO_MEMTABLE
-		int ret_allocsites = dl_for_one_object_phdrs(ret, load_and_init_allocsites_for_one_object, NULL);
-		assert(ret_allocsites == 0);
-		int ret_stackaddr = dl_for_one_object_phdrs(ret, link_stackaddr_and_static_allocs_for_one_object, NULL);
-		assert(ret_stackaddr == 0);
-	#endif
+		void *types_handle = NULL;
+		int ret_meta = dl_for_one_object_phdrs(ret, load_and_init_all_metadata_for_one_object, NULL);
 	}
 	// write_string("Blah3007\n");
 

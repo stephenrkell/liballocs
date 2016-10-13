@@ -446,7 +446,7 @@ static const char *helper_libfile_name(const char *objname, const char *suffix)
 // HACK
 extern void __libcrunch_scan_lazy_typenames(void *handle) __attribute__((weak));
 
-int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
+int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *maybe_out_handle)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
@@ -479,6 +479,7 @@ int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *data
 		return 0;
 	}
 	debug_printf(3, "loaded types object: %s\n", libfile_name);
+	if (maybe_out_handle) *(void**) maybe_out_handle = handle;
 	
 	// if we want maximum output, print it
 // 	if (__liballocs_debug_level >= 6)
@@ -559,7 +560,7 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 #undef FIXADDR
 }
 
-int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
+int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t size, void *maybe_out_handle)
 {
 	// write_string("Blah10000\n");
 	// get the canonical libfile name
@@ -592,6 +593,7 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 		return 0;
 	}
 	debug_printf(3, "loaded allocsites object: %s\n", libfile_name);
+	if (maybe_out_handle) *(void**) maybe_out_handle = allocsites_handle;
 	
 	dlerror();
 	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(allocsites_handle, "allocsites");
@@ -705,8 +707,27 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 	
 	// always continue with further objects
 	return 0;
-	
 }
+
+int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
+{
+	void *types_handle = NULL;
+	int types_said_stop = load_types_for_one_object(info, size, &types_handle);
+	void *allocsites_handle = NULL;
+#ifndef NO_MEMTABLE
+	int allocsites_said_stop = load_and_init_allocsites_for_one_object(info, size,
+		&allocsites_handle);
+	int link_said_stop = link_stackaddr_and_static_allocs_for_one_object(info, size, NULL);
+#endif
+	struct object_metadata meta = { types_handle, allocsites_handle };
+	if (&__hook_loaded_one_object_meta) __hook_loaded_one_object_meta(info, size, &meta);
+	return types_said_stop
+#ifndef NO_MEMTABLE
+		|| allocsites_said_stop || link_said_stop
+#endif
+	;
+}
+
 static _Bool check_blacklist(const void *obj)
 {
 #ifndef NO_BLACKLIST
@@ -928,6 +949,16 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	return mem;
 }
 
+/* These have hidden visibility */
+struct uniqtype *pointer_to___uniqtype__void;
+struct uniqtype *pointer_to___uniqtype__signed_char;
+struct uniqtype *pointer_to___uniqtype__unsigned_char;
+struct uniqtype *pointer_to___uniqtype____PTR_signed_char;
+struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char;
+struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t;
+struct uniqtype *pointer_to___uniqtype____ARR0_signed_char;
+struct uniqtype *pointer_to___uniqtype__intptr_t;
+
 /* We want to be called early, but not too early, ecause it might not be safe 
  * to open the -uniqtypes.so handle yet. */
 int __liballocs_global_init(void) __attribute__((constructor(103),visibility("protected")));
@@ -997,10 +1028,6 @@ int __liballocs_global_init(void)
 	 * 
 	 * It seems that option 1 is better. 
 	 */
-	
-	int ret_types = dl_iterate_phdr(load_types_for_one_object, NULL);
-	assert(ret_types == 0);
-	
 #ifndef NO_MEMTABLE
 	/* Allocate the memtable. 
 	 * Assume we don't need to cover addresses >= STACK_BEGIN.
@@ -1015,13 +1042,8 @@ int __liballocs_global_init(void)
 		(void*) 0, (void*) (0x800000000000ul << 2), (const void*) 0x300000000000ul);
 	if (__liballocs_allocsmt == MAP_FAILED) abort();
 	debug_printf(3, "allocsmt at %p\n", __liballocs_allocsmt);
-	
-	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_for_one_object, NULL);
-	assert(ret_allocsites == 0);
-
-	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_for_one_object, NULL);
-	assert(ret_stackaddr == 0);
 #endif
+	int ret_hook = dl_iterate_phdr(load_and_init_all_metadata_for_one_object, NULL);
 	
 	/* Don't do this. They all have constructors. Moreover, the mmap allocator
 	 * calls *us* because it can't start the systrap before we've loaded all the
@@ -1030,6 +1052,28 @@ int __liballocs_global_init(void)
 	// __mmap_allocator_init();
 	// __static_allocator_init();
 	// __auxv_allocator_init();
+	/* Snarf the addresses of certain uniqtypes, if they're present.
+	 * Because the Unix linker is broken (see notes below on uniquing),
+	 * we can't have uniqueness of anything defined in a preload,
+	 * and from a preload we also can't bind to anything defined elsewhere.
+	 * So we use the dynamic linker to work around this mess. */
+	pointer_to___uniqtype__void = dlsym(RTLD_DEFAULT, "__uniqtype__void");
+	pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$8");
+	pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$8");
+	if (!pointer_to___uniqtype__void || !pointer_to___uniqtype__signed_char
+			|| !pointer_to___uniqtype__unsigned_char)
+	{
+		debug_printf(0, "looks uninstrumented!");
+		abort(); 
+		/* This breaks the case of loading instrumented shared libraries
+		 * into an uninstrumented executable with preload active. It *can* 
+		 * be unbroken, with a little effort. */
+	}
+	pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
+	pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$8");
+	pointer_to___uniqtype__Elf64_auxv_t = dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_auxv_t");
+	pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
+	pointer_to___uniqtype__intptr_t = dlsym(RTLD_DEFAULT, "__uniqtype__intptr_t");
 
 	trying_to_initialize = 0;
 	__liballocs_is_initialized = 1;

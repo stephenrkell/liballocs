@@ -25,12 +25,6 @@ int open(const char *, int);
  * By convention, each of our allocators also exposes "notify_*"
  * operations that the instrumentation uses to talk to the index. */
 
-struct allocator __mmap_allocator = {
-	.name = "mmap",
-	.is_cacheable = 1
-	/* FIXME: meta-protocol implementation */
-};
-
 /* The mmap allocator's notion of allocation is roughly a 
  * *sequence* of memory mappings. This is so that a single segment
  * can have a single parent allocation, even though it
@@ -742,3 +736,30 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 	}
 	update_data_segment_end(new_curbrk);
 }
+
+static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc, 
+	struct uniqtype **out_type, void **out_base, 
+	unsigned long *out_size, const void **out_site)
+{
+	/* The info is simply the top-level bigalloc for that address. */
+	struct big_allocation *b = maybe_bigalloc;
+	if (!b) b = &big_allocations[pageindex[PAGENUM(obj)]];
+	while (b && b->parent) b = b->parent;
+	if (!b) return &__liballocs_err_object_of_unknown_storage;
+	
+	if (out_type) *out_type = NULL;
+	if (out_base) *out_base = b->begin;
+	if (out_size) *out_size = (char*) b->end - (char*) b->begin;
+	if (out_site) *out_site = ((struct mapping_sequence *) b->meta.un.opaque_data.data_ptr)->
+		mappings[0].caller; // bit of a HACK: just use the first one in the seq
+	
+	// success
+	return NULL;
+}
+
+struct allocator __mmap_allocator = {
+	.name = "mmap",
+	.is_cacheable = 1,
+	.get_info = get_info
+	/* FIXME: meta-protocol implementation */
+};
