@@ -85,6 +85,33 @@ static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp,
 
 static int debug_out = 1;
 
+using dwarf::lib::Dwarf_Off;
+using dwarf::lib::Dwarf_Addr;
+using dwarf::lib::Dwarf_Signed;
+using dwarf::lib::Dwarf_Unsigned;
+
+template <typename Second>
+struct compare_first_iter_offset
+{
+	bool operator()(const pair< iterator_df<with_dynamic_location_die>, Second >& x,
+		            const pair< iterator_df<with_dynamic_location_die>, Second >& y)
+		const
+	{
+		return x.first.offset_here() < y.first.offset_here();
+	}
+};
+
+struct compare_first_signed_second_offset
+{
+	bool operator()(const pair< Dwarf_Signed, iterator_df<with_dynamic_location_die> >& x,
+		            const pair< Dwarf_Signed, iterator_df<with_dynamic_location_die> >& y)
+		const
+	{
+		return (x.first < y.first)
+			|| ((x.first == y.first) && x.second.offset_here() < y.second.offset_here());
+	}
+};
+
 int main(int argc, char **argv)
 {
 	/* We open the file named by argv[1] and dump its DWARF types. */ 
@@ -212,12 +239,12 @@ int main(int argc, char **argv)
 	 *
 	 * We also output an allocsites record for each one, wit the allocsite as the
 	 *  */
-	using dwarf::lib::Dwarf_Off;
-	using dwarf::lib::Dwarf_Addr;
-	using dwarf::lib::Dwarf_Signed;
-	using dwarf::lib::Dwarf_Unsigned;
+
 	
-	typedef std::set< pair< iterator_df<with_dynamic_location_die>, encap::loc_expr > > live_set_t;
+	typedef std::set< 
+		pair< iterator_df<with_dynamic_location_die>, encap::loc_expr >,
+		compare_first_iter_offset<encap::loc_expr> 
+	> live_set_t;
 	typedef boost::icl::interval_map< Dwarf_Off, live_set_t > intervals_t;
 	typedef boost::icl::interval_map< 
 			Dwarf_Off, 
@@ -225,7 +252,8 @@ int main(int argc, char **argv)
 				pair<
 					Dwarf_Signed, 
 					iterator_df<with_dynamic_location_die> 
-				> 
+				>,
+				compare_first_signed_second_offset
 			>
 		> retained_intervals_t;
 	typedef boost::icl::interval_map< 
@@ -234,7 +262,8 @@ int main(int argc, char **argv)
 				pair<
 					iterator_df<with_dynamic_location_die>,
 					string
-				>
+				>,
+				compare_first_iter_offset<string>
 			>
 		> discarded_intervals_t;
 		
@@ -318,7 +347,8 @@ int main(int argc, char **argv)
 			for (auto i_locexpr = var_loclist.begin(); 
 				i_locexpr != var_loclist.end(); ++i_locexpr)
 			{
-				std::set< pair<iterator_df<with_dynamic_location_die>, encap::loc_expr > > singleton_set;
+				std::set< pair<iterator_df<with_dynamic_location_die>, encap::loc_expr >,
+					compare_first_iter_offset<encap::loc_expr> > singleton_set;
 				/* PROBLEM: we need to remember not only that each i_dyn is valid 
 				 * in a given range, but with what loc_expr. So we pair the i_dyn with
 				 * the relevant loc_expr. */
@@ -507,7 +537,8 @@ int main(int argc, char **argv)
 						<< *i_el 
 						<< "in the vaddr range " 
 						<< std::hex << i_int->first << std::dec;
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+					set< pair< iterator_df< with_dynamic_location_die >, string>,
+						compare_first_iter_offset<string> > singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("static-masquerading-as-local")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 					continue;
@@ -539,7 +570,8 @@ int main(int argc, char **argv)
 					 		<< *i_el;
 					}
 					//discarded.push_back(make_pair(*i_el, "register-located"));
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+					set< pair< iterator_df< with_dynamic_location_die >, string>,
+						compare_first_iter_offset<string> > singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("register-located")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 					continue;
@@ -549,7 +581,8 @@ int main(int argc, char **argv)
 					cerr << "Warning: something strange happened when computing location for fp: " 
 					 	<< *i_el;
 					//discarded.push_back(make_pair(*i_el, "register-located"));
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+					set< pair< iterator_df< with_dynamic_location_die >, string>,
+						compare_first_iter_offset<string> > singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("something-strange")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 					continue;
@@ -563,13 +596,15 @@ int main(int argc, char **argv)
 				if ((*i_el)->find_type() && (*i_el)->find_type()->get_concrete_type())
 				{
 					//by_frame_off[frame_offset] = *i_el;
-					set< pair<Dwarf_Signed, iterator_df<with_dynamic_location_die> > > singleton_set;
+					set< pair<Dwarf_Signed, iterator_df<with_dynamic_location_die> >,
+						compare_first_signed_second_offset > singleton_set;
 					singleton_set.insert(make_pair(frame_offset, *i_el));
 					frame_intervals += make_pair(i_int->first, singleton_set);
 				}
 				else
 				{
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+					set< pair< iterator_df< with_dynamic_location_die >, string>,
+						compare_first_iter_offset<string> > singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("no_concrete_type")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 				}
