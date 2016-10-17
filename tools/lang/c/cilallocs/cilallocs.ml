@@ -413,7 +413,7 @@ let getOrCreateUniqtypeGlobal m concreteType globals =
       in 
       (m, foundVar, globals)
   with Not_found -> 
-     debug_print 0 ("Creating new uniqtype global for type named " ^ typename ^ "\n");
+     debug_print 1 ("Creating new uniqtype global for type named " ^ typename ^ "\n");
      let typeStructUniqtype = try findStructTypeByName globals "uniqtype" 
         with Not_found -> failwith "no struct uniqtype in file; why is libcrunch_cil_inlines not included?"
      in
@@ -433,13 +433,13 @@ let getOrCreateUniqtypeGlobal m concreteType globals =
      (newMap, newGlobal, newGlobals)
 
 let ensureUniqtypeGlobal concreteType enclosingFile (uniqtypeGlobals : Cil.global UniqtypeMap.t ref) = 
-    debug_print 0 ("Ensuring we have uniqtype for " ^ (typsigToString concreteType) ^ "\n");
+    debug_print 1 ("Ensuring we have uniqtype for " ^ (typsigToString concreteType) ^ "\n");
     let (updatedMap, uniqtypeGlobalVar, updatedGlobals)
      = getOrCreateUniqtypeGlobal !uniqtypeGlobals concreteType enclosingFile.globals
     in 
     enclosingFile.globals <- updatedGlobals; 
     uniqtypeGlobals := updatedMap;
-    debug_print 0 ("Got uniqtype for " ^ (typsigToString concreteType) ^ "\n");
+    debug_print 1 ("Got uniqtype for " ^ (typsigToString concreteType) ^ "\n");
     uniqtypeGlobalVar
 
 let findCompDefinitionInFile isStruct name wholeFile = 
