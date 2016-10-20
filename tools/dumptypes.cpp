@@ -632,7 +632,7 @@ int main(int argc, char **argv)
 					cerr << "Skipping static var masquerading as local: "
 						<< *i_el 
 						<< "in the vaddr range " 
-						<< std::hex << i_int->first << std::dec;
+						<< std::hex << i_int->first << std::dec << std::endl;
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
 						compare_first_iter_offset<string>*/ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("static-masquerading-as-local")));
