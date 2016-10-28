@@ -41,4 +41,22 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	bool emit_codeless_aliases,
 	bool emit_subobject_names = true);
 
+void write_uniqtype_open(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+    const string& maxoff_comment_str,
+    unsigned nmemb,
+    bool is_array,
+    unsigned array_len);
+	
+void write_uniqtype_related(std::ostream& o,
+    bool is_first,
+	unsigned offset,
+    const string& mangled_typename,
+	const string& comment_str
+    );
+	
+void write_uniqtype_close(std::ostream& o);
+
 #endif

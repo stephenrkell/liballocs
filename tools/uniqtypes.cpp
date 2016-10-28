@@ -244,7 +244,7 @@ string ensure_contained_length(const string& mangled_name, unsigned contained_le
 {
 	ostringstream s;
 	s << "__asm__(\".size " << mangled_name << ", "
-		<< (offsetof(uniqtype, contained) + contained_length * sizeof (contained))
+		<< (offsetof(uniqtype, related) + contained_length * sizeof (uniqtype_rel_info))
 		<< "\");" << endl;
 	
 	return s.str();
@@ -280,17 +280,17 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
 				<< "= { (void*)0 };\n";
 		}
-		out << "struct uniqtype " << mangle_typename(make_pair(string(""), string("void")))
-			<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
-			<< " = {\n\t" 
-			<< "{ 0, 0, 0 },\n\t"
-			<< "\"void\"" << ",\n\t"
-			<< "0" << " /* pos_maxoff (void) */,\n\t"
-			<< "0" << " /* neg_maxoff (void) */,\n\t"
-			<< "0" << " /* nmemb (void) */,\n\t"
-			<< "0" << " /* is_array (void) */,\n\t"
-			<< "0" << " /* array_len (void) */,\n\t"
-			<< "/* contained */ { }\n};\n";
+		
+		write_uniqtype_open(out,
+			mangle_typename(make_pair(string(""), string("void"))),
+			"void",
+			0,
+			"void",
+			0,
+			false,
+			0
+		);
+		write_uniqtype_close(out);
 	}
 	else // always declare it, at least, with weak attribute
 	{
@@ -522,86 +522,57 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 					out << "= { (void*)0 };\n";
 				}
 		}
-		out << "struct uniqtype " << mangled_name
-			<< " __attribute__((section (\".data." << mangled_name << ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))"
-			<< " = {\n\t" 
-			<< "{ 0, 0, 0 },\n\t"
-			<< "\"" << i_vert->first.second << "\",\n\t"
-			/* implement the flexible/opaque/undefined distinction we mentioned... */
-			<< (opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
-			<< "0 /* neg_maxoff */,\n\t"
-			<< (i_vert->second.is_a<array_type_die>() ? 1 : members_count) << " /* nmemb */,\n\t"
-			<< (i_vert->second.is_a<array_type_die>() ? "1" : "0") << " /* is_array */,\n\t"
-			<< array_len << " /* array_len */,\n\t"
-			<< /* contained[0] */ "/* contained */ {\n\t\t";
+		
+		write_uniqtype_open(out,
+			mangled_name,
+			i_vert->first.second,
+			(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+			"no comment",
+			(i_vert->second.is_a<array_type_die>() ? 1 : members_count),
+			(i_vert->second.is_a<array_type_die>()),
+			array_len);
 
 		unsigned contained_length = 1;
 		if (i_vert->second.is_a<array_type_die>())
 		{
-			// array: write a single entry, for the element type
-			out << "{ " << "0, ";
-
 			// compute and print destination name
 			auto k = canonical_key_from_type(i_vert->second.as_a<array_type_die>()->get_type());
 			/* FIXME: do multidimensional arrays get handled okay like this? 
 			 * I reckon so, but am not yet sure. */
 			string mangled_name = mangle_typename(k);
-			out << "&" << mangled_name;
-
-			// end the struct
-			out << " }";
-			contained_length = 1;
+			write_uniqtype_related(out,
+				true,
+				0,
+				mangled_name,
+				"no comment"
+			);
 		}
 		else if (i_vert->second.is_a<string_type_die>())
 		{
-			// array: write a single entry, for the element type
-			out << "{ " << "0, ";
-
-			out << "&" << "__uniqtype__unsigned_char$8"; // HACK FIXME HACK FIXME
-
-			// end the struct
-			out << " }";
-			contained_length = 1;
+			write_uniqtype_related(out, true, 0, "__uniqtype__unsigned_char$8", "no comment");
 		}
 		else if (i_vert->second.is_a<address_holding_type_die>())
 		{
-			// array: write a single entry, for the target type
-			out << "{ " << "0, ";
-
 			// compute and print destination name
 			auto k = canonical_key_from_type(i_vert->second.as_a<address_holding_type_die>()->get_type());
 			string mangled_name = mangle_typename(k);
-			out << "&" << mangled_name;
-
-			// end the struct
-			out << " }";
-			contained_length = 1;
+			write_uniqtype_related(out, true, 0, mangled_name, "no comment");
 		}
 		else if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
 			/* Output the return type and argument types. We always output
 			 * a return type, even if it's &__uniqtype__void. */
 			auto return_type = i_vert->second.as_a<type_describing_subprogram_die>()->find_type();
-			/* begin the struct */
-			out << "{ ";
-			out << "0, ";
-			out << "&" << mangle_typename(canonical_key_from_type(return_type));
-
-			// end the struct
-			out << " }";
+			write_uniqtype_related(out, true, 0, mangle_typename(canonical_key_from_type(return_type)),
+				"no comment");
 			
 			for (auto i_t = fp_types.begin(); i_t != fp_types.end(); ++i_t)
 			{
-				/* always write a comma */
-				out << ",\n\t\t";
-
-				/* begin the struct */
-				out << "{ ";
-				out << "0, ";
-				out << "&" << mangle_typename(canonical_key_from_type(*i_t));
-
-				// end the struct
-				out << " }";
+				write_uniqtype_related(out, false,
+					0,
+					mangle_typename(canonical_key_from_type(*i_t)),
+					"no comment"
+				);
 				
 				++contained_length;
 			}
@@ -621,18 +592,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				{
 					++contained_length;
 					auto i_edge = i_i_edge->as_a<member_die>();
-
-					/* if we're not the first, write a comma */
-					if (i_i_edge != real_members.begin()) out << ",\n\t\t";
-
-					/* begin the struct */
-					out << "{ ";
-
-					// compute offset
-
-					out << *i_off << ", ";
-
-					// compute and print destination name
 					auto k = canonical_key_from_type(i_edge->get_type());
 					string mangled_name = mangle_typename(k);
 					if (names_emitted.find(mangled_name) == names_emitted.end())
@@ -649,19 +608,18 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 						}
 						assert(false);
 					}
-					out << "&" << mangled_name;
 
-					// end the struct
-					out << " }";
+					write_uniqtype_related(out,
+						i_i_edge == real_members.begin(),
+						*i_off,
+						mangled_name,
+						"no comment");
 				}
 			}
 			else
 			{
 				/* If we're a base type having a signedness-complement, output
 				 * that, else output a null. */
-				/* begin the struct */
-				out << "{ " << 0 << ", ";
-				
 				if (i_vert->second.is_a<base_type_die>() && 
 					needs_complement(i_vert->second.as_a<base_type_die>()))
 				{
@@ -675,17 +633,13 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 						name_for_complement_base_type(i_vert->second)
 					);
 					string mangled_name = mangle_typename(k);
-					out << "&" << mangled_name;
+					write_uniqtype_related(out, true, 0, mangled_name, "no comment");
 				}
-				else out << "(void*) 0";
-
-				// end the struct
-				out << " }";
+				else write_uniqtype_related(out, true, 0, "(void*) 0", "no comment");
 			}
 		}
 		
-		out << "\n\t}"; /* end contained */
-		out << "\n};\n"; /* end struct uniqtype */
+		write_uniqtype_close(out);
 		out << ensure_contained_length(mangled_name, contained_length);
 		
 		/* Output a synthetic complement if we need one. */
@@ -704,21 +658,22 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				name_for_complement_base_type(i_vert->second)
 			);
 			string compl_name = mangle_typename(k);
-			out << "struct uniqtype " << compl_name
-				<< " __attribute__((section (\"" << ".data." << compl_name << ", \\\"awG\\\", @progbits, " << compl_name << ", comdat#\")))"
-				<< " = {\n\t" 
-				<< "{ 0, 0, 0 },\n\t"
-				<< "\"" << k.second << "\",\n\t"
-				<< (opt_sz ? *opt_sz : 0) << " /* pos_maxoff " << (opt_sz ? "" : "(incomplete) ") << "*/,\n\t"
-				<< "0 /* neg_maxoff */,\n\t"
-				<< "0 /* nmemb */,\n\t"
-				<< "0 /* is_array */,\n\t"
-				<< "0 /* array_len */,\n\t"
-				<< /* contained[0] */ "/* contained */ {\n\t\t"
-				<< "{ 0, &" << mangled_name
-				<< " }";
-			out << "\n\t}"; /* end contained */
-			out << "\n};\n"; /* end struct uniqtype */
+			
+			write_uniqtype_open(out, 
+				compl_name,
+				k.second,
+				(opt_sz ? *opt_sz : 0),
+				"",
+				0,
+				false,
+				0);
+			write_uniqtype_related(out,
+				true,
+				0,
+				mangled_name,
+				"no comment"
+			);
+			write_uniqtype_close(out);
 			out << ensure_contained_length(compl_name, 1);
 			
 			/* If our actual type has a C-style name, output a C-style alias for the 
@@ -810,4 +765,49 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			}
 		}
 	}
+}
+
+void write_uniqtype_open(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+    const string& maxoff_comment_str,
+    unsigned nmemb,
+    bool is_array,
+    unsigned array_len)
+{
+	o << "struct uniqtype " << mangled_typename
+		<< " __attribute__((section (\".data." << mangled_typename 
+			<< ", \\\"awG\\\", @progbits, " << mangled_typename 
+			<< ", comdat#\")))"
+		<< " = {\n\t" 
+		<< "{ 0, 0, 0 },\n\t"
+		<< "\"" << unmangled_typename << "\",\n\t"
+		<< pos_maxoff << " /* pos_maxoff */,\n\t"
+		<< 0 << " /* " << maxoff_comment_str << " */ /* neg_maxoff */,\n\t"
+		<< nmemb << " /* nmemb */,\n\t"
+		<< (is_array ? "1" : "0" ) << " /* is_array */,\n\t"
+		<< array_len << " /* array_len */,\n\t"
+		<< /* contained[0] */ "/* contained */ {\n\t\t";
+}
+
+void write_uniqtype_related(std::ostream& o,
+    bool is_first,
+	unsigned offset,
+    const string& mangled_typename,
+	const string& comment_str
+    )
+    {
+		if (!is_first) o << ",\n\t\t";
+		/* begin the struct */
+		o << "{ "<< offset << ", "
+			<< "&" << mangled_typename
+			<< "}"
+			<< " /* " << comment_str << " */ ";
+    }
+
+void write_uniqtype_close(std::ostream& o)
+{
+	o << "\n\t}";
+	o << "\n};\n";
 }
