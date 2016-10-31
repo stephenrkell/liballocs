@@ -49,6 +49,8 @@ using dwarf::core::variable_die;
 using dwarf::core::with_dynamic_location_die;
 using dwarf::core::address_holding_type_die;
 using dwarf::core::base_type_die;
+using dwarf::core::enumeration_type_die;
+using dwarf::core::subrange_type_die;
 using dwarf::core::array_type_die;
 using dwarf::core::string_type_die;
 using dwarf::core::type_chain_die;
@@ -281,16 +283,13 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				<< "= { (void*)0 };\n";
 		}
 		
-		write_uniqtype_open(out,
-			mangle_typename(make_pair(string(""), string("void"))),
+		string mangled_name = mangle_typename(make_pair(string(""), string("void")));
+		write_uniqtype_open_void(out,
+			mangled_name,
 			"void",
-			0,
-			"void",
-			0,
-			false,
-			0
+			string("void")
 		);
-		write_uniqtype_close(out);
+		write_uniqtype_close(out, mangled_name);
 	}
 	else // always declare it, at least, with weak attribute
 	{
@@ -523,124 +522,193 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				}
 		}
 		
-		write_uniqtype_open(out,
-			mangled_name,
-			i_vert->first.second,
-			(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
-			"no comment",
-			(i_vert->second.is_a<array_type_die>() ? 1 : members_count),
-			(i_vert->second.is_a<array_type_die>()),
-			array_len);
-
 		unsigned contained_length = 1;
 		if (i_vert->second.is_a<array_type_die>())
 		{
+			write_uniqtype_open_array(out,
+				mangled_name,
+				i_vert->first.second,
+				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				array_len
+			);
+			
 			// compute and print destination name
 			auto k = canonical_key_from_type(i_vert->second.as_a<array_type_die>()->get_type());
 			/* FIXME: do multidimensional arrays get handled okay like this? 
 			 * I reckon so, but am not yet sure. */
 			string mangled_name = mangle_typename(k);
-			write_uniqtype_related(out,
-				true,
-				0,
-				mangled_name,
-				"no comment"
+			write_uniqtype_related_array_element_type(out,
+				mangled_name
 			);
 		}
 		else if (i_vert->second.is_a<string_type_die>())
 		{
-			write_uniqtype_related(out, true, 0, "__uniqtype__unsigned_char$8", "no comment");
+			write_uniqtype_open_array(out,
+				mangled_name,
+				i_vert->first.second,
+				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				array_len
+			);
+			/* FIXME */
+			write_uniqtype_related_array_element_type(out, string("__uniqtype__unsigned_char$8"));
 		}
 		else if (i_vert->second.is_a<address_holding_type_die>())
 		{
+			write_uniqtype_open_address(out,
+				mangled_name,
+				i_vert->first.second,
+				sizeof (void*) /* FIXME */,
+				0 /* FIXME */,
+				0 /* FIXME */,
+				0 /* FIXME */
+			);
 			// compute and print destination name
 			auto k = canonical_key_from_type(i_vert->second.as_a<address_holding_type_die>()->get_type());
 			string mangled_name = mangle_typename(k);
-			write_uniqtype_related(out, true, 0, mangled_name, "no comment");
+			write_uniqtype_related_pointee_type(out, mangled_name);
 		}
 		else if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
+			write_uniqtype_open_subprogram(out,
+				mangled_name,
+				i_vert->first.second,
+				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				members_count,
+				1,
+				0 /* FIXME */,
+				0 /* FIXME */
+			);
 			/* Output the return type and argument types. We always output
 			 * a return type, even if it's &__uniqtype__void. */
 			auto return_type = i_vert->second.as_a<type_describing_subprogram_die>()->find_type();
-			write_uniqtype_related(out, true, 0, mangle_typename(canonical_key_from_type(return_type)),
-				"no comment");
+			write_uniqtype_related_subprogram_return_type(out,
+				true, mangle_typename(canonical_key_from_type(return_type)));
 			
 			for (auto i_t = fp_types.begin(); i_t != fp_types.end(); ++i_t)
 			{
-				write_uniqtype_related(out, false,
-					0,
-					mangle_typename(canonical_key_from_type(*i_t)),
-					"no comment"
+				write_uniqtype_related_subprogram_argument_type(out,
+					mangle_typename(canonical_key_from_type(*i_t))
 				);
 				
 				++contained_length;
 			}
 		}
-		else // non-array non-subprogram -- use real members
+		else if (i_vert->second.is_a<subrange_type_die>()) // FIXME
 		{
+			write_uniqtype_open_base(out,
+				mangled_name,
+				i_vert->first.second,
+				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				i_vert->second.as_a<subrange_type_die>()->find_type().as_a<base_type_die>()->
+					get_encoding(),
+				0 /* FIXME */,
+				0 /* FIXME */,
+				0 /* FIXME */,
+				0 /* FIXME */
+			);
+			write_uniqtype_related_dummy(out);
+		}
+
+		else if (i_vert->second.is_a<base_type_die>())
+		{
+			write_uniqtype_open_base(out,
+				mangled_name,
+				i_vert->first.second,
+				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				i_vert->second.as_a<base_type_die>()->get_encoding(),
+				0 /* FIXME */,
+				0 /* FIXME */,
+				0 /* FIXME */,
+				0 /* FIXME */
+			);
+		
+			if (needs_complement(i_vert->second.as_a<base_type_die>()))
+			{
+				// compute and print complement name
+				auto k = make_pair(
+					summary_code_to_string(
+						signedness_complement_type_summary_code(
+							i_vert->second
+						)
+					),
+					name_for_complement_base_type(i_vert->second)
+				);
+				string mangled_name = mangle_typename(k);
+				write_uniqtype_related_signedness_complement_type(out, mangled_name);
+			}
+			else write_uniqtype_related_dummy(out);
+		}
+		else if (i_vert->second.is_a<enumeration_type_die>())
+		{
+			write_uniqtype_open_enumeration(out,
+				mangled_name,
+				i_vert->first.second,
+				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */
+			);
+			write_uniqtype_related_dummy(out); /* FIXME */
+		}
+		else if (!i_vert->second)
+		{
+			write_uniqtype_open_void(out,
+				mangled_name,
+				i_vert->first.second
+			);
+			write_uniqtype_related_dummy(out);
+		}
+		else if (i_vert->second.is_a<with_data_members_die>())
+		{
+			write_uniqtype_open_composite(out,
+				mangled_name,
+				i_vert->first.second,
+				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				members_count,
+				false
+			);
 			unsigned i_membernum = 0;
 			std::set<lib::Dwarf_Unsigned> used_offsets;
 			opt<iterator_base> first_with_byte_offset;
 			auto i_off = real_member_offsets.begin();
 			
 			// we *always* output at least one array element
-			if (members_count > 0)
+			contained_length = 0;
+			for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
 			{
-				contained_length = 0;
-				for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
+				++contained_length;
+				auto i_edge = i_i_edge->as_a<member_die>();
+				auto k = canonical_key_from_type(i_edge->get_type());
+				string mangled_name = mangle_typename(k);
+				if (names_emitted.find(mangled_name) == names_emitted.end())
 				{
-					++contained_length;
-					auto i_edge = i_i_edge->as_a<member_die>();
-					auto k = canonical_key_from_type(i_edge->get_type());
-					string mangled_name = mangle_typename(k);
-					if (names_emitted.find(mangled_name) == names_emitted.end())
+					out << "Type named " << mangled_name << ", " << i_edge->get_type()
+						<< ", concretely " << i_edge->get_type()->get_concrete_type()
+						<< " was not emitted previously." << endl;
+					for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
 					{
-						out << "Type named " << mangled_name << ", " << i_edge->get_type()
-							<< ", concretely " << i_edge->get_type()->get_concrete_type()
-							<< " was not emitted previously." << endl;
-						for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
+						if (i_name->substr(i_name->length() - k.second.length()) == k.second)
 						{
-							if (i_name->substr(i_name->length() - k.second.length()) == k.second)
-							{
-								out << "Possible near-miss: " << *i_name << endl;
-							}
+							out << "Possible near-miss: " << *i_name << endl;
 						}
-						assert(false);
 					}
+					assert(false);
+				}
 
-					write_uniqtype_related(out,
-						i_i_edge == real_members.begin(),
-						*i_off,
-						mangled_name,
-						"no comment");
-				}
-			}
-			else
-			{
-				/* If we're a base type having a signedness-complement, output
-				 * that, else output a null. */
-				if (i_vert->second.is_a<base_type_die>() && 
-					needs_complement(i_vert->second.as_a<base_type_die>()))
-				{
-					// compute and print complement name
-					auto k = make_pair(
-						summary_code_to_string(
-							signedness_complement_type_summary_code(
-								i_vert->second
-							)
-						),
-						name_for_complement_base_type(i_vert->second)
-					);
-					string mangled_name = mangle_typename(k);
-					write_uniqtype_related(out, true, 0, mangled_name, "no comment");
-				}
-				else write_uniqtype_related(out, true, 0, "(void*) 0", "no comment");
+				write_uniqtype_related_contained_member_type(out,
+					i_i_edge == real_members.begin(),
+					*i_off,
+					mangled_name);
 			}
 		}
+		else
+		{
+			cerr << "Saw a type of tag: " <<
+				i_vert->second.spec_here().tag_lookup(
+					i_vert->second.tag_here()
+				)
+				<< endl;
+			assert(false);
+		}
 		
-		write_uniqtype_close(out);
-		out << ensure_contained_length(mangled_name, contained_length);
+		write_uniqtype_close(out, mangled_name, contained_length);
 		
 		/* Output a synthetic complement if we need one. */
 		if (synthesise_complements.find(i_vert->second) != synthesise_complements.end())
@@ -659,22 +727,23 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			);
 			string compl_name = mangle_typename(k);
 			
-			write_uniqtype_open(out, 
+			write_uniqtype_open_base(out, 
 				compl_name,
 				k.second,
 				(opt_sz ? *opt_sz : 0),
-				"",
-				0,
-				false,
-				0);
-			write_uniqtype_related(out,
-				true,
-				0,
-				mangled_name,
-				"no comment"
+				(i_vert->second.as_a<base_type_die>()->get_encoding() == DW_ATE_unsigned) ? 
+					DW_ATE_signed : 
+					(i_vert->second.as_a<base_type_die>()->get_encoding() == DW_ATE_signed) ? 
+					DW_ATE_unsigned :
+					i_vert->second.as_a<base_type_die>()->get_encoding(),
+				0, /* FIXME */
+				0, /* FIXME */
+				0, /* FIXME */
+				0) /* FIXME */;
+			write_uniqtype_related_signedness_complement_type(out,
+				mangled_name
 			);
-			write_uniqtype_close(out);
-			out << ensure_contained_length(compl_name, 1);
+			write_uniqtype_close(out, compl_name, 1);
 			
 			/* If our actual type has a C-style name, output a C-style alias for the 
 			 * complement we just output. FIXME: how *should* this work? Who consumes 
@@ -767,14 +836,11 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	}
 }
 
-void write_uniqtype_open(std::ostream& o,
+static void write_uniqtype_open_generic(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    unsigned pos_maxoff,
-    const string& maxoff_comment_str,
-    unsigned nmemb,
-    bool is_array,
-    unsigned array_len)
+    unsigned pos_maxoff
+	)
 {
 	o << "struct uniqtype " << mangled_typename
 		<< " __attribute__((section (\".data." << mangled_typename 
@@ -782,32 +848,205 @@ void write_uniqtype_open(std::ostream& o,
 			<< ", comdat#\")))"
 		<< " = {\n\t" 
 		<< "{ 0, 0, 0 },\n\t"
-		<< "\"" << unmangled_typename << "\",\n\t"
-		<< pos_maxoff << " /* pos_maxoff */,\n\t"
-		<< 0 << " /* " << maxoff_comment_str << " */ /* neg_maxoff */,\n\t"
-		<< nmemb << " /* nmemb */,\n\t"
-		<< (is_array ? "1" : "0" ) << " /* is_array */,\n\t"
-		<< array_len << " /* array_len */,\n\t"
-		<< /* contained[0] */ "/* contained */ {\n\t\t";
+		//<< "\"" << unmangled_typename << "\",\n\t"
+		<< pos_maxoff << " /* pos_maxoff */,\n\t";
 }
 
-void write_uniqtype_related(std::ostream& o,
+void write_uniqtype_open_void(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    opt<const string&> maxoff_comment_str
+	)
+{
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, 0);
+	o << "{ _void: { VOID } },\n\t"
+		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+}
+void write_uniqtype_open_array(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+    unsigned nelems,
+    opt<const string&> maxoff_comment_str
+	)
+{
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	o << "{ array: { 1, " << nelems << " } },\n\t"
+		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+}
+void write_uniqtype_open_address(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+    unsigned indir_level,
+    bool is_generic,
+    unsigned log_min_align,
+    opt<const string&> maxoff_comment_str
+	)
+{
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	o << "{ address: { ADDRESS, " << indir_level << ", " << is_generic << ", " << log_min_align
+		<< " } },\n\t"
+		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+}
+void write_uniqtype_open_base(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+    unsigned enc,
+    unsigned log_bit_size,
+    signed bit_size_delta,
+    unsigned log_bit_off,
+    signed bit_off_delta,
+    opt<const string&> maxoff_comment_str
+	)
+{
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	o << "{ base: { BASE, " << enc
+		<< ", " << log_bit_size
+		<< ", " << bit_size_delta
+		<< ", " << log_bit_off
+		<< ", " << bit_off_delta
+		<< " } },\n\t"
+		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+}
+void write_uniqtype_open_enumeration(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+    opt<const string&> maxoff_comment_str
+	)
+{
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	o << "{ enumeration: { ENUMERATION, 0, 0, 0 } },\n\t"
+		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+}
+void write_uniqtype_open_composite(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+    unsigned nmemb,
+    bool not_simultaneous,
+    opt<const string&> maxoff_comment_str
+	)
+{
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	o << "{ composite: { COMPOSITE, " << nmemb
+		<< ", " << not_simultaneous 
+		<< " } },\n\t"
+		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+}
+void write_uniqtype_open_subprogram(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+    unsigned narg,
+    unsigned nret,
+    bool is_va,
+    unsigned cc,
+    opt<const string&> maxoff_comment_str
+	)
+{
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	o << "{ subprogram: { SUBPROGRAM, " << narg 
+		<< ", " << nret 
+		<< ", " << is_va
+		<< ", " << cc
+		<< " } },\n\t"
+		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+	
+}
+void write_uniqtype_related_array_element_type(std::ostream& o,
+    opt<const string&> maybe_mangled_typename,
+	opt<const string&> comment_str
+    )
+{
+	/* begin the struct */
+	o << "{ { t: { ";
+	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;
+	else o << "(void*) 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
+void write_uniqtype_related_pointee_type(std::ostream& o,
+    opt<const string&> maybe_mangled_typename,
+	opt<const string&> comment_str
+    )
+{
+	/* begin the struct */
+	o << "{ { t: { ";
+	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;
+	else o << "(void*) 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
+void write_uniqtype_related_subprogram_argument_type(std::ostream& o,
+    opt<const string&> maybe_mangled_typename,
+	opt<const string&> comment_str
+    )
+{
+	o << ",\n\t\t";
+	/* begin the struct */
+	o << "{ { t: { ";
+	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;
+	else o << "(void*) 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
+void write_uniqtype_related_subprogram_return_type(std::ostream& o,
+	bool is_first,
+    opt<const string&> maybe_mangled_typename,
+	opt<const string&> comment_str
+    )
+{
+	if (!is_first) o << ",\n\t\t";
+	/* begin the struct */
+	o << "{ { t: { ";
+	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;
+	else o << "(void*) 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
+void write_uniqtype_related_contained_member_type(std::ostream& o,
     bool is_first,
 	unsigned offset,
-    const string& mangled_typename,
-	const string& comment_str
+    opt<const string&> maybe_mangled_typename,
+	opt<const string&> comment_str
     )
-    {
-		if (!is_first) o << ",\n\t\t";
-		/* begin the struct */
-		o << "{ "<< offset << ", "
-			<< "&" << mangled_typename
-			<< "}"
-			<< " /* " << comment_str << " */ ";
-    }
+{
+	if (!is_first) o << ",\n\t\t";
+	/* begin the struct */
+	o << "{ { memb: { ";
+	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;
+	else o << "(void*) 0";
+	o << ", " << offset << ", 0, 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
+void write_uniqtype_related_signedness_complement_type(std::ostream& o,
+    opt<const string&> maybe_mangled_typename,
+	opt<const string&> comment_str
+    )
+{
+	/* begin the struct */
+	o << "{ { t: { ";
+	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;
+	else o << "(void*) 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
+void write_uniqtype_related_dummy(std::ostream& o,
+	opt<const string&> comment_str
+    )
+{
+	/* begin the struct */
+	o << "{ { t: { (void*) 0 } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
 
-void write_uniqtype_close(std::ostream& o)
+void write_uniqtype_close(std::ostream& o, const string& mangled_name, opt<unsigned> n_contained)
 {
 	o << "\n\t}";
 	o << "\n};\n";
+	if (n_contained) o << ensure_contained_length(mangled_name, *n_contained);
 }

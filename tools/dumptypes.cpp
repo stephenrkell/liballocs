@@ -836,14 +836,15 @@ int main(int argc, char **argv)
 				 << " defined in " << cu_name << ", "
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
-			write_uniqtype_open(cout,
-				mangle_typename(make_pair(cu_name, unmangled_typename)),
+			string mangled_name = mangle_typename(make_pair(cu_name, unmangled_typename));
+			write_uniqtype_open_composite(cout,
+				mangled_name,
 				unmangled_typename,
 				interval_maxoff + offset_to_all,
-				min_s.str(),
 				i_frame_int->second.size(),
 				false,
-				0);
+				min_s.str()
+			);
 			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
 			{
 				ostringstream comment_s;
@@ -859,16 +860,14 @@ int main(int argc, char **argv)
 				string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->second->find_type()));
 				assert(names_emitted.find(mangled_name) != names_emitted.end());
 				
-				write_uniqtype_related(cout,
+				write_uniqtype_related_contained_member_type(cout,
 					/* is_first */ i_by_off == i_frame_int->second.begin(),
 					i_by_off->first + offset_to_all,
 					mangled_name,
 					comment_s.str()
 				);
 			}
-			write_uniqtype_close(cout);
-			cout << "\n\t}";
-			cout << "\n};\n";
+			write_uniqtype_close(cout, mangled_name);
 		}
 		/* Now print a summary of what was discarded. */
 // 		for (auto i_discarded = discarded.begin(); i_discarded != discarded.end(); 
