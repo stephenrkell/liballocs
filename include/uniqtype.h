@@ -26,7 +26,13 @@ of or in connection with the use or performance of this software.
 #define UNIQTYPE_H_
 
 #define UNIQTYPE_DECLS \
-enum uniqtype_kind { VOID, BASE, ENUMERATION, COMPOSITE, ADDRESS, SUBPROGRAM, unused1_, unused2_, ARRAY = 0x8 /* STOP */ }; \
+/* CARE with bit allocation: we want the first bit (is_array) to be set only in */ \
+/* the ARRAY value. The placement of bitfields is ABI-determined, but on x86-64 */ \
+/* we get a leading 1-bit bitfield coming out as the LSB, and a leading 3-bit   */ \
+/* bitfield coming out internally LE, i.e. the leading bit is the low bit. SO...*/ \
+/* make ARRAY equal 1, and the others use even numbers.                         */ \
+enum uniqtype_kind { VOID, ARRAY = 0x1, BASE = 0x2, ENUMERATION = 0x4, COMPOSITE = 0x6, \
+    ADDRESS = 0x8, SUBPROGRAM = 0xa }; \
 struct alloc_addr_info \
 { \
 	unsigned long addr:47; \
@@ -279,7 +285,7 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 #define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) ((u)->un.subprogram.narg)
 #define UNIQTYPE_IS_POINTER_TYPE(u)      ((u)->un.info.kind == ADDRESS)
 #define UNIQTYPE_POINTEE_TYPE(u)         (UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->related[0].un.t.ptr : (void*)0)
-#define UNIQTYPE_IS_ARRAY_TYPE(u)        ((u)->un.info.kind == ARRAY)
+#define UNIQTYPE_IS_ARRAY_TYPE(u)        ((u)->un.array.is_array)
 #define UNIQTYPE_IS_COMPOSITE_TYPE(u)    ((u)->un.info.kind == COMPOSITE)
 #define UNIQTYPE_HAS_SUBOBJECTS(u)       (UNIQTYPE_IS_COMPOSITE_TYPE(u) || UNIQTYPE_IS_ARRAY_TYPE(u))
 #define UNIQTYPE_HAS_KNOWN_LENGTH(u)     ((u)->pos_maxoff != UINT_MAX)
