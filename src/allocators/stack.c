@@ -35,7 +35,7 @@ rlim_t __stack_lim_max __attribute__((visibility("protected")));
 
 struct suballocated_chunk_rec; // FIXME: remove once heap_index has been refactored
 
-static struct big_allocation *initial_stack;
+static struct big_allocation *initial_stack_bigalloc;
 
 void __stack_allocator_init(void) __attribute__((constructor(101)));
 void __stack_allocator_init(void)
@@ -62,11 +62,9 @@ void __stack_allocator_init(void)
 	}
 }
 
-void *__top_of_initial_stack __attribute__((visibility("protected")));
-void __stack_allocator_notify_init_stack_mapping(void *begin, void *end)
+void __stack_allocator_notify_init_stack_region(void *begin, void *end)
 {
-	__top_of_initial_stack = end; /* i.e. the highest address */
-	initial_stack = __liballocs_new_bigalloc(
+	initial_stack_bigalloc = __liballocs_new_bigalloc(
 		begin,
 		(char*) end - (char*) begin,
 		(struct meta_info) {
@@ -78,21 +76,23 @@ void __stack_allocator_notify_init_stack_mapping(void *begin, void *end)
 				}
 			}
 		},
-		NULL,
+		NULL, /* Will fill in auxv bigalloc */
 		&__stack_allocator
 	);
-	if (!initial_stack) abort();
+	if (!initial_stack_bigalloc) abort();
+	if (!initial_stack_bigalloc->parent || initial_stack_bigalloc->parent->allocated_by
+				!= &__auxv_allocator) abort();
 	
 	/* FIXME: is this necessarily right? a GROWSDOWN mapping might actually 
 	 * be managed some other way. */
-	initial_stack->suballocator = &__stackframe_allocator;
+	initial_stack_bigalloc->suballocator = &__stackframe_allocator;
 }
 
 static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc,
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void** out_site)
 {
-	abort();
+	return &__liballocs_err_unrecognised_alloc_site;
 }
 
 static size_t guess_sane_max_stack_size(void)
@@ -123,7 +123,7 @@ static size_t guess_sane_max_stack_delta(void)
 _Bool __stack_allocator_notify_unindexed_address(const void *ptr)
 {
 	/* Do we claim it? */
-	for (struct big_allocation *b = initial_stack;
+	for (struct big_allocation *b = initial_stack_bigalloc;
 				b;
 				b = (struct big_allocation *) b->meta.un.opaque_data.data_ptr)
 	{

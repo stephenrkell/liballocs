@@ -117,6 +117,38 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	return &__liballocs_err_object_of_unknown_storage;
 }
 
+/* HACK: we have a special link to the stack allocator. */
+void __stack_allocator_notify_init_stack_region(void *begin, void *end);
+
+void *__top_of_initial_stack __attribute__((visibility("protected")));
+static struct big_allocation *our_bigalloc;
+void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end)
+{
+	if (!auxv_array_start) __auxv_allocator_init();
+	if (!p_argcount) abort();
+	
+	__top_of_initial_stack = end; /* i.e. the highest address */
+	our_bigalloc = __liballocs_new_bigalloc(
+		begin,
+		(char*) end - (char*) begin,
+		(struct meta_info) {
+			.what = DATA_PTR,
+			.un = {
+				opaque_data: {
+					.data_ptr = NULL,
+					.free_func = NULL
+				}
+			}
+		},
+		NULL,
+		&__auxv_allocator
+	);
+	if (!our_bigalloc) abort();
+	
+	our_bigalloc->suballocator = &__stack_allocator;
+	__stack_allocator_notify_init_stack_region(begin, p_argcount);
+}
+
 struct allocator __auxv_allocator = {
 	.name = "auxv",
 	.is_cacheable = 1,

@@ -117,8 +117,8 @@ static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
 	};
 }
 
-/* HACK: we have a special link to the stack allocator. */
-void __stack_allocator_notify_init_stack_mapping(void *begin, void *end);
+/* HACK: we have a special link to the auxv allocator. */
+void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end);
 
 static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 	void *addr, size_t length)
@@ -658,7 +658,7 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg)
 	/* If it looks like a stack... */
 	if (0 == strncmp(ent->rest, "[stack", 6))
 	{
-		__stack_allocator_notify_init_stack_mapping(
+		__auxv_allocator_notify_init_stack_mapping(
 			(void*) ent->first, (void*) ent->second
 		);
 		return 0;
