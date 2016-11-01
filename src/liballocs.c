@@ -266,12 +266,13 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	int cb_ret = 0;
 	for (ElfW(Sym) *p_sym = dynsym; p_sym <  dynsym + nsyms; ++p_sym)
 	{
+		const char *name = p_sym->st_name ? dynstr + p_sym->st_name : NULL;
 		if (ELF64_ST_TYPE(p_sym->st_info) == STT_OBJECT && 
 			p_sym->st_shndx != SHN_UNDEF &&
-			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8) &&
+			0 == strncmp("__uniqty", name, 8) &&
 			(0 != strcmp("_subobj_names", 
-					dynstr + p_sym->st_name
-						+ strlen(dynstr + p_sym->st_name) - (sizeof "_subobj_names" - 1)
+					dynstr + p_sym->st_name + strlen(name)
+						 - (sizeof "_subobj_names" - 1)
 				)
 			)
 		)
@@ -283,7 +284,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 				cb_ret = cb(t, arg);
 				if (cb_ret != 0) break;
 			}
-			else warnx("Saw insane uniqtype at %p in file %s", t, h->l_name);
+			else warnx("Saw insane uniqtype %s at %p in file %s", name, t, h->l_name);
 		}
 	}
 	

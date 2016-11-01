@@ -73,6 +73,14 @@ void write_uniqtype_open_base(std::ostream& o,
     signed bit_off_delta,
     opt<const string&> comment_str = opt<const string&>()
 	);
+void write_uniqtype_open_subrange(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff,
+	signed min,
+	signed max,
+    opt<const string&> comment_str = opt<const string&>()
+	);
 void write_uniqtype_open_enumeration(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,

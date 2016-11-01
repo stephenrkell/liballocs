@@ -32,7 +32,7 @@ of or in connection with the use or performance of this software.
 /* bitfield coming out internally LE, i.e. the leading bit is the low bit. SO...*/ \
 /* make ARRAY equal 1, and the others use even numbers.                         */ \
 enum uniqtype_kind { VOID, ARRAY = 0x1, BASE = 0x2, ENUMERATION = 0x4, COMPOSITE = 0x6, \
-    ADDRESS = 0x8, SUBPROGRAM = 0xa }; \
+    ADDRESS = 0x8, SUBPROGRAM = 0xa, SUBRANGE = 0xc }; \
 struct alloc_addr_info \
 { \
 	unsigned long addr:47; \
@@ -121,6 +121,11 @@ struct uniqtype \
            unsigned is_va:1; /* is variadic */ \
            unsigned cc:7;    /* calling convention */ \
        } subprogram; /* related[0..nret] are return types; contained[nret..nret+narg] are args */ \
+       struct { \
+           unsigned kind:4; \
+           unsigned min:14; \
+           unsigned max:14; \
+       } subrange; /* related[0] is host type */ \
        struct { \
            unsigned is_array:1; /* because ARRAY is 8, i.e. top bit set */ \
            unsigned nelems:31; /* for consistency with pos_maxoff, use -1 for unbounded/unknown */ \
@@ -306,9 +311,10 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 	((u)->un.array.is_array && ((u)->un.array.nelems == 0 || (u)->pos_maxoff > 0)) \
 	|| ((u)->un.info.kind == VOID && (u)->pos_maxoff == 0) \
 	|| ((u)->un.info.kind == BASE && (u)->un.base.enc != 0) \
-	|| ((u)->un.info.kind == ENUMERATION && 1) \
+	|| ((u)->un.info.kind == ENUMERATION && 1 /* FIXME */) \
 	|| ((u)->un.info.kind == COMPOSITE && ((u)->pos_maxoff <= 1 || (u)->un.composite.nmemb > 0)) \
-	|| ((u)->un.info.kind == ADDRESS && 1) \
+	|| ((u)->un.info.kind == ADDRESS && 1 /* FIXME */) \
+	|| ((u)->un.info.kind == SUBRANGE && 1 /* FIXME */) \
 	|| ((u)->un.info.kind == SUBPROGRAM && (u)->related[0].un.t.ptr != NULL) \
 	) 
 #define NAME_FOR_UNIQTYPE(u) UNIQTYPE_NAME(u)
