@@ -595,12 +595,12 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		}
 		else if (i_vert->second.is_a<subrange_type_die>()) // FIXME
 		{
+			auto base_t = i_vert->second.as_a<subrange_type_die>()->find_type();
 			write_uniqtype_open_base(out,
 				mangled_name,
 				i_vert->first.second,
 				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
-				i_vert->second.as_a<subrange_type_die>()->find_type().as_a<base_type_die>()->
-					get_encoding(),
+				base_t ? base_t.as_a<base_type_die>()->get_encoding() : 0 /* FIXME */,
 				0 /* FIXME */,
 				0 /* FIXME */,
 				0 /* FIXME */,
