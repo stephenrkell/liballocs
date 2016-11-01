@@ -264,12 +264,17 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	char *dynstr = (char*) dynstr_ent->d_un.d_ptr;
 
 	int cb_ret = 0;
-
 	for (ElfW(Sym) *p_sym = dynsym; p_sym <  dynsym + nsyms; ++p_sym)
 	{
 		if (ELF64_ST_TYPE(p_sym->st_info) == STT_OBJECT && 
 			p_sym->st_shndx != SHN_UNDEF &&
-			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8))
+			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8) &&
+			(0 != strcmp("_subobj_names", 
+					dynstr + p_sym->st_name
+						+ strlen(dynstr + p_sym->st_name) - (sizeof "_subobj_names" - 1)
+				)
+			)
+		)
 		{
 			struct uniqtype *t = (struct uniqtype *) (load_addr + p_sym->st_value);
 			// if our name comes out as null, we've probably done something wrong

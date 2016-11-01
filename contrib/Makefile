@@ -3,6 +3,7 @@ CONTRIB_ROOT := $(realpath $(dir $(THIS_MAKEFILE)))
 
 # trap-syscalls's contrib needs to be able to find liballocs
 export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
+export LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 
 # things we need to build:
 # - libc++fileno
@@ -13,6 +14,7 @@ export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
 # - trap-syscalls's own contrib      (this needs antlr, I think)
 # - trap-syscalls/libsystrap    (*not* the main trap-syscalls, which has other deps...)
 # - dwarfidl (ignore its contrib build script)
+# - libdlbind
 # - binutils-gdb?
 #
 # things that just sit here, but we have to set config for:
@@ -24,7 +26,7 @@ export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
 
 default: env.sh config.mk trap-syscalls/libsystrap/libsystrap.a \
 build-dwarfidl build-libdwarfpp build-libcxxgen build-libsrk31c++ build-libc++fileno \
-build-libantlr3c++ build-libantlr3c
+build-libantlr3c++ build-libantlr3c build-libdlbind
 
 .PHONY: clean default
 
@@ -209,6 +211,13 @@ trap-syscalls/libsystrap/libsystrap.a: trap-syscalls/contrib/config.mk
 
 CONFIG_MK += \nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls\n
 
+# ----------------------------libdlbind
+
+build-libdlbind:
+	$(MAKE) -C libdlbind
+
+CONFIG_MK += \nLIBDLBIND ?= $(CONTRIB_ROOT)/libdlbind\n
+
 # ----------------------------malloc-hooks
 
 CONFIG_MK += \nMALLOC_HOOKS := $(CONTRIB_ROOT)/libmallochooks\n
@@ -216,7 +225,7 @@ CONFIG_MK += \nMALLOC_HOOKS := $(CONTRIB_ROOT)/libmallochooks\n
 # ----------------------------config.mk
 
 varlist := CXXFLAGS CPPFLAGS CFLAGS LDFLAGS \
-TRAP_SYSCALLS MALLOC_HOOKS \
+TRAP_SYSCALLS MALLOC_HOOKS LIBDLBIND \
 DWARFIDL_CXXFLAGS DWARFIDL_LIBS \
 LIBANTLR3CXX_CXXFLAGS LIBANTLR3CXX_LIBS \
 LIBCXXGEN_CXXFLAGS LIBCXXGEN_LIBS \
