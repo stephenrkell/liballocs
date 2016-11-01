@@ -118,7 +118,7 @@ static void build_adjacency_list_recursive(
 	unsigned nmemb;
 	_Bool is_array;
 
-	if (UNIQTYPE_HAS_DATA_MEMBERS(t_at_offset))
+	if (UNIQTYPE_IS_COMPOSITE_TYPE(t_at_offset))
 	{
 		is_array = 0;
 		nmemb = UNIQTYPE_COMPOSITE_MEMBER_COUNT(t_at_offset);
@@ -182,7 +182,7 @@ static void build_adjacency_list_recursive(
 				pointed_to_object, NAME_FOR_UNIQTYPE(pointed_to_static_t),
 				to_enqueue->obj, NAME_FOR_UNIQTYPE(to_enqueue->t));
 		}
-		else if (UNIQTYPE_HAS_DATA_MEMBERS(element_type)) /* Else is it a thing with structure? If so, recurse. */
+		else if (UNIQTYPE_IS_COMPOSITE_TYPE(element_type)) /* Else is it a thing with structure? If so, recurse. */
 		{
 			build_adjacency_list_recursive(
 				p_adj_u_head, p_adj_u_tail, 
