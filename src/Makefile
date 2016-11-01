@@ -3,6 +3,7 @@ LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 SRCROOT := $(dir $(THIS_MAKEFILE))../
 MALLOC_HOOKS ?= $(SRCROOT)contrib/libmallochooks #./../libmallochooks.hg
 TRAP_SYSCALLS ?= $(SRCROOT)contrib/trap-syscalls
+LIBDLBIND ?= $(SRCROOT)contrib/libdlbind
 
 # HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
 # object. It complains about __next_malloc_hook et al being undefined, even though
@@ -54,6 +55,9 @@ LDFLAGS += -Wl,-O2 -flto -Bsymbolic-functions -fPIC
 
 # until binutils bug 13600 is fixed, gold is the linker we need
 LDFLAGS += -Wl,-fuse-ld=gold
+
+LDFLAGS += -L$(LIBDLBIND)/lib
+LDLIBS += -ldlbind
 
 # We define our own malloc_usable_size to catch the alloca case.
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size

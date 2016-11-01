@@ -826,8 +826,6 @@ int main(int argc, char **argv)
 			assert(found_minoff != interval_minoffs.end());
 			signed interval_minoff = found_minoff->second;
 			
-
-			
 			/* Output in offset order, CHECKing that there is no overlap (sanity). */
 			cout << "\n/* uniqtype for stack frame ";
 			string unmangled_typename = typename_for_vaddr_interval(i_subp, i_frame_int->first);
@@ -837,40 +835,39 @@ int main(int argc, char **argv)
 			cout << unmangled_typename
 				 << " defined in " << cu_name << ", "
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
-				 
-			cout << "struct uniqtype " << mangle_typename(make_pair(cu_name, unmangled_typename))
-				<< " = {\n\t" 
-				<< "{ 0, 0, 0 },\n\t"
-				<< "\"" << unmangled_typename << "\",\n\t"
-				<< interval_maxoff + offset_to_all << " /* pos_maxoff */,\n\t"
-				<< 0 << " /* actual min is " << interval_minoff + offset_to_all << " */ /* neg_maxoff */,\n\t"
-				<< i_frame_int->second.size() << " /* nmemb */,\n\t"
-				<< "0 /* is_array */,\n\t"
-				<< "0 /* array_len */,\n\t"
-				<< /* contained[0] */ "/* contained */ {\n\t\t";
+			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
+			string mangled_name = mangle_typename(make_pair(cu_name, unmangled_typename));
+			write_uniqtype_open_composite(cout,
+				mangled_name,
+				unmangled_typename,
+				interval_maxoff + offset_to_all,
+				i_frame_int->second.size(),
+				false,
+				min_s.str()
+			);
 			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
 			{
-				if (i_by_off != i_frame_int->second.begin()) cout << ",\n\t\t";
-				/* begin the struct */
-				cout << "{ ";
-				string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->second->find_type()));
-				assert(names_emitted.find(mangled_name) != names_emitted.end());
-				cout << (i_by_off->first + offset_to_all) << ", "
-					<< "&" << mangled_name
-					<< "}";
-				cout << " /* ";
+				ostringstream comment_s;
 				if (i_by_off->second.name_here())
 				{
-					cout << *i_by_off->second.name_here();
+					comment_s << *i_by_off->second.name_here();
 				}
-				else cout << "(anonymous)"; 
-				cout << " -- " << i_by_off->second.spec_here().tag_lookup(
+				else comment_s << "(anonymous)"; 
+				comment_s << " -- " << i_by_off->second.spec_here().tag_lookup(
 						i_by_off->second.tag_here())
 					<< " @" << std::hex << i_by_off->second.offset_here() << std::dec;
-				cout << " */ ";
+
+				string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->second->find_type()));
+				assert(names_emitted.find(mangled_name) != names_emitted.end());
+				
+				write_uniqtype_related_contained_member_type(cout,
+					/* is_first */ i_by_off == i_frame_int->second.begin(),
+					i_by_off->first + offset_to_all,
+					mangled_name,
+					comment_s.str()
+				);
 			}
-			cout << "\n\t}";
-			cout << "\n};\n";
+			write_uniqtype_close(cout, mangled_name);
 		}
 		/* Now print a summary of what was discarded. */
 // 		for (auto i_discarded = discarded.begin(); i_discarded != discarded.end(); 

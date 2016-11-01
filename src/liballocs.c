@@ -31,7 +31,7 @@ __liballocs_walk_subobjects_spanning_rec(
 	const signed target_offset_within_u,
 	struct uniqtype *u, 
 	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth,
-		struct uniqtype *containing, struct contained *contained_pos, 
+		struct uniqtype *containing, struct uniqtype_rel_info *contained_pos, 
 		signed containing_span_start_offset, void *arg),
 	void *arg
 	);
@@ -198,7 +198,7 @@ static int swap_out_segment_pages(struct dl_phdr_info *info, size_t size, void *
 static int print_type_cb(struct uniqtype *t, void *ignored)
 {
 	fprintf(stream_err, "uniqtype addr %p, name %s, size %d bytes\n", 
-		t, t->name, t->pos_maxoff);
+		t, UNIQTYPE_NAME(t), t->pos_maxoff);
 	fflush(stream_err);
 	return 0;
 }
@@ -264,20 +264,26 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	char *dynstr = (char*) dynstr_ent->d_un.d_ptr;
 
 	int cb_ret = 0;
-
 	for (ElfW(Sym) *p_sym = dynsym; p_sym <  dynsym + nsyms; ++p_sym)
 	{
 		if (ELF64_ST_TYPE(p_sym->st_info) == STT_OBJECT && 
 			p_sym->st_shndx != SHN_UNDEF &&
-			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8))
+			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8) &&
+			(0 != strcmp("_subobj_names", 
+					dynstr + p_sym->st_name
+						+ strlen(dynstr + p_sym->st_name) - (sizeof "_subobj_names" - 1)
+				)
+			)
+		)
 		{
 			struct uniqtype *t = (struct uniqtype *) (load_addr + p_sym->st_value);
 			// if our name comes out as null, we've probably done something wrong
-			if (t->name)
+			if (UNIQTYPE_IS_SANE(t))
 			{
 				cb_ret = cb(t, arg);
 				if (cb_ret != 0) break;
 			}
+			else warnx("Saw insane uniqtype at %p in file %s", t, h->l_name);
 		}
 	}
 	
@@ -323,6 +329,17 @@ Dl_info dladdr_with_cache(const void *addr)
 	}
 	
 	return info;
+}
+
+const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u)
+{
+	if (!u) return "(no type)";
+	Dl_info i = dladdr_with_cache(u);
+	if (i.dli_saddr == u)
+	{
+		return i.dli_sname;
+	}
+	return "(unnamed type)";
 }
 
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
@@ -1262,7 +1279,7 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 		/* We might have *multiple* subobjects spanning the offset. 
 		 * Test all of them. */
 		struct uniqtype *containing_uniqtype = NULL;
-		struct contained *contained_pos = NULL;
+		struct uniqtype_rel_info *contained_pos = NULL;
 		
 		signed sub_target_offset = target_offset_within_uniqtype;
 		struct uniqtype *contained_uniqtype = cur_obj_uniqtype;
@@ -1274,7 +1291,7 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 		
 		if (!success) return 0;
 		
-		*p_cumulative_offset_searched += contained_pos->offset;
+		*p_cumulative_offset_searched += contained_pos->un.memb.off;
 		
 		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
 		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;
@@ -1286,13 +1303,13 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched);
 			if (__builtin_expect(recursive_test, 1)) return 1;
 			// else look for a later contained subobject at the same offset
-			unsigned subobj_ind = contained_pos - &containing_uniqtype->contained[0];
+			unsigned subobj_ind = contained_pos - &containing_uniqtype->related[0];
 			assert(subobj_ind >= 0);
-			assert(subobj_ind == 0 || subobj_ind < containing_uniqtype->nmemb);
+			assert(subobj_ind == 0 || subobj_ind < UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype));
 			if (__builtin_expect(
-					containing_uniqtype->nmemb <= subobj_ind + 1
-					|| containing_uniqtype->contained[subobj_ind + 1].offset != 
-						containing_uniqtype->contained[subobj_ind].offset,
+					UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype) <= subobj_ind + 1
+					|| containing_uniqtype->related[subobj_ind + 1].un.memb.off != 
+						containing_uniqtype->related[subobj_ind].un.memb.off,
 				1))
 			{
 				// no more subobjects at the same offset, so fail
@@ -1300,8 +1317,8 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 			} 
 			else
 			{
-				contained_pos = &containing_uniqtype->contained[subobj_ind + 1];
-				contained_uniqtype = contained_pos->ptr;
+				contained_pos = &containing_uniqtype->related[subobj_ind + 1];
+				contained_uniqtype = contained_pos->un.memb.ptr;
 			}
 		} while (1);
 		

@@ -14,6 +14,7 @@ export ALLOCSITES_BASE
 
 CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
+LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../lib
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../src
 
 # HMM -- this is causing us to re-add the +='d stuff in each recursive make.
@@ -63,6 +64,12 @@ checkrun-fail-%:
 		tail -n6 "$$err" | tr '\n' '\f' | \
 		grep ' 0.* 0.* 0.* 0\+.* [1-9][0-9]*.* 0\+$$' >/dev/null || \
 		(tail -n20 $$err; false)
+# special: this failing case aborts, for now
+checkrun-fail-alloca-clang:
+	@echo "expected-fail case is fail-alloca-clang" && \
+		out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
+		err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
+		! $(MAKE) cleanrun-fail-alloca-clang 1>$$out 2>$$err
 
 # Some cases are expected to abort
 checkrun-abort-%:

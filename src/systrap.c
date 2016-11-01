@@ -9,10 +9,17 @@
 #define RELF_DEFINE_STRUCTURES
 #include "relf.h"
 
-/* We also get linked in from libcrunch's stubs file, which lacks most of liballocs. 
- * So only call out to the hooks if they're present. */
+/* Our secret private channel with libdlbind. This must always be linked in,
+ * even in libcrunch stubs. */
+extern __thread const char *dlbind_open_active_on __attribute__((visibility("hidden")));
+
+/* NOTE: We also get linked in from libcrunch's stubs file, which lacks most of liballocs.
+ * (Read that again. It lacks most of liballocs, not just most of libcrunch.)
+ * We used to say "so only call out to the hooks if they're present". But now we define
+ * our own nudger, and libcrunch wraps it (or not). */
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
-                  int *p_fd, off_t *p_offset, const void *caller) __attribute__((weak));
+                  int *p_fd, off_t *p_offset, const void *caller);
+void __liballocs_nudge_open(const char **p_pathname, int *p_flags, mode_t *p_mode, const void *caller);
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller) __attribute__((weak));
 void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address, void *caller)
 			__attribute__((weak));
@@ -66,11 +73,8 @@ void mmap_replacement(struct generic_syscall *s, post_handler *post)
 	off_t offset = s->args[5];
 	
 	/* Nudge them. */
-	if (&__liballocs_nudge_mmap)
-	{
-		__liballocs_nudge_mmap(&addr, &length, &prot, &flags, 
+	__liballocs_nudge_mmap(&addr, &length, &prot, &flags, 
 			&fd, &offset, s->saved_context->pretcode);
-	}
 	
 	/* Re-pack them. */
 	s->args[0] = (long int) addr;
@@ -121,8 +125,7 @@ void munmap_replacement(struct generic_syscall *s, post_handler *post)
 void mremap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void mremap_replacement(struct generic_syscall *s, post_handler *post)
 {
-	/* Unpack the mmap arguments. */
-	/* Unpack the mmap arguments. */
+	/* Unpack the mremap arguments. */
 	void *old_addr = (void*) s->args[0];
 	size_t old_length = s->args[1];
 	size_t new_length = s->args[2];
@@ -147,6 +150,31 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 		__mmap_allocator_notify_mremap_after((void*) ret, old_addr, old_length, new_length, flags, 
 			maybe_new_address, GUESS_CALLER(s->saved_context->uc.uc_mcontext));
 	}
+	
+	/* Do the post-handling. */
+	post(s, ret);
+	
+	/* We need to do our own resumption also. */
+	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+}
+
+void open_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
+void open_replacement(struct generic_syscall *s, post_handler *post)
+{
+	/* Unpack the arguments */
+	const char *path = (const char *) s->args[0];
+	int flags = s->args[1];
+	mode_t mode = s->args[2];
+	
+	/* Nudge them. */
+	__liballocs_nudge_open(&path, &flags, &mode, s->saved_context->pretcode);
+	
+	/* Repack. */
+	s->args[0] = (long int) path;
+	s->args[1] = flags;
+	s->args[2] = mode;
+	
+	long int ret = do_syscall5(s);
 	
 	/* Do the post-handling. */
 	post(s, ret);
@@ -217,6 +245,7 @@ void __liballocs_systrap_init(void)
 	replaced_syscalls[SYS_munmap] = munmap_replacement;
 	replaced_syscalls[SYS_mremap] = mremap_replacement;
 	replaced_syscalls[SYS_brk] = brk_replacement;
+	replaced_syscalls[SYS_open] = open_replacement;
 	/* Get a hold of the ld.so's link map entry. How? We get it from the auxiliary
 	 * vector. */
 	const char *interpreter_fname = NULL;
@@ -322,4 +351,23 @@ void __liballocs_systrap_init(void)
 
 	install_sigill_handler();
 	__liballocs_systrap_is_initialized = 1;
+}
+
+void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
+                  int *p_fd, off_t *p_offset, const void *caller)
+{
+	if (dlbind_open_active_on)
+	{
+		*p_flags &= ~(0x3 /*MAP_SHARED|MAP_PRIVATE*/);
+		*p_flags |= 0x1 /* MAP_SHARED */;
+	}
+}
+
+void __liballocs_nudge_open(const char **p_pathname, int *p_flags, mode_t *p_mode, const void *caller)
+{
+	if (dlbind_open_active_on)
+	{
+		*p_flags &= ~(O_RDWR|O_RDONLY);
+		*p_flags |= O_RDWR;
+	}
 }
