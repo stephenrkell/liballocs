@@ -11,7 +11,9 @@
 
 /* Our secret private channel with libdlbind. This must always be linked in,
  * even in libcrunch stubs. */
-extern __thread const char *dlbind_open_active_on __attribute__((visibility("hidden")));
+extern __thread const char *dlbind_open_active_on __attribute__((weak,visibility("hidden")));
+/* While weak thread-locals don't actually work (on x86-64).... */
+extern int dlbind_dummy __attribute__((weak));
 
 /* NOTE: We also get linked in from libcrunch's stubs file, which lacks most of liballocs.
  * (Read that again. It lacks most of liballocs, not just most of libcrunch.)
@@ -356,7 +358,7 @@ void __liballocs_systrap_init(void)
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller)
 {
-	if (dlbind_open_active_on)
+	if (&dlbind_dummy && dlbind_open_active_on)
 	{
 		*p_flags &= ~(0x3 /*MAP_SHARED|MAP_PRIVATE*/);
 		*p_flags |= 0x1 /* MAP_SHARED */;
@@ -365,7 +367,7 @@ void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p
 
 void __liballocs_nudge_open(const char **p_pathname, int *p_flags, mode_t *p_mode, const void *caller)
 {
-	if (dlbind_open_active_on)
+	if (&dlbind_dummy && dlbind_open_active_on)
 	{
 		*p_flags &= ~(O_RDWR|O_RDONLY);
 		*p_flags |= O_RDWR;
