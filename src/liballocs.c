@@ -338,6 +338,16 @@ const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqt
 	Dl_info i = dladdr_with_cache(u);
 	if (i.dli_saddr == u)
 	{
+		if (0 == strncmp(i.dli_sname, "__uniqtype__", sizeof "__uniqtype__" - 1))
+		{
+			/* Codeless. */
+			return i.dli_sname + sizeof "__uniqtype__" - 1;
+		}
+		else if (0 == strncmp(i.dli_sname, "__uniqtype_", sizeof "__uniqtype_" - 1))
+		{
+			/* With code. */
+			return i.dli_sname + sizeof "__uniqtype_" - 1 + /* code + underscore */ 9;
+		}
 		return i.dli_sname;
 	}
 	return "(unnamed type)";
