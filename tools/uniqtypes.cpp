@@ -55,6 +55,7 @@ using dwarf::core::array_type_die;
 using dwarf::core::string_type_die;
 using dwarf::core::type_chain_die;
 using dwarf::core::subroutine_type_die;
+using dwarf::core::unspecified_type_die;
 using dwarf::core::formal_parameter_die;
 
 using dwarf::lib::Dwarf_Off;
@@ -573,10 +574,10 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 				mangled_name,
 				i_vert->first.second,
 				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
-				members_count,
-				1,
-				0 /* FIXME */,
-				0 /* FIXME */
+				/* narg */ fp_types.size(),
+				/* nret */ 1,
+				/* is_va */ 0 /* FIXME */,
+				/* cc */ 0 /* FIXME */
 			);
 			/* Output the return type and argument types. We always output
 			 * a return type, even if it's &__uniqtype__void. */
@@ -605,7 +606,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			);
 			write_uniqtype_related_dummy(out);
 		}
-
 		else if (i_vert->second.is_a<base_type_die>())
 		{
 			write_uniqtype_open_base(out,
@@ -645,6 +645,14 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			write_uniqtype_related_dummy(out); /* FIXME */
 		}
 		else if (!i_vert->second)
+		{
+			write_uniqtype_open_void(out,
+				mangled_name,
+				i_vert->first.second
+			);
+			write_uniqtype_related_dummy(out);
+		}
+		else if (i_vert->second.is_a<unspecified_type_die>())
 		{
 			write_uniqtype_open_void(out,
 				mangled_name,
@@ -697,12 +705,12 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		}
 		else
 		{
-			cerr << "Saw a type of tag: " <<
+			cerr << "Saw an unknown type of tag: " <<
 				i_vert->second.spec_here().tag_lookup(
 					i_vert->second.tag_here()
 				)
 				<< endl;
-			assert(false);
+			// assert(false);
 		}
 		
 		write_uniqtype_close(out, mangled_name, contained_length);
