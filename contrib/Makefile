@@ -139,7 +139,7 @@ libcxxgen/config.status:
 	LIBDWARFPP_CXXFLAGS=-I$(CONTRIB_ROOT)/libdwarfpp/include \
 	LIBDWARFPP_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/lib \
         -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib -ldwarfpp" \
-	 ./configure --prefix=$(CONTRIB_ROOT)/usr
+	 ./configure --prefix=$(CONTRIB_ROOT)/usr $(LIBCXXGEN_CONFIGURE_FLAGS)
 
 .PHONY: build-libcxxgen
 build-libcxxgen: libcxxgen/config.status build-libdwarfpp build-libsrk31c++ build-libc++fileno
