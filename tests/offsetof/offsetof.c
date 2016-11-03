@@ -37,10 +37,10 @@ int main(void)
 	struct uniqtype *baz_type = dlsym(RTLD_NEXT, "__uniqtype__baz");
 	assert(baz_type);
 	assert(got_comp_type);
-	assert(got_comp_type->nmemb == 2);
-	assert(got_comp_type->contained[0].ptr == baz_type);
-	assert(got_comp_type->contained[1].ptr->is_array);
-	assert(got_comp_type->contained[1].ptr->contained[0].ptr == blah_type);
+	assert(got_comp_type->un.info.kind == COMPOSITE);
+	assert(got_comp_type->related[0].un.memb.ptr == baz_type);
+	assert(got_comp_type->related[1].un.memb.ptr->un.array.is_array);
+	assert(got_comp_type->related[1].un.memb.ptr->related[0].un.memb.ptr == blah_type);
 
 	return 0;
 }
