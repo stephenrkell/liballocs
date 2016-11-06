@@ -14,7 +14,7 @@ HOOKS_PRELOAD_OBJS := malloc_hook_stubs_preload_fast.o event_hooks_fast.o
 HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
 
 CFLAGS += -std=gnu11 -Wall -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS) \
-   -I$(TRAP_SYSCALLS)/libsystrap -I$(SRCROOT)/src -Wno-unused
+   -I$(TRAP_SYSCALLS)/libsystrap -I$(LIBDLBIND)/include -I$(SRCROOT)/src -Wno-unused
 
 ifeq ($(DEBUG),1)
     DEFAULT_EXTRA_CFLAGS := -g
