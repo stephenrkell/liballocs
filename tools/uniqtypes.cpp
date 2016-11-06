@@ -1,3 +1,5 @@
+#include "uniqtype.h" /* for UNIQTYPE_DECL which we stringify -- include first to avoid
+                       * conflicting C++-linkage decls coming later from <c*> */
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -18,7 +20,6 @@
 #include <fileno.hpp>
 
 #include "uniqtypes.hpp"
-#include "uniqtype.h" /* for UNIQTYPE_DECL which we stringify */
 
 using std::cin;
 using std::cout;

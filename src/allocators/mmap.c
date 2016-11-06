@@ -14,6 +14,7 @@ int open(const char *, int);
 #include "maps.h"
 #include "liballocs_private.h"
 #include "raw-syscalls.h"
+#include "dlbind.h"
 
 /* We talk about "allocators" but in the case of retrofitted 
  * allocators, they actually come in up to three parts:
@@ -557,6 +558,10 @@ void __mmap_allocator_init(void)
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
 		
+		/* Now we can correctly initialize libdlbind. Bit of a HACK that it's in here. */
+		__libdlbind_do_init();
+		__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+
 		initialized = 1;
 		trying_to_initialize = 0;
 	}

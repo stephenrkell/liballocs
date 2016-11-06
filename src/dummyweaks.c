@@ -64,3 +64,17 @@ void __liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, con
 {
 	
 }
+
+const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u)
+{
+	return NULL;
+}
+
+struct mcontext;
+struct uniqtype *
+__liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
+   struct uniqtype *out, unsigned long out_len,
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt)
+{
+	return NULL;
+}

@@ -21,6 +21,9 @@
 #include "raw-syscalls.h"
 #include "liballocs.h"
 #include "liballocs_private.h"
+#include "dlbind.h"
+
+void *__liballocs_rt_uniqtypes_obj;
 
 /* Force a definition of this inline function to be emitted.
  * Debug builds use this, since they won't inline the call to it
@@ -1073,8 +1076,10 @@ int __liballocs_global_init(void)
 #endif
 	int ret_hook = dl_iterate_phdr(load_and_init_all_metadata_for_one_object, NULL);
 	
-	/* Don't do this. They all have constructors. Moreover, the mmap allocator
-	 * calls *us* because it can't start the systrap before we've loaded all the
+	/* Don't do this. They all have constructors, so it's not necessary.
+	 * Moreover, the mmap allocator's constructor 
+	 * calls *us* (if we haven't already run) 
+	 * because it can't start the systrap before we've loaded all the
 	 * metadata for the loaded objects (the "__brk" problem). */
 	// __stack_allocator_init();
 	// __mmap_allocator_init();
@@ -1103,6 +1108,10 @@ int __liballocs_global_init(void)
 	pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
 	pointer_to___uniqtype__intptr_t = dlsym(RTLD_DEFAULT, "__uniqtype__intptr_t");
 
+	// don't init dlbind here -- do it in the mmap allocator, *after* we've started systrap
+	//__libdlbind_do_init();
+	//__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+	
 	trying_to_initialize = 0;
 	__liballocs_is_initialized = 1;
 
@@ -1367,3 +1376,10 @@ __liballocs_get_alloc_site(void *obj)
 	
 	return (void*) alloc_site;
 }
+
+/* Instantiate the inline from uniqtypes.h. */
+extern inline
+struct uniqtype *
+__liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
+   struct uniqtype *out, unsigned long out_len,
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt);

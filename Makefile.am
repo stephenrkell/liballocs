@@ -7,7 +7,7 @@ AM_CXXFLAGS = -std=c++11 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated
 
 AM_CFLAGS = -Wall -std=gnu99 -ggdb -O3 -flto -Iinclude -fPIC -Wp,-w
 
-AM_LDFLAGS = -Wl,--no-as-needed -lstdc++ -lm -lboost_regex $(DWARFIDL_LIBS) $(LIBCXXGEN_LIBS) $(LIBDWARFPP_LIBS) $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) 
+AM_LDFLAGS = -Wl,--no-as-needed -lstdc++ -lm -lboost_regex $(DWARFIDL_LIBS) $(LIBCXXGEN_LIBS) $(LIBDWARFPP_LIBS) $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) -ldl
 
 extra_DIST = liballocs.pc.in
 pkgconfigdir = $(libdir)/pkgconfig

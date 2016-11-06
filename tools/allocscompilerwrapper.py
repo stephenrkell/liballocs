@@ -115,8 +115,17 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # do we need to unbind? 
         # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
         # This is needed e.g. for SPEC benchmark bzip2
-        with (self.makeErrFile(filename + ".fixuplog", "w+") if not errfile else errfile) as errfile:
+        with (self.makeErrFile(os.path.realpath(filename) + ".fixuplog", "w+") if not errfile else errfile) as errfile:
 
+            # also link the file with the uniqtypes it references
+            linkUsedTypesCmd = [self.getLibAllocsBaseDir() + "/tools/lang/c/bin/link-used-types", filename]
+            self.debugMsg("Calling " + " ".join(linkUsedTypesCmd) + "\n")
+            ret = subprocess.call(linkUsedTypesCmd, stderr=errfile)
+            if ret != 0:
+                self.print_errors(errfile)
+                return ret  # give up now
+
+            # Now deal with wrapped functions
             wrappedFns = self.allWrappedSymNames()
             self.debugMsg("Looking for wrapped functions that need unbinding\n")
             cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"; exit $?" \

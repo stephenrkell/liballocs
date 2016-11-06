@@ -25,6 +25,25 @@ of or in connection with the use or performance of this software.
 #ifndef UNIQTYPE_H_
 #define UNIQTYPE_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stddef.h>
+#include <elf.h>
+#include <assert.h>
+/* FIXME: Don't make these weak. */
+extern void *__liballocs_rt_uniqtypes_obj __attribute__((weak));
+#include <string.h>
+#include <stdio.h>
+#include <dlfcn.h>
+void *dlbind(void *lib, const char *symname, void *obj, size_t len, Elf64_Word type)
+			__attribute__((weak));
+void *dlalloc(void *l, unsigned long sz, unsigned flags) __attribute__((weak));
+
+struct uniqtype;
+const char *(__attribute__((pure,weak)) __liballocs_uniqtype_name)(const struct uniqtype *u);
+
 #define UNIQTYPE_DECLS \
 /* CARE with bit allocation: we want the first bit (is_array) to be set only in */ \
 /* the ARRAY value. The placement of bitfields is ABI-determined, but on x86-64 */ \
@@ -76,7 +95,7 @@ struct mcontext; /* for #include contexts that lack it */ \
 /* "make_precise" func for encoding dynamic / data-dependent reps (e.g. stack frame, hash table) */ \
 typedef struct uniqtype *make_precise_fn_t(struct uniqtype *in, \
    struct uniqtype *out, unsigned long out_len, \
-   void *obj, void *ip, struct mcontext *ctxt); \
+   void *obj, void *alloc_base, unsigned long alloc_sz, void *ip, struct mcontext *ctxt); \
 struct uniqtype \
 { \
    struct alloc_addr_info cache_word; \
@@ -136,7 +155,7 @@ struct uniqtype \
    struct uniqtype_rel_info related[]; \
 }; 
 
-#define UNIQTYPE_POS_MAXOFF_UNBOUNDED UINT_MAX
+#define UNIQTYPE_POS_MAXOFF_UNBOUNDED ((1ul << (8*sizeof(unsigned int)))-1) /* UINT_MAX */
 #define UNIQTYPE_ARRAY_LENGTH_UNBOUNDED ((1u<<31)-1)
 
 UNIQTYPE_DECLS
@@ -316,9 +335,71 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 	|| ((u)->un.info.kind == ADDRESS && 1 /* FIXME */) \
 	|| ((u)->un.info.kind == SUBRANGE && 1 /* FIXME */) \
 	|| ((u)->un.info.kind == SUBPROGRAM && (u)->related[0].un.t.ptr != NULL) \
-	) 
+	)
 #define NAME_FOR_UNIQTYPE(u) UNIQTYPE_NAME(u)
-const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u);
+
+// #include <elf.h>
+// #include <dlfcn.h>
+// #include <dlbind.h>
+// #include <stdio.h>
+
+/* We want this inline to be COMDAT'd and global-overridden to a unique run-time instance.
+ * But HMM, we will get the same problem as with uniqtypes: between the preloaded library
+ * and the executable, we won't get uniquing. I think this is okay.
+ * 
+ * HMM. This function relies on elf.h, liballocs, libdlbind, libdl and libc.
+ * How to deal with the includes? And with supplying the dependencies at link time? 
+ * It's not silly to link -ldl -ldlbind -lallocs, passing the .so files for each.
+ * 
+ * We instantiate this function (using "extern inline") in any typeobj. Do we? 
+ *
+ * NOTE also that this code needs to be C++-clean, because we include this header
+ * in uniqtypes.cpp. */
+inline 
+struct uniqtype *
+__liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
+   struct uniqtype *out, unsigned long out_len,
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt)
+{
+	unsigned long precise_size = ((char*) memrange_base + memrange_sz) - (char*) obj;
+	struct uniqtype *element_t = UNIQTYPE_ARRAY_ELEMENT_TYPE(in);
+	assert(element_t);
+	assert(element_t->pos_maxoff > 0);
+	assert(element_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
+	
+	unsigned array_len = precise_size / element_t->pos_maxoff;
+	assert(precise_size / element_t->pos_maxoff == 0); /* too strict? */
+	
+	char precise_uniqtype_name[4096];
+	const char *arr_substr = strstr(UNIQTYPE_NAME(in), "__ARR");
+	assert(arr_substr);
+	const char *rest = arr_substr + sizeof "__ARR" - 1;
+	while (*rest >= '0' && *rest <= '9') ++rest;
+	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
+			"__uniqtype____ARR%d%s", array_len, rest);
+	/* FIXME: compute hash code. Should be an easy case. */
+	
+	/* Does such a type exist? */
+	void *found = NULL;
+	if (NULL != (found = dlsym(NULL, precise_uniqtype_name)))
+	{
+		return (struct uniqtype *) found;
+	}
+	else
+	{
+		/* Create it and memoise using libdlbind. */
+		size_t sz = offsetof(struct uniqtype, related) + 1 * (sizeof (struct uniqtype_rel_info));
+		void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+		memcpy(allocated, in, sz);
+		((struct uniqtype *) allocated)->un.array.nelems = array_len;
+		void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
+			allocated, sz, STT_OBJECT);
+		assert(reloaded);
+		
+		return (struct uniqtype *) allocated;
+	}
+}
+
 	/* Some notes on make_precise:
 	 *
 	 * We can generate the make_precise function in specific DWARF contexts that require
@@ -408,5 +489,9 @@ const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqt
 	 * Need to describe the pieces -- no avoiding it.
 	 * Could compile the DWARF into a reader/writer function pair, but that's very opaque.
 	 */
+
+#ifdef __cplusplus
+} /* end extern "C" */
+#endif
 
 #endif
