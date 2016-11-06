@@ -176,7 +176,7 @@ void open_replacement(struct generic_syscall *s, post_handler *post)
 	s->args[1] = flags;
 	s->args[2] = mode;
 	
-	long int ret = do_syscall5(s);
+	long int ret = do_syscall3(s);
 	
 	/* Do the post-handling. */
 	post(s, ret);
@@ -185,12 +185,13 @@ void open_replacement(struct generic_syscall *s, post_handler *post)
 	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
 }
 
-static int trap_ldso_cb(struct proc_entry *ent, char *linebuf, void *interpreter_fname_as_void)
+static int trap_ldso_or_libdl_cb(struct proc_entry *ent, char *linebuf, void *interpreter_fname_as_void)
 {
 	const char *interpreter_fname = (const char *) interpreter_fname_as_void;
-	if (ent->x == 'x' && 0 == strcmp(interpreter_fname, ent->rest))
+	if (ent->x == 'x' && (0 == strcmp(interpreter_fname, ent->rest)
+		|| 0 == strcmp(basename(ent->rest), "libdl.so.2")))
 	{
-		/* It's an executable mapping in the ld.so, so trap it. */
+		/* It's an executable mapping in the ld.so or libdl, so trap it. */
 		trap_one_executable_region((unsigned char *) ent->first, (unsigned char *) ent->second,
 			interpreter_fname, ent->w == 'w', ent->r == 'r');
 	}
@@ -201,8 +202,9 @@ static int trap_ldso_cb(struct proc_entry *ent, char *linebuf, void *interpreter
 static _Bool trap_syscalls_in_symbol_named(const char *name, struct link_map *l,
 	ElfW(Sym) *dynsym, ElfW(Sym) *dynsym_end, const char *dynstr, const char *dynstr_end)
 {
-	uint32_t *gnu_hash = (uint32_t *) dynamic_xlookup(l->l_ld, DT_GNU_HASH)->d_un.d_ptr;
-	ElfW(Sym) *found = gnu_hash_lookup(gnu_hash, dynsym, dynstr, name);
+	ElfW(Dyn) *gnu_hash_ent = dynamic_lookup(l->l_ld, DT_GNU_HASH);
+	ElfW(Sym) *found = gnu_hash_ent ? gnu_hash_lookup((uint32_t*) gnu_hash_ent->d_un.d_ptr, 
+		dynsym, dynstr, name) : NULL;
 	if (found && found->st_shndx != STN_UNDEF)
 	{
 		trap_one_instruction_range((unsigned char *)(l->l_addr + found->st_value),
@@ -272,7 +274,7 @@ void __liballocs_systrap_init(void)
 	int fd = open(proc_buf, O_RDONLY);
 	if (fd == -1) abort();
 	char linebuf[8192];
-	for_each_maps_entry(fd, linebuf, sizeof linebuf, &entry, trap_ldso_cb, (void*) interpreter_fname);
+	for_each_maps_entry(fd, linebuf, sizeof linebuf, &entry, trap_ldso_or_libdl_cb, (void*) interpreter_fname);
 	close(fd);
 
 	/* Also trap the mmap and mmap64 calls in the libc so. Again, we use relf
