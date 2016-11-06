@@ -30,16 +30,9 @@ extern "C" {
 #endif
 
 #include <stddef.h>
-#include <elf.h>
-#include <assert.h>
-/* FIXME: Don't make these weak. */
-extern void *__liballocs_rt_uniqtypes_obj __attribute__((weak));
-#include <string.h>
-#include <stdio.h>
-#include <dlfcn.h>
-void *dlbind(void *lib, const char *symname, void *obj, size_t len, Elf64_Word type)
-			__attribute__((weak));
-void *dlalloc(void *l, unsigned long sz, unsigned flags) __attribute__((weak));
+/* Don't include any inline functions before we've defined *our* inlines,
+ * or they'll get instrumented by CIL passes and create lots of implicit-declaration
+ * problems. Since our inline function needs some includes, we put them at the bottom. */
 
 struct uniqtype;
 const char *(__attribute__((pure,weak)) __liballocs_uniqtype_name)(const struct uniqtype *u);
@@ -337,11 +330,17 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 	|| ((u)->un.info.kind == SUBPROGRAM && (u)->related[0].un.t.ptr != NULL) \
 	)
 #define NAME_FOR_UNIQTYPE(u) UNIQTYPE_NAME(u)
-
-// #include <elf.h>
-// #include <dlfcn.h>
-// #include <dlbind.h>
-// #include <stdio.h>
+#include <elf.h>
+#include <assert.h>
+/* FIXME: Don't make these weak. */
+extern void *__liballocs_rt_uniqtypes_obj __attribute__((weak));
+const char *strstr(const char *haystack, const char *needle);
+int snprintf(char *str, size_t size, const char *format, ...);
+void *memcpy(void *dest, const void *src, size_t n);
+void *dlsym(void *handle, const char *symbol);
+void *dlbind(void *lib, const char *symname, void *obj, size_t len, Elf64_Word type)
+			__attribute__((weak));
+void *dlalloc(void *l, unsigned long sz, unsigned flags) __attribute__((weak));
 
 /* We want this inline to be COMDAT'd and global-overridden to a unique run-time instance.
  * But HMM, we will get the same problem as with uniqtypes: between the preloaded library

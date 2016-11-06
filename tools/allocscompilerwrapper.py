@@ -186,6 +186,12 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def getVerboseArgs(self):
         return []
 
+    def getStubGenHeaderPath(self):
+        return self.getLibAllocsBaseDir() + "/tools/stubgen.h"
+    
+    def getStubGenCompileArgs(self):
+        return []
+    
     def main(self):
         # un-export CC from the env if it's set to allocscc, because 
         # we don't want to recursively crunchcc the -uniqtypes.c files
@@ -269,7 +275,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 stubsfile_name = outputFile + ".allocstubs.c"
                 with open(stubsfile_name, "w") as stubsfile:
                     self.debugMsg("stubsfile is %s\n" % stubsfile.name)
-                    stubsfile.write("#include \"" + self.getLibAllocsBaseDir() + "/tools/stubgen.h\"\n")
+                    stubsfile.write("#include \"" + self.getStubGenHeaderPath() + "\"\n")
 
                     def writeArgList(fnName, fnSig):
                         stubsfile.write("#define arglist_%s(make_arg) " % fnName)
@@ -277,6 +283,12 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         for c in fnSig: 
                             if ndx != 0:
                                 stubsfile.write(", ")
+                            stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                            ndx += 1
+                        stubsfile.write("\n")
+                        stubsfile.write("#define arglist_nocomma_%s(make_arg) " % fnName)
+                        ndx = 0
+                        for c in fnSig: 
                             stubsfile.write("make_arg(%d, %c)" % (ndx, c))
                             ndx += 1
                         stubsfile.write("\n")
@@ -352,13 +364,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     # To do "mostly the right thing", we preprocess with 
                     # most of the user's options, 
                     # then compile with a more tightly controlled set
-                    extraFlags = []
+                    extraFlags = self.getStubGenCompileArgs()
                     if "-shared" in passedThroughArgs \
                         or "-G" in passedThroughArgs:
                         extraFlags += ["-fPIC"]
                     else:
                         pass
-                    stubs_pp_cmd = ["cc", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
+                    stubs_pp_cmd = ["cc", "-std=c11", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
                         "-I" + self.getLibAllocsBaseDir() + "/tools"] \
                         + [arg for arg in passedThroughArgs if arg.startswith("-D")] \
                         + [stubsfile.name]
@@ -371,6 +383,15 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         exit(1)
                     # now erase the '# ... file ' lines that refer to our stubs file,
                     # and add some line breaks
+                    # -- HMM, why not just erase all #line directives? i.e. preprocess with -P?
+                    # We already do this.
+                    # NOTE: the "right" thing to do is keep the line directives
+                    # and replace the ones pointing to stubgen.h
+                    # with ones pointing at the .i file itself, at the appropriate line numbers.
+                    # This is tricky because our insertion of newlines will mess with the
+                    # line numbers.
+                    # Though, actually, we should only need a single #line directive.
+                    # Of course this is only useful if the .i file is kept around.
                     stubs_sed_cmd = ["sed", "-r", "-i", "s^#.*allocs.*/stubgen\\.h\" *[0-9]* *$^^\n " \
                     + "/__real_|__wrap_|__current_/ s^[;\\{\\}]^&\\n^g", stubs_pp]
                     ret_stubs_sed = subprocess.call(stubs_sed_cmd)
@@ -378,7 +399,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
                             % (stubs_pp, ret_stubs_sed))
                         exit(1)
-                    stubs_cc_cmd = ["cc", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
+                    stubs_cc_cmd = ["cc", "-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
                         "-I" + self.getLibAllocsBaseDir() + "/tools", \
                         stubs_pp]
                     self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
