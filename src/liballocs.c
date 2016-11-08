@@ -1377,7 +1377,11 @@ __liballocs_get_alloc_site(void *obj)
 	return (void*) alloc_site;
 }
 
-/* Instantiate the inline from uniqtypes.h. */
+/* Instantiate the inlines from uniqtypes.h. */
+extern inline
+struct uniqtype *
+__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len);
+
 extern inline
 struct uniqtype *
 __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
