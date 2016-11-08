@@ -15,19 +15,39 @@
 
 static const char *asciiz_start;
 static const char *asciiz_end;
+static struct uniqtype *asciiz_uniqtype;
 
 static const char **env_vector_start;
 static const char **env_vector_terminator;
+static struct uniqtype *env_vector_uniqtype;
 
 static const char **argv_vector_start;
 static const char **argv_vector_terminator;
+static struct uniqtype *argv_vector_uniqtype;
 
 static ElfW(auxv_t) *auxv_array_start;
 static ElfW(auxv_t) *auxv_array_terminator;
+static struct uniqtype *auxv_array_uniqtype;
 
 static intptr_t *p_argcount;
 
 void *program_entry_point;
+
+/* Delay this bit of the init until we need it, because it depends on libdlbind
+ * which is only ready fairly late (after mmap). */
+static void init_uniqtypes(void)
+{
+	auxv_array_uniqtype = __liballocs_get_or_create_array_type(
+			pointer_to___uniqtype__Elf64_auxv_t,
+			auxv_array_terminator + 1 - auxv_array_start);
+	env_vector_uniqtype = __liballocs_get_or_create_array_type(
+			pointer_to___uniqtype____PTR_signed_char, 
+			env_vector_terminator + 1 - env_vector_terminator);
+	argv_vector_uniqtype = __liballocs_get_or_create_array_type(
+			pointer_to___uniqtype____PTR_signed_char, *p_argcount + 1);
+	asciiz_uniqtype = __liballocs_get_or_create_array_type(
+			pointer_to___uniqtype__signed_char, asciiz_end - asciiz_start);
+}
 
 void __auxv_allocator_init(void) __attribute__((constructor(101)));
 void __auxv_allocator_init(void)
@@ -61,8 +81,8 @@ void __auxv_allocator_init(void)
 	p_argcount = (intptr_t*) argv_vector_start - 1;
 	
 	/* Now for the asciiz. We lump it all in one chunk. */
-	char *asciiz_start = (char*) (auxv_array_terminator + 1);
-	char *asciiz_end = asciiz_start;
+	asciiz_start = (char*) (auxv_array_terminator + 1);
+	asciiz_end = asciiz_start;
 	while (*(intptr_t *) asciiz_end != 0) asciiz_end += sizeof (void*);
 	
 	ElfW(auxv_t) *found_at_entry = auxv_lookup(auxv_array_start, AT_ENTRY);
@@ -73,24 +93,35 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site)
 {
+	if (!auxv_array_uniqtype) init_uniqtypes();
+	
 	/* Decide whether it falls into the asciiz, auxv_t or ptr vector parts. */
 	if ((char*) obj >= (char*) auxv_array_start
 			&& (char*) obj <= (char*) auxv_array_terminator)
 	{
-		if (out_type) *out_type = pointer_to___uniqtype__Elf64_auxv_t;
-		if (out_base) *out_base = auxv_array_start +
-				sizeof (Elf64_auxv_t) * (((char*) obj - (char*) auxv_array_start) / sizeof (Elf64_auxv_t));
-		if (out_size) *out_size = sizeof (Elf64_auxv_t);
+		if (out_type) *out_type = auxv_array_uniqtype;
+		if (out_base) *out_base = auxv_array_start;
+		if (out_size) *out_size = (auxv_array_terminator + 1 - auxv_array_start) * sizeof (Elf64_auxv_t);
 		if (out_site) *out_site = program_entry_point;
 		return NULL;
 	}
 	
 	if ((char*) obj >= (char*) argv_vector_start
+			&& (char*) obj <= (char*) argv_vector_terminator)
+	{
+		if (out_type) *out_type = argv_vector_uniqtype;
+		if (out_base) *out_base = argv_vector_start;
+		if (out_size) *out_size = (argv_vector_terminator + 1 - argv_vector_start) * sizeof (char*);
+		if (out_site) *out_site = program_entry_point;
+		return NULL;
+	}
+	
+	if ((char*) obj >= (char*) env_vector_start
 			&& (char*) obj <= (char*) env_vector_terminator)
 	{
-		if (out_type) *out_type = pointer_to___uniqtype____PTR_signed_char;
-		if (out_base) *out_base = (void*) ROUND_DOWN((uintptr_t) obj, sizeof (char*));
-		if (out_size) *out_size = sizeof (char*);
+		if (out_type) *out_type = env_vector_uniqtype;
+		if (out_base) *out_base = env_vector_start;
+		if (out_size) *out_size = (env_vector_terminator + 1 - env_vector_start) * sizeof (char*);
 		if (out_site) *out_site = program_entry_point;
 		return NULL;
 	}
