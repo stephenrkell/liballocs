@@ -9,6 +9,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/regex.hpp>
 #include <dwarfidl/create.hpp>
+#include <libgen.h>
 
 // regex usings
 using boost::regex;
@@ -25,6 +26,28 @@ using std::string;
 using std::deque;
 using namespace dwarf::core;
 using dwarf::tool::abstract_c_compiler;
+
+string fq_pathname(const string& dir, const string& path)
+{
+	if (path.length() > 0 && path.at(0) == '/') return path;
+	else
+	{
+		// we want to do 
+		// return dir + "/" + path;
+		// BUT "path" can contain "../".
+		string ourdir = dir;
+		string ourpath = path;
+		while (boost::starts_with(ourpath, "../"))
+		{
+			char *buf = strdup(ourdir.c_str());
+			ourdir = dirname(buf);
+			free(buf);
+			ourpath = ourpath.substr(3);
+		}
+		
+		return ourdir + "/" + path;
+	}
+}
 
 vector<allocsite>
 read_allocsites(std::istream& in)
@@ -474,7 +497,31 @@ canonical_key_from_type(iterator_df<type_die> t)
 			   local data types, C++ namespaces). */
 			/* FIXME: deal with struct/union tags also (but being sensitive to language: 
 			   don't do it with C++ CUs). */
-			name_to_use = t.name_here() ? *name_for_type_die(t) : offset_to_string(t.offset_here());
+			if (t.name_here())
+			{
+				name_to_use = *name_for_type_die(t);
+			}
+			else
+			{
+				string offsetstr = offset_to_string(t.offset_here());
+				/* We really want to allow deduplicating anonymous structure types
+				 * that originate in the same header file but are included in multiple
+				 * compilation units. Since each gets a different offset, using that
+				 * for the fake name string is a bad idea. Instead, use the defining
+				 * source file path, if we have it. */
+				if (t->get_decl_file() && t->get_decl_line())
+				{
+					ostringstream s;
+					s << fq_pathname(
+						t.enclosing_cu()->get_comp_dir()
+						? *t.enclosing_cu()->get_comp_dir() 
+						: "",
+						t.enclosing_cu()->source_file_name(*t->get_decl_file()))
+					<< "_" << *t->get_decl_line();
+					name_to_use = s.str();
+				}
+				else name_to_use = offsetstr;
+			}
 		}
 // 		else // t->name_here() && t.tag_here() == DW_TAG_base_type
 // 		{

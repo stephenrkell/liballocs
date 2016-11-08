@@ -165,6 +165,7 @@ inline string mangle_typename(const pair<string, string>& p)
 	
 	return "__uniqtype_" + first_mangled + "_" + second_mangled;
 }
+string fq_pathname(const string& dir, const string& path);
 
 opt<uint32_t> type_summary_code(core::iterator_df<core::type_die> t);
 opt<uint32_t> signedness_complement_type_summary_code(core::iterator_df<core::base_type_die> base_t);
