@@ -316,7 +316,7 @@ void *dlopen(const char *filename, int flag)
 					(0 == strcmp(lm_ent_realname, file_realname)));
 			if (file_already_loaded) break;
 		}
-		free((void*) file_realname);
+		__wrap_dlfree((void*) file_realname);
 	}
 	// write_string("Blah3005\n");
 	
