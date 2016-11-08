@@ -58,26 +58,18 @@ void *dlbind(void *lib, const char *symname, void *obj, size_t len, Elf64_Word t
 
 extern void *__liballocs_rt_uniqtypes_obj __attribute__((weak));
 
-inline 
+inline
 struct uniqtype *
-__liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
-   struct uniqtype *out, unsigned long out_len,
-   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt)
+__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
 {
-	unsigned long precise_size = ((char*) memrange_base + memrange_sz) - (char*) obj;
-	struct uniqtype *element_t = UNIQTYPE_ARRAY_ELEMENT_TYPE(in);
 	assert(element_t);
 	assert(element_t->pos_maxoff > 0);
 	assert(element_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
 	
-	unsigned array_len = precise_size / element_t->pos_maxoff;
-	assert(precise_size / element_t->pos_maxoff == 0); /* too strict? */
-	
 	char precise_uniqtype_name[4096];
-	const char *arr_substr = strstr(UNIQTYPE_NAME(in), "__ARR");
-	assert(arr_substr);
-	const char *rest = arr_substr + sizeof "__ARR" - 1;
-	while (*rest >= '0' && *rest <= '9') ++rest;
+	const char *maybe_code_substr = UNIQTYPE_NAME(element_t) + sizeof ("__uniqtype_") - 1;
+	const char *rest = maybe_code_substr;
+	while (*rest != '_') ++rest; /* now "rest" begins with "_" */
 	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
 			"__uniqtype____ARR%d%s", array_len, rest);
 	/* FIXME: compute hash code. Should be an easy case. */
@@ -93,14 +85,48 @@ __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
 		/* Create it and memoise using libdlbind. */
 		size_t sz = offsetof(struct uniqtype, related) + 1 * (sizeof (struct uniqtype_rel_info));
 		void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
-		memcpy(allocated, in, sz);
-		((struct uniqtype *) allocated)->un.array.nelems = array_len;
+		struct uniqtype *allocated_uniqtype = allocated;
+		*allocated_uniqtype = (struct uniqtype) {
+			.pos_maxoff = array_len * element_t->pos_maxoff,
+			.un = {
+				array: {
+					.is_array = 1,
+					.nelems = array_len
+				}
+			},
+			.make_precise = NULL
+		};
+		allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
+			.un = {
+				t: {
+					.ptr = element_t
+				}
+			}
+		};
 		void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
 			allocated, sz, STT_OBJECT);
 		assert(reloaded);
 		
-		return (struct uniqtype *) allocated;
+		return allocated_uniqtype;
 	}
+}
+
+inline 
+struct uniqtype *
+__liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
+   struct uniqtype *out, unsigned long out_len,
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt)
+{
+	unsigned long precise_size = ((char*) memrange_base + memrange_sz) - (char*) obj;
+	struct uniqtype *element_t = UNIQTYPE_ARRAY_ELEMENT_TYPE(in);
+	assert(element_t);
+	assert(element_t->pos_maxoff > 0);
+	assert(element_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
+	
+	unsigned array_len = precise_size / element_t->pos_maxoff;
+	assert(precise_size % element_t->pos_maxoff == 0); /* too strict? */
+	
+	return __liballocs_get_or_create_array_type(element_t, precise_size / element_t->pos_maxoff);
 }
 
 	/* Some notes on make_precise:
