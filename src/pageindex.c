@@ -413,12 +413,16 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 	{
 		add_child(b, parent);
 		/* Check that the parent thinks that this allocator is its suballocator. 
-		 * EXCEPTION: the executable's data segment also contains the sbrk area. */
-		if (!parent->suballocator) parent->suballocator = allocated_by;
-		else if (parent->suballocator != allocated_by
-			&& !(parent == executable_data_segment_mapping_bigalloc
-				 && parent->suballocator == &__generic_malloc_allocator)
-		) abort();
+		 * EXCEPTION: the executable's data segment also contains the sbrk area.
+		 * EXCEPTION: the auxv allocator also "contains" (logically) the stack.
+		 * Actually, only do this check if the child does not have any children
+		 * of its own. Except initially, it won't do. Hmm. So just scrap the check. */
+		// if (!parent->suballocator) parent->suballocator = allocated_by;
+		// else if (parent->suballocator != allocated_by
+		// 	&& !(parent == executable_data_segment_mapping_bigalloc
+		// 		 && parent->suballocator == &__generic_malloc_allocator)
+		// 	// && parent != auxv_bigalloc
+		// ) abort();
 	}
 	
 	SANITY_CHECK_BIGALLOC(b);

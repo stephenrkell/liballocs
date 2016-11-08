@@ -145,8 +145,16 @@ void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end)
 	);
 	if (!our_bigalloc) abort();
 	
-	our_bigalloc->suballocator = &__stack_allocator;
+	/* Don't do this. Queries on auxv region are on a "crack" so we don't want
+	 * to descend to the suballocator. Recording suballocators is only useful at
+	 * leaf level anyway, since the child bigalloc (which can be sized precisely,
+	 * leaving the auxv cracks excluded) fills this role at branch level. */
+	// our_bigalloc->suballocator = &__stack_allocator;
 	__stack_allocator_notify_init_stack_region(begin, p_argcount);
+	/* HACK: undo the suballocation relationship created in pageindex. Ideally
+	 * it wouldn't do this. But it doesn't know any better... all bigallocs
+	 * are initially childless, so it's the right thing to do. */
+	our_bigalloc->suballocator = NULL;
 }
 
 struct allocator __auxv_allocator = {
