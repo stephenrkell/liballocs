@@ -540,6 +540,10 @@ let tsIsNonVoidPointer testTs = match testTs with
  | TSPtr(_, _) -> true
  | _ -> false
 
+let tsIsVoidPointer testTs = match testTs with 
+   TSPtr(TSBase(TVoid(_)), _) -> true
+ | _ -> false
+
 let rec tIsPointer testT = match testT with 
    TPtr(_, _) -> true
  | TNamed(ti, _) -> tIsPointer ti.ttype
