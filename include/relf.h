@@ -572,6 +572,15 @@ uintptr_t guess_page_size_unsafe(void)
 	return auxv_xlookup(p_auxv, AT_PAGESZ)->a_un.a_val;
 }
 
+static inline 
+void *get_exe_handle(void)
+{
+	int x;
+	ElfW(auxv_t) *p_auxv = get_auxv((const char **) environ, &x);
+	if (!p_auxv) abort();
+	void *entry = (void*) auxv_xlookup(p_auxv, AT_ENTRY)->a_un.a_val;
+	return get_highest_loaded_object_below(entry);
+}
 #define ROUND_DOWN(p, align) \
 	(((uintptr_t) (p)) % (align) == 0 ? ((uintptr_t) (p)) \
 	: (uintptr_t) ((align) * ((uintptr_t) (p) / (align))))
