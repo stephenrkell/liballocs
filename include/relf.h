@@ -716,7 +716,16 @@ void *fake_dlsym(void *handle, const char *symname)
 		{
 			/* Does this object have the symbol? */
 			ElfW(Sym) *found = symbol_lookup_in_object(l, symname);
-			if (found && found->st_shndx != SHN_UNDEF) return sym_to_addr(found);
+			if (found && found->st_shndx != SHN_UNDEF)
+			{
+				/* HACK for ifunc */
+				if (ELF64_ST_TYPE(found->st_info) == STT_GNU_IFUNC)
+				{
+					void *(*ifunc)(void) = sym_to_addr(found);
+					return ifunc();
+				}
+				else return sym_to_addr(found);
+			}
 			
 			if (handle == l)
 			{
