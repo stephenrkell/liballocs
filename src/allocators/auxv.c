@@ -193,3 +193,38 @@ struct allocator __auxv_allocator = {
 	.is_cacheable = 1,
 	.get_info = get_info
 };
+
+_Bool __auxv_get_asciiz(const char **out_start, const char **out_end, struct uniqtype **out_uniqtype)
+{
+	if (out_start) *out_start = asciiz_start;
+	if (out_end) *out_end = asciiz_end;
+	if (out_uniqtype) *out_uniqtype = asciiz_uniqtype;
+	return 1;
+}
+_Bool __auxv_get_argv(const char ***out_start, const char ***out_terminator, struct uniqtype **out_uniqtype)
+{
+	if (out_start) *out_start = argv_vector_start;
+	if (out_terminator) *out_terminator = argv_vector_terminator;
+	if (out_uniqtype) *out_uniqtype = argv_vector_uniqtype;
+	return 1;
+}
+
+_Bool __auxv_get_env(const char ***out_start, const char ***out_terminator, struct uniqtype **out_uniqtype)
+{
+	if (out_start) *out_start = env_vector_start;
+	if (out_terminator) *out_terminator = env_vector_terminator;
+	if (out_uniqtype) *out_uniqtype = env_vector_uniqtype;
+	return 1;
+}
+
+_Bool __auxv_get_auxv(const Elf64_auxv_t **out_start, Elf64_auxv_t **out_terminator, struct uniqtype **out_uniqtype)
+{
+	if (out_start) *out_start = auxv_array_start;
+	if (out_terminator) *out_terminator = auxv_array_terminator;
+	if (out_uniqtype) *out_uniqtype = auxv_array_uniqtype;
+	return 1;
+}
+void *__auxv_get_program_entry_point(void)
+{
+	return program_entry_point;
+}
