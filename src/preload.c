@@ -631,3 +631,33 @@ out:
 	if (we_set_flag) __avoid_libdl_calls = 0;
 	return ret;
 }
+
+void *memcpy(void *dest, const void *src, size_t n)
+{
+	static void *(*orig_memcpy)(void *, const void *, size_t);
+	if (!orig_memcpy)
+	{
+		/* Use fake_dlsym because it understands ifuncs. */
+		orig_memcpy = fake_dlsym(RTLD_NEXT, "memcpy");
+		assert(orig_memcpy);
+	}
+	
+	orig_memcpy(dest, src, n);
+	
+	return __notify_copy(dest, src, n);
+}
+
+void *(*orig_memmove)(void *, const void *, size_t);
+void *memmove(void *dest, const void *src, size_t n)
+{
+	if (!orig_memmove)
+	{
+		/* Use fake_dlsym because it understands ifuncs. */
+		orig_memmove = fake_dlsym(RTLD_NEXT, "memmove");
+		assert(orig_memmove);
+	}
+	
+	orig_memmove(dest, src, n);
+	
+	return __notify_copy(dest, src, n);
+}

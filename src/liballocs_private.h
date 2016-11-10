@@ -51,6 +51,7 @@ int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data) __attri
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
+void *(*orig_memmove)(void *, const void *, unsigned long) __attribute__((visibility("hidden")));
 int dl_for_one_object_phdrs(void *handle,
 	int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
 	void *data) __attribute__((visibility("hidden")));
@@ -146,6 +147,8 @@ struct object_metadata
 int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *object_metadata) __attribute__((weak));
 int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 	__attribute__((visibility("hidden")));
+
+void *__notify_copy(void *dest, const void *src, unsigned long n);
 
 extern struct uniqtype *pointer_to___uniqtype__void __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__signed_char __attribute__((visibility("hidden")));

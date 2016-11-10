@@ -979,6 +979,11 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	mem[len] = '\0';
 	return mem;
 }
+void *__notify_copy(void *dest, const void *src, unsigned long n)
+{
+	/* We do nothing here. But libcrunch will wrap us. */
+	return dest;
+}
 
 /* These have hidden visibility */
 struct uniqtype *pointer_to___uniqtype__void;
@@ -1042,6 +1047,8 @@ int __liballocs_global_init(void)
 	{
 		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
 		assert(orig_dlopen);
+		orig_memmove = dlsym(RTLD_NEXT, "memmove");
+		assert(orig_memmove);
 	}
 
 	/* NOTE that we get called during allocation. So we should avoid 

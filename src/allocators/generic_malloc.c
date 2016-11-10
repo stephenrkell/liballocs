@@ -764,11 +764,21 @@ void post_nonnull_nonzero_realloc(void *userptr,
 	size_t old_usable_size,
 	const void *caller, void *__new_allocptr)
 {
-	if (__new_allocptr != NULL)
+	/* Are we a bigalloc? */
+	struct big_allocation *b = __lookup_bigalloc(userptr, 
+			&__generic_malloc_allocator, NULL);
+	if (__new_allocptr && __new_allocptr != userptr)
 	{
-		/* create a new bin entry */
+		/* Create a new bin entry. This will also take care of becoming a bigalloc, etc..
+		 * FIXME: check the new type metadata against the old! We can probably do this
+		 * in a way that's uniform with memcpy... the new chunk will take its type
+		 * from the realloc site, and we then check compatibility on the copy. */
 		index_insert(allocptr_to_userptr(__new_allocptr), 
 				modified_size, __current_allocsite ? __current_allocsite : caller);
+		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
+		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
+		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
+		__notify_copy(__new_allocptr, userptr, old_usable_size - sizeof (struct insert));
 	}
 	else 
 	{
@@ -779,16 +789,17 @@ void post_nonnull_nonzero_realloc(void *userptr,
 		index_insert(userptr, old_usable_size, __current_allocsite ? __current_allocsite : caller);
 	}
 	
-	if (modified_size < old_usable_size)
+	if (__new_allocptr == userptr && modified_size < old_usable_size)
 	{
-		/* Are we a bigalloc? */
-		struct big_allocation *b = __lookup_bigalloc(userptr, 
-				&__generic_malloc_allocator, NULL);
 		if (b)
 		{
 			__liballocs_truncate_bigalloc_at_end(b, (char*) userptr + modified_size);
 		}
 	}
+	
+	/* If the old alloc has gone away, do the malloc_hooks call the free hook on it? 
+	 * NO. We need to handle that here. */
+	if (__new_allocptr == userptr) index_delete(userptr);
 }
 
 // same but zero bytes, not bits
