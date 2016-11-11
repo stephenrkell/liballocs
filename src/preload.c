@@ -139,7 +139,7 @@ size_t __wrap_malloc_usable_size (void *ptr)
 		return //__real_malloc_usable_size(ptr);
 			__mallochooks_malloc_usable_size(ptr);
 	}
-	return (__lookup_top_level_allocator(ptr) == &__stack_allocator)
+	return (__liballocs_get_allocator_upper_bound(ptr) == &__stack_allocator)
 		? *(((unsigned long *) ptr) - 1)
 		: __mallochooks_malloc_usable_size(ptr);
 }

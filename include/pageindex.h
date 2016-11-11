@@ -113,7 +113,8 @@ struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, v
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
-struct allocator *__lookup_top_level_allocator(const void *mem) __attribute__((visibility("hidden")));
+struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attribute__((visibility("protected")));
+struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));
 _Bool __pages_unused(void *begin, void *end) __attribute__((visibility("hidden")));
 _Bool __liballocs_notify_unindexed_address(const void *);
 

@@ -284,9 +284,14 @@ struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attri
 struct allocator *__liballocs_get_allocator_upper_bound(const void *obj)
 {
 	if (!pageindex) init();
-	struct big_allocation *alloc = __liballocs_get_bigalloc_containing(obj);
-	if (alloc) return alloc->allocated_by;
+	struct big_allocation *b = __liballocs_get_bigalloc_containing(obj);
+	if (b) return b->allocated_by;
 	else return NULL;
+}
+struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));
+struct allocator *__liballocs_ool_get_allocator(const void *obj)
+{
+	return __liballocs_leaf_allocator_for(obj, NULL, NULL);
 }
 
 void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));
@@ -793,15 +798,6 @@ struct big_allocation *__lookup_deepest_bigalloc(const void *mem)
 	struct big_allocation *b = find_deepest_bigalloc(mem);
 	BIG_UNLOCK
 	return b;
-}
-
-struct allocator *__lookup_top_level_allocator(const void *mem) __attribute__((visibility("hidden")));
-struct allocator *__lookup_top_level_allocator(const void *mem)
-{
-	if (!pageindex) init();
-	struct big_allocation *b = __lookup_bigalloc_top_level(mem);
-	if (!b) return NULL;
-	else return b->allocated_by;
 }
 
 static struct big_allocation *get_common_parent_bigalloc_recursive(struct big_allocation *b1,
