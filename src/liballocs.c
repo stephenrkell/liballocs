@@ -482,6 +482,8 @@ int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *mayb
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
+	
+	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
 
 	// skip objects that are themselves types/allocsites objects
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
@@ -506,7 +508,7 @@ int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *mayb
 	handle = (orig_dlopen ? orig_dlopen :dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	if (!handle)
 	{
-		debug_printf(1, "loading types object: %s\n", dlerror());
+		debug_printf(is_exe ? 0 : 1, "loading types object: %s\n", dlerror());
 		return 0;
 	}
 	debug_printf(3, "loaded types object: %s\n", libfile_name);
@@ -598,6 +600,8 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
 	
+	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
+	
 	// skip objects that are themselves types/allocsites objects
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
 	
@@ -620,7 +624,7 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 	allocsites_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW);
 	if (!allocsites_handle)
 	{
-		debug_printf(1, "loading allocsites object: %s\n", dlerror());
+		debug_printf(is_exe ? 0 : 1, "loading allocsites object: %s\n", dlerror());
 		return 0;
 	}
 	debug_printf(3, "loaded allocsites object: %s\n", libfile_name);
