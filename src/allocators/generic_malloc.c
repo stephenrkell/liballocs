@@ -780,12 +780,13 @@ void post_nonnull_nonzero_realloc(void *userptr,
 		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
 		__notify_copy(__new_allocptr, userptr, old_usable_size - sizeof (struct insert));
 	}
-	else 
+	else // !__new_allocptr || __new_allocptr == userptr
 	{
 		/* *recreate* the old bin entry! The old usable size
 		 * is the *modified* size, i.e. we modified it before
 		 * allocating it, so we pass it as the modified_size to
 		 * index_insert. */
+		// FIXME: is this right? what if __new_allocptr is null?
 		index_insert(userptr, old_usable_size, __current_allocsite ? __current_allocsite : caller);
 	}
 	
@@ -798,8 +799,7 @@ void post_nonnull_nonzero_realloc(void *userptr,
 	}
 	
 	/* If the old alloc has gone away, do the malloc_hooks call the free hook on it? 
-	 * NO. We need to handle that here. */
-	if (__new_allocptr == userptr) index_delete(userptr);
+	 * YES: it was done before the realloc, in the pre-hook. */
 }
 
 // same but zero bytes, not bits
