@@ -191,6 +191,32 @@ class AllocsCompilerWrapper(CompilerWrapper):
     
     def getStubGenCompileArgs(self):
         return []
+        
+    def doPostLinkMetadataBuild(self, outputFile):
+        # We've just output an object, so invoke make to collect the allocsites, 
+        # with our target name as the file we've just built, using ALLOCSITES_BASE 
+        # to set the appropriate prefix
+        if "ALLOCSITES_BASE" in os.environ:
+            baseDir = os.environ["ALLOCSITES_BASE"]
+        else:
+            baseDir = "/usr/lib/allocsites"
+        if os.path.exists(os.path.realpath(outputFile)):
+            targetNames = [baseDir + os.path.realpath(outputFile) + ext \
+                for ext in [".allocs", "-types.c", "-types.so", "-allocsites.c", "-allocsites.so"]]
+            errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
+
+            ret2 = 42
+            with self.makeErrFile(errfilename, "w+") as errfile:
+                cmd = ["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
+                    "-f", "Makefile.allocsites"] +  targetNames
+                errfile.write("Running: " + " ".join(cmd) + "\n")
+                ret2 = subprocess.call(cmd, stderr=errfile, stdout=errfile)
+                errfile.write("Exit status was %d\n" % ret2)
+                if (ret2 != 0 or "DEBUG_CC" in os.environ):
+                    self.print_errors(errfile)
+            return ret2
+        else:
+            return 1
     
     def main(self):
         # un-export CC from the env if it's set to allocscc, because 
@@ -501,30 +527,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
         else: # isLinkCommand
             if not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
-                # We've just output an object, so invoke make to collect the allocsites, 
-                # with our target name as the file we've just built, using ALLOCSITES_BASE 
-                # to set the appropriate prefix
-                if "ALLOCSITES_BASE" in os.environ:
-                    baseDir = os.environ["ALLOCSITES_BASE"]
-                else:
-                    baseDir = "/usr/lib/allocsites"
-                if os.path.exists(os.path.realpath(outputFile)):
-                    targetNames = [baseDir + os.path.realpath(outputFile) + ext \
-                        for ext in [".allocs", "-types.c", "-types.so", "-allocsites.c", "-allocsites.so"]]
-                    errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
-
-                    ret2 = 42
-                    with self.makeErrFile(errfilename, "w+") as errfile:
-                        cmd = ["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
-                            "-f", "Makefile.allocsites"] +  targetNames
-                        errfile.write("Running: " + " ".join(cmd) + "\n")
-                        ret2 = subprocess.call(cmd, stderr=errfile, stdout=errfile)
-                        errfile.write("Exit status was %d\n" % ret2)
-                        if (ret2 != 0 or "DEBUG_CC" in os.environ):
-                            self.print_errors(errfile)
-                    return ret2
-                else:
-                    return 1
+                return self.doPostLinkMetadataBuild(outputFile)
+            else:
+                return 0
 
     # expose base class methods to derived classes
     def parseInputAndOutputFiles(self, args):
