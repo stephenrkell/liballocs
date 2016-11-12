@@ -37,7 +37,7 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 	arg ## num
 
 #ifndef do_wrapper_init
-#define do_wrapper_init
+#define do_wrapper_init(name)
 #endif
 
 #ifndef do_arginit_z
@@ -60,26 +60,26 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 #endif
 
 #ifndef do_wrapper_fini
-#define do_wrapper_fini
+#define do_wrapper_fini(name)
 #endif
 
 #ifndef do_ret_z
-#define do_ret_z
+#define do_ret_z(name)
 #endif
 #ifndef do_ret_Z
-#define do_ret_Z
+#define do_ret_Z(name)
 #endif
 #ifndef do_ret_p
-#define do_ret_p
+#define do_ret_p(name)
 #endif
 #ifndef do_ret_P
-#define do_ret_P
+#define do_ret_P(name)
 #endif
 #ifndef do_ret_i
-#define do_ret_i
+#define do_ret_i(name)
 #endif
 #ifndef do_ret_I
-#define do_ret_I
+#define do_ret_I(name)
 #endif
 
 #ifndef do_arginit
@@ -90,7 +90,7 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 	type_for_argchar_ ## retchar __real_ ## name ( arglist_ ## name (make_argdecl) ); \
 	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
-		do_wrapper_init \
+		do_wrapper_init(name) \
 		arglist_nocomma_ ## name (do_arginit) \
 		type_for_argchar_ ## retchar real_retval; \
 		if (&__current_allocfn && !__current_allocfn) \
@@ -119,8 +119,8 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 			/* if (&__current_allocfn) printf("__current_allocfn: %d", __current_allocfn); */ \
 			real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
 		} \
-		do_wrapper_fini \
-		do_ret_ ## retchar \
+		do_wrapper_fini(name) \
+		do_ret_ ## retchar (name) \
 		return real_retval; \
 	}
 
@@ -131,7 +131,7 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 	type_for_argchar_ ## retchar __real_ ## name( arglist_ ## name (make_argdecl) ); \
 	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
-		do_wrapper_init \
+		do_wrapper_init(name) \
 		arglist_nocomma_ ## name (do_arginit) \
 		type_for_argchar_ ## retchar real_retval; \
 		if (&__current_allocsite && !__current_allocsite) \
@@ -150,8 +150,8 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 			real_retval = retval; \
 		} \
 		else real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-		do_wrapper_fini \
-		do_ret_ ## retchar \
+		do_wrapper_fini(name) \
+		do_ret_ ## retchar (name) \
 		return real_retval; \
 	}
 	
@@ -162,7 +162,7 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 	type_for_argchar_ ## retchar __real_ ## name ( arglist_ ## name (make_argdecl) ); \
 	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
-		do_wrapper_init \
+		do_wrapper_init(name) \
 		arglist_nocomma_ ## name (do_arginit) \
 		_Bool have_caller_allocfn; \
 		_Bool set_currently_allocating = 0; \
@@ -206,8 +206,8 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 			__current_allocsz = 0; \
 		} \
 		if (set_currently_allocating) __currently_allocating = 0; \
-		do_wrapper_fini \
-		do_ret_ ## retchar \
+		do_wrapper_fini(name) \
+		do_ret_ ## retchar (name) \
 		return real_retval; \
 	}
 
@@ -215,14 +215,14 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 	void __real_ ## name( arglist_ ## name (make_argdecl) ); \
 	void __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
-		do_wrapper_init \
+		do_wrapper_init(name) \
 		_Bool we_are_toplevel_free; \
 		if (&__currently_freeing && !__currently_freeing) we_are_toplevel_free = 1; \
 		else we_are_toplevel_free = 0; \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 1; \
 		__real_ ## name( arglist_ ## name (make_argname) ); \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 0; \
-		do_wrapper_fini \
+		do_wrapper_fini(name) \
 	}
 
 #define make_suballocator_free_wrapper(name, alloc_name) /* HACK: assume void-returning for now */ \
@@ -230,7 +230,7 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 	void __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
 	{ \
 		assert(alloc_name ## _alloclevel); \
-		do_wrapper_init \
+		do_wrapper_init(name) \
 		_Bool we_are_toplevel_free; \
 		if (&__currently_freeing && !__currently_freeing) we_are_toplevel_free = 1; \
 		else we_are_toplevel_free = 0; \
@@ -238,5 +238,5 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 		__real_ ## name( arglist_ ## name (make_argname) ); \
 		__unindex_small_alloc(ptr_arg_ ## name, alloc_name ## _alloclevel); \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 0; \
-		do_wrapper_fini \
+		do_wrapper_fini(name) \
 	}
