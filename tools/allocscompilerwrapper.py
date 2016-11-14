@@ -130,7 +130,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             self.debugMsg("Looking for wrapped functions that need unbinding\n")
             cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"; exit $?" \
                 % (filename, "|".join(wrappedFns))
-            self.debugMsg("cmdstring is " + cmdstring + "\n")
+            self.debugMsg("cmdstring for objdump is " + cmdstring + "\n")
             grep_ret = subprocess.call(["sh", "-c", cmdstring], stdout=errfile, stderr=errfile)
             if grep_ret == 0:
                 # we need to unbind. We unbind the allocsite syms
@@ -149,9 +149,10 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 unbind_cmd = ["objcopy", "--prefer-non-section-relocs"] \
                  + [opt for pair in unbind_pairs for opt in pair] \
                  + [filename]
-                self.debugMsg("cmdstring is " + " ".join(unbind_cmd) + "\n")
+                self.debugMsg("cmdstring for objcopy (unbind) is " + " ".join(unbind_cmd) + "\n")
                 objcopy_ret = subprocess.call(unbind_cmd, stderr=errfile)
                 if objcopy_ret != 0:
+                    self.debugMsg("problem doing objcopy (unbind) (ret %d)\n" % objcopy_ret)
                     self.print_errors(errfile)
                     return objcopy_ret
                 else:
