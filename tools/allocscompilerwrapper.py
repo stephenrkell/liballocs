@@ -188,6 +188,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
     def getStubGenHeaderPath(self):
         return self.getLibAllocsBaseDir() + "/tools/stubgen.h"
+
+    def getExtraLinkArgs(self, passedThroughArgs):
+        return []
     
     def getStubGenCompileArgs(self):
         return []
@@ -446,7 +449,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     # CARE: we must insert the wrapper object on the cmdline *before* any 
                     # archive that is providing the wrapped functions. The easiest way
                     # is to insert it first, it appears.
-                    linkArgs = [stubs_bin] + linkArgs
+                    linkArgs = [stubs_bin] + linkArgs + self.getExtraLinkArgs(passedThroughArgs)
                     linkArgs += ["-L" + self.getLinkPath()]
                     if not "-static" in passedThroughArgs and not "-Bstatic" in passedThroughArgs \
                         and not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
