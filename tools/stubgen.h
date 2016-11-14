@@ -36,6 +36,9 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 #define make_argname(num, c) \
 	arg ## num
 
+#define pre_realarg(num, c) \
+	pre_realarg_ ## c (arg ## num)
+
 #ifndef do_wrapper_init
 #define do_wrapper_init(name)
 #endif
@@ -57,6 +60,33 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 #endif
 #ifndef do_arginit_I
 #define do_arginit_I(argname)
+#endif
+
+#ifndef pre_realarg_z
+#define pre_realarg_z(argname)
+#endif
+#ifndef pre_realarg_Z
+#define pre_realarg_Z(argname)
+#endif
+#ifndef pre_realarg_p
+#define pre_realarg_p(argname)
+#endif
+#ifndef pre_realarg_P
+#define pre_realarg_P(argname)
+#endif
+#ifndef pre_realarg_i
+#define pre_realarg_i(argname)
+#endif
+#ifndef pre_realarg_I
+#define pre_realarg_I(argname)
+#endif
+
+#ifndef pre_realcall
+#define pre_realcall(callee, ...)
+#endif
+
+#ifndef post_realcall
+#define post_realcall(callee, ...)
 #endif
 
 #ifndef do_wrapper_fini
@@ -104,7 +134,10 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 			if (!__current_allocsite) __current_allocsite = __builtin_return_address(0); \
 			__current_allocfn = &__real_ ## name; \
 			__current_allocsz = size_arg_ ## name; \
+			arglist_nocomma_ ## name (pre_realarg) \
+			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
 			void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
 			/* __current_alloclevel = 0; */ \
 			/* zero the site now the alloc action is completed, even if it was already set */ \
 			__current_allocsite = (void*)0; \
@@ -117,7 +150,10 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 		{ \
 			/* printf("&__current_allocfn: %p    ", &__current_allocfn); */ \
 			/* if (&__current_allocfn) printf("__current_allocfn: %d", __current_allocfn); */ \
+			arglist_nocomma_ ## name (pre_realarg) \
+			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
 			real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
 		} \
 		do_wrapper_fini(name) \
 		do_ret_ ## retchar (name) \
@@ -143,13 +179,22 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 			} \
 			/* only set the site if we don't have one already */ \
 			__current_allocsite = __builtin_return_address(0); \
+			arglist_nocomma_ ## name (pre_realarg) \
+			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
 			void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
 			/* __current_alloclevel = 0; */ \
 			if (set_currently_allocating) __currently_allocating = 0; \
 			/* *leave* the site to be picked up the the next alloc action, in case we're a helper */ \
 			real_retval = retval; \
 		} \
-		else real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+		else { \
+			arglist_nocomma_ ## name (pre_realarg) \
+			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
+			void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+			real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
+		} \
 		do_wrapper_fini(name) \
 		do_ret_ ## retchar (name) \
 		return real_retval; \
@@ -180,7 +225,10 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 			have_caller_allocfn = 0; \
 		}  else have_caller_allocfn = 1; \
 		/* __current_alloclevel = 1; */ /* We're at least at level 1, i.e. below sbrk()/mmap(). pre_alloc increments this too */ \
+		arglist_nocomma_ ## name (pre_realarg) \
+		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
 		void *real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+		post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
 		if (/* __current_alloclevel > name ## _alloclevel*/ 0) \
 		{ \
 			/* Warn if we've already initialized our_alloclevel and saw a greater level */ \
@@ -235,7 +283,10 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 		if (&__currently_freeing && !__currently_freeing) we_are_toplevel_free = 1; \
 		else we_are_toplevel_free = 0; \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 1; \
+		arglist_nocomma_ ## name (pre_realarg) \
+		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
 		__real_ ## name( arglist_ ## name (make_argname) ); \
+		post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
 		__unindex_small_alloc(ptr_arg_ ## name, alloc_name ## _alloclevel); \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 0; \
 		do_wrapper_fini(name) \
