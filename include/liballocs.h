@@ -651,6 +651,8 @@ const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
 // 
 void *
 __liballocs_get_alloc_site(void *obj);
+unsigned long
+__liballocs_get_alloc_size(void *obj);
 
 #ifdef __cplusplus
 } // end extern "C"

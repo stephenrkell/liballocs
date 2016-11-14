@@ -65,6 +65,12 @@ void __liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, con
 	
 }
 
+unsigned long __liballocs_get_alloc_size(const void *obj)
+{
+	return 0;
+}
+
+struct uniqtype;
 const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u)
 {
 	return NULL;

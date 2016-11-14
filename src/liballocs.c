@@ -1388,6 +1388,18 @@ __liballocs_get_alloc_site(void *obj)
 	return (void*) alloc_site;
 }
 
+unsigned long
+__liballocs_get_alloc_size(void *obj)
+{
+	unsigned long alloc_size;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
+		&alloc_size, NULL, NULL);
+	
+	if (err && err != &__liballocs_err_unrecognised_alloc_site) return 0;
+	
+	return alloc_size;
+}
+
 /* Instantiate the inlines from uniqtypes.h. */
 extern inline
 struct uniqtype *
