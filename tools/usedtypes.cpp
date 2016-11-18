@@ -1,3 +1,4 @@
+#define _WITH_GETLINE
 #include <fstream>
 #include <sstream>
 #include <map>
