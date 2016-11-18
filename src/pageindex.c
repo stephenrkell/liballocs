@@ -284,9 +284,14 @@ struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attri
 struct allocator *__liballocs_get_allocator_upper_bound(const void *obj)
 {
 	if (!pageindex) init();
-	struct big_allocation *alloc = __liballocs_get_bigalloc_containing(obj);
-	if (alloc) return alloc->allocated_by;
+	struct big_allocation *b = __liballocs_get_bigalloc_containing(obj);
+	if (b) return b->allocated_by;
 	else return NULL;
+}
+struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));
+struct allocator *__liballocs_ool_get_allocator(const void *obj)
+{
+	return __liballocs_leaf_allocator_for(obj, NULL, NULL);
 }
 
 void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));
@@ -413,12 +418,16 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 	{
 		add_child(b, parent);
 		/* Check that the parent thinks that this allocator is its suballocator. 
-		 * EXCEPTION: the executable's data segment also contains the sbrk area. */
-		if (!parent->suballocator) parent->suballocator = allocated_by;
-		else if (parent->suballocator != allocated_by
-			&& !(parent == executable_data_segment_mapping_bigalloc
-				 && parent->suballocator == &__generic_malloc_allocator)
-		) abort();
+		 * EXCEPTION: the executable's data segment also contains the sbrk area.
+		 * EXCEPTION: the auxv allocator also "contains" (logically) the stack.
+		 * Actually, only do this check if the child does not have any children
+		 * of its own. Except initially, it won't do. Hmm. So just scrap the check. */
+		// if (!parent->suballocator) parent->suballocator = allocated_by;
+		// else if (parent->suballocator != allocated_by
+		// 	&& !(parent == executable_data_segment_mapping_bigalloc
+		// 		 && parent->suballocator == &__generic_malloc_allocator)
+		// 	// && parent != auxv_bigalloc
+		// ) abort();
 	}
 	
 	SANITY_CHECK_BIGALLOC(b);
@@ -789,15 +798,6 @@ struct big_allocation *__lookup_deepest_bigalloc(const void *mem)
 	struct big_allocation *b = find_deepest_bigalloc(mem);
 	BIG_UNLOCK
 	return b;
-}
-
-struct allocator *__lookup_top_level_allocator(const void *mem) __attribute__((visibility("hidden")));
-struct allocator *__lookup_top_level_allocator(const void *mem)
-{
-	if (!pageindex) init();
-	struct big_allocation *b = __lookup_bigalloc_top_level(mem);
-	if (!b) return NULL;
-	else return b->allocated_by;
 }
 
 static struct big_allocation *get_common_parent_bigalloc_recursive(struct big_allocation *b1,

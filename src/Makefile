@@ -3,6 +3,7 @@ LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 SRCROOT := $(dir $(THIS_MAKEFILE))../
 MALLOC_HOOKS ?= $(SRCROOT)contrib/libmallochooks #./../libmallochooks.hg
 TRAP_SYSCALLS ?= $(SRCROOT)contrib/trap-syscalls
+LIBDLBIND ?= $(SRCROOT)contrib/libdlbind
 
 # HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
 # object. It complains about __next_malloc_hook et al being undefined, even though
@@ -13,7 +14,7 @@ HOOKS_PRELOAD_OBJS := malloc_hook_stubs_preload_fast.o event_hooks_fast.o
 HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
 
 CFLAGS += -std=gnu11 -Wall -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS) \
-   -I$(TRAP_SYSCALLS)/libsystrap -I$(SRCROOT)/src -Wno-unused
+   -I$(TRAP_SYSCALLS)/libsystrap -I$(LIBDLBIND)/include -I$(SRCROOT)/src -Wno-unused
 
 ifeq ($(DEBUG),1)
     DEFAULT_EXTRA_CFLAGS := -g
@@ -36,7 +37,7 @@ else
     #DEFAULT_EXTRA_CFLAGS := -O4 -flto -DNDEBUG
 
     # Summary of the above: -O3 -DNDEBUG is the fastest
-    FAST_EXTRA_CFLAGS := -O3 -DNDEBUG
+    FAST_EXTRA_CFLAGS := -O3 -DNDEBUG -flto -ffat-lto-objects
     DEBUG_EXTRA_CFLAGS := -O0
 endif
 
@@ -54,6 +55,9 @@ LDFLAGS += -Wl,-O2 -flto -Bsymbolic-functions -fPIC
 
 # until binutils bug 13600 is fixed, gold is the linker we need
 LDFLAGS += -Wl,-fuse-ld=gold
+
+LDFLAGS += -L$(LIBDLBIND)/lib
+LDLIBS += -ldlbind
 
 # We define our own malloc_usable_size to catch the alloca case.
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size

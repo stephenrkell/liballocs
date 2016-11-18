@@ -1,6 +1,6 @@
 /*
-This is the license for uniqtype.h, a definition of run-time type
-information for compiled code.
+This is the license for uniqtype.h, part of a definition of 
+run-time type information for compiled code.
 
 Copyright 2011--16, Stephen Kell <stephen.kell@cl.cam.ac.uk>
 
@@ -25,122 +25,113 @@ of or in connection with the use or performance of this software.
 #ifndef UNIQTYPE_H_
 #define UNIQTYPE_H_
 
-#define UNIQTYPE_DECLS \
-struct uniqtype_cache_word \
-{ \
-	unsigned long addr:47; \
-	unsigned flag:1; \
-	unsigned bits:16; \
-}; \
-struct contained { \
-	signed offset; \
-	struct uniqtype *ptr; \
-}; \
-struct uniqtype \
-{ \
-	struct uniqtype_cache_word cache_word; \
-	const char *name; \
-	unsigned short pos_maxoff; /* 16 bits */ \
-	unsigned short neg_maxoff; /* 16 bits */ \
-	unsigned nmemb:12;         /* 12 bits -- number of `contained's (always 1 if array) */ \
-	unsigned is_array:1;       /* 1 bit */ \
-	unsigned array_len:19;     /* 19 bits; 0 means undetermined length */ \
-	struct contained contained[]; /* there's always at least one of these, even if nmemb == 0 */ \
-}; 
+#include "uniqtype-defs.h"
 
-UNIQTYPE_DECLS
+#include <elf.h>
+#include <assert.h>
+#include <string.h>
+#include <stdio.h>
+#include <dlfcn.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// #include "dlbind.h"
+void *dlcreate(const char *libname);
+void *dlreload(void *handle);
+void *dlalloc(void *l, size_t sz, unsigned flags);
+void *dlbind(void *lib, const char *symname, void *obj, size_t len, Elf64_Word type);
+
+/* We want this inline to be COMDAT'd and global-overridden to a unique run-time instance.
+ * But HMM, we will get the same problem as with uniqtypes: between the preloaded library
+ * and the executable, we won't get uniquing. I think this is okay.
+ * 
+ * HMM. This function relies on elf.h, liballocs, libdlbind, libdl and libc.
+ * How to deal with the includes? And with supplying the dependencies at link time? 
+ * It's not silly to link -ldl -ldlbind -lallocs, passing the .so files for each.
+ * 
+ * We instantiate this function (using "extern inline") in any typeobj. Do we? 
+ *
+ * NOTE also that this code needs to be C++-clean, because we include this header
+ * in uniqtypes.cpp. */
+
+extern void *__liballocs_rt_uniqtypes_obj __attribute__((weak));
+
+inline
+struct uniqtype *
+__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
+{
+	assert(element_t);
+	assert(element_t->pos_maxoff > 0);
+	assert(element_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
+	
+	char precise_uniqtype_name[4096];
+	const char *maybe_code_substr = UNIQTYPE_NAME(element_t) + sizeof ("__uniqtype_") - 1;
+	const char *rest = maybe_code_substr;
+	while (*rest != '_') ++rest; /* now "rest" begins with "_" */
+	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
+			"__uniqtype____ARR%d%s", array_len, rest);
+	/* FIXME: compute hash code. Should be an easy case. */
+	
+	/* Does such a type exist? */
+	void *found = NULL;
+	if (NULL != (found = dlsym(NULL, precise_uniqtype_name)))
+	{
+		return (struct uniqtype *) found;
+	}
+	else
+	{
+		/* Create it and memoise using libdlbind. */
+		size_t sz = offsetof(struct uniqtype, related) + 1 * (sizeof (struct uniqtype_rel_info));
+		void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+		struct uniqtype *allocated_uniqtype = allocated;
+		*allocated_uniqtype = (struct uniqtype) {
+			.pos_maxoff = array_len * element_t->pos_maxoff,
+			.un = {
+				array: {
+					.is_array = 1,
+					.nelems = array_len
+				}
+			},
+			.make_precise = NULL
+		};
+		allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
+			.un = {
+				t: {
+					.ptr = element_t
+				}
+			}
+		};
+		void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
+			allocated, sz, STT_OBJECT);
+		assert(reloaded);
 		
-#define UNIQTYPE_STRINGIFY(s) #s
-#define UNIQTYPE_XSTRINGIFY(s) UNIQTYPE_STRINGIFY(s)
-#define UNIQTYPE_DECLSTR UNIQTYPE_XSTRINGIFY(UNIQTYPE_DECLS)
+		return allocated_uniqtype;
+	}
+}
 
-/* Tentative redesign for uniqtype
+inline 
+struct uniqtype *
+__liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
+   struct uniqtype *out, unsigned long out_len,
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt)
+{
+	unsigned long precise_size = ((char*) memrange_base + memrange_sz) - (char*) obj;
+	struct uniqtype *element_t = UNIQTYPE_ARRAY_ELEMENT_TYPE(in);
+	assert(element_t);
+	assert(element_t->pos_maxoff > 0);
+	assert(element_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
+	
+	unsigned array_len = precise_size / element_t->pos_maxoff;
+	assert(precise_size % element_t->pos_maxoff == 0); /* too strict? */
+	
+	return __liballocs_get_or_create_array_type(element_t, precise_size / element_t->pos_maxoff);
+}
 
-	struct uniqtype_cache_word cache_word;
-	const char *name;
-	unsigned short pos_maxoff; // 16 bits
-	unsigned short neg_maxoff; // 16 bits
-	// 32 bits to describe the details
-	enum t { BASE, ENUMERATION, ARRAY, WITH_SUBOBJS, ADDRESS, SUBPROGRAM };
-	unsigned what:4; // or is_array, to allow 2^31-sized arrays?
-	unsigned bits:24 // actually we have 28 bits to play with
-		// BASE:        { enc, log_bit_size, log_bit_off } 8 bits each; contained[0] is compl
-		// ENUMERATION: hmm                                           ; contained[0] is base?
-		// ARRAY:       { nelems } 24 bits                            ; contained[0] is elem_t
-		// WITH_SUBOBJS:{ nmembs } 24 bits? "refines" i.e. templatey relations?
-		// ADDRESS:     hmm; indirection level? YES, and also genericity -- we need this when deciding whether or not to overwrite
-		// SUBPROGRAM:  { is_va, nargs } 1 bit, 23 bits?              ; contained[0] is return_t, contained[1..] args_ts
-	;
-	// variable-length part to instantiate relations 
-	// (containedness, complement, pointee, ... what else?)
-	struct contained contained[];
-
-*/
-		
-extern struct uniqtype __uniqtype__void __attribute__((weak));
-
-#define UNIQTYPE_IS_SUBPROGRAM(u) \
-(((u) != (struct uniqtype *) &__uniqtype__void) && \
-((u)->pos_maxoff == 0) && \
-((u)->neg_maxoff == 0) && !(u)->is_array)
-
-#define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) (u)->array_len
-
-#define UNIQTYPE_ARRAY_LEN(u) (UNIQTYPE_IS_ARRAY((u)) ? (u)->array_len : 0)
-
-#define MAGIC_LENGTH_POINTER ((1u << 19) - 1u)
-#define UNIQTYPE_IS_POINTER_TYPE(u) \
-(!((u)->is_array) && (u)->array_len == MAGIC_LENGTH_POINTER)
-#define UNIQTYPE_POINTEE_TYPE(u) \
-(UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->contained[0].ptr : NULL)
-
-#define UNIQTYPE_HAS_SUBOBJECTS(u) \
-(!UNIQTYPE_IS_SUBPROGRAM(u) && \
-((u)->is_array || (u)->nmemb > 0))
-
-#define UNIQTYPE_IS_ARRAY(u) \
-(UNIQTYPE_HAS_SUBOBJECTS(u) && (u)->is_array)
-
-#define UNIQTYPE_HAS_DATA_MEMBERS(u) \
-(UNIQTYPE_HAS_SUBOBJECTS(u) && !(u)->is_array)
-
-#define UNIQTYPE_HAS_KNOWN_LENGTH(u) \
-((u)-> pos_maxoff != ((unsigned short) -1))
-
-#define UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u) \
-(((u) != (struct uniqtype *) &__uniqtype__void) && \
-((u)->pos_maxoff > 0) && \
-((u)->neg_maxoff == 0) && !(u)->is_array && (u)->nmemb == 0)
-
-#define UNIQTYPE_IS_BASE_TYPE(u) \
-UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u) 
-// FIXME: how to distinguish base from enum?
-
-/* FIXME: does anybody use this one? it used to enumerate all the builtin base types,
- * but now define it to the proper thing. Except (FIXME) it also matches enums! */
-// #define UNIQTYPE_IS_BASE(u) UNIQTYPE_IS_BASE_TYPE(u)
-
-/* HACK HACK HACK! */
-#define UNIQTYPE_IS_2S_COMPL_INTEGER_TYPE(u) \
-(UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u) && (u) != (struct uniqtype *) &__uniqtype__float && \
-(u) != (struct uniqtype *) &__uniqtype__double)
-
-	/* Tentative improvement:
-	 * as we have pos_maxoff, neg_maxoff and (for structs) contained[],
-	 * also  have pos_dynoff, neg_dynoff and dyn_contained_fn.
-	 * These are functions from the object state to precise descriptions.
-	 * The manifest pos_maxoff, neg_maxoff and contained are to be seen as 
-	 * *conservative*: recording overapproximations of extent
-	 * and underapproximations of the set of members
-	 * (specifically, only those members guaranteed to be present at a fixed offset).
-	 * 
-	 * Perhaps a dyn_decode fun that just gives you back another uniqtype, but *precise*?
-	 * The default one just does memcpy!  (Or make it NULL? YES, probably better;
-	 * a helper/macro can substitute memcpy for clients who really expect a decoder.)
-	 * 
-	 * void (*dyn_decode)(struct uniqtype *out, const struct uniqtype *this_uniqtype, size_t outlen, const void *obj, ...);
-	 * 
-	 * We can generate the dyn_decode function in specific DWARF contexts that require
+	/* Some notes on make_precise:
+	 *
+	 * We can generate the make_precise function in specific DWARF contexts that require
 	 * it. For example, if a DW_TAG_subrange_type has a DW_AT_upper_bound that refers 
 	 * to an in-scope DW_TAG_member, we can use this to generate a function from
 	 * the member to the precise subrange type's bounds.
@@ -149,12 +140,14 @@ UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u)
 	 * Here we seem to compute them on-demand, writing them into caller-supplied
 	 * memory. Do we want to memoise this? That would change the signature a bit.
 	 * 
-	 * This is a direct refinement of the C model, in which an object is either
+	 * make_precise is a direct refinement of the C model, in which an object is either
 	 * "incomplete" (implicitly possibly data-dependent) 
 	 * or "complete" (completely manifest). 
 	 * A continuum is defined by how much context is necessary to decode the structure.
-	 * The dyn* extensions assume that the object memory itself provides sufficient context.
-	 * (By contrast, an XOR-doubly-linked-list would require "reached-from" context also.)
+	 * The current make_precise prototype assumes the object memory itself, combined with the
+	 * machine registers in mcontext, are good enough to bootstrap context discovery. 
+	 * This isn't always good enough: an XOR-doubly-linked-list would require "reached-from" 
+	 * context, and it's intractable to recover that in general.)
 	 * 
 	 * Everything in dyn_* is a transcoding of something expressed declaratively
 	 * in (hypothetically-extended-)DWARF. So we need not view them as arbitrary programs.
@@ -165,66 +158,69 @@ UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u)
 	 * we can be fairly confident that those instructions are understood at runtime
 	 * (even in an out-of-process debugger, which likely has an instruction emulator).
 	 * 
-	 * We can also import a notion of allocations as framing:
-	 * if I have a char[], say, that is supposed to be NUL-terminated,
+	 * We're currently lacking a strong notion of read- or write- validity (outside of unions,
+	 * which have read-validity). 
+	 * We can perhaps borrow a notion of allocations as framing here.
+	 * If I have a char[], say, that is supposed to be NUL-terminated,
 	 * we can say it's terminated 
 	 * *either* by the extent of its containing allocation 
 	 * *or* by NUL, whichever comes first.
 	 * This generalises to a "proper nesting": an object never extends beyond 
 	 * its containing allocation.
-	 
-	 
-	 // encode key-value or hashtable-like representations
- typedef struct uniqtype *make_precise_fn_t(struct uniqtype *out, 
-     struct uniqtype *in, void *obj, void *ip, // struct mcontext *ctxt, ...
-  );
-     // can return `out' or another preexisting uniqtype, as it chooses
- 
- struct uniqtype {
-     // common fields
-     const char *name;            // friendly name 
-     unsigned pos_size, neg_size; // bound on extent forward/back from start address
-                                  // (unsigned) -1 means "no bound"
-     
-     // discriminated union
-     enum tag { BASE, ARRAY, ENUMERATION, ADDRESS, WITH_SUBOBJS, SUBPROGRAM };
-     unsigned tag:4;
-     union
-     {
-         struct //BASE
-          {   unsigned encoding:7;  // 2's complement, IEEE 754, ...
-             unsigned bit_size:10: // allows 31-bit integers, etc..
-             unsigned bit_off:9;   // ... needn't start at 0th bit.
-         } base;
-         struct //ARRAY
-          {   unsigned nmemb:28;
-         } array;
-         struct // ENUMERATION, ADDRESS, WITH_SUBOBJS, SUBPROGRAM
-         {  // ...
-         }  // ...;
-     } u;
-     
-     // mapping to a dynamically precise type
-     make_precise_fn_t *make_precise_fn;
-     
-     // links to related types: element type, pointee type, 
-     // arg/return types, member types, signedness-complement, ...
-     struct related_types {
-         struct uniqtype *ptr;
-		 union
-		 {
-             intptr_t info;        // offset, field name, ... 
-			 struct // BASE
-			 {
-			 }
-			 struct // ARRAY
-			 {
-				 
-			 }
-		 } u;
-     } rel[];
+	 * So what should "make_precise" tell us?
+	 * Presumably it needs to tell us that
+	 * the first n, up to the NUL, are readable
+	 * and the whole m, up to the bounds of the allocation, are writable.
+	 * 
+	 * A similar story comes up with updates.
+	 * Suppose we have a uniqtype representing ELF auxv as a record.
+	 * We can have make_precise tell us which members are present.
+	 * But how can the uniqtype helps us change the value, to include a new key (say)?
+	 * We need some kind of "metavalue", or interpreted representation of values,
+	 * that can be plonked down into the concrete representation, i.e. a "semantic copy",
+	 * perhaps using a near-dual operation of make_precise ("synthesize_rep", say).
+	 * So far I have mentally been using (uniqtype, void*, len) triples as metavalues.
+	 * Is that good enough?
+	 * Perhaps; "synthesize_rep" might just be a transcode request, i.e. semantic copy: 
+	 * transcode this abstract content into this representation.
+	 * The "abstract content" is what we get by interpreting the uniqtype at a high level, 
+	 * i.e. as a sequence (structs, arrays), a mathematical number (base types), etc..
+	 *
+	 * A question about register locals in stack frames:
+	 * Given a struct mcontext, we can represent the "address" of a register local
+	 * as its address within the mcontext.
+	 * This means a query via mcontext entails copying out the whole uniqtype,
+	 * and doesn't really make explicit the register assignment.
+	 * In fact, since fields are represented as offsets rather than addresses,
+	 * we're already in difficulty. 
+	 * (We could compute a 64-bit offset from the base, but that's nasty.)
+	 * Seems we need a story on "noncontiguous fields", or on the "fragment" versus "object"
+	 * distinction.
+	 * If we adopt the "same object, different fragments" view of register locals, 
+	 * we might want make_precise to tell us about the other fragments of that object.
+	 * We might want uniqtypes to know about fragments.
+	 * Or we might want to keep the "object" (not fragment) model as a wholly separate layer.
+	 * I do rather favour the latter.
+	 * 
+	 * What about DW_OP_piece? Does that have consequences for uniqtypes?
+	 * It's mostly used in register locals, so it's the same problem,
+	 * EXCEPT that one field (i.e. uniqtype element) might span multiple fragments (pieces).
+	 * That might be an argument in favour of baking together fragments with uniqtypes/allocations.
+	 * 
+	 * Another example of fragments is C++ virtual inheritance: usually it's
+	 * the same chunk of memory, but plumbed together with internal pointers. Could imagine
+	 * different chunks of memory, though.
+	 * 
+	 * Can say that dynamically made-precise uniqtypes can reference 
+	 * allocation-external pieces.
+	 * HMM: doesn't solve the pieces thing. One field might have >1 address!
+	 * i.e. part in register, part in memory.
+	 * Need to describe the pieces -- no avoiding it.
+	 * Could compile the DWARF into a reader/writer function pair, but that's very opaque.
+	 */
 
- */
-
+#ifdef __cplusplus
+} /* end extern "C" */
+#endif
 
 #endif

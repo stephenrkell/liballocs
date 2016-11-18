@@ -115,13 +115,22 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # do we need to unbind? 
         # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
         # This is needed e.g. for SPEC benchmark bzip2
-        with (self.makeErrFile(filename + ".fixuplog", "w+") if not errfile else errfile) as errfile:
+        with (self.makeErrFile(os.path.realpath(filename) + ".fixuplog", "w+") if not errfile else errfile) as errfile:
 
+            # also link the file with the uniqtypes it references
+            linkUsedTypesCmd = [self.getLibAllocsBaseDir() + "/tools/lang/c/bin/link-used-types", filename]
+            self.debugMsg("Calling " + " ".join(linkUsedTypesCmd) + "\n")
+            ret = subprocess.call(linkUsedTypesCmd, stderr=errfile)
+            if ret != 0:
+                self.print_errors(errfile)
+                return ret  # give up now
+
+            # Now deal with wrapped functions
             wrappedFns = self.allWrappedSymNames()
             self.debugMsg("Looking for wrapped functions that need unbinding\n")
             cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"; exit $?" \
                 % (filename, "|".join(wrappedFns))
-            self.debugMsg("cmdstring is " + cmdstring + "\n")
+            self.debugMsg("cmdstring for objdump is " + cmdstring + "\n")
             grep_ret = subprocess.call(["sh", "-c", cmdstring], stdout=errfile, stderr=errfile)
             if grep_ret == 0:
                 # we need to unbind. We unbind the allocsite syms
@@ -140,9 +149,10 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 unbind_cmd = ["objcopy", "--prefer-non-section-relocs"] \
                  + [opt for pair in unbind_pairs for opt in pair] \
                  + [filename]
-                self.debugMsg("cmdstring is " + " ".join(unbind_cmd) + "\n")
+                self.debugMsg("cmdstring for objcopy (unbind) is " + " ".join(unbind_cmd) + "\n")
                 objcopy_ret = subprocess.call(unbind_cmd, stderr=errfile)
                 if objcopy_ret != 0:
+                    self.debugMsg("problem doing objcopy (unbind) (ret %d)\n" % objcopy_ret)
                     self.print_errors(errfile)
                     return objcopy_ret
                 else:
@@ -177,6 +187,41 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def getVerboseArgs(self):
         return []
 
+    def getStubGenHeaderPath(self):
+        return self.getLibAllocsBaseDir() + "/tools/stubgen.h"
+
+    def getExtraLinkArgs(self, passedThroughArgs):
+        return []
+    
+    def getStubGenCompileArgs(self):
+        return []
+        
+    def doPostLinkMetadataBuild(self, outputFile):
+        # We've just output an object, so invoke make to collect the allocsites, 
+        # with our target name as the file we've just built, using ALLOCSITES_BASE 
+        # to set the appropriate prefix
+        if "ALLOCSITES_BASE" in os.environ:
+            baseDir = os.environ["ALLOCSITES_BASE"]
+        else:
+            baseDir = "/usr/lib/allocsites"
+        if os.path.exists(os.path.realpath(outputFile)):
+            targetNames = [baseDir + os.path.realpath(outputFile) + ext \
+                for ext in [".allocs", "-types.c", "-types.so", "-allocsites.c", "-allocsites.so"]]
+            errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
+
+            ret2 = 42
+            with self.makeErrFile(errfilename, "w+") as errfile:
+                cmd = ["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
+                    "-f", "Makefile.allocsites"] +  targetNames
+                errfile.write("Running: " + " ".join(cmd) + "\n")
+                ret2 = subprocess.call(cmd, stderr=errfile, stdout=errfile)
+                errfile.write("Exit status was %d\n" % ret2)
+                if (ret2 != 0 or "DEBUG_CC" in os.environ):
+                    self.print_errors(errfile)
+            return ret2
+        else:
+            return 1
+    
     def main(self):
         # un-export CC from the env if it's set to allocscc, because 
         # we don't want to recursively crunchcc the -uniqtypes.c files
@@ -260,7 +305,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 stubsfile_name = outputFile + ".allocstubs.c"
                 with open(stubsfile_name, "w") as stubsfile:
                     self.debugMsg("stubsfile is %s\n" % stubsfile.name)
-                    stubsfile.write("#include \"" + self.getLibAllocsBaseDir() + "/tools/stubgen.h\"\n")
+                    stubsfile.write("#include \"" + self.getStubGenHeaderPath() + "\"\n")
 
                     def writeArgList(fnName, fnSig):
                         stubsfile.write("#define arglist_%s(make_arg) " % fnName)
@@ -268,6 +313,12 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         for c in fnSig: 
                             if ndx != 0:
                                 stubsfile.write(", ")
+                            stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                            ndx += 1
+                        stubsfile.write("\n")
+                        stubsfile.write("#define arglist_nocomma_%s(make_arg) " % fnName)
+                        ndx = 0
+                        for c in fnSig: 
                             stubsfile.write("make_arg(%d, %c)" % (ndx, c))
                             ndx += 1
                         stubsfile.write("\n")
@@ -343,13 +394,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     # To do "mostly the right thing", we preprocess with 
                     # most of the user's options, 
                     # then compile with a more tightly controlled set
-                    extraFlags = []
+                    extraFlags = self.getStubGenCompileArgs()
                     if "-shared" in passedThroughArgs \
                         or "-G" in passedThroughArgs:
                         extraFlags += ["-fPIC"]
                     else:
                         pass
-                    stubs_pp_cmd = ["cc", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
+                    stubs_pp_cmd = ["cc", "-std=c11", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
                         "-I" + self.getLibAllocsBaseDir() + "/tools"] \
                         + [arg for arg in passedThroughArgs if arg.startswith("-D")] \
                         + [stubsfile.name]
@@ -362,6 +413,15 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         exit(1)
                     # now erase the '# ... file ' lines that refer to our stubs file,
                     # and add some line breaks
+                    # -- HMM, why not just erase all #line directives? i.e. preprocess with -P?
+                    # We already do this.
+                    # NOTE: the "right" thing to do is keep the line directives
+                    # and replace the ones pointing to stubgen.h
+                    # with ones pointing at the .i file itself, at the appropriate line numbers.
+                    # This is tricky because our insertion of newlines will mess with the
+                    # line numbers.
+                    # Though, actually, we should only need a single #line directive.
+                    # Of course this is only useful if the .i file is kept around.
                     stubs_sed_cmd = ["sed", "-r", "-i", "s^#.*allocs.*/stubgen\\.h\" *[0-9]* *$^^\n " \
                     + "/__real_|__wrap_|__current_/ s^[;\\{\\}]^&\\n^g", stubs_pp]
                     ret_stubs_sed = subprocess.call(stubs_sed_cmd)
@@ -369,7 +429,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
                             % (stubs_pp, ret_stubs_sed))
                         exit(1)
-                    stubs_cc_cmd = ["cc", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
+                    stubs_cc_cmd = ["cc", "-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
                         "-I" + self.getLibAllocsBaseDir() + "/tools", \
                         stubs_pp]
                     self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
@@ -390,7 +450,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     # CARE: we must insert the wrapper object on the cmdline *before* any 
                     # archive that is providing the wrapped functions. The easiest way
                     # is to insert it first, it appears.
-                    linkArgs = [stubs_bin] + linkArgs
+                    linkArgs = [stubs_bin] + linkArgs + self.getExtraLinkArgs(passedThroughArgs)
                     linkArgs += ["-L" + self.getLinkPath()]
                     if not "-static" in passedThroughArgs and not "-Bstatic" in passedThroughArgs \
                         and not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
@@ -471,30 +531,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
         else: # isLinkCommand
             if not "-r" in passedThroughArgs and not "-Wl,-r" in passedThroughArgs:
-                # We've just output an object, so invoke make to collect the allocsites, 
-                # with our target name as the file we've just built, using ALLOCSITES_BASE 
-                # to set the appropriate prefix
-                if "ALLOCSITES_BASE" in os.environ:
-                    baseDir = os.environ["ALLOCSITES_BASE"]
-                else:
-                    baseDir = "/usr/lib/allocsites"
-                if os.path.exists(os.path.realpath(outputFile)):
-                    targetNames = [baseDir + os.path.realpath(outputFile) + ext \
-                        for ext in [".allocs", "-types.c", "-types.so", "-allocsites.c", "-allocsites.so"]]
-                    errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
-
-                    ret2 = 42
-                    with self.makeErrFile(errfilename, "w+") as errfile:
-                        cmd = ["make", "-C", self.getLibAllocsBaseDir() + "/tools", \
-                            "-f", "Makefile.allocsites"] +  targetNames
-                        errfile.write("Running: " + " ".join(cmd) + "\n")
-                        ret2 = subprocess.call(cmd, stderr=errfile, stdout=errfile)
-                        errfile.write("Exit status was %d\n" % ret2)
-                        if (ret2 != 0 or "DEBUG_CC" in os.environ):
-                            self.print_errors(errfile)
-                    return ret2
-                else:
-                    return 1
+                return self.doPostLinkMetadataBuild(outputFile)
+            else:
+                return 0
 
     # expose base class methods to derived classes
     def parseInputAndOutputFiles(self, args):

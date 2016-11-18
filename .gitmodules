@@ -28,3 +28,6 @@
 [submodule "contrib/libcxxgen"]
 	path = contrib/libcxxgen
 	url = git://github.com/stephenrkell/libcxxgen.git
+[submodule "contrib/libdlbind"]
+	path = contrib/libdlbind
+	url = git://github.com/stephenrkell/libdlbind.git

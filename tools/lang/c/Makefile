@@ -2,7 +2,7 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 OCAMLFIND ?= ocamlfind
 CILLY ?= $(dir $(THIS_MAKEFILE))/cil/bin/cilly
-CIL_TOOLS := cilallocs dumpallocs monalloca #trumptr
+CIL_TOOLS ?= cilallocs dumpallocs monalloca dumpmemacc
 OCAMLFLAGS +=  -package findlib
 OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/cil/lib/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
 
@@ -39,8 +39,10 @@ cil/configure:
 
 # build cilallocs first
 dumpallocs/dumpallocs.cmx: cilallocs/cilallocs.cmx
+dumpmemacc/dumpmemacc.cmx: cilallocs/cilallocs.cmx
 monalloca/monalloca.cmx: cilallocs/cilallocs.cmx
 dumpallocs/dumpallocs.cmo: cilallocs/cilallocs.cmo
+dumpmemacc/dumpmemacc.cmo: cilallocs/cilallocs.cmo
 monalloca/monalloca.cmo: cilallocs/cilallocs.cmo
 
 # for testing

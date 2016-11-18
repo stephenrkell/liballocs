@@ -764,31 +764,42 @@ void post_nonnull_nonzero_realloc(void *userptr,
 	size_t old_usable_size,
 	const void *caller, void *__new_allocptr)
 {
-	if (__new_allocptr != NULL)
+	/* Are we a bigalloc? */
+	struct big_allocation *b = __lookup_bigalloc(userptr, 
+			&__generic_malloc_allocator, NULL);
+	if (__new_allocptr && __new_allocptr != userptr)
 	{
-		/* create a new bin entry */
+		/* Create a new bin entry. This will also take care of becoming a bigalloc, etc..
+		 * FIXME: check the new type metadata against the old! We can probably do this
+		 * in a way that's uniform with memcpy... the new chunk will take its type
+		 * from the realloc site, and we then check compatibility on the copy. */
 		index_insert(allocptr_to_userptr(__new_allocptr), 
 				modified_size, __current_allocsite ? __current_allocsite : caller);
+		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
+		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
+		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
+		__notify_copy(__new_allocptr, userptr, old_usable_size - sizeof (struct insert));
 	}
-	else 
+	else // !__new_allocptr || __new_allocptr == userptr
 	{
 		/* *recreate* the old bin entry! The old usable size
 		 * is the *modified* size, i.e. we modified it before
 		 * allocating it, so we pass it as the modified_size to
 		 * index_insert. */
+		// FIXME: is this right? what if __new_allocptr is null?
 		index_insert(userptr, old_usable_size, __current_allocsite ? __current_allocsite : caller);
 	}
 	
-	if (modified_size < old_usable_size)
+	if (__new_allocptr == userptr && modified_size < old_usable_size)
 	{
-		/* Are we a bigalloc? */
-		struct big_allocation *b = __lookup_bigalloc(userptr, 
-				&__generic_malloc_allocator, NULL);
 		if (b)
 		{
 			__liballocs_truncate_bigalloc_at_end(b, (char*) userptr + modified_size);
 		}
 	}
+	
+	/* If the old alloc has gone away, do the malloc_hooks call the free hook on it? 
+	 * YES: it was done before the realloc, in the pre-hook. */
 }
 
 // same but zero bytes, not bits
@@ -1278,23 +1289,30 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 	 * are discovered, e.g. indirect ones.)
 	 */
 	struct insert *heap_info = NULL;
-	size_t alloc_chunksize;
 	
+	/* NOTE: bigallocs already have the size adjusted by the insert. */
 	if (maybe_bigalloc)
 	{
 		/* We already have the metadata. */
 		heap_info = &maybe_bigalloc->meta.un.ins_and_bits.ins;
-		alloc_chunksize = (char*) maybe_bigalloc->end - (char*) maybe_bigalloc->begin;
-		*out_base = maybe_bigalloc->begin;
-	} else heap_info = lookup_object_info(obj, out_base, &alloc_chunksize, NULL);
+		if (out_base) *out_base = maybe_bigalloc->begin;
+		if (out_size) *out_size = (char*) maybe_bigalloc->end - (char*) maybe_bigalloc->begin;
+	} 
+	else
+	{
+		size_t alloc_chunksize;
+		heap_info = lookup_object_info(obj, out_base, &alloc_chunksize, NULL);
+		if (heap_info)
+		{
+			if (out_size) *out_size = alloc_chunksize - sizeof (struct insert);
+		}
+	}
 	
 	if (!heap_info)
 	{
 		++__liballocs_aborted_unindexed_heap;
 		return &__liballocs_err_unindexed_heap_object;
 	}
-
-	if (out_size) *out_size = alloc_chunksize - sizeof (struct insert);
 	
 	return extract_and_output_alloc_site_and_type(heap_info, out_type, (void**) out_site);
 }

@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <search.h>
 #include <assert.h>
@@ -89,7 +90,6 @@ static void treemap_delete(void **rootp)
 	tdestroy(*rootp, free);
 }
 
-#define NAME_FOR_UNIQTYPE(u) ((u) ? ((u)->name ? (u)->name : "(no name)") : "(no type)")
 /* HACK: archdep */
 #define IS_PLAUSIBLE_POINTER(p) (!(p) || ((p) == (void*) -1) || (((uintptr_t) (p)) >= 4194304 && ((uintptr_t) (p)) < 0x800000000000ul))
 
@@ -115,32 +115,35 @@ static void build_adjacency_list_recursive(
 	if (!UNIQTYPE_HAS_SUBOBJECTS(t_at_offset)) return;
 
 	/* The way we iterate through structs and arrays is different. */
-	struct contained *contained = &t_at_offset->contained[0];
+	struct uniqtype_rel_info *related = &t_at_offset->related[0];
 	unsigned nmemb;
 	_Bool is_array;
 
-	if (UNIQTYPE_HAS_DATA_MEMBERS(t_at_offset))
+	if (UNIQTYPE_IS_COMPOSITE_TYPE(t_at_offset))
 	{
 		is_array = 0;
-		nmemb = t_at_offset->nmemb;
+		nmemb = UNIQTYPE_COMPOSITE_MEMBER_COUNT(t_at_offset);
 		/* FIXME: toplevel of heap arrays */
 	}
 	else
 	{
 		is_array = 1;
-		nmemb = t_at_offset->array_len; /* FIXME: dynamically-sized arrays */
+		nmemb = UNIQTYPE_ARRAY_LENGTH(t_at_offset); /* FIXME: dynamically-sized arrays */
 	}
 
-	for (unsigned i = 0; i < nmemb; ++i, contained += (is_array ? 0 : 1))
+	for (unsigned i = 0; i < nmemb; ++i, related += (is_array ? 0 : 1))
 	{
 		// if we're an array, the element type should have known length (pos_maxoff)
-		assert(!is_array || UNIQTYPE_HAS_KNOWN_LENGTH(contained->ptr));
-		long memb_offset = is_array ? (i * contained->ptr->pos_maxoff) : contained->offset;
+		assert(!is_array || UNIQTYPE_HAS_KNOWN_LENGTH(related->un.memb.ptr));
+		struct uniqtype *element_type = is_array ? UNIQTYPE_ARRAY_ELEMENT_TYPE(t_at_offset) : 
+			related->un.memb.ptr;
+		long memb_offset = is_array ? (i * UNIQTYPE_ARRAY_ELEMENT_TYPE(t_at_offset)->pos_maxoff) 
+			: related->un.memb.off;
 		
 		/* Is it a pointer? If so, add it to the adjacency list. */
-		if (UNIQTYPE_IS_POINTER_TYPE(contained->ptr))
+		if (UNIQTYPE_IS_POINTER_TYPE(element_type))
 		{
-			struct uniqtype *pointed_to_static_t = UNIQTYPE_POINTEE_TYPE(contained->ptr);
+			struct uniqtype *pointed_to_static_t = UNIQTYPE_POINTEE_TYPE(element_type);
 			// get the address of the pointed-to object
 			void *pointed_to_object = *(void**)((char*) obj_start + start_offset + memb_offset);
 			/* Check sanity of the pointer. We might be reading some union'd storage
@@ -180,12 +183,12 @@ static void build_adjacency_list_recursive(
 				pointed_to_object, NAME_FOR_UNIQTYPE(pointed_to_static_t),
 				to_enqueue->obj, NAME_FOR_UNIQTYPE(to_enqueue->t));
 		}
-		else if (UNIQTYPE_HAS_DATA_MEMBERS(contained->ptr)) /* Else is it a thing with structure? If so, recurse. */
+		else if (UNIQTYPE_IS_COMPOSITE_TYPE(element_type)) /* Else is it a thing with structure? If so, recurse. */
 		{
 			build_adjacency_list_recursive(
 				p_adj_u_head, p_adj_u_tail, 
 				obj_start, obj_t, 
-				start_offset + memb_offset, contained->ptr,
+				start_offset + memb_offset, element_type,
 				follow_ptr, fp_arg
 			);
 		}

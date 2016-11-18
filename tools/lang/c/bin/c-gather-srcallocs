@@ -7,19 +7,46 @@ obj="$2"
 cu_fname="$3"
 cu_compdir="$4"
 
+our_name="$(basename "$0")"
+case "$our_name" in
+    (*srcallocs)
+        extension="allocs"
+        ;;
+    (*srcmemacc)
+        extension="memacc"
+        ;;
+    (*)
+        echo "Did not recognise basename '$our_name'" 1>&2; exit 1
+        ;;
+esac
+
 test -n "$cu_compdir" || (echo "args: <sourcepath> <obj> <cu_fname> <cu_compdir>" 1>&2; false) || exit 1
 
-cu_allocspath="$( echo "$cu_sourcepath" | grep '\.cil\.[ci]$' | sed 's/\.cil\.[ci]/.i.allocs/' )"
+cu_allocspath="$( echo "$cu_sourcepath" | grep '\.cil\.[ci]$' | sed "s/\.cil\.[ci]/.i.$extension/" )"
 
 # If we're using clang instead of CIL then the source path will just be '%.c',
 # not '%.cil.c'.
 if [[ -z "$cu_allocspath" ]]; then
-    cu_allocspath="$( echo "$cu_sourcepath" | grep '\.c$' | sed 's/\.[ci]/.i.allocs/' )"
+    cu_allocspath="$( echo "$cu_sourcepath" | grep '\.c$' | sed "s/\.[ci]/.i.$extension/" )"
 fi
+
+echo "Warning: cu_allocspath is $cu_allocspath" 1>&2
 
 if [[ ! -r "$cu_allocspath" ]]; then
     echo "Warning: missing expected allocs file ($cu_allocspath) for source file: $cu_sourcepath" 1>&2
 else
     # we need to sed its symnames
-    cat "$cu_allocspath" | translate_symnames "$obj" "$cu_fname" "$cu_compdir"
+    cat "$cu_allocspath" | \
+    while read fname rest; do
+        # if the filename is relative, it's relative to the compilation directory.
+        # prepend the full path *as the compiler saw it*, i.e. cu_compdir.
+        case "$fname" in
+            ('/'*)
+                echo "$fname"$'\t'"$rest"
+                ;;
+            (*)
+                echo "$cu_compdir"/"$fname"$'\t'"$rest"
+                ;;
+        esac
+    done | translate_symnames "$obj" "$cu_fname" "$cu_compdir"
 fi

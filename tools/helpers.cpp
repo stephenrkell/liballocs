@@ -9,6 +9,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/regex.hpp>
 #include <dwarfidl/create.hpp>
+#include <libgen.h>
 
 // regex usings
 using boost::regex;
@@ -474,7 +475,30 @@ canonical_key_from_type(iterator_df<type_die> t)
 			   local data types, C++ namespaces). */
 			/* FIXME: deal with struct/union tags also (but being sensitive to language: 
 			   don't do it with C++ CUs). */
-			name_to_use = t.name_here() ? *name_for_type_die(t) : offset_to_string(t.offset_here());
+			if (t.name_here())
+			{
+				name_to_use = *name_for_type_die(t);
+			}
+			else
+			{
+				string offsetstr = offset_to_string(t.offset_here());
+				/* We really want to allow deduplicating anonymous structure types
+				 * that originate in the same header file but are included in multiple
+				 * compilation units. Since each gets a different offset, using that
+				 * for the fake name string is a bad idea. Instead, use the defining
+				 * source file path, if we have it. */
+				if (t->get_decl_file() && t->get_decl_line())
+				{
+					ostringstream s;
+					opt<string> maybe_fqp = t.enclosing_cu()->source_file_fq_pathname(*t->get_decl_file());
+					s << (maybe_fqp ? 
+						*maybe_fqp : 
+						t.enclosing_cu()->source_file_name(*t->get_decl_file())) 
+						<< "_" << *t->get_decl_line();
+					name_to_use = s.str();
+				}
+				else name_to_use = offsetstr;
+			}
 		}
 // 		else // t->name_here() && t.tag_here() == DW_TAG_base_type
 // 		{

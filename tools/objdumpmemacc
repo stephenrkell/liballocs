@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Build a list of allocation sites using the power of objdump.
+line_regexp='([0-9a-f]+)[[:blank:]]*<([^-\+]+)([-\+](0x[0-9a-f]+))?>.*'
+# Treat callq of monalloca labels as a possible alloc site, as that's what 
+# our alloca instrumentation inserts.
+meta_instr_regexp="${line_regexp}.*(([a-z0-9]+).*(.*[\*\(]))"
+# HACK: if liballocs_alloc_fns is unset, use "malloc" a second time
+# (leaving this out will make the regexp end "|)" so match all calls)
+
+echo "meta_instr_regexp is: $meta_instr_regexp" 1>&2
+
+. "$(dirname "$0")"/objdumpmeta
+
+format_output () {
+    while read next_instr_sym next_instr_addr next_instr_offset address filename line_number line_number_end token source_oneline; do
+        case "$outputstyle" in
+            (tab)
+                echo "${next_instr_sym}"$'\t'"${address}"$'\t'"${filename}"$'\t'"${line_number}"$'\t'"${line_number_end}"
+                ;;
+            (punc)
+                echo "<${next_instr_sym}+${next_instr_offset}-1instr> @${filename}:${line_number}"$'\t'"${token}"
+                ;;
+            (*)
+                echo "<${next_instr_sym}+${next_instr_offset}-1instr> @${filename}:${line_number}"$'\t'"${token}"
+                ;;
+        esac
+    done
+}
+
+output_lines="$( generate_output_lines )"
+
+echo "$output_lines" | format_output

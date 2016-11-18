@@ -79,12 +79,6 @@ bool sanity_check_set(const std::set<_Key, _Compare, _Alloc>& s)
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval);
 
-static string fq_pathname(const string& dir, const string& path)
-{
-	if (path.length() > 0 && path.at(0) == '/') return path;
-	else return dir + "/" + path;
-}
-
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval)
 {

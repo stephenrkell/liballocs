@@ -381,6 +381,48 @@ get_link_map(void *ptr)
 }
 
 static inline
+unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn, struct LINK_MAP_STRUCT_TAG *l)
+{
+	unsigned long nsyms = 0;
+	ElfW(Dyn) *dynstr_ent = NULL;
+	unsigned char *dynstr = NULL;
+	ElfW(Dyn) *dynsym_ent = dynamic_lookup(dyn, DT_SYMTAB);
+	if (!dynsym_ent) return 0;
+	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
+	if ((intptr_t) dynsym < 0) return 0; // HACK: x86-64 vdso workaround
+	
+	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_HASH);
+	ElfW(Word) *hash = NULL;
+	if (hash_ent)
+	{
+		/* Got the SysV-style hash table. */
+		hash = (ElfW(Word) *) hash_ent->d_un.d_ptr;
+		if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
+		if ((char*) hash < (char*) l->l_addr) return 0; // HACK: x86-64 vdso workaround
+		nsyms = hash[1]; /* nchain, which equals the number of symbols */
+	}
+	else if (NULL != (hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_GNU_HASH)))
+	{
+		/* Got the GNU-style hash table. 
+		 * GAH. Unlike the SysV one, this doesn't tell us the size of the symtab. */
+		goto dynsym_nasty_hack;
+	}
+	else
+	{
+dynsym_nasty_hack:
+		/* Take a wild guess, by assuming dynstr directly follows dynsym. */
+		dynstr_ent = dynamic_lookup(dyn, DT_STRTAB);
+		assert(dynstr_ent);
+		dynstr = (unsigned char *) dynstr_ent->d_un.d_ptr;
+		if ((intptr_t) dynstr < 0) return 0; // HACK: x86-64 vdso workaround
+		assert((unsigned char *) dynstr > (unsigned char *) dynsym);
+		// round down, because dynsym might be padded
+		nsyms = (dynstr - (unsigned char *) dynsym) / sizeof (ElfW(Sym));
+	}
+	return nsyms;
+}
+
+static inline
 ElfW(Sym) *hash_lookup(ElfW(Word) *hash, ElfW(Sym) *symtab, const char *strtab, const char *sym)
 {
 	ElfW(Sym) *found_sym = NULL;
@@ -405,6 +447,28 @@ ElfW(Sym) *hash_lookup(ElfW(Word) *hash, ElfW(Sym) *symtab, const char *strtab, 
 	}
 	
 	return found_sym;
+}
+
+static inline
+int hash_walk_syms(ElfW(Word) *hash, int (*cb)(ElfW(Sym) *, void *), ElfW(Sym) *symtab, void *arg)
+{
+	ElfW(Word) nbucket = hash[0];
+	ElfW(Word) nchain __attribute__((unused)) = hash[1];
+	ElfW(Word) (*buckets)[/*nbucket*/] = (void*) &hash[2];
+	ElfW(Word) (*chains)[/*nchain*/] = (void*) &hash[2 + nbucket];
+
+	for (int bucketn = 0; bucketn < nbucket; ++bucketn)
+	{
+		for (ElfW(Word) symind = ((ElfW(Word) *)buckets)[bucketn]; 
+				symind != STN_UNDEF; symind = (*chains)[symind])
+		{
+			ElfW(Sym) *p_sym = &symtab[symind];
+			int ret = cb(p_sym, arg);
+			if (ret) return ret;
+			// else keep going
+		}
+	}
+	return 0;
 }
 
 static inline uint_fast32_t
@@ -530,6 +594,38 @@ ElfW(Sym) *gnu_hash_lookup(ElfW(Word) *gnu_hash, ElfW(Sym) *symtab, const char *
 }
 
 static inline
+int gnu_hash_walk_syms(ElfW(Word) *gnu_hash, int (*cb)(ElfW(Sym) *, void *), ElfW(Sym) *symtab, void *arg)
+{
+	uint32_t *gnu_hash_words = (uint32_t *) gnu_hash;
+	uint32_t nbuckets = gnu_hash_words[0];
+	uint32_t symbias = gnu_hash_words[1]; // only symbols at symbias up are gnu_hash'd
+	uint32_t maskwords = gnu_hash_words[2]; // number of ELFCLASS-sized words in pt2 of table
+	uint32_t shift2 = gnu_hash_words[3];
+
+	ElfW(Off) *bloom = (ElfW(Off) *) &gnu_hash_words[4];
+	uint32_t *buckets = (uint32_t*) (bloom + maskwords);
+	uint32_t *hasharr = buckets + nbuckets;
+	
+	// uint32_t lowest_symidx = buckets[hashval % nbuckets]; // might be 0
+	struct LINK_MAP_STRUCT_TAG *l = get_highest_loaded_object_below(gnu_hash);
+	ElfW(Dyn) *d = (ElfW(Dyn) *) l->l_ld;
+	unsigned symcount = dynamic_symbol_count(d, l);
+	for (uint32_t symidx = symbias; 
+			symidx != symcount;
+			symidx++)
+	{
+		/* We know that hash-mod-nbuckets equals the right value,
+		 * but what about the hash itself? Test this before we bother
+		 * doing the full comparison. We have to live with not being
+		 * able to test the lowest bit. */
+		int ret = cb(&symtab[symidx], arg);
+		if (ret) return ret;
+	}
+	
+	return 0;
+}
+
+static inline
 ElfW(Sym) *hash_lookup_local(const char *sym)
 {
 	ElfW(Word) *hash = (ElfW(Word) *) local_dynamic_xlookup(DT_HASH)->d_un.d_ptr;
@@ -581,6 +677,15 @@ uintptr_t guess_page_size_unsafe(void)
 	return auxv_xlookup(p_auxv, AT_PAGESZ)->a_un.a_val;
 }
 
+static inline 
+void *get_exe_handle(void)
+{
+	int x;
+	ElfW(auxv_t) *p_auxv = get_auxv((const char **) environ, &x);
+	if (!p_auxv) abort();
+	void *entry = (void*) auxv_xlookup(p_auxv, AT_ENTRY)->a_un.a_val;
+	return get_highest_loaded_object_below(entry);
+}
 #define ROUND_DOWN(p, align) \
 	(((uintptr_t) (p)) % (align) == 0 ? ((uintptr_t) (p)) \
 	: (uintptr_t) ((align) * ((uintptr_t) (p) / (align))))
@@ -605,47 +710,6 @@ ElfW(Sym) *symbol_lookup_linear_local(const char *sym)
 	return symbol_lookup_linear(symtab, symtab_end, strtab, strtab_end, sym);
 }
 
-static inline
-unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn, struct LINK_MAP_STRUCT_TAG *l)
-{
-	unsigned long nsyms = 0;
-	ElfW(Dyn) *dynstr_ent = NULL;
-	unsigned char *dynstr = NULL;
-	ElfW(Dyn) *dynsym_ent = dynamic_lookup(dyn, DT_SYMTAB);
-	if (!dynsym_ent) return 0;
-	ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
-	if ((intptr_t) dynsym < 0) return 0; // HACK: x86-64 vdso workaround
-	
-	ElfW(Dyn) *hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_HASH);
-	ElfW(Word) *hash = NULL;
-	if (hash_ent)
-	{
-		/* Got the SysV-style hash table. */
-		hash = (ElfW(Word) *) hash_ent->d_un.d_ptr;
-		if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
-		if ((char*) hash < (char*) l->l_addr) return 0; // HACK: x86-64 vdso workaround
-		nsyms = hash[1]; /* nchain, which equals the number of symbols */
-	}
-	else if (NULL != (hash_ent = (ElfW(Dyn) *) dynamic_lookup(dyn, DT_GNU_HASH)))
-	{
-		/* Got the GNU-style hash table. 
-		 * GAH. Unlike the SysV one, this doesn't tell us the size of the symtab. */
-		goto dynsym_nasty_hack;
-	}
-	else
-	{
-dynsym_nasty_hack:
-		/* Take a wild guess, by assuming dynstr directly follows dynsym. */
-		dynstr_ent = dynamic_lookup(dyn, DT_STRTAB);
-		assert(dynstr_ent);
-		dynstr = (unsigned char *) dynstr_ent->d_un.d_ptr;
-		if ((intptr_t) dynstr < 0) return 0; // HACK: x86-64 vdso workaround
-		assert((unsigned char *) dynstr > (unsigned char *) dynsym);
-		// round down, because dynsym might be padded
-		nsyms = (dynstr - (unsigned char *) dynsym) / sizeof (ElfW(Sym));
-	}
-	return nsyms;
-}
 
 static inline 
 ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sym)
@@ -685,15 +749,21 @@ static inline
 void *sym_to_addr(ElfW(Sym) *sym)
 {
 	if (!sym) return NULL;
-	return LOAD_ADDR_FIXUP(sym->st_value, sym);
+	/* HACK for ifunc */
+	if (ELF64_ST_TYPE(sym->st_info) == STT_GNU_IFUNC)
+	{
+		void *(*ifunc)(void) = LOAD_ADDR_FIXUP(sym->st_value, sym);
+		return ifunc();
+	}
+	else return LOAD_ADDR_FIXUP(sym->st_value, sym);
 }
 
-static inline
-void *sym_to_addr_in_object(struct LINK_MAP_STRUCT_TAG *l, ElfW(Sym) *sym)
-{
-	if (!sym) return NULL;
-	return LOAD_ADDR_FIXUP_IN_OBJ(l, sym->st_value);
-}
+//static inline
+//void *sym_to_addr_in_object(struct LINK_MAP_STRUCT_TAG *l, ElfW(Sym) *sym)
+//{
+//	if (!sym) return NULL;
+//	return LOAD_ADDR_FIXUP_IN_OBJ(l, sym->st_value);
+//}
 
 static inline
 void *fake_dlsym(void *handle, const char *symname)
@@ -725,7 +795,10 @@ void *fake_dlsym(void *handle, const char *symname)
 		{
 			/* Does this object have the symbol? */
 			ElfW(Sym) *found = symbol_lookup_in_object(l, symname);
-			if (found && found->st_shndx != SHN_UNDEF) return sym_to_addr(found);
+			if (found && found->st_shndx != SHN_UNDEF)
+			{
+				return sym_to_addr(found);
+			}
 			
 			if (handle == l)
 			{
@@ -742,6 +815,77 @@ not_found:
 	 * reliably do that from here. Instead, we use MAP_FAILED to signal error. */
 	return (void*) -1;
 	
+}
+
+static inline
+int walk_symbols_in_object(struct LINK_MAP_STRUCT_TAG *l,
+	int (*cb)(ElfW(Sym) *, void *), void *arg)
+{
+	ElfW(Sym) *symtab = (ElfW(Sym) *) dynamic_xlookup(l->l_ld, DT_SYMTAB)->d_un.d_ptr;
+	if ((intptr_t) symtab < 0) return 0; // HACK: x86-64 vdso workaround
+
+	ElfW(Dyn) *gnu_hash_ent = dynamic_lookup(l->l_ld, DT_GNU_HASH);
+	ElfW(Word) *gnu_hash = gnu_hash_ent ? (ElfW(Word) *) gnu_hash_ent->d_un.d_ptr : NULL;
+	if ((intptr_t) gnu_hash < 0) return 0; // HACK: x86-64 vdso workaround
+	if ((uintptr_t) gnu_hash < l->l_addr) return 0; // HACK: x86-64 vdso workaround
+	if (gnu_hash) return gnu_hash_walk_syms(gnu_hash, cb, symtab, arg);
+	
+	ElfW(Dyn) *hash_ent = dynamic_lookup(l->l_ld, DT_HASH);
+	ElfW(Word) *hash = hash_ent ? (ElfW(Word) *) hash_ent->d_un.d_ptr : NULL;
+	if ((intptr_t) hash < 0) return 0; // HACK: x86-64 vdso workaround
+	if ((uintptr_t) hash < l->l_addr) return 0; // HACK: x86-64 vdso workaround
+	if (hash) return hash_walk_syms(hash, cb, symtab, arg);
+	
+	return 0;
+}
+
+struct fake_dladdr_args
+{
+	void *in_sought_addr;
+	ElfW(Sym) *out_found_sym;
+};
+
+static inline int fake_dladdr_cb(ElfW(Sym) *p_sym, void *args)
+{
+	struct fake_dladdr_args *found = (struct fake_dladdr_args *) args;
+	void *addr = sym_to_addr(p_sym);
+	if ((unsigned long) found->in_sought_addr - (unsigned long) addr < p_sym->st_size)
+	{
+		found->out_found_sym = p_sym;
+		return 1;
+	}
+	return 0;
+}
+
+static inline
+int fake_dladdr(void *addr, const char **out_fname, void **out_fbase, const char **out_sname,
+	void **out_saddr)
+{
+	struct LINK_MAP_STRUCT_TAG *l = get_highest_loaded_object_below(addr);
+	struct fake_dladdr_args args = { .in_sought_addr = addr };
+	int success = walk_symbols_in_object(l, fake_dladdr_cb, &args);
+	if (success)
+	{
+		if (out_fname) *out_fname = l->l_name;
+		if (out_fbase) *out_fbase = (void*) l->l_addr;
+		if (out_sname) 
+		{
+			ElfW(Dyn) *dynstr_ent = dynamic_lookup(l->l_ld, DT_STRTAB);
+			if (dynstr_ent)
+			{
+				char *dynstr = (char *) dynstr_ent->d_un.d_ptr;
+				if ((intptr_t) dynstr >= 0)
+				{
+					*out_sname = &dynstr[args.out_found_sym->st_name];
+					goto done_dynstr;
+				}
+			}
+			*out_sname = NULL;
+		}
+	done_dynstr:
+		if (out_saddr) *out_saddr = sym_to_addr(args.out_found_sym);
+	}
+	return success; /* i.e. "return 0 on error", like dladdr */
 }
 
 #endif

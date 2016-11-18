@@ -139,7 +139,7 @@ size_t __wrap_malloc_usable_size (void *ptr)
 		return //__real_malloc_usable_size(ptr);
 			__mallochooks_malloc_usable_size(ptr);
 	}
-	return (__lookup_top_level_allocator(ptr) == &__stack_allocator)
+	return (__liballocs_get_allocator_upper_bound(ptr) == &__stack_allocator)
 		? *(((unsigned long *) ptr) - 1)
 		: __mallochooks_malloc_usable_size(ptr);
 }
@@ -316,7 +316,7 @@ void *dlopen(const char *filename, int flag)
 					(0 == strcmp(lm_ent_realname, file_realname)));
 			if (file_already_loaded) break;
 		}
-		free((void*) file_realname);
+		__wrap_dlfree((void*) file_realname);
 	}
 	// write_string("Blah3005\n");
 	
@@ -336,14 +336,8 @@ skip_load:
 
 		/* Also load the types and allocsites for this object. These callbacks
 		 * also have to be tolerant of already-loadedness. */
-		int ret_types = dl_for_one_object_phdrs(ret, load_types_for_one_object, NULL);
-		assert(ret_types == 0);
-	#ifndef NO_MEMTABLE
-		int ret_allocsites = dl_for_one_object_phdrs(ret, load_and_init_allocsites_for_one_object, NULL);
-		assert(ret_allocsites == 0);
-		int ret_stackaddr = dl_for_one_object_phdrs(ret, link_stackaddr_and_static_allocs_for_one_object, NULL);
-		assert(ret_stackaddr == 0);
-	#endif
+		void *types_handle = NULL;
+		int ret_meta = dl_for_one_object_phdrs(ret, load_and_init_all_metadata_for_one_object, NULL);
 	}
 	// write_string("Blah3007\n");
 
@@ -636,4 +630,34 @@ int sigaction(int signum, const struct __libc_sigaction *act,
 out:
 	if (we_set_flag) __avoid_libdl_calls = 0;
 	return ret;
+}
+
+void *memcpy(void *dest, const void *src, size_t n)
+{
+	static void *(*orig_memcpy)(void *, const void *, size_t);
+	if (!orig_memcpy)
+	{
+		/* Use fake_dlsym because it understands ifuncs. */
+		orig_memcpy = fake_dlsym(RTLD_NEXT, "memcpy");
+		assert(orig_memcpy);
+	}
+	
+	orig_memcpy(dest, src, n);
+	
+	return __notify_copy(dest, src, n);
+}
+
+void *(*orig_memmove)(void *, const void *, size_t);
+void *memmove(void *dest, const void *src, size_t n)
+{
+	if (!orig_memmove)
+	{
+		/* Use fake_dlsym because it understands ifuncs. */
+		orig_memmove = fake_dlsym(RTLD_NEXT, "memmove");
+		assert(orig_memmove);
+	}
+	
+	orig_memmove(dest, src, n);
+	
+	return __notify_copy(dest, src, n);
 }

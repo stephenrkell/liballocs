@@ -163,6 +163,13 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site);
 
+_Bool __auxv_get_asciiz(const char **out_start, const char **out_end, struct uniqtype **out_uniqtype);
+_Bool __auxv_get_argv(const char ***out_start, const char ***out_terminator, struct uniqtype **out_uniqtype);
+_Bool __auxv_get_env(const char ***out_start, const char ***out_terminator, struct uniqtype **out_uniqtype);
+_Bool __auxv_get_auxv(const Elf64_auxv_t **out_start, Elf64_auxv_t **out_terminator, struct uniqtype **out_uniqtype);
+void *__auxv_get_program_entry_point(void);
+
+
 /* liballocs assumes some fixed structure in the first couple of levels of the hierarchy.
  * 
  *                           ______ (imaginary root) ______

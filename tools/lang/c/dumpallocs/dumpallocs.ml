@@ -67,10 +67,6 @@ let rec sizeExprHasNoSizeof (e: exp) =
  | AlignOfE(t) -> true
  | _ -> true
 
-let rec decayArrayInTypesig ts = match ts with
-   TSArray(tsig, optSz, attrs) -> decayArrayInTypesig tsig (* recurse for multidim arrays *)
- | _ -> ts
-
 type sz = 
     Undet
   | Existing of typsig
@@ -289,11 +285,8 @@ let rec warnIfLikelyAllocFn (i: instr) (maybeFunName: string option) (arglist: e
              debug_print 1 ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
              else (* getSizeExpr (nth arglist 0) *)
                 debug_print 1 ("call to function " ^ funName ^ " looks like an allocation, but does not match any in LIBALLOCS_{SUB,}ALLOC_FNS\n")
-      else () (*  ) 
-      else (* takes no arguments, so we output a "(none)" line. *)
-         Some(f.vname, None) (* We eliminate these lines in merge-allocs, rather than
-            here, so we can safely pass over the false positive from objdumpallocs. *)
-*)  end else (* None *)
+      else () 
+    end else (* None *)
       (* (debug_print 1 ("call to function " ^ funName ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
 | None -> ()
 
@@ -465,28 +458,19 @@ let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) e
   getUserAllocExpr i maybeFunName arglist env (allAllocFunctions ()) calledFunctionType
 
 (* I so do not understand Pretty.dprintf *)
-let printAllocFn fileAndLine chan maybeFunvar allocSymOrExpr = 
+let printAllocFn fileAndLine chan maybeFunvar allocType = 
    (* debug_print 1 ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
    output_string chan fileAndLine;
-   let msg = match maybeFunvar with 
+   let targetFunc = match maybeFunvar with 
      Some(funvar) -> Pretty.sprint 80 
        (Pretty.dprintf  "\t%a\t"
             d_lval (Var(funvar), NoOffset)) 
    | None -> "\t(indirect)\t"
    in
-   output_string chan (msg ^ allocSymOrExpr ^ "\n");
+   output_string chan (targetFunc ^ allocType ^ "\n");
    flush chan
 
-(* Currently our visitor visits each instruction, 
-   and for those that are calls, 
-   uses getAllocExpr to match those that are allocation function calls, 
-   extracting the sizeof subexpression from their argument list
-   in the process (getAllocExpr calls getSizeExpr). 
-   
-   PROBLEM: address-taken allocation functions?
-   We can perhaps conservatively overapproximate these. TODO.
-   
-   What we want it to do instead is:
+(* What we do is:
    - an intraprocedural analysis
    - each SSA local is labelled with Maybe sizeExpr
    - initially all labels are None
@@ -666,7 +650,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
              | Some(s) -> s
              | None    -> Pervasives.stderr
             in
-            let fileAndLine = (abspath l.file) ^ "\t" ^ (string_of_int l.line) 
+            let fileAndLine = l.file ^ "\t" ^ (string_of_int l.line) ^ "\t" ^ (string_of_int l.line)
             in
             begin
               (* Here we need to identify the size argument and

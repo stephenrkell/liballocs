@@ -52,9 +52,9 @@ let list_empty l = not (List.exists (fun x -> true) l)
 let expToString e      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp e))
 let instToString i     = (Pretty.sprint 80 (Pretty.dprintf "%a" d_instr i))
 let lvalToString lv    = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv))
+let offsetToString o   = (Pretty.sprint 80 (Pretty.dprintf "%a" (d_offset (d_formatarg () (Fg("")))) o))
 let typToString t      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
 let typsigToString ts  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig ts))
-
 let expToCilString e   = (Pretty.sprint 80 (printExp  (new plainCilPrinterClass) () e))
 let lvalToCilString lv = (Pretty.sprint 80 (printLval (new plainCilPrinterClass) () lv))
 
@@ -127,8 +127,13 @@ let makeIntegerConstant n = Const(CInt64(n, IInt, None))
 
 let isStaticallyZero e = isZero (foldConstants e) 
 
-let isStaticallyNullPtr e = match (typeSig (typeOf e)) with
-    TSPtr(_) -> isStaticallyZero(e)
+let rec isStaticallyNullPtr e = match (typeSig (typeOf e)) with
+    TSPtr(_) -> begin match e with
+            CastE(targetT, subE) ->
+                if isPointerType (typeOf subE) then isStaticallyNullPtr subE
+                else isStaticallyZero subE
+          | _ -> isStaticallyZero e
+        end
   | _ -> false
 
 let constInt64ValueOfExprNoChr (intExp: Cil.exp) : int64 option =
@@ -329,6 +334,27 @@ let rec getConcreteType ts =
  | TSBase(TFloat(kind,attrs)) -> TSBase(TFloat(kind, []))
  | _ -> ts
 
+(* This will turn "array of [array of...] X" into "X". *)
+let rec decayArrayInTypesig ts = match ts with
+   TSArray(tsig, optSz, attrs) -> decayArrayInTypesig tsig (* recurse for multidim arrays *)
+ | _ -> ts
+
+(* This will make a "pointer to array of X" typesig into a "pointer to X" typesig.
+ * And similarly for "pointer to array of pointer to array of X" -- 
+ *      it becomes "pointer to pointer to X". *)
+let rec decayArrayInPointeeTypesig ts = match ts with
+   TSPtr(TSArray(tsig, optSz, arrAttrs), ptrAttrs) -> TSPtr(decayArrayInPointeeTypesig tsig, ptrAttrs)
+ | TSPtr(tsig, attrs) -> TSPtr(decayArrayInPointeeTypesig tsig, attrs)
+ | _ -> ts
+
+(* This will turn "array of [array of...] X" into "pointer to X". 
+ * And for any pointed-to arrays within X, will do the same. *)
+let rec decayArrayToCompatiblePointer ts = match ts with
+   TSArray(tsig, optSz, attrs) -> TSPtr(decayArrayToCompatiblePointer(decayArrayInTypesig tsig), attrs)
+ | TSPtr(tsig, attrs) -> TSPtr(decayArrayToCompatiblePointer tsig, attrs)
+ | _ -> ts
+
+
 let exprConcreteType e = getConcreteType (Cil.typeSig (Cil.typeOf e))
 
 let matchIgnoringLocation g1 g2 = match g1 with 
@@ -387,7 +413,7 @@ let getOrCreateUniqtypeGlobal m concreteType globals =
       in 
       (m, foundVar, globals)
   with Not_found -> 
-     debug_print 0 ("Creating new uniqtype global for type named " ^ typename ^ "\n");
+     debug_print 1 ("Creating new uniqtype global for type named " ^ typename ^ "\n");
      let typeStructUniqtype = try findStructTypeByName globals "uniqtype" 
         with Not_found -> failwith "no struct uniqtype in file; why is libcrunch_cil_inlines not included?"
      in
@@ -407,13 +433,13 @@ let getOrCreateUniqtypeGlobal m concreteType globals =
      (newMap, newGlobal, newGlobals)
 
 let ensureUniqtypeGlobal concreteType enclosingFile (uniqtypeGlobals : Cil.global UniqtypeMap.t ref) = 
-    debug_print 0 ("Ensuring we have uniqtype for " ^ (typsigToString concreteType) ^ "\n");
+    debug_print 1 ("Ensuring we have uniqtype for " ^ (typsigToString concreteType) ^ "\n");
     let (updatedMap, uniqtypeGlobalVar, updatedGlobals)
      = getOrCreateUniqtypeGlobal !uniqtypeGlobals concreteType enclosingFile.globals
     in 
     enclosingFile.globals <- updatedGlobals; 
     uniqtypeGlobals := updatedMap;
-    debug_print 0 ("Got uniqtype for " ^ (typsigToString concreteType) ^ "\n");
+    debug_print 1 ("Got uniqtype for " ^ (typsigToString concreteType) ^ "\n");
     uniqtypeGlobalVar
 
 let findCompDefinitionInFile isStruct name wholeFile = 
@@ -455,6 +481,8 @@ let rec tsIsUndefinedType ts wholeFile =
     |   TSFun(returnTs, None, isVarargs, attrs)  ->
             tsIsUndefinedType returnTs wholeFile
     |   _                                           -> false
+
+let tsIsIncompleteType ts wholeFile = tsIsUndefinedType ts wholeFile
 
 let findOrCreateExternalFunctionInFile fl nm proto : fundec = (* findOrCreateFunc fl nm proto *) (* NO! doesn't let us have the fundec *)
   let rec findFun gs = match gs with
@@ -505,6 +533,15 @@ let makeInlineFunctionInFile fl ourFun nm proto body referencedValues = begin
 
 let tsIsPointer testTs = match testTs with 
    TSPtr(_, _) -> true
+ | _ -> false
+
+let tsIsNonVoidPointer testTs = match testTs with 
+   TSPtr(TSBase(TVoid(_)), _) -> false
+ | TSPtr(_, _) -> true
+ | _ -> false
+
+let tsIsVoidPointer testTs = match testTs with 
+   TSPtr(TSBase(TVoid(_)), _) -> true
  | _ -> false
 
 let rec tIsPointer testT = match testT with 

@@ -6,6 +6,8 @@
 #include <sstream>
 #include <map>
 #include <set>
+#include <unordered_set>
+#include <unordered_map>
 #include <string>
 #include <cctype>
 #include <cstdlib>
@@ -65,12 +67,6 @@ using boost::format_all;
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval);
 
-static string fq_pathname(const string& dir, const string& path)
-{
-	if (path.length() > 0 && path.at(0) == '/') return path;
-	else return dir + "/" + path;
-}
-
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval)
 {
@@ -84,6 +80,129 @@ static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp,
 }
 
 static int debug_out = 1;
+
+using dwarf::lib::Dwarf_Off;
+using dwarf::lib::Dwarf_Addr;
+using dwarf::lib::Dwarf_Signed;
+using dwarf::lib::Dwarf_Unsigned;
+
+template <typename Second>
+struct compare_first_iter_offset
+{
+	bool operator()(const pair< iterator_df<with_dynamic_location_die>, Second >& x,
+		            const pair< iterator_df<with_dynamic_location_die>, Second >& y)
+		const
+	{
+		return x.first.offset_here() < y.first.offset_here();
+	}
+};
+
+struct compare_first_signed_second_offset
+{
+	bool operator()(const pair< Dwarf_Signed, iterator_df<with_dynamic_location_die> >& x,
+		            const pair< Dwarf_Signed, iterator_df<with_dynamic_location_die> >& y)
+		const
+	{
+		return (x.first < y.first)
+			|| ((x.first == y.first) && x.second.offset_here() < y.second.offset_here());
+	}
+};
+
+using std::unordered_set;
+
+template <class Target>
+struct iter_hash
+{
+	typedef iterator_df<Target> T;
+	
+	static size_t hash_fn(const T& v) { return v.offset_here(); }
+	static bool eq_fn(const T& v1, const T& v2)
+	{ return v1.offset_here() == v2.offset_here(); }
+	
+	struct set : unordered_set<
+		T,
+		std::function<typeof(hash_fn)>,
+		std::function<typeof(eq_fn)>
+	>
+	{
+		set() : unordered_set<T, std::function<typeof(hash_fn)>, std::function<typeof(eq_fn)> >({}, 0, hash_fn, eq_fn) {}
+	};
+};
+
+template <class Target, class Second>
+struct iterfirst_pair_hash
+{
+	typedef pair<iterator_df<Target>, Second> T;
+	
+	static size_t hash_fn(const T& v)
+	{ return v.first.offset_here() ^ std::hash<Second>()(v.second); }
+	static bool eq_fn(const T& v1,  const T& v2)
+	{ return v1.first.offset_here() == v2.first.offset_here(); }
+
+	struct set : unordered_set< 
+		T,
+		std::function<typeof(hash_fn)>,
+		std::function<typeof(eq_fn)>
+	>
+	{
+		set() : unordered_set<T, std::function<typeof(hash_fn)>, std::function<typeof(eq_fn)> >
+			({}, 0, hash_fn, eq_fn) 
+			{}
+	};
+};
+
+template <class First, class Target>
+struct itersecond_pair_hash
+{
+	typedef pair<First, iterator_df<Target> > T;
+	
+	static size_t hash_fn(const T& v) 
+	{ return v.second.offset_here() ^ std::hash<First>()(v.first); }
+	static bool eq_fn(const T& v1, 	const T& v2)
+	{ return v1.first == v2.first &&
+	    v1.second.offset_here() == v2.second.offset_here(); }
+
+	struct set : unordered_set< 
+		T,
+		std::function<typeof(hash_fn)>,
+		std::function<typeof(eq_fn)>
+	>
+	{
+		set() : unordered_set<T, std::function<typeof(hash_fn)>, std::function<typeof(eq_fn)> >
+			({}, 0, hash_fn, eq_fn) 
+			{}
+	};
+};
+
+
+namespace std {
+template <>
+struct hash<const dwarf::lib::Dwarf_Loc>
+{
+	size_t operator()(const dwarf::lib::Dwarf_Loc& v)
+	{
+		size_t working = 0;
+		working ^= v.lr_atom;
+		working ^= v.lr_number;
+		working ^= v.lr_number2;
+		working ^= v.lr_offset;
+		return working;
+	}
+};
+template <>
+struct hash<dwarf::encap::loc_expr>
+{
+	size_t operator()(const dwarf::encap::loc_expr& v)
+	{
+		size_t working = 0;
+		for (auto i = v.begin(); i != v.end(); ++i)
+		{
+			working ^= std::hash<typeof(*i)>()(*i);
+		}
+		return working;
+	}
+};
+}
 
 int main(int argc, char **argv)
 {
@@ -142,6 +261,7 @@ int main(int argc, char **argv)
 	 * - a length prefix;
 	 * - a list of <offset, included-type-record ptr> pairs.
 	 */
+
 
 	// write a forward declaration for every uniqtype we need
 	set<string> names_emitted;
@@ -212,33 +332,32 @@ int main(int argc, char **argv)
 	 *
 	 * We also output an allocsites record for each one, wit the allocsite as the
 	 *  */
-	using dwarf::lib::Dwarf_Off;
-	using dwarf::lib::Dwarf_Addr;
-	using dwarf::lib::Dwarf_Signed;
-	using dwarf::lib::Dwarf_Unsigned;
+
 	
-	typedef std::set< pair< iterator_df<with_dynamic_location_die>, encap::loc_expr > > live_set_t;
+	typedef iterfirst_pair_hash< 
+		with_dynamic_location_die, encap::loc_expr/* ,
+		compare_first_iter_offset<encap::loc_expr> */
+	>::set live_set_t;
 	typedef boost::icl::interval_map< Dwarf_Off, live_set_t > intervals_t;
 	typedef boost::icl::interval_map< 
 			Dwarf_Off, 
-			std::set< 
-				pair<
-					Dwarf_Signed, 
-					iterator_df<with_dynamic_location_die> 
-				> 
+			set<pair< 
+					Dwarf_Signed, // frame offset
+					iterator_df< with_dynamic_location_die >
+				>,
+				compare_first_signed_second_offset 
 			>
-		> retained_intervals_t;
+		> frame_intervals_t;
 	typedef boost::icl::interval_map< 
 			Dwarf_Off, 
-			std::set< 
-				pair<
-					iterator_df<with_dynamic_location_die>,
-					string
-				>
-			>
+			iterfirst_pair_hash< 
+				with_dynamic_location_die,
+				string
+			>::set/* ,
+				compare_first_iter_offset<string> */
 		> discarded_intervals_t;
 		
-	map< iterator_df<subprogram_die>, retained_intervals_t > intervals_by_subprogram;
+	map< iterator_df<subprogram_die>, frame_intervals_t > intervals_by_subprogram;
 	map< iterator_df<subprogram_die>, unsigned > frame_offsets_by_subprogram;
 	
 	for (auto i_i_subp = subprograms_list.begin(); i_i_subp != subprograms_list.end(); ++i_i_subp)
@@ -318,7 +437,8 @@ int main(int argc, char **argv)
 			for (auto i_locexpr = var_loclist.begin(); 
 				i_locexpr != var_loclist.end(); ++i_locexpr)
 			{
-				std::set< pair<iterator_df<with_dynamic_location_die>, encap::loc_expr > > singleton_set;
+				iterfirst_pair_hash< with_dynamic_location_die, encap::loc_expr >::set /*,
+					compare_first_iter_offset<encap::loc_expr> */ singleton_set;
 				/* PROBLEM: we need to remember not only that each i_dyn is valid 
 				 * in a given range, but with what loc_expr. So we pair the i_dyn with
 				 * the relevant loc_expr. */
@@ -456,7 +576,7 @@ int main(int argc, char **argv)
 		 * Keep an interval map of discarded items.
 		 * When finished, walk it and build another map keyed by 
 		  */
-		retained_intervals_t frame_intervals;
+		frame_intervals_t frame_intervals;
 		discarded_intervals_t discarded_intervals;
 		 
 		for (auto i_int = subp_vaddr_intervals.begin(); 
@@ -506,14 +626,47 @@ int main(int argc, char **argv)
 					cerr << "Skipping static var masquerading as local: "
 						<< *i_el 
 						<< "in the vaddr range " 
-						<< std::hex << i_int->first << std::dec;
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+						<< std::hex << i_int->first << std::dec << std::endl;
+					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
+						compare_first_iter_offset<string>*/ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("static-masquerading-as-local")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 					continue;
 				}
 				
-				try
+				bool saw_register = false;
+				auto& spec = i_el_pair->first.spec_here();
+				for (auto i_instr = i_el_pair->second.begin(); i_instr != i_el_pair->second.end();
+					++i_instr)
+				{
+					if (spec.op_reads_register(i_instr->lr_atom))
+					{ saw_register = true; break; }
+				}
+				
+				/* FIXME: DW_OP_piece complicates this. If we have part in a register, 
+				 * part on the stack, we'd like to record this somehow. Perhaps supply
+				 * a getter and setter in the make_precise()-generated uniqtype? */
+				
+				if (saw_register)
+				{
+					/* This means our variable/fp is in a register and not 
+					 * in a stack location. That's fine. Warn and continue. */
+					if (debug_out > 1)
+					{
+						cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp "
+							<< "in the vaddr range " 
+							<< std::hex << i_int->first << std::dec
+							<< ": "
+					 		<< *i_el;
+					}
+					//discarded.push_back(make_pair(*i_el, "register-located"));
+					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
+						compare_first_iter_offset<string> */ singleton_set;
+					singleton_set.insert(make_pair(*i_el, string("register-located")));
+					discarded_intervals += make_pair(i_int->first, singleton_set);
+					continue;
+				}
+				else try
 				{
 					std::stack<Dwarf_Unsigned> initial_stack; 
 					// call the evaluator directly
@@ -528,19 +681,19 @@ int main(int argc, char **argv)
 				} 
 				catch (dwarf::lib::No_entry)
 				{
-					/* This probably means our variable/fp is in a register and not 
-					 * in a stack location. That's fine. Warn and continue. */
+					/* Not sure what would cause this, since we scanned for registers. */
 					if (debug_out > 1)
 					{
-						cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp "
+						cerr << "Warning: failed to locate non-register-located local/fp "
 							<< "in the vaddr range " 
 							<< std::hex << i_int->first << std::dec
 							<< ": "
 					 		<< *i_el;
 					}
 					//discarded.push_back(make_pair(*i_el, "register-located"));
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
-					singleton_set.insert(make_pair(*i_el, string("register-located")));
+					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
+						compare_first_iter_offset<string> */ singleton_set;
+					singleton_set.insert(make_pair(*i_el, string("unknown")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 					continue;
 				}
@@ -549,7 +702,8 @@ int main(int argc, char **argv)
 					cerr << "Warning: something strange happened when computing location for fp: " 
 					 	<< *i_el;
 					//discarded.push_back(make_pair(*i_el, "register-located"));
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
+						compare_first_iter_offset<string> */ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("something-strange")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 					continue;
@@ -563,13 +717,15 @@ int main(int argc, char **argv)
 				if ((*i_el)->find_type() && (*i_el)->find_type()->get_concrete_type())
 				{
 					//by_frame_off[frame_offset] = *i_el;
-					set< pair<Dwarf_Signed, iterator_df<with_dynamic_location_die> > > singleton_set;
+					set< pair< Dwarf_Signed, iterator_df< with_dynamic_location_die > >,
+						compare_first_signed_second_offset > singleton_set;
 					singleton_set.insert(make_pair(frame_offset, *i_el));
 					frame_intervals += make_pair(i_int->first, singleton_set);
 				}
 				else
 				{
-					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
+					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
+						compare_first_iter_offset<string> */ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("no_concrete_type")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 				}
@@ -597,7 +753,16 @@ int main(int argc, char **argv)
 			else
 			{
 				{
-					auto i_maxoff_el = i_frame_int->second.end(); --i_maxoff_el;
+					frame_intervals_t::codomain_type::iterator i_maxoff_el = i_frame_int->second.end(); --i_maxoff_el;
+// 					Dwarf_Signed seen_maxoff = std::numeric_limits<Dwarf_Signed>::min();
+// 					for (auto i_el = i_frame_int->second.begin(); i_el != i_frame_int->second.end(); ++i_el)
+// 					{
+// 						if (i_el->first > seen_maxoff)
+// 						{
+// 							seen_maxoff = i_el->first;
+// 							i_maxoff_el = i_el;
+// 						}
+// 					}
 					auto p_maxoff_type = i_maxoff_el->second->find_type();
 					unsigned calculated_maxel_size;
 					if (!p_maxoff_type || !p_maxoff_type->get_concrete_type()) 
@@ -655,8 +820,6 @@ int main(int argc, char **argv)
 			assert(found_minoff != interval_minoffs.end());
 			signed interval_minoff = found_minoff->second;
 			
-
-			
 			/* Output in offset order, CHECKing that there is no overlap (sanity). */
 			cout << "\n/* uniqtype for stack frame ";
 			string unmangled_typename = typename_for_vaddr_interval(i_subp, i_frame_int->first);
@@ -666,40 +829,39 @@ int main(int argc, char **argv)
 			cout << unmangled_typename
 				 << " defined in " << cu_name << ", "
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
-				 
-			cout << "struct uniqtype " << mangle_typename(make_pair(cu_name, unmangled_typename))
-				<< " = {\n\t" 
-				<< "{ 0, 0, 0 },\n\t"
-				<< "\"" << unmangled_typename << "\",\n\t"
-				<< interval_maxoff + offset_to_all << " /* pos_maxoff */,\n\t"
-				<< 0 << " /* actual min is " << interval_minoff + offset_to_all << " */ /* neg_maxoff */,\n\t"
-				<< i_frame_int->second.size() << " /* nmemb */,\n\t"
-				<< "0 /* is_array */,\n\t"
-				<< "0 /* array_len */,\n\t"
-				<< /* contained[0] */ "/* contained */ {\n\t\t";
+			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
+			string mangled_name = mangle_typename(make_pair(cu_name, unmangled_typename));
+			write_uniqtype_open_composite(cout,
+				mangled_name,
+				unmangled_typename,
+				interval_maxoff + offset_to_all,
+				i_frame_int->second.size(),
+				false,
+				min_s.str()
+			);
 			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
 			{
-				if (i_by_off != i_frame_int->second.begin()) cout << ",\n\t\t";
-				/* begin the struct */
-				cout << "{ ";
-				string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->second->find_type()));
-				assert(names_emitted.find(mangled_name) != names_emitted.end());
-				cout << (i_by_off->first + offset_to_all) << ", "
-					<< "&" << mangled_name
-					<< "}";
-				cout << " /* ";
+				ostringstream comment_s;
 				if (i_by_off->second.name_here())
 				{
-					cout << *i_by_off->second.name_here();
+					comment_s << *i_by_off->second.name_here();
 				}
-				else cout << "(anonymous)"; 
-				cout << " -- " << i_by_off->second.spec_here().tag_lookup(
+				else comment_s << "(anonymous)"; 
+				comment_s << " -- " << i_by_off->second.spec_here().tag_lookup(
 						i_by_off->second.tag_here())
 					<< " @" << std::hex << i_by_off->second.offset_here() << std::dec;
-				cout << " */ ";
+
+				string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->second->find_type()));
+				assert(names_emitted.find(mangled_name) != names_emitted.end());
+				
+				write_uniqtype_related_contained_member_type(cout,
+					/* is_first */ i_by_off == i_frame_int->second.begin(),
+					i_by_off->first + offset_to_all,
+					mangled_name,
+					comment_s.str()
+				);
 			}
-			cout << "\n\t}";
-			cout << "\n};\n";
+			write_uniqtype_close(cout, mangled_name);
 		}
 		/* Now print a summary of what was discarded. */
 // 		for (auto i_discarded = discarded.begin(); i_discarded != discarded.end(); 
@@ -740,22 +902,12 @@ int main(int argc, char **argv)
 	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
 
 	unsigned total_emitted = 0;
-	// reminder: retained_intervals_t is
-	// boost::icl::interval_map< 
-	//		Dwarf_Off, 
-	//		std::set< 
-	//			pair<
-	//				Dwarf_Signed, 
-	//				iterator_df<with_dynamic_location_die> 
-	//			> 
-	//		>
-	//	>
 	
 	/* NOTE: our allocsite chaining trick in liballocs requires that our allocsites 
 	 * are sorted in vaddr order, so that adjacent allocsites in the memtable buckets
 	 * are adjacent in the table. So we sort them here. */
 	set< pair< boost::icl::discrete_interval<Dwarf_Addr>, iterator_df<subprogram_die> > > sorted_intervals;
-	for (map< iterator_df<subprogram_die>, retained_intervals_t >::iterator i_subp_intervals 
+	for (map< iterator_df<subprogram_die>, frame_intervals_t >::iterator i_subp_intervals 
 	  = intervals_by_subprogram.begin(); i_subp_intervals != intervals_by_subprogram.end();
 	  ++ i_subp_intervals)
 	{

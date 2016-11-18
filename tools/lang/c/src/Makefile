@@ -1,3 +1,5 @@
+$(warning antlr environment is $(shell printenv | grep -i antlr))
+
 DEPS := 
 
 ALLOCSTOOL ?= ../../../
@@ -6,8 +8,8 @@ CXXFLAGS += -std=c++0x -g -O2 -I$(ALLOCSTOOL)
 CXXFLAGS += -Wno-deprecated-declarations # while we're using old libdwarfpp -- FIXME
 
 # use the pkg-config vars
-CXXFLAGS += $(LIBCXXFILENO_CXXFLAGS) $(LIBSRK31CXX_CXXFLAGS) $(LIBDWARFPP_CXXFLAGS) $(LIBCXXGEN_CXXFLAGS) $(DWARFIDL_CXXFLAGS)
-LDFLAGS += $(LIBCXXFILENO_LIBS) $(LIBSRK31CXX_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(DWARFIDL_LIBS)
+CXXFLAGS += $(LIBCXXFILENO_CXXFLAGS) $(LIBSRK31CXX_CXXFLAGS) $(LIBDWARFPP_CXXFLAGS) $(LIBCXXGEN_CXXFLAGS) $(DWARFIDL_CXXFLAGS) $(LIBANTLR3C_CXXFLAGS)
+LDFLAGS += $(LIBCXXFILENO_LIBS) $(LIBSRK31CXX_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(DWARFIDL_LIBS) $(LIBANTLR3C_LIBS)
 
 LDFLAGS += -L`pwd` -Wl,-R`pwd` -L$(ALLOCSTOOL) -Wl,-R$(realpath $(ALLOCSTOOL))
 LDLIBS += -lallocstool -lantlr3c -ldwarfidl -lcxxgen -ldwarfpp -ldwarf \

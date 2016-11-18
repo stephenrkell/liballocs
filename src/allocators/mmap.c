@@ -14,6 +14,7 @@ int open(const char *, int);
 #include "maps.h"
 #include "liballocs_private.h"
 #include "raw-syscalls.h"
+#include "dlbind.h"
 
 /* We talk about "allocators" but in the case of retrofitted 
  * allocators, they actually come in up to three parts:
@@ -24,12 +25,6 @@ int open(const char *, int);
  * 
  * By convention, each of our allocators also exposes "notify_*"
  * operations that the instrumentation uses to talk to the index. */
-
-struct allocator __mmap_allocator = {
-	.name = "mmap",
-	.is_cacheable = 1
-	/* FIXME: meta-protocol implementation */
-};
 
 /* The mmap allocator's notion of allocation is roughly a 
  * *sequence* of memory mappings. This is so that a single segment
@@ -107,7 +102,8 @@ static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
 	if (!b) abort();
 	
 	/* Note that this will use early_malloc if we would otherwise be reentrant. */
-	struct mapping_sequence *copy = malloc(sizeof (struct mapping_sequence));
+	struct mapping_sequence *copy = __wrap_dlmalloc(sizeof (struct mapping_sequence));
+	/* FIXME: free this somewhere? */
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
 	
@@ -116,14 +112,14 @@ static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
 		.un = {
 			opaque_data: {
 				.data_ptr = copy,
-				.free_func = free
+				.free_func = __wrap_dlfree
 			}
 		}
 	};
 }
 
-/* HACK: we have a special link to the stack allocator. */
-void __stack_allocator_notify_init_stack_mapping(void *begin, void *end);
+/* HACK: we have a special link to the auxv allocator. */
+void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end);
 
 static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 	void *addr, size_t length)
@@ -258,7 +254,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				if (!second_half) abort();
 				__liballocs_truncate_bigalloc_at_end(b, addr);
 				/* Now the bigallocs are in the right place, but their metadata is wrong. */
-				struct mapping_sequence *new_seq = malloc(sizeof (struct mapping_sequence));
+				struct mapping_sequence *new_seq = __wrap_dlmalloc(sizeof (struct mapping_sequence));
 				struct mapping_sequence *orig_seq = b->meta.un.opaque_data.data_ptr;
 				memcpy(new_seq, orig_seq, sizeof (struct mapping_sequence));
 				/* From the first, delete from the hole all the way. */
@@ -266,7 +262,8 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				/* From the second, delete from the old begin to the end of the hole. */
 				delete_mapping_sequence_span(new_seq, b->begin, 
 						((char*) addr + length) - (char*) b->begin);
-
+				second_half->meta.un.opaque_data.data_ptr = new_seq;
+				/* same free function as before */
 			}
 		}
 	}
@@ -404,7 +401,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		else /* HMM */
 		{
 			add_bigalloc(mapped_addr, mapped_length);
-		}		
+		}
 	}
 }
 void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_t length, 
@@ -489,36 +486,43 @@ void __mmap_allocator_init(void)
 		assert(phnum_auxv);
 		uintptr_t biggest_start_seen = 0;
 		uintptr_t biggest_end_seen = 0;
+		uintptr_t executable_load_addr = 0; /* might get overridden by PHDR */
 		for (int i = 0; i < phnum_auxv->a_un.a_val; ++i)
 		{
 			ElfW(Phdr) *phdr = ((ElfW(Phdr)*) ph_auxv->a_un.a_val) + i;
-			if (phdr->p_type == PT_LOAD)
+			if (phdr->p_type == PT_PHDR)
+			{
+				executable_load_addr = (char*) phdr - (char*) phdr->p_vaddr;
+			}
+			else if (phdr->p_type == PT_LOAD)
 			{
 				/* Kernel's treatment of extra-memsz is not reliable -- i.e. the 
 				 * memsz bit needn't show up in /proc/<pid>/maps -- so use the
 				 * beginning. */
 				// FIXME: assumes executable load addr is 0
-				uintptr_t end = (uintptr_t) phdr->p_vaddr + phdr->p_memsz;
+				uintptr_t end = executable_load_addr + 
+					(uintptr_t) phdr->p_vaddr + phdr->p_memsz;
 				if (end > biggest_end_seen)
 				{
 					biggest_end_seen = end;
-					biggest_start_seen = (uintptr_t) phdr->p_vaddr;
+					biggest_start_seen = executable_load_addr + 
+						(uintptr_t) phdr->p_vaddr;
 				}
 				// write_string("Saw executable phdr end address: ");
 				// write_ulong((unsigned long) end);
 				// write_string("\n");
 
 				if (!(phdr->p_flags & PF_X) &&
-					(char*) phdr->p_vaddr > (char*) data_segment_start_addr)
+					(char*) executable_load_addr + phdr->p_vaddr > (char*) data_segment_start_addr)
 				{
-					data_segment_start_addr = (void*) phdr->p_vaddr;
+					data_segment_start_addr = (void*) (executable_load_addr + phdr->p_vaddr);
 				}
 			}
 		}
 		executable_end_addr = (void*) biggest_end_seen;
 		uintptr_t executable_data_segment_start_addr = biggest_start_seen;
 		assert(executable_end_addr != 0);
-		assert((char*) executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
+		// assert((char*) executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
 		// write_string("Executable highest phdr end address: ");
 		// write_ulong((unsigned long) executable_end_addr);
 		// write_string("\n");
@@ -542,7 +546,6 @@ void __mmap_allocator_init(void)
 			}
 		}
 		if (!executable_data_segment_mapping_bigalloc) abort();
-
 		/* We expect the data segment's suballocator to be malloc, so pre-ordain that.
 		 * NOTE that there will also be a nested allocation under it, that is the 
 		 * static allocator's segment bigalloc. We don't consider the sbrk area
@@ -551,10 +554,14 @@ void __mmap_allocator_init(void)
 		
 		/* Also extend the data segment to account for the current brk. */
 		update_data_segment_end(sbrk(0));
-		
+
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
 		
+		/* Now we can correctly initialize libdlbind. Bit of a HACK that it's in here. */
+		__libdlbind_do_init();
+		__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -656,7 +663,7 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg)
 	/* If it looks like a stack... */
 	if (0 == strncmp(ent->rest, "[stack", 6))
 	{
-		__stack_allocator_notify_init_stack_mapping(
+		__auxv_allocator_notify_init_stack_mapping(
 			(void*) ent->first, (void*) ent->second
 		);
 		return 0;
@@ -734,3 +741,30 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 	}
 	update_data_segment_end(new_curbrk);
 }
+
+static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc, 
+	struct uniqtype **out_type, void **out_base, 
+	unsigned long *out_size, const void **out_site)
+{
+	/* The info is simply the top-level bigalloc for that address. */
+	struct big_allocation *b = maybe_bigalloc;
+	if (!b) b = &big_allocations[pageindex[PAGENUM(obj)]];
+	while (b && b->parent) b = b->parent;
+	if (!b) return &__liballocs_err_object_of_unknown_storage;
+	
+	if (out_type) *out_type = NULL;
+	if (out_base) *out_base = b->begin;
+	if (out_size) *out_size = (char*) b->end - (char*) b->begin;
+	if (out_site) *out_site = ((struct mapping_sequence *) b->meta.un.opaque_data.data_ptr)->
+		mappings[0].caller; // bit of a HACK: just use the first one in the seq
+	
+	// success
+	return NULL;
+}
+
+struct allocator __mmap_allocator = {
+	.name = "mmap",
+	.is_cacheable = 1,
+	.get_info = get_info
+	/* FIXME: meta-protocol implementation */
+};

@@ -108,3 +108,15 @@ tools/.deps/*
 tools/ifacetypes
 contrib/libantlr3c-3.4/*
 contrib/antlr-3.4.tar.gz
+contrib/antlr-3.4-complete.jar
+contrib/config.mk
+contrib/env.sh
+lib/liballocs_dummyweaks.so
+core.*
+src/dlmalloc.a
+gdb.log
+src/liballocs_dummyweaks.so
+stashed-*.patch
+tools/.libs/*
+tools/dumpptrs
+compile

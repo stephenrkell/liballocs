@@ -205,12 +205,14 @@ inline int read_allocs_line(
 	do { \
 		if ((stream).bad()) report_error(fieldname, (buf)); \
 	   } while (0)		
+	string alloc_targetfun;
 	std::getline(s, objname, '\t'); check_error(s, objname, str);
 	std::getline(s, symname, '\t'); check_error(s, symname, str);
 	std::getline(s, file_addrstr, '\t'); check_error(s, offset, str);
 	std::getline(s, cuname, '\t'); check_error(s, cuname, str);
 	std::getline(s, linestr, '\t'); check_error(s, line, str);
 	std::getline(s, endlinestr, '\t'); check_error(s, endline, str);
+	std::getline(s, alloc_targetfun, '\t'); check_error(s, alloc_targetfun, str);
 	std::getline(s, alloc_typename, '\t'); check_error(s, alloc_typename, str);
 	// don't bother reading rest -- the line below doesn't work
 	//std::getline(s, rest, '\n'); check_error(s, rest);

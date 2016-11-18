@@ -21,6 +21,9 @@
 #include "raw-syscalls.h"
 #include "liballocs.h"
 #include "liballocs_private.h"
+#include "dlbind.h"
+
+void *__liballocs_rt_uniqtypes_obj;
 
 /* Force a definition of this inline function to be emitted.
  * Debug builds use this, since they won't inline the call to it
@@ -31,7 +34,7 @@ __liballocs_walk_subobjects_spanning_rec(
 	const signed target_offset_within_u,
 	struct uniqtype *u, 
 	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth,
-		struct uniqtype *containing, struct contained *contained_pos, 
+		struct uniqtype *containing, struct uniqtype_rel_info *contained_pos, 
 		signed containing_span_start_offset, void *arg),
 	void *arg
 	);
@@ -42,13 +45,17 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp)
 {
 	assert(!offp);
-	dlerror();
-	Dl_info info = dladdr_with_cache((void*) p_cursor->frame_ip);
-	if (!info.dli_fname) return 1;
-	if (!info.dli_sname) return 2;
+	//dlerror();
+	//Dl_info info = dladdr_with_cache((void*) p_cursor->frame_ip);
+	//if (!info.dli_fname) return 1;
+	//if (!info.dli_sname) return 2;
+	/* For robustness, use fake_dladdr. */
+	const char *sname;
+	int success = fake_dladdr((void*) p_cursor->frame_ip, NULL, NULL, &sname, NULL);
+	if (!success) return 1;
 	else 
 	{
-		strncpy(buf, info.dli_sname, n);
+		strncpy(buf, sname, n);
 		return 0;
 	}
 }
@@ -198,7 +205,7 @@ static int swap_out_segment_pages(struct dl_phdr_info *info, size_t size, void *
 static int print_type_cb(struct uniqtype *t, void *ignored)
 {
 	fprintf(stream_err, "uniqtype addr %p, name %s, size %d bytes\n", 
-		t, t->name, t->pos_maxoff);
+		t, UNIQTYPE_NAME(t), t->pos_maxoff);
 	fflush(stream_err);
 	return 0;
 }
@@ -264,20 +271,27 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	char *dynstr = (char*) dynstr_ent->d_un.d_ptr;
 
 	int cb_ret = 0;
-
 	for (ElfW(Sym) *p_sym = dynsym; p_sym <  dynsym + nsyms; ++p_sym)
 	{
+		const char *name = p_sym->st_name ? dynstr + p_sym->st_name : NULL;
 		if (ELF64_ST_TYPE(p_sym->st_info) == STT_OBJECT && 
 			p_sym->st_shndx != SHN_UNDEF &&
-			0 == strncmp("__uniqty", dynstr + p_sym->st_name, 8))
+			0 == strncmp("__uniqty", name, 8) &&
+			(0 != strcmp("_subobj_names", 
+					dynstr + p_sym->st_name + strlen(name)
+						 - (sizeof "_subobj_names" - 1)
+				)
+			)
+		)
 		{
 			struct uniqtype *t = (struct uniqtype *) (load_addr + p_sym->st_value);
 			// if our name comes out as null, we've probably done something wrong
-			if (t->name)
+			if (UNIQTYPE_IS_SANE(t))
 			{
 				cb_ret = cb(t, arg);
 				if (cb_ret != 0) break;
 			}
+			else warnx("Saw insane uniqtype %s at %p in file %s", name, t, h->l_name);
 		}
 	}
 	
@@ -323,6 +337,27 @@ Dl_info dladdr_with_cache(const void *addr)
 	}
 	
 	return info;
+}
+
+const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u)
+{
+	if (!u) return "(no type)";
+	Dl_info i = dladdr_with_cache(u);
+	if (i.dli_saddr == u)
+	{
+		if (0 == strncmp(i.dli_sname, "__uniqtype__", sizeof "__uniqtype__" - 1))
+		{
+			/* Codeless. */
+			return i.dli_sname + sizeof "__uniqtype__" - 1;
+		}
+		else if (0 == strncmp(i.dli_sname, "__uniqtype_", sizeof "__uniqtype_" - 1))
+		{
+			/* With code. */
+			return i.dli_sname + sizeof "__uniqtype_" - 1 + /* code + underscore */ 9;
+		}
+		return i.dli_sname;
+	}
+	return "(unnamed type)";
 }
 
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
@@ -397,7 +432,12 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 				//	return "[vdso]";
 				//}
 			}
-			abort();
+			else
+			{
+				/* This is probably a PIE executable or a shared object
+				 * being interpreted as an executable. */
+				return get_exe_fullname();
+			}
 		}
 	}
 	else
@@ -441,11 +481,13 @@ static const char *helper_libfile_name(const char *objname, const char *suffix)
 // HACK
 extern void __libcrunch_scan_lazy_typenames(void *handle) __attribute__((weak));
 
-int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
+int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *maybe_out_handle)
 {
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
+	
+	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
 
 	// skip objects that are themselves types/allocsites objects
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
@@ -470,10 +512,11 @@ int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *data
 	handle = (orig_dlopen ? orig_dlopen :dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	if (!handle)
 	{
-		debug_printf(1, "loading types object: %s\n", dlerror());
+		debug_printf(is_exe ? 0 : 1, "loading types object: %s\n", dlerror());
 		return 0;
 	}
 	debug_printf(3, "loaded types object: %s\n", libfile_name);
+	if (maybe_out_handle) *(void**) maybe_out_handle = handle;
 	
 	// if we want maximum output, print it
 // 	if (__liballocs_debug_level >= 6)
@@ -554,12 +597,14 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 #undef FIXADDR
 }
 
-int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
+int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t size, void *maybe_out_handle)
 {
 	// write_string("Blah10000\n");
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
+	
+	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
 	
 	// skip objects that are themselves types/allocsites objects
 	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
@@ -583,10 +628,11 @@ int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t si
 	allocsites_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW);
 	if (!allocsites_handle)
 	{
-		debug_printf(1, "loading allocsites object: %s\n", dlerror());
+		debug_printf(is_exe ? 0 : 1, "loading allocsites object: %s\n", dlerror());
 		return 0;
 	}
 	debug_printf(3, "loaded allocsites object: %s\n", libfile_name);
+	if (maybe_out_handle) *(void**) maybe_out_handle = allocsites_handle;
 	
 	dlerror();
 	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(allocsites_handle, "allocsites");
@@ -700,8 +746,27 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 	
 	// always continue with further objects
 	return 0;
-	
 }
+
+int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
+{
+	void *types_handle = NULL;
+	int types_said_stop = load_types_for_one_object(info, size, &types_handle);
+	void *allocsites_handle = NULL;
+#ifndef NO_MEMTABLE
+	int allocsites_said_stop = load_and_init_allocsites_for_one_object(info, size,
+		&allocsites_handle);
+	int link_said_stop = link_stackaddr_and_static_allocs_for_one_object(info, size, NULL);
+#endif
+	struct object_metadata meta = { types_handle, allocsites_handle };
+	if (&__hook_loaded_one_object_meta) __hook_loaded_one_object_meta(info, size, &meta);
+	return types_said_stop
+#ifndef NO_MEMTABLE
+		|| allocsites_said_stop || link_said_stop
+#endif
+	;
+}
+
 static _Bool check_blacklist(const void *obj)
 {
 #ifndef NO_BLACKLIST
@@ -908,7 +973,7 @@ void *biggest_vaddr_in_obj(void *handle)
 char *__liballocs_private_strdup(const char *s)
 {
 	size_t len = strlen(s);
-	char *mem = malloc(len + 1);
+	char *mem = __wrap_dlmalloc(len + 1);
 	strncpy(mem, s, len);
 	mem[len] = '\0';
 	return mem;
@@ -917,11 +982,26 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 {
 	size_t maxlen = strlen(s);
 	size_t len = (n > maxlen) ? maxlen : n;
-	char *mem = malloc(len + 1);
+	char *mem = __wrap_dlmalloc(len + 1);
 	strncpy(mem, s, len);
 	mem[len] = '\0';
 	return mem;
 }
+void *__notify_copy(void *dest, const void *src, unsigned long n)
+{
+	/* We do nothing here. But libcrunch will wrap us. */
+	return dest;
+}
+
+/* These have hidden visibility */
+struct uniqtype *pointer_to___uniqtype__void;
+struct uniqtype *pointer_to___uniqtype__signed_char;
+struct uniqtype *pointer_to___uniqtype__unsigned_char;
+struct uniqtype *pointer_to___uniqtype____PTR_signed_char;
+struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char;
+struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t;
+struct uniqtype *pointer_to___uniqtype____ARR0_signed_char;
+struct uniqtype *pointer_to___uniqtype__intptr_t;
 
 /* We want to be called early, but not too early, ecause it might not be safe 
  * to open the -uniqtypes.so handle yet. */
@@ -975,6 +1055,8 @@ int __liballocs_global_init(void)
 	{
 		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
 		assert(orig_dlopen);
+		orig_memmove = dlsym(RTLD_NEXT, "memmove");
+		assert(orig_memmove);
 	}
 
 	/* NOTE that we get called during allocation. So we should avoid 
@@ -992,10 +1074,6 @@ int __liballocs_global_init(void)
 	 * 
 	 * It seems that option 1 is better. 
 	 */
-	
-	int ret_types = dl_iterate_phdr(load_types_for_one_object, NULL);
-	assert(ret_types == 0);
-	
 #ifndef NO_MEMTABLE
 	/* Allocate the memtable. 
 	 * Assume we don't need to cover addresses >= STACK_BEGIN.
@@ -1010,22 +1088,45 @@ int __liballocs_global_init(void)
 		(void*) 0, (void*) (0x800000000000ul << 2), (const void*) 0x300000000000ul);
 	if (__liballocs_allocsmt == MAP_FAILED) abort();
 	debug_printf(3, "allocsmt at %p\n", __liballocs_allocsmt);
-	
-	int ret_allocsites = dl_iterate_phdr(load_and_init_allocsites_for_one_object, NULL);
-	assert(ret_allocsites == 0);
-
-	int ret_stackaddr = dl_iterate_phdr(link_stackaddr_and_static_allocs_for_one_object, NULL);
-	assert(ret_stackaddr == 0);
 #endif
+	int ret_hook = dl_iterate_phdr(load_and_init_all_metadata_for_one_object, NULL);
 	
-	/* Don't do this. They all have constructors. Moreover, the mmap allocator
-	 * calls *us* because it can't start the systrap before we've loaded all the
+	/* Don't do this. They all have constructors, so it's not necessary.
+	 * Moreover, the mmap allocator's constructor 
+	 * calls *us* (if we haven't already run) 
+	 * because it can't start the systrap before we've loaded all the
 	 * metadata for the loaded objects (the "__brk" problem). */
 	// __stack_allocator_init();
 	// __mmap_allocator_init();
 	// __static_allocator_init();
 	// __auxv_allocator_init();
+	/* Snarf the addresses of certain uniqtypes, if they're present.
+	 * Because the Unix linker is broken (see notes below on uniquing),
+	 * we can't have uniqueness of anything defined in a preload,
+	 * and from a preload we also can't bind to anything defined elsewhere.
+	 * So we use the dynamic linker to work around this mess. */
+	pointer_to___uniqtype__void = dlsym(RTLD_DEFAULT, "__uniqtype__void");
+	pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$8");
+	pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$8");
+	if (!pointer_to___uniqtype__void || !pointer_to___uniqtype__signed_char
+			|| !pointer_to___uniqtype__unsigned_char)
+	{
+		debug_printf(0, "looks uninstrumented!");
+		abort(); 
+		/* This breaks the case of loading instrumented shared libraries
+		 * into an uninstrumented executable with preload active. It *can* 
+		 * be unbroken, with a little effort. */
+	}
+	pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
+	pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$8");
+	pointer_to___uniqtype__Elf64_auxv_t = dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_auxv_t");
+	pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
+	pointer_to___uniqtype__intptr_t = dlsym(RTLD_DEFAULT, "__uniqtype__intptr_t");
 
+	// don't init dlbind here -- do it in the mmap allocator, *after* we've started systrap
+	//__libdlbind_do_init();
+	//__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+	
 	trying_to_initialize = 0;
 	__liballocs_is_initialized = 1;
 
@@ -1213,7 +1314,7 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 		/* We might have *multiple* subobjects spanning the offset. 
 		 * Test all of them. */
 		struct uniqtype *containing_uniqtype = NULL;
-		struct contained *contained_pos = NULL;
+		struct uniqtype_rel_info *contained_pos = NULL;
 		
 		signed sub_target_offset = target_offset_within_uniqtype;
 		struct uniqtype *contained_uniqtype = cur_obj_uniqtype;
@@ -1225,7 +1326,7 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 		
 		if (!success) return 0;
 		
-		*p_cumulative_offset_searched += contained_pos->offset;
+		*p_cumulative_offset_searched += contained_pos->un.memb.off;
 		
 		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
 		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;
@@ -1237,13 +1338,13 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched);
 			if (__builtin_expect(recursive_test, 1)) return 1;
 			// else look for a later contained subobject at the same offset
-			unsigned subobj_ind = contained_pos - &containing_uniqtype->contained[0];
+			unsigned subobj_ind = contained_pos - &containing_uniqtype->related[0];
 			assert(subobj_ind >= 0);
-			assert(subobj_ind == 0 || subobj_ind < containing_uniqtype->nmemb);
+			assert(subobj_ind == 0 || subobj_ind < UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype));
 			if (__builtin_expect(
-					containing_uniqtype->nmemb <= subobj_ind + 1
-					|| containing_uniqtype->contained[subobj_ind + 1].offset != 
-						containing_uniqtype->contained[subobj_ind].offset,
+					UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype) <= subobj_ind + 1
+					|| containing_uniqtype->related[subobj_ind + 1].un.memb.off != 
+						containing_uniqtype->related[subobj_ind].un.memb.off,
 				1))
 			{
 				// no more subobjects at the same offset, so fail
@@ -1251,8 +1352,8 @@ _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 			} 
 			else
 			{
-				contained_pos = &containing_uniqtype->contained[subobj_ind + 1];
-				contained_uniqtype = contained_pos->ptr;
+				contained_pos = &containing_uniqtype->related[subobj_ind + 1];
+				contained_uniqtype = contained_pos->un.memb.ptr;
 			}
 		} while (1);
 		
@@ -1290,3 +1391,26 @@ __liballocs_get_alloc_site(void *obj)
 	
 	return (void*) alloc_site;
 }
+
+unsigned long
+__liballocs_get_alloc_size(void *obj)
+{
+	unsigned long alloc_size;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
+		&alloc_size, NULL, NULL);
+	
+	if (err && err != &__liballocs_err_unrecognised_alloc_site) return 0;
+	
+	return alloc_size;
+}
+
+/* Instantiate the inlines from uniqtypes.h. */
+extern inline
+struct uniqtype *
+__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len);
+
+extern inline
+struct uniqtype *
+__liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
+   struct uniqtype *out, unsigned long out_len,
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt);

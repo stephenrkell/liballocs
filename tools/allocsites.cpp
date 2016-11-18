@@ -155,14 +155,18 @@ int main(int argc, char **argv)
 						/* Does this source file have a matching name? */
 						string current_sourcepath;
 						string cu_srcfile_mayberelative = i_cu->source_file_name(i_srcfile);
-						//cerr << "CU " << *i_cu->get_name() << " sourcefile " << i_srcfile << " is " <<
-						//	cu_srcfile_mayberelative << endl;
 						//if (!path(cu_srcfile_mayberelative).has_root_directory())
 						if (cu_srcfile_mayberelative.length() > 0 && cu_srcfile_mayberelative.at(0) != '/')
 						{ 
 							current_sourcepath = cu_comp_dir + '/' + cu_srcfile_mayberelative;
 						}
 						else current_sourcepath = /*path(*/cu_srcfile_mayberelative/*)*/;
+						
+						//cerr << "CU " << *i_cu->get_name() << " sourcefile " << i_srcfile << " is " <<
+						//	cu_srcfile_mayberelative 
+						//	<< ", sourcepath "
+						//	<< current_sourcepath
+						//	<< endl;
 
 						// FIXME: smarter search
 						// FIXME: look around a bit, since sizeof isn't enough to keep DIE in the object file
@@ -258,7 +262,8 @@ int main(int argc, char **argv)
 			if (!found_type)
 			{
 				cerr << "Warning: no type named " << type_symname 
-					<< " in CUs (found " << embodying_cus.size() << ":";
+					<< " in CUs embodying source file " << sourcefile
+					<< " (found " << embodying_cus.size() << ":";
 					for (auto i_cu = embodying_cus.begin(); i_cu != embodying_cus.end(); ++i_cu)
 					{
 						if (i_cu != embodying_cus.begin()) cerr << ", ";
