@@ -38,9 +38,9 @@ int unw_init_local(unw_cursor_t *cursor, unw_context_t *context)
 	*cursor = *context;
 	return 0;
 }
-// sanity-check bp: it should be higher, but not loads higher
+// sanity-check bp: it should be higher (or equal), but not loads higher
 #define SANE_BP_OR_NULL(bp, sp) \
-	(((char*) (bp) > (char*) (sp) && ((char*) (bp) - (char*) (sp)) < 0x10000)  \
+	(((char*) (bp) >= (char*) (sp) && ((char*) (bp) - (char*) (sp)) < 0x10000)  \
 		? (unw_word_t) (bp) \
 		: 0)
 
