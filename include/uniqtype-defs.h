@@ -146,7 +146,12 @@ struct uniqtype \
    } un; \
    make_precise_fn_t *make_precise; /* NULL means identity function */ \
    struct uniqtype_rel_info related[]; \
-}; 
+}; \
+struct mcontext; \
+const char *(__attribute__((pure,weak)) __liballocs_uniqtype_name)(const struct uniqtype *u); \
+struct uniqtype *(__attribute__((weak)) __liballocs_make_array_precise_with_memory_bounds)(struct uniqtype *in, \
+   struct uniqtype *out, unsigned long out_len, \
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt);
 
 #define UNIQTYPE_POS_MAXOFF_UNBOUNDED ((1ul << (8*sizeof(unsigned int)))-1) /* UINT_MAX */
 #define UNIQTYPE_ARRAY_LENGTH_UNBOUNDED ((1u<<31)-1)
