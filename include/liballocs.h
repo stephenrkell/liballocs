@@ -654,6 +654,85 @@ __liballocs_get_alloc_site(void *obj);
 unsigned long
 __liballocs_get_alloc_size(void *obj);
 
+extern inline void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void);
+extern inline void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void)
+{
+	unw_word_t sp;
+#ifdef __i386__
+	__asm__ ("movl %%esp, %0\n" :"=r"(sp));
+#elif defined(__x86_64__)
+	__asm__("movq %%rsp, %0\n" : "=r"(sp));
+#else
+#error "Unsupported architecture."
+#endif
+	return (void*) sp;
+}
+
+static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void *), void *arg)
+{
+	liballocs_err_t err;
+	unw_cursor_t cursor, saved_cursor;
+	unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0;
+	int unw_ret;
+	int ret = 0;
+	
+	/* Get an initial snapshot. */
+	unw_context_t unw_context;
+	unw_ret = unw_getcontext(&unw_context);
+	unw_init_local(&cursor, &unw_context);
+
+	unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp);
+#ifndef NDEBUG
+	assert(__liballocs_get_sp() == higherframe_sp);
+#endif
+	unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
+
+	_Bool at_or_above_main = 0;
+	do
+	{
+		// callee_ip = ip;
+		// prev_saved_cursor is the cursor into the callee's frame 
+		// prev_saved_cursor = saved_cursor; // FIXME: will be garbage if callee_ip == 0
+		saved_cursor = cursor; // saved_cursor is the *current* frame's cursor
+
+		/* First get the ip, sp and symname of the current stack frame. */
+		unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(unw_ret == 0);
+		unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(unw_ret == 0);
+		// try to get the bp, but no problem if we don't
+		unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); 
+		_Bool got_higherframe_bp = 0;
+		
+		ret = cb((void*) ip, (void*) sp, (void*) bp, arg);
+		if (ret) return ret;
+		
+		int step_ret = unw_step(&cursor);
+		if (step_ret > 0)
+		{
+			unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp); assert(unw_ret == 0);
+			unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
+			// try to get the bp, but no problem if we don't
+			unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &higherframe_bp); 
+			got_higherframe_bp = (unw_ret == 0) && higherframe_bp != 0;
+		}
+		else if (step_ret == 0)
+		{
+#define BEGINNING_OF_STACK ((uintptr_t) MAXIMUM_USER_ADDRESS)
+			higherframe_sp = BEGINNING_OF_STACK;
+			higherframe_bp = BEGINNING_OF_STACK;
+			got_higherframe_bp = 1;
+			higherframe_ip = 0x0;
+		}
+		else // step failure
+		{
+			// err = &__liballocs_err_stack_walk_step_failure;
+			ret = -1;
+			break;
+		}
+	} while (higherframe_sp != BEGINNING_OF_STACK);
+#undef BEGINNING_OF_STACK
+	
+	return ret;
+}
 #ifdef __cplusplus
 } // end extern "C"
 #endif
