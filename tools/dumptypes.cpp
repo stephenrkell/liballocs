@@ -121,11 +121,11 @@ struct iter_hash
 	
 	struct set : unordered_set<
 		T,
-		std::function<typeof(hash_fn)>,
-		std::function<typeof(eq_fn)>
+		std::function<__typeof__(hash_fn)>,
+		std::function<__typeof__(eq_fn)>
 	>
 	{
-		set() : unordered_set<T, std::function<typeof(hash_fn)>, std::function<typeof(eq_fn)> >({}, 0, hash_fn, eq_fn) {}
+		set() : unordered_set<T, std::function<__typeof__(hash_fn)>, std::function<__typeof__(eq_fn)> >({}, 0, hash_fn, eq_fn) {}
 	};
 };
 
@@ -141,11 +141,11 @@ struct iterfirst_pair_hash
 
 	struct set : unordered_set< 
 		T,
-		std::function<typeof(hash_fn)>,
-		std::function<typeof(eq_fn)>
+		std::function<__typeof__(hash_fn)>,
+		std::function<__typeof__(eq_fn)>
 	>
 	{
-		set() : unordered_set<T, std::function<typeof(hash_fn)>, std::function<typeof(eq_fn)> >
+		set() : unordered_set<T, std::function<__typeof__(hash_fn)>, std::function<__typeof__(eq_fn)> >
 			({}, 0, hash_fn, eq_fn) 
 			{}
 	};
@@ -164,11 +164,11 @@ struct itersecond_pair_hash
 
 	struct set : unordered_set< 
 		T,
-		std::function<typeof(hash_fn)>,
-		std::function<typeof(eq_fn)>
+		std::function<__typeof__(hash_fn)>,
+		std::function<__typeof__(eq_fn)>
 	>
 	{
-		set() : unordered_set<T, std::function<typeof(hash_fn)>, std::function<typeof(eq_fn)> >
+		set() : unordered_set<T, std::function<__typeof__(hash_fn)>, std::function<__typeof__(eq_fn)> >
 			({}, 0, hash_fn, eq_fn) 
 			{}
 	};
@@ -197,7 +197,7 @@ struct hash<dwarf::encap::loc_expr>
 		size_t working = 0;
 		for (auto i = v.begin(); i != v.end(); ++i)
 		{
-			working ^= std::hash<typeof(*i)>()(*i);
+			working ^= std::hash<__typeof__(*i)>()(*i);
 		}
 		return working;
 	}
