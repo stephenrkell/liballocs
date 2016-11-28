@@ -2,7 +2,16 @@
 #define RELF_H_
 
 #include <stddef.h> /* for offsetof */
+#include <stdint.h>
 #include <elf.h>
+#ifdef __FreeBSD__
+/* FreeBSD is POSIXly-correct by avoiding the typename "auxv_t". 
+ * For now, we hack around this, but we should really follow its
+ * lead. */
+typedef Elf32_Auxinfo Elf32_auxv_t;
+typedef Elf64_Auxinfo Elf64_auxv_t;
+#endif
+
 /* #include <link.h> -- we don't do this because it can pollute us with libc stuff
  * when clients (like trap-syscalls) want to use us in sub-libc (asm-level) code. 
  * Use RELF_DEFINE_STRUCTURES instead. */

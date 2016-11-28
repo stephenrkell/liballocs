@@ -12,7 +12,9 @@ CXXFLAGS += $(LIBCXXFILENO_CXXFLAGS) $(LIBSRK31CXX_CXXFLAGS) $(LIBDWARFPP_CXXFLA
 LDFLAGS += $(LIBCXXFILENO_LIBS) $(LIBSRK31CXX_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(DWARFIDL_LIBS) $(LIBANTLR3C_LIBS)
 
 LDFLAGS += -L`pwd` -Wl,-R`pwd` -L$(ALLOCSTOOL) -Wl,-R$(realpath $(ALLOCSTOOL))
-LDLIBS += -lallocstool -lantlr3c -ldwarfidl -lcxxgen -ldwarfpp -ldwarf -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization -lc++fileno -lsrk31c++ -lelf
+LDLIBS += -lallocstool -lantlr3c -ldwarfidl -lcxxgen -ldwarfpp -ldwarf \
+-lboost_regex -lboost_filesystem -lboost_system -lboost_serialization  \
+-lc++fileno -lsrk31c++ -lelf -lstdc++
 
 CPP_SRC := $(wildcard *.cpp)
 
