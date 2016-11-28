@@ -149,9 +149,11 @@ struct uniqtype \
 }; \
 struct mcontext; \
 const char *(__attribute__((pure,weak)) __liballocs_uniqtype_name)(const struct uniqtype *u); \
+const char *(__attribute__((pure,weak)) __liballocs_uniqtype_symbol_name)(const struct uniqtype *u); \
 struct uniqtype *(__attribute__((weak)) __liballocs_make_array_precise_with_memory_bounds)(struct uniqtype *in, \
    struct uniqtype *out, unsigned long out_len, \
-   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt);
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt); \
+struct uniqtype *(__attribute__((pure,weak)) __liballocs_get_or_create_array_type)(struct uniqtype *element_t, unsigned array_len);
 
 #define UNIQTYPE_POS_MAXOFF_UNBOUNDED ((1ul << (8*sizeof(unsigned int)))-1) /* UINT_MAX */
 #define UNIQTYPE_ARRAY_LENGTH_UNBOUNDED ((1u<<31)-1)
@@ -323,7 +325,8 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
    (((u)->un.info.kind == BASE && \
        ((u)->un.base.enc == 0x5 /* DW_ATE_signed */ || ((u)->un.base.enc == 0x7 /* DW_ATE_unsigned */))) ? \
 	    (u)->related[0].un.t.ptr : (struct uniqtype *)0)
-#define UNIQTYPE_NAME(u) __liballocs_uniqtype_name(u) /* helper in liballocs.h */
+#define UNIQTYPE_NAME(u) __liballocs_uniqtype_name(u) /* helper in liballocs.c */
+#define UNIQTYPE_SYMBOL_NAME(u) __liballocs_uniqtype_symbol_name(u) /* helper in liballocs.c */
 #define UNIQTYPE_IS_SANE(u) ( \
 	((u)->un.array.is_array && ((u)->un.array.nelems == 0 || (u)->pos_maxoff > 0)) \
 	|| ((u)->un.info.kind == VOID && (u)->pos_maxoff == 0) \

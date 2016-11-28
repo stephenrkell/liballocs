@@ -845,7 +845,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 static void write_uniqtype_open_generic(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    unsigned pos_maxoff
+    const string& pos_maxoff_str
 	)
 {
 	o << "struct uniqtype " << mangled_typename
@@ -855,7 +855,17 @@ static void write_uniqtype_open_generic(std::ostream& o,
 		<< " = {\n\t" 
 		<< "{ 0, 0, 0 },\n\t"
 		//<< "\"" << unmangled_typename << "\",\n\t"
-		<< pos_maxoff << " /* pos_maxoff */,\n\t";
+		<< pos_maxoff_str << " /* pos_maxoff */,\n\t";
+}
+
+static void write_uniqtype_open_generic(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    unsigned pos_maxoff
+	)
+{
+	std::ostringstream s; s << pos_maxoff;
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, s.str());
 }
 
 void write_uniqtype_open_void(std::ostream& o,
@@ -879,6 +889,17 @@ void write_uniqtype_open_array(std::ostream& o,
 	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
 	o << "{ array: { 1, " << nelems << " } },\n\t"
 		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+}
+void write_uniqtype_open_flex_array(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    opt<const string&> maxoff_comment_str
+	)
+{
+	std::ostringstream s; s << UNIQTYPE_POS_MAXOFF_UNBOUNDED;
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, s.str());
+	o << "{ array: { 1, " << UNIQTYPE_ARRAY_LENGTH_UNBOUNDED << " } },\n\t"
+		<< "/* make_precise */ __liballocs_make_array_precise_with_memory_bounds, /* related */ {\n\t\t";
 }
 void write_uniqtype_open_address(std::ostream& o,
     const string& mangled_typename,

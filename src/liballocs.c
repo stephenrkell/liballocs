@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <link.h>
+#include <dwarf.h> /* for DW_ATE_* */
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -338,24 +339,33 @@ Dl_info dladdr_with_cache(const void *addr)
 	
 	return info;
 }
+const char *(__attribute__((pure)) __liballocs_uniqtype_symbol_name)(const struct uniqtype *u)
+{
+	if (!u) return NULL;
+	Dl_info i = dladdr_with_cache(u);
+	if (i.dli_saddr == u)
+	{
+		return i.dli_sname;
+	} else return NULL;
+}
 
 const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u)
 {
 	if (!u) return "(no type)";
-	Dl_info i = dladdr_with_cache(u);
-	if (i.dli_saddr == u)
+	const char *symbol_name = __liballocs_uniqtype_symbol_name(u);
+	if (symbol_name)
 	{
-		if (0 == strncmp(i.dli_sname, "__uniqtype__", sizeof "__uniqtype__" - 1))
+		if (0 == strncmp(symbol_name, "__uniqtype__", sizeof "__uniqtype__" - 1))
 		{
 			/* Codeless. */
-			return i.dli_sname + sizeof "__uniqtype__" - 1;
+			return symbol_name + sizeof "__uniqtype__" - 1;
 		}
-		else if (0 == strncmp(i.dli_sname, "__uniqtype_", sizeof "__uniqtype_" - 1))
+		else if (0 == strncmp(symbol_name, "__uniqtype_", sizeof "__uniqtype_" - 1))
 		{
 			/* With code. */
-			return i.dli_sname + sizeof "__uniqtype_" - 1 + /* code + underscore */ 9;
+			return symbol_name + sizeof "__uniqtype_" - 1 + /* code + underscore */ 9;
 		}
-		return i.dli_sname;
+		return symbol_name;
 	}
 	return "(unnamed type)";
 }
@@ -1100,29 +1110,7 @@ int __liballocs_global_init(void)
 	// __mmap_allocator_init();
 	// __static_allocator_init();
 	// __auxv_allocator_init();
-	/* Snarf the addresses of certain uniqtypes, if they're present.
-	 * Because the Unix linker is broken (see notes below on uniquing),
-	 * we can't have uniqueness of anything defined in a preload,
-	 * and from a preload we also can't bind to anything defined elsewhere.
-	 * So we use the dynamic linker to work around this mess. */
-	pointer_to___uniqtype__void = dlsym(RTLD_DEFAULT, "__uniqtype__void");
-	pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$8");
-	pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$8");
-	if (!pointer_to___uniqtype__void || !pointer_to___uniqtype__signed_char
-			|| !pointer_to___uniqtype__unsigned_char)
-	{
-		debug_printf(0, "looks uninstrumented!");
-		abort(); 
-		/* This breaks the case of loading instrumented shared libraries
-		 * into an uninstrumented executable with preload active. It *can* 
-		 * be unbroken, with a little effort. */
-	}
-	pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
-	pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$8");
-	pointer_to___uniqtype__Elf64_auxv_t = dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_auxv_t");
-	pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
-	pointer_to___uniqtype__intptr_t = dlsym(RTLD_DEFAULT, "__uniqtype__intptr_t");
-
+	
 	// don't init dlbind here -- do it in the mmap allocator, *after* we've started systrap
 	//__libdlbind_do_init();
 	//__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
@@ -1133,6 +1121,97 @@ int __liballocs_global_init(void)
 	debug_printf(1, "liballocs successfully initialized\n");
 	
 	return 0;
+}
+
+void __liballocs_post_systrap_init(void)
+{
+	/* Now we can correctly initialize libdlbind. */
+	__libdlbind_do_init();
+	__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+	
+	/* Now we can grab our uniqtype pointers, or create them. */
+	/* Because the Unix linker is broken (see notes below on uniquing),
+	 * we can't have uniqueness of anything defined in a preload,
+	 * and from a preload we also can't bind to anything defined elsewhere.
+	 * So we use the dynamic linker to work around this mess. */
+	pointer_to___uniqtype__void = dlsym(RTLD_DEFAULT, "__uniqtype__void");
+#define SIZE_FOR_NRELATED(n) offsetof(struct uniqtype, related) + (n) * sizeof (struct uniqtype_rel_info)
+#define CREATE(varname, symname, nrelated, ...) \
+		size_t sz = SIZE_FOR_NRELATED(nrelated); \
+		pointer_to_ ## varname = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE); \
+		if (!pointer_to_ ## varname) abort(); \
+		*(struct uniqtype *) pointer_to_ ## varname = (struct uniqtype) __VA_ARGS__; \
+		dlbind(__liballocs_rt_uniqtypes_obj, #symname, pointer_to_ ## varname, sz, STT_OBJECT);
+	if (!pointer_to___uniqtype__void)
+	{
+		CREATE(__uniqtype__void, __uniqtype__void, 1, {
+			.pos_maxoff = 0,
+			.un = { _void: { .kind = VOID } }
+		});
+	}
+	pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$8");
+	if (!pointer_to___uniqtype__signed_char)
+	{
+		CREATE(__uniqtype__signed_char, __uniqtype__signed_char$8, 1, {
+			.pos_maxoff = 0,
+			.un = { base: { .kind = BASE, .enc = DW_ATE_signed_char } }
+		});
+		pointer_to___uniqtype__unsigned_char->related[0] = (struct uniqtype_rel_info) {
+			{ t : { pointer_to___uniqtype__signed_char } }
+		};
+	}
+	pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$8");
+	if (!pointer_to___uniqtype__unsigned_char)
+	{
+		CREATE(__uniqtype__unsigned_char, __uniqtype__unsigned_char$8, 1, {
+			.pos_maxoff = 0,
+			.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned_char } }
+		});
+		pointer_to___uniqtype__unsigned_char->related[0] = (struct uniqtype_rel_info) {
+			{ t : { pointer_to___uniqtype__signed_char } }
+		};
+	}
+	if (!(pointer_to___uniqtype__unsigned_char->related[0].un.t.ptr)) pointer_to___uniqtype__unsigned_char->related[0] = 
+		(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__signed_char } } };
+	pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
+	if (!pointer_to___uniqtype____PTR_signed_char)
+	{
+		CREATE(__uniqtype____PTR_signed_char, __uniqtype____PTR_signed_char$8, 1, {
+			.pos_maxoff = sizeof (char*),
+			.un = { address: { .kind = ADDRESS, .indir_level = 1 } }
+		});
+		pointer_to___uniqtype____PTR_signed_char->related[0] = (struct uniqtype_rel_info) {
+			{ t : { pointer_to___uniqtype__signed_char } }
+		};
+	}
+	pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$8");
+	if (!pointer_to___uniqtype____PTR___PTR_signed_char)
+	{
+		CREATE(__uniqtype____PTR___PTR_signed_char, __uniqtype____PTR___PTR_signed_char$8, 1, {
+			.pos_maxoff = sizeof (char**),
+			.un = { address: { .kind = ADDRESS, .indir_level = 2 } }
+		});
+		pointer_to___uniqtype____PTR___PTR_signed_char->related[0] = (struct uniqtype_rel_info) {
+			{ t : { pointer_to___uniqtype____PTR_signed_char } }
+		};
+	}
+	pointer_to___uniqtype__Elf64_auxv_t = dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_auxv_t");
+	if (!pointer_to___uniqtype__Elf64_auxv_t)
+	{
+		// FIXME: handle this
+	}
+	pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
+	if (!pointer_to___uniqtype____ARR0_signed_char)
+	{
+		// FIXME: handle this
+	}
+	pointer_to___uniqtype__intptr_t = dlsym(RTLD_DEFAULT, "__uniqtype__intptr_t");
+	if (!pointer_to___uniqtype__intptr_t)
+	{
+		// FIXME: handle this
+	}
+#undef CREATE
+#undef SIZE_FOR_NRELATED
 }
 
 static void *typeobj_handle_for_addr(void *caller)
@@ -1299,67 +1378,72 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 	return NULL;
 }
 
-_Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
+extern inline _Bool 
+(__attribute__((gnu_inline)) __liballocs_find_matching_subobject)(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched) __attribute__((visibility("protected")));
-_Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
-	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
-	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched)
-{
-	if (target_offset_within_uniqtype == 0 && (!test_uniqtype || cur_obj_uniqtype == test_uniqtype)) return 1;
-	else
-	{
-		/* We might have *multiple* subobjects spanning the offset. 
-		 * Test all of them. */
-		struct uniqtype *containing_uniqtype = NULL;
-		struct uniqtype_rel_info *contained_pos = NULL;
-		
-		signed sub_target_offset = target_offset_within_uniqtype;
-		struct uniqtype *contained_uniqtype = cur_obj_uniqtype;
-		
-		_Bool success = __liballocs_first_subobject_spanning(
-			&sub_target_offset, &contained_uniqtype,
-			&containing_uniqtype, &contained_pos);
-		// now we have a *new* sub_target_offset and contained_uniqtype
-		
-		if (!success) return 0;
-		
-		*p_cumulative_offset_searched += contained_pos->un.memb.off;
-		
-		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
-		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;
-		do {
-			assert(containing_uniqtype == cur_obj_uniqtype);
-			_Bool recursive_test = __liballocs_find_matching_subobject(
-					sub_target_offset,
-					contained_uniqtype, test_uniqtype, 
-					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched);
-			if (__builtin_expect(recursive_test, 1)) return 1;
-			// else look for a later contained subobject at the same offset
-			unsigned subobj_ind = contained_pos - &containing_uniqtype->related[0];
-			assert(subobj_ind >= 0);
-			assert(subobj_ind == 0 || subobj_ind < UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype));
-			if (__builtin_expect(
-					UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype) <= subobj_ind + 1
-					|| containing_uniqtype->related[subobj_ind + 1].un.memb.off != 
-						containing_uniqtype->related[subobj_ind].un.memb.off,
-				1))
-			{
-				// no more subobjects at the same offset, so fail
-				return 0;
-			} 
-			else
-			{
-				contained_pos = &containing_uniqtype->related[subobj_ind + 1];
-				contained_uniqtype = contained_pos->un.memb.ptr;
-			}
-		} while (1);
-		
-		assert(0);
-	}
-}
+		signed *p_cumulative_offset_searched,
+		struct uniqtype **p_cur_containing_uniqtype,
+		struct uniqtype_rel_info **p_cur_contained_pos) __attribute__((visibility("protected")));
+// _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
+// 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
+// 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
+// 		signed *p_cumulative_offset_searched,
+// 		struct uniqtype **p_cur_containing_uniqtype,
+// 		struct uniqtype_rel_info **p_cur_contained_pos)
+// {
+// 	if (target_offset_within_uniqtype == 0 && (!test_uniqtype || cur_obj_uniqtype == test_uniqtype)) return 1;
+// 	else
+// 	{
+// 		/* We might have *multiple* subobjects spanning the offset. 
+// 		 * Test all of them. */
+// 		struct uniqtype *containing_uniqtype = NULL;
+// 		struct uniqtype_rel_info *contained_pos = NULL;
+// 		
+// 		signed sub_target_offset = target_offset_within_uniqtype;
+// 		struct uniqtype *contained_uniqtype = cur_obj_uniqtype;
+// 		
+// 		_Bool success = __liballocs_first_subobject_spanning(
+// 			&sub_target_offset, &contained_uniqtype,
+// 			&containing_uniqtype, &contained_pos);
+// 		// now we have a *new* sub_target_offset and contained_uniqtype
+// 		
+// 		if (!success) return 0;
+// 		
+// 		*p_cumulative_offset_searched += contained_pos->un.memb.off;
+// 		
+// 		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
+// 		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;
+// 		do {
+// 			assert(containing_uniqtype == cur_obj_uniqtype);
+// 			_Bool recursive_test = __liballocs_find_matching_subobject(
+// 					sub_target_offset,
+// 					contained_uniqtype, test_uniqtype, 
+// 					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched);
+// 			if (__builtin_expect(recursive_test, 1)) return 1;
+// 			// else look for a later contained subobject at the same offset
+// 			unsigned subobj_ind = contained_pos - &containing_uniqtype->related[0];
+// 			assert(subobj_ind >= 0);
+// 			assert(subobj_ind == 0 || subobj_ind < UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype));
+// 			if (__builtin_expect(
+// 					UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype) <= subobj_ind + 1
+// 					|| containing_uniqtype->related[subobj_ind + 1].un.memb.off != 
+// 						containing_uniqtype->related[subobj_ind].un.memb.off,
+// 				1))
+// 			{
+// 				// no more subobjects at the same offset, so fail
+// 				return 0;
+// 			} 
+// 			else
+// 			{
+// 				contained_pos = &containing_uniqtype->related[subobj_ind + 1];
+// 				contained_uniqtype = contained_pos->un.memb.ptr;
+// 			}
+// 		} while (1);
+// 		
+// 		assert(0);
+// 	}
+// }
 
 struct uniqtype * 
 __liballocs_get_alloc_type(void *obj)

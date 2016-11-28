@@ -136,6 +136,7 @@ char *__liballocs_private_strndup(const char *s, size_t n) __attribute__((visibi
 /* Our handling of mmap is in two phases: before systrapping enabled,
  * and after. */
 extern _Bool __liballocs_systrap_is_initialized;
+void __liballocs_post_systrap_init(void) __attribute__((visibility("hidden")));
 
 /* If this weak function is defined, it will be called when we've loaded
  * the metadata for one object. */

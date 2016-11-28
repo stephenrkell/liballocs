@@ -53,6 +53,11 @@ void write_uniqtype_open_array(std::ostream& o,
     unsigned nelems,
     opt<const string&> comment_str = opt<const string&>()
 	);
+void write_uniqtype_open_flex_array(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    opt<const string&> comment_str = opt<const string&>()
+	);
 void write_uniqtype_open_address(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,

@@ -67,11 +67,9 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 	assert(element_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
 	
 	char precise_uniqtype_name[4096];
-	const char *maybe_code_substr = UNIQTYPE_NAME(element_t) + sizeof ("__uniqtype_") - 1;
-	const char *rest = maybe_code_substr;
-	while (*rest != '_') ++rest; /* now "rest" begins with "_" */
+	const char *element_name = UNIQTYPE_NAME(element_t); /* gets "simple", not symbol, name */
 	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
-			"__uniqtype____ARR%d%s", array_len, rest);
+			"__uniqtype____ARR%d_%s", array_len, element_name);
 	/* FIXME: compute hash code. Should be an easy case. */
 	
 	/* Does such a type exist? */

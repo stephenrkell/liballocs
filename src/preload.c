@@ -346,6 +346,9 @@ skip_load:
 
 int dlclose(void *handle)
 {
+	/* FIXME: libcrunch needs a way to purge its cache on dynamic unloading,
+	 * since it may contain "static" allocations. */
+
 	_Bool we_set_flag = 0;
 	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
 	

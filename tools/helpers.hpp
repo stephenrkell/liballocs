@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <deque>
+#include <map>
 
 // FIXME: shouldn't have toplevel "using" in header file
 using std::string;
@@ -19,10 +20,14 @@ using std::map;
 using std::deque;
 using std::pair;
 using std::make_pair;
+using std::multimap;
 using std::istringstream;
 using namespace dwarf;
 using spec::opt;
 using lib::Dwarf_Unsigned;
+using dwarf::core::iterator_df;
+using dwarf::core::type_die;
+using dwarf::core::root_die;
 
 struct allocsite
 {
@@ -30,6 +35,7 @@ struct allocsite
 	string sourcefile;
 	string objname;
 	unsigned file_addr;
+	bool declare_as_array0;
 };
 
 vector<allocsite> read_allocsites(std::istream& in);
@@ -228,4 +234,14 @@ inline int read_allocs_line(
 	return 0;
 }
 
+typedef std::map< pair< string, unsigned long >, pair<uniqued_name, bool> > allocsites_relation_t;
+
+void make_allocsites_relation(
+    allocsites_relation_t& allocsites_relation,
+    vector<allocsite> const& allocsites_to_add,
+    multimap<string, iterator_df<type_die> >& types_by_codeless_name,
+	root_die& r
+    );
+	
+ 
 #endif

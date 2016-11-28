@@ -191,7 +191,9 @@ extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 extern INLINE _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched) __attribute__((hot));
+		signed *p_cumulative_offset_searched,
+		struct uniqtype **p_cur_containing_uniqtype,
+		struct uniqtype_rel_info **p_cur_contained_pos) __attribute__((hot));
 /* Some inlines follow at the bottom. */
 
 /* Public API for l0index / mappings was here. FIXME: why was it public? Presumably
@@ -480,7 +482,9 @@ _Bool
 __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched)
+		signed *p_cumulative_offset_searched,
+		struct uniqtype **p_cur_containing_uniqtype,
+		struct uniqtype_rel_info **p_cur_contained_pos)
 #ifndef __cplusplus
 __attribute__((gnu_inline))
 #endif
@@ -495,9 +499,17 @@ _Bool
 __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched)
+		signed *p_cumulative_offset_searched,
+		struct uniqtype **p_cur_containing_uniqtype,
+		struct uniqtype_rel_info **p_cur_contained_pos)
 {
-	if (target_offset_within_uniqtype == 0 && (!test_uniqtype || cur_obj_uniqtype == test_uniqtype)) return 1;
+	if (target_offset_within_uniqtype == 0 
+		&& (!test_uniqtype || cur_obj_uniqtype == test_uniqtype))
+	{
+		if (p_cur_containing_uniqtype) *p_cur_containing_uniqtype = NULL;
+		if (p_cur_contained_pos) *p_cur_contained_pos = NULL;
+		return 1;
+	}
 	else
 	{
 		/* We might have *multiple* subobjects spanning the offset. 
@@ -524,8 +536,16 @@ __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 			_Bool recursive_test = __liballocs_find_matching_subobject(
 					sub_target_offset,
 					contained_uniqtype, test_uniqtype, 
-					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched);
-			if (__builtin_expect(recursive_test, 1)) return 1;
+					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched,
+					p_cur_containing_uniqtype,
+					p_cur_contained_pos);
+			if (__builtin_expect(recursive_test, 1))
+			{
+				if (p_cur_containing_uniqtype) *p_cur_containing_uniqtype = containing_uniqtype;
+				if (p_cur_contained_pos) *p_cur_contained_pos = contained_pos;
+
+				return 1;
+			}
 			// else look for a later contained subobject at the same offset
 			signed subobj_ind = contained_pos - &containing_uniqtype->related[0];
 			assert(subobj_ind >= 0);

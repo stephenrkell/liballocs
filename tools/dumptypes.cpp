@@ -239,7 +239,20 @@ int main(int argc, char **argv)
 	/* Do we have an allocsites file for this object? If so, we incorporate its 
 	 * synthetic data types. */
 	auto allocsites = read_allocsites_for_binary(argv[1]);
-	if (allocsites) merge_and_rewrite_synthetic_data_types(root, *allocsites);
+	allocsites_relation_t allocsites_relation;
+	multimap<string, iterator_df<type_die> > types_by_codeless_name;
+	//set< pair<string, string> > to_generate_array0;
+	if (allocsites)
+	{
+		/* rewrite the allocsites we were passed */
+		merge_and_rewrite_synthetic_data_types(root, *allocsites);
+	}
+	get_types_by_codeless_uniqtype_name(types_by_codeless_name,
+		root.begin(), root.end());
+	if (allocsites)
+	{
+		make_allocsites_relation(allocsites_relation, *allocsites, types_by_codeless_name, root);
+	}
 
 	struct subprogram_key : public pair< pair<string, string>, string > // ordering for free
 	{
@@ -262,13 +275,59 @@ int main(int argc, char **argv)
 	 * - a list of <offset, included-type-record ptr> pairs.
 	 */
 
-
 	// write a forward declaration for every uniqtype we need
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	
 	write_master_relation(master_relation, root, cout, cerr, true /* emit_void */, true, 
 		names_emitted, types_by_name, /* emit_codeless_alises */ true);
+	
+	cerr << "Allocsites relation has " << allocsites_relation.size() << " members." << endl;
+	
+	/* Now write any ARR0 ones we need. But WAIT: what about any ARR0 that we 
+	 * have already emitted? Find them in names_emitted and skip them. FIXME:
+	 * better to do it in the other order, so we skip during the master relation.
+	 * Then we need to forward-declare. Just like in allocsites! So, finally,
+	 * merge allocsites and types meta-objs into a single one (please) (FIXME). */
+	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
+	{
+		auto objname = i_site->second.first.first;
+		auto file_addr = i_site->second.first.second;
+		string name_used_code = i_site->second.first.first;
+		string name_used_ident = i_site->second.first.second;
+		bool declare_as_array0 = i_site->second.second;
+		
+		if (declare_as_array0)
+		{
+			string mangled_name = mangle_typename(make_pair(name_used_code, name_used_ident));
+			cout << "/* Allocation site type needing ARR0 type: " 
+				<< mangled_name
+				<< " */" << endl;
+			
+			pair<string, string> array_codeless_name
+			 = make_pair(string(""), string("__ARR0_") + name_used_ident);
+			string mangled_array_name = mangle_typename(array_codeless_name);
+			
+			if (names_emitted.find(mangled_array_name) == names_emitted.end())
+			{
+				// compute and print destination name
+				write_uniqtype_open_flex_array(cout,
+					mangled_array_name,
+					array_codeless_name.second
+				);
+				write_uniqtype_related_array_element_type(cout,
+					mangled_name // i.e. the element type
+				);
+
+				write_uniqtype_close(cout, mangled_array_name);
+				
+				names_emitted.insert(mangled_array_name);
+			}
+			else cout << "/* Already emitted one of this name: " << mangled_array_name << " */" << endl;
+		} else 	cout << "/* Allocation site type not needing ARR0 type: " 
+				<< i_site->second.first.second
+				<< " */" << endl;
+	}
 	
 	// now output for the subprograms
 	cout << "/* Begin stack frame types. */" << endl;
