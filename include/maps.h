@@ -6,10 +6,13 @@
 #ifdef __FreeBSD__
 #include <sys/sysctl.h>
 #include <sys/user.h>
+#else
+#include <asm-generic/fcntl.h>
 #endif
 
 /* Don't include stdio -- trap-syscalls won't like it, for example. */
 int sscanf(const char *str, const char *format, ...);
+int open(const char *pathname, int flags, ...);
 
 /* Rethinking this "maps" concept in the name of portability (to FreeBSD), we have
  * 
@@ -146,6 +149,7 @@ static inline ssize_t get_a_line(char *buf, size_t size, intptr_t handle)
 	return actual_size_to_copy;
 #else
 	if (size == 0) return -1; // now size is at least 1
+	int fd = (int) handle;
 	
 	// read some stuff, at most `size - 1' bytes (we're going to add a null), into the buffer
 	ssize_t bytes_read = read(fd, buf, size - 1);

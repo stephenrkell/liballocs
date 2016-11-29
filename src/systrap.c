@@ -38,7 +38,7 @@ _Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, c
 /* avoid standard headers */
 char *realpath(const char *path, char *resolved_path);
 int snprintf(char *str, size_t size, const char *format, ...);
-int open(const char *pathname, int flags);
+int open(const char *pathname, int flags, ...);
 int close(int fd);
 
 #define GUESS_CALLER(uc) \
