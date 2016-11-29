@@ -43,6 +43,10 @@ static void *userptr_to_allocptr(void *allocptr);
 #define ALLOCPTR_TO_USERPTR(p) (allocptr_to_userptr(p))
 #define USERPTR_TO_ALLOCPTR(p) (userptr_to_allocptr(p))
 
+#ifndef EXTRA_INSERT_SPACE
+#define EXTRA_INSERT_SPACE 0
+#endif
+
 #define ALLOC_EVENT_QUALIFIERS __attribute__((visibility("hidden")))
 
 #include "alloc_events.h"
@@ -551,7 +555,7 @@ void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 	size_t orig_size = *p_size;
 	/* Add the size of struct insert, and round this up to the align of struct insert. 
 	 * This ensure we always have room for an *aligned* struct insert. */
-	size_t size_with_insert = orig_size + sizeof (struct insert);
+	size_t size_with_insert = orig_size + sizeof (struct insert) + EXTRA_INSERT_SPACE;
 	size_t size_to_allocate = PAD_TO_ALIGN(size_with_insert, sizeof (struct insert));
 	assert(0 == size_to_allocate % ALIGNOF(struct insert));
 	*p_size = size_to_allocate;
@@ -778,7 +782,7 @@ void post_nonnull_nonzero_realloc(void *userptr,
 		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
 		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
 		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
-		__notify_copy(__new_allocptr, userptr, old_usable_size - sizeof (struct insert));
+		__notify_copy(__new_allocptr, userptr, old_usable_size - sizeof (struct insert) - EXTRA_INSERT_SPACE);
 	}
 	else // !__new_allocptr || __new_allocptr == userptr
 	{
@@ -1304,7 +1308,7 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 		heap_info = lookup_object_info(obj, out_base, &alloc_chunksize, NULL);
 		if (heap_info)
 		{
-			if (out_size) *out_size = alloc_chunksize - sizeof (struct insert);
+			if (out_size) *out_size = alloc_chunksize - sizeof (struct insert) - EXTRA_INSERT_SPACE;
 		}
 	}
 	
