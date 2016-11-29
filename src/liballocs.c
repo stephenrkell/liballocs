@@ -1498,3 +1498,9 @@ struct uniqtype *
 __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
    struct uniqtype *out, unsigned long out_len,
    void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt);
+
+/* Instantiate inlines from liballocs.h. */
+extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
+	struct allocator **out_allocator, const void **out_alloc_start,
+	unsigned long *out_alloc_size_bytes,
+	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);

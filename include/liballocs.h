@@ -184,10 +184,10 @@ Dl_info dladdr_with_cache(const void *addr);
 int __liballocs_iterate_types(void *typelib_handle, 
 		int (*cb)(struct uniqtype *t, void *arg), void *arg);
 /* Our main API: query allocation information for a pointer */
-extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
+inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,
 	unsigned long *out_alloc_size_bytes,
-	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site) __attribute__((gnu_inline,hot));
+	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);
 extern INLINE _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
@@ -570,20 +570,20 @@ __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
 	}
 }
 
-extern inline 
-struct liballocs_err * 
-__attribute__((always_inline,gnu_inline)) 
-__liballocs_get_alloc_info
-	(const void *obj, 
-	struct allocator **out_allocator,
-	const void **out_alloc_start,
-	unsigned long *out_alloc_size_bytes,
-	struct uniqtype **out_alloc_uniqtype, 
-	const void **out_alloc_site) __attribute__((always_inline,gnu_inline));
-
-extern inline 
+/* HACK HACK HACKETY HACK: we want our fast-path functions to be inlined.
+ * However, there's a linking problem: we reference pageindex which is a protected
+ * symbol. From an executable that is a client of liballocs, under the small code
+ * model, the linker won't let us reference this symbol (copy-reloc'ing a protected
+ * symbol is a recipe for trouble, which ld.bfd sensibly does not allow). So we
+ * don't inline this function from such clients. We use a hacky method for identifying
+ * them: non-PIC code. This BREAKS small-model PIE executables -- use -mcmodel=large
+ * if you want a PIE executable that is a client of liballocs. FIXME: I'm not actually
+ * sure that sensible things happen under the large code model -- more experimentation
+ * required.
+ */
+#if defined(__PIC__) || defined(__code_model_large__)
+inline 
 struct liballocs_err *
-__attribute__((always_inline,gnu_inline)) 
 __liballocs_get_alloc_info
 	(const void *obj, 
 	struct allocator **out_allocator,
@@ -616,7 +616,16 @@ __liballocs_get_alloc_info
 	return a->get_info((void*) obj, maybe_the_allocation, out_alloc_uniqtype, (void**) out_alloc_start,
 			out_alloc_size_bytes, out_alloc_site);
 }
-
+#else
+struct liballocs_err *
+__liballocs_get_alloc_info
+	(const void *obj, 
+	struct allocator **out_allocator,
+	const void **out_alloc_start,
+	unsigned long *out_alloc_size_bytes, 
+	struct uniqtype **out_alloc_uniqtype, 
+	const void **out_alloc_site);
+#endif
 
 /* We define a more friendly API for simple queries.
  * NOTE that we don't make these functions inline. They are still fast, internally,

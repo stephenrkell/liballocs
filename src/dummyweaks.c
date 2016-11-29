@@ -84,3 +84,7 @@ __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
 {
 	return NULL;
 }
+
+void __liballocs_report_wild_address(const void *ptr)
+{
+}
