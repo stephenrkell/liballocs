@@ -88,3 +88,5 @@ __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
 void __liballocs_report_wild_address(const void *ptr)
 {
 }
+
+int __generic_malloc_allocator;
