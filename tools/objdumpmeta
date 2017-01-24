@@ -228,7 +228,7 @@ generate_output_lines () {
     #echo "${return_addr_sym}"$'\t'"0x${return_addr}"$'\t'"${return_addr_offset}"$'\t'"0x${address}"$'\t'"${filename}"$'\t'"${line_number}"$'\t'$(( ${line_number:-0} + ${source_lines_count:-0} ))$'\t'"${token:-\$FAILED\$}"$'\t'"${source_oneline}"
     echo "${return_addr_sym}"$'\t'"0x${return_addr}"$'\t'"${return_addr_offset}"$'\t'"0x${address}"$'\t'"${addr2line_filename}"$'\t'"${addr2line_line_number}"$'\t'$(( ${addr2line_line_number:-0} + 1 ))$'\t'"${token:-\$FAILED\$}"$'\t'"${source_oneline}"
 done <"$allocsites_tmpfile" 3<"$addr2line_tmpfile" | \
-   pad_numbers | sort -t$'\t' -k5 -k6
+   pad_numbers | LANG=C sort -t$'\t' -k5 -k6
 }
 
 # comment to help debugging
