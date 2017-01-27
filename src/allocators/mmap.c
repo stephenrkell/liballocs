@@ -4,7 +4,7 @@
 #include <sys/mman.h>
 #include <stdlib.h>
 // #include <fcntl.h>     // problem with raw-syscalls conflict
-int open(const char *, int);
+int open(const char *, int, ...);
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
