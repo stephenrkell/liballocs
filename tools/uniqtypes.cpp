@@ -629,7 +629,9 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			 * must be calculated from the bit size, as ceil (bit_size / 8). */
 			
 			unsigned byte_size = opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0);
-			unsigned bit_size = bt->get_bit_size() ? *bt->get_bit_size() : 8 * byte_size;
+			pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = bt->bit_size_and_offset();
+			unsigned bit_size = bit_size_and_offset.first;
+			unsigned bit_offset = bit_size_and_offset.second;
 			signed bit_size_delta = 8 * byte_size - bit_size;
 			
 			unsigned one_plus_log_to_use;
@@ -673,7 +675,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			
 			// same job for the bit offset
 			signed bit_offset_to_use;
-			unsigned bit_offset = bt->get_bit_offset() ? *bt->get_bit_offset() : 0;
 			// prefer positive bit offsets, but...
 			// NOTE that this will only arise if/when we have absurdly wide integers
 			if (bit_offset >= 512)
