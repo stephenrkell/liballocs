@@ -381,6 +381,30 @@ get_link_map(void *ptr)
 }
 
 static inline
+void *find_ldso_base(const char **environ, void *stackptr)
+{
+	ElfW(auxv_t) *at_interp = auxv_xlookup(get_auxv(environ, stackptr), AT_BASE);
+	void *ldso_base = (void*) at_interp->a_un.a_val;
+	if (!ldso_base)
+	{
+		/* This happens if the program is running the ld.so explicitly, i.e. 
+		 *    /path/to/ld.so ./program
+		 * ... in which case we *still* want the base of the ld.so, and
+		 * it really won't be 0. Hmm.
+		 * 
+		 * Turns out that _r_debug tells us this!
+		 * 
+		 * If we didn't have r_debug, we could use a symbol that we know is defined
+		 * in the ld.so. BUT ARGH. If we use a data symbol like _r_debug itself we might 
+		 * get a copy reloc. If we use a text symbol we'll get a PLT entry. Getting
+		 * an address that is genu-winely in the ld.so, via a public interface, is hard. */
+		
+		ldso_base = (void*) _r_debug.r_ldbase;
+	}
+	return ldso_base;
+}
+
+static inline
 unsigned long dynamic_symbol_count(ElfW(Dyn) *dyn, struct LINK_MAP_STRUCT_TAG *l)
 {
 	unsigned long nsyms = 0;
@@ -535,7 +559,7 @@ ElfW(Sym) *gnu_hash_lookup(ElfW(Word) *gnu_hash, ElfW(Sym) *symtab, const char *
 	  word of the filter. Oh well... we still have 32--64 bits to play with.
 	
 	  The Bloom filter has no correspondence with the bucket structure -- it just records
-	  whether a given hash is in the table or not.
+	  whether a given hash is (possibly) in the table or not.
 	 */
 
 	ElfW(Off) bloom_word
