@@ -2,7 +2,7 @@
 This is the license for uniqtype.h, part of a definition of 
 run-time type information for compiled code.
 
-Copyright 2011--16, Stephen Kell <stephen.kell@cl.cam.ac.uk>
+Copyright 2011--17, Stephen Kell <stephen.kell@cl.cam.ac.uk>
 
 Permission to use, copy, modify, and distribute this software and its
 documentation for any purpose and without fee is hereby granted,

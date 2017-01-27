@@ -104,15 +104,14 @@ struct uniqtype \
        struct { \
            unsigned kind:4; \
            unsigned enc:6; /* i.e. up to 64 distinct encodings */ \
-           unsigned log_bit_size:4; /* i.e. bit sizes up to 2^15 */ \
-             signed bit_size_delta:8; /* i.e. +/- 128 bits */ \
-           unsigned log_bit_off:3; /* i.e. bit offsets up to 2^7 */ \
-             signed bit_off_delta:7; /* i.e. +/- 64 bits */ \
+           unsigned one_plus_log_bit_size_delta:4; /* i.e. up to 15 i.e. delta of up to 2^14 less than implied bit size (8 * byte size) */ \
+             signed bit_size_delta_delta:8; /* i.e. vary the delta +/- 127 bits */ \
+             signed bit_off:10; /* i.e. bit offsets up to 2^9 *from either end* */ \
        } base; /* related[0] is signedness complement; could also do same-twice-as-big, same-twice-as-small? */ \
        struct { \
            unsigned kind:4; \
-           unsigned is_contiguous; /* idea */ \
-           unsigned is_log_spaced; /* idea (inefficiency: implies not is_contiguous) */ \
+           unsigned is_contiguous:1; /* idea */ \
+           unsigned is_log_spaced:1; /* idea (inefficiency: implies not is_contiguous) */ \
            unsigned nenum:26; /* HMM */ \
        } enumeration; /* related[0] is base type, related[1..nenum] are enumerators -- HMM, t is the *value*? */ \
        struct { \
@@ -338,6 +337,16 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 	|| ((u)->un.info.kind == SUBPROGRAM && (u)->related[0].un.t.ptr != NULL) \
 	)
 #define NAME_FOR_UNIQTYPE(u) UNIQTYPE_NAME(u)
+#define UNIQTYPE_BASE_TYPE_BIT_SIZE(u)         (((u)->un.info.kind != BASE) ? 0 : \
+                                                   8*(u)->pos_maxoff - ( \
+                                                  ( (u)->un.base.one_plus_log_bit_size_delta ? \
+                                                    1ul<<((u)->un.base.one_plus_log_bit_size_delta - 1) \
+                                                    : 0 ) + (u)->un.base.bit_size_delta_delta \
+                                                  ) )
+#define UNIQTYPE_BASE_TYPE_BIT_OFFSET(u)         ((((u)->un.info.kind != BASE) ? 0 : \
+                                           ((u)->un.base.bit_offset) < 0) ? \
+                                                    (8*(u)->pos_maxoff - (-((u)->un.base.bit_offset))) \
+                                                       : (u)->un.base.bit_offset)
 
 #ifdef __cplusplus
 } /* end extern "C" */

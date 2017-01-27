@@ -69,6 +69,22 @@ unsigned long __liballocs_get_alloc_size(const void *obj)
 {
 	return 0;
 }
+struct uniqtype * __liballocs_get_alloc_type(const void *obj)
+{
+	return NULL;
+}
+
+struct uniqtype * 
+__liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
+{
+	return NULL;
+}
+
+struct uniqtype * 
+__liballocs_get_outermost_type(void *obj)
+{
+	return NULL;
+}
 
 struct uniqtype;
 const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u)

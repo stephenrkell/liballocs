@@ -649,6 +649,13 @@ __liballocs_get_type_inside(void *obj, struct uniqtype *t);
 struct uniqtype * 
 __liballocs_get_innermost_type(void *obj);
 
+struct uniqtype * 
+__liballocs_get_inner_type(void *obj, unsigned skip_at_bottom);
+
+/* FIXME: we'd like to be able to walk the containment chain upwards. 
+ * Feels like we want an API call that dumps a vector of uniqtype pointers,
+ * each with their start offset. */
+
 struct insert *__liballocs_get_insert(const void *mem); // HACK: please remove (see libcrunch)
 
 inline 

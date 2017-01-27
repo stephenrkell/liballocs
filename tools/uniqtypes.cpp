@@ -20,6 +20,7 @@
 #include <fileno.hpp>
 
 #include "uniqtypes.hpp"
+#include "bitops.h"
 
 using std::cin;
 using std::cout;
@@ -96,7 +97,7 @@ pair<bool, uniqued_name> add_type_if_absent(iterator_df<type_die> t, master_rela
 		auto concrete_t = t->get_concrete_type();
 		auto ret = add_concrete_type_if_absent(concrete_t, r);
 		// add the alias, if we have a name
-		if (t.name_here())
+		if (t.name_here() && !t.as_a<base_type_die>()->is_bitfield_type())
 		{
 			add_alias_if_absent(*name_for_type_die(t), concrete_t, r);
 			/* HACK: for good measure, also ensure that we add the 
@@ -241,6 +242,16 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 			}
 			add_type(i.as_a<type_die>(), rel);
 		}
+		else if (i.is_a<member_die>())
+		{
+			/* If we have any of the bit attributes, we might induce another type.
+			 * So add it. */
+			auto memb = i.as_a<member_die>();
+			if (memb->get_bit_size() || memb->get_bit_offset() || memb->get_data_bit_offset())
+			{
+				add_type(memb->find_or_create_type_handling_bitfields(), rel);
+			}
+		}
 		previous_offset = i.offset_here();
 	}
 }	
@@ -302,8 +313,11 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 	/* The complement relation among signed and unsigned integer types. */
 	map<unsigned, map<bool, set< master_relation_t::value_type > > > integer_base_types_by_size_and_signedness;
 	auto needs_complement = [](iterator_df<base_type_die> base_t) {
-		return base_t->get_encoding() == DW_ATE_signed
-			 || base_t->get_encoding() == DW_ATE_unsigned;
+		return (base_t->get_encoding() == DW_ATE_signed
+			 || base_t->get_encoding() == DW_ATE_unsigned)
+			 && base_t->bit_size_and_offset().second == 0; 
+			 /* HACK: only complement zero-off cases for now, since we don't track the 
+			  * bit offset in the big _by_size_and_signedness map. */
 	};
 		
 	/* Emit forward declarations, building the complement relation as we go. */
@@ -325,17 +339,14 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			auto base_t = t.as_a<base_type_die>();
 			if (needs_complement(base_t))
 			{
-				unsigned size = *base_t->get_byte_size();
+				unsigned bit_size = base_t->bit_size_and_offset().first;
 				bool signedness = (base_t->get_encoding() == DW_ATE_signed);
 
-				// HACK: for now, skip weird cases with bit size/offset
-				if ((base_t->get_bit_offset() && *base_t->get_bit_offset() != 0) || 
-					(base_t->get_bit_size() && *base_t->get_bit_size() != 8 * size))
+				// HACK: for now, skip weird cases with bit offset non-zero
+				if (base_t->bit_size_and_offset().second == 0)
 				{
-					continue;
+					integer_base_types_by_size_and_signedness[bit_size][signedness].insert(*i_pair);
 				}
-
-				integer_base_types_by_size_and_signedness[size][signedness].insert(*i_pair);
 			}
 		}
 		
@@ -609,18 +620,90 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 		}
 		else if (i_vert->second.is_a<base_type_die>())
 		{
+			auto bt = i_vert->second.as_a<base_type_die>();
+			
+			/* As of DWARF4, we're allowed to have *either* bit_size *or* byte_size,
+			 * or alternatively, both! The "both" case is already handled, and so
+			 * is the "bit size only", by calculate_byte_size.
+			 * we need to handle the case where the byte size
+			 * must be calculated from the bit size, as ceil (bit_size / 8). */
+			
+			unsigned byte_size = opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0);
+			unsigned bit_size = bt->get_bit_size() ? *bt->get_bit_size() : 8 * byte_size;
+			signed bit_size_delta = 8 * byte_size - bit_size;
+			
+			unsigned one_plus_log_to_use;
+			signed diff_to_use;
+			signed offset_to_use;
+			
+			if (bit_size_delta)
+			{
+				unsigned highest_po2_ordinal = 8 * sizeof (unsigned long) - nlz1(bit_size_delta) - 1;
+				unsigned next_lower_po2 = (1u<<highest_po2_ordinal);
+				unsigned next_higher_po2 = (1u<<(1+highest_po2_ordinal));
+				signed diff_lower = bit_size_delta - next_lower_po2; // will be positive
+				signed diff_higher = bit_size_delta - next_higher_po2; // will be negative
+				
+				
+				if (diff_lower < 128)
+				{
+					/* Use this one */
+					one_plus_log_to_use = 1 + highest_po2_ordinal;
+					diff_to_use = diff_lower;
+				}
+				else if (diff_higher >= -128)
+				{
+					one_plus_log_to_use = 2 + highest_po2_ordinal;
+					diff_to_use = diff_higher;
+				}
+				else /* we can't represent this */
+				{
+					cerr << "Warning: cannot represent bit size with delta " 
+						<< bit_size_delta
+						<< endl;
+					one_plus_log_to_use = 0;
+					diff_to_use = 0;
+				}
+			}
+			else // it's just the 8 * byte size
+			{
+				one_plus_log_to_use = 0;
+				diff_to_use = 0;
+			}
+			
+			// same job for the bit offset
+			signed bit_offset_to_use;
+			unsigned bit_offset = bt->get_bit_offset() ? *bt->get_bit_offset() : 0;
+			// prefer positive bit offsets, but...
+			// NOTE that this will only arise if/when we have absurdly wide integers
+			if (bit_offset >= 512)
+			{
+				if (8 * byte_size - bit_offset < 512)
+				{
+					// i.e. negative means "from other end"
+					bit_offset_to_use = -(8 * byte_size - bit_offset); 
+				}
+				else
+				{
+					// can't represent this
+					cerr << "Warning: cannot represent bit offset  " 
+						<< bit_offset
+						<< endl;
+					bit_offset_to_use = 0;
+				}
+			} else bit_offset_to_use = bit_offset;
+				
 			write_uniqtype_open_base(out,
 				mangled_name,
 				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				byte_size /* pos_maxoff */,
 				i_vert->second.as_a<base_type_die>()->get_encoding(),
-				0 /* FIXME */,
-				0 /* FIXME */,
-				0 /* FIXME */,
-				0 /* FIXME */
+				one_plus_log_to_use /* one_plus_log_bit_size_delta, up to 15 i.e. delta of up to 2^15 from implied bit size */,
+				diff_to_use /* bit_size_delta_delta, up to +- 127 */,
+				bit_offset_to_use /* bit_offset, up to +- 512 */
 			);
 		
-			if (needs_complement(i_vert->second.as_a<base_type_die>()))
+			if (needs_complement(bt))
 			{
 				// compute and print complement name
 				auto k = make_pair(
@@ -681,7 +764,7 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 			{
 				++contained_length;
 				auto i_edge = i_i_edge->as_a<member_die>();
-				auto k = canonical_key_from_type(i_edge->get_type());
+				auto k = canonical_key_from_type(i_edge->find_or_create_type_handling_bitfields());
 				string mangled_name = mangle_typename(k);
 				if (names_emitted.find(mangled_name) == names_emitted.end())
 				{
@@ -742,7 +825,6 @@ void write_master_relation(master_relation_t& r, dwarf::core::root_die& root,
 					(i_vert->second.as_a<base_type_die>()->get_encoding() == DW_ATE_signed) ? 
 					DW_ATE_unsigned :
 					i_vert->second.as_a<base_type_die>()->get_encoding(),
-				0, /* FIXME */
 				0, /* FIXME */
 				0, /* FIXME */
 				0) /* FIXME */;
@@ -921,19 +1003,17 @@ void write_uniqtype_open_base(std::ostream& o,
     const string& unmangled_typename,
     unsigned pos_maxoff,
     unsigned enc,
-    unsigned log_bit_size,
-    signed bit_size_delta,
-    unsigned log_bit_off,
-    signed bit_off_delta,
+    unsigned one_plus_log_bit_size_delta,
+    signed bit_size_delta_delta,
+    signed bit_off,
     opt<const string&> maxoff_comment_str
 	)
 {
 	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
 	o << "{ base: { BASE, " << enc
-		<< ", " << log_bit_size
-		<< ", " << bit_size_delta
-		<< ", " << log_bit_off
-		<< ", " << bit_off_delta
+		<< ", " << one_plus_log_bit_size_delta
+		<< ", " << bit_size_delta_delta
+		<< ", " << bit_off
 		<< " } },\n\t"
 		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
 }

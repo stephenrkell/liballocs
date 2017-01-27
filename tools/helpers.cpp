@@ -394,12 +394,12 @@ name_for_complement_base_type(iterator_df<base_type_die> base_t)
 	unsigned size = *base_t->get_byte_size();
 	auto encoding = base_t->get_encoding();
 	assert(encoding == DW_ATE_signed || encoding == DW_ATE_unsigned);
-	// assert we're not a weird bitty case
-	assert((!base_t->get_bit_offset() || *base_t->get_bit_offset() == 0) && 
-		(!base_t->get_bit_size() || *base_t->get_bit_size() == 8 * size));
-	
+	pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = base_t->bit_size_and_offset();
+	bool needs_suffix = !((bit_size_and_offset.second == 0) 
+		&& (bit_size_and_offset.first == 8 * size));
 	name << ((base_t->get_encoding() == DW_ATE_signed) ? "uint" : "int")
-		<< "$" << (8 * *base_t->get_byte_size());
+		<< "$" << bit_size_and_offset.first;
+	if (needs_suffix) name << "$" << bit_size_and_offset.second;
 
 	return name.str();
 }
@@ -424,19 +424,12 @@ name_for_base_type(iterator_df<base_type_die> base_t)
 			name << encoding_name.substr(sizeof "DW_ATE_" - 1);
 			break;
 	}
-
-	// weird cases of bit size/offset
-	if ((base_t->get_bit_offset() && *base_t->get_bit_offset() != 0) || 
-		(base_t->get_bit_size() && *base_t->get_bit_size() != 8 * size))
-	{
-		// use the bit size and add a bit offset
-		name << "$" << *base_t->get_bit_size() 
-			<< "$" << (base_t->get_bit_offset() ? *base_t->get_bit_offset() : 0);
-	} 
-	else
-	{
-		name << "$" << (8 * size);
-	}
+	
+	pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = base_t->bit_size_and_offset();
+	bool needs_suffix = !((bit_size_and_offset.second == 0) 
+		&& (bit_size_and_offset.first == 8 * size));
+	name << "$" << bit_size_and_offset.first;
+	if (needs_suffix) name << "$" << bit_size_and_offset.second;
 
 	return name.str();
 }
@@ -459,7 +452,7 @@ all_names_for_type_t::all_names_for_type_t() :
 	base_type_case([this](iterator_df<base_type_die> t)        { 
 		// we treat these like a typedef of the language-independent canonical name
 		deque<string> synonyms(1, name_for_base_type(t.as_a<base_type_die>()));
-		if (t.name_here())
+		if (t.name_here() && !t->is_bitfield_type())
 		{
 			synonyms.push_back(*name_for_type_die(t));
 		}
@@ -888,8 +881,9 @@ opt<uint32_t> signedness_complement_type_summary_code(core::iterator_df<core::ba
 	summary_code_word_t output_word;
 	assert(base_t->get_byte_size());
 	unsigned byte_size = *base_t->get_byte_size();
-	unsigned bit_size = base_t->get_bit_size() ? *base_t->get_bit_size() : byte_size * 8;
-	unsigned bit_offset = base_t->get_bit_offset() ? *base_t->get_bit_offset() : 0;
+	pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = base_t->bit_size_and_offset();
+	unsigned bit_size = bit_size_and_offset.first;
+	unsigned bit_offset = bit_size_and_offset.second;
 	output_word << DW_TAG_base_type 
 		<< (encoding == DW_ATE_unsigned ? DW_ATE_signed : DW_ATE_unsigned) 
 		<< byte_size << bit_size << bit_offset;
@@ -955,7 +949,8 @@ void get_types_by_codeless_uniqtype_name(
 			/* Special handling for base types: also add them by the name in which they 
 			 * appear in the DWARF, *and* by their C-canonical name. Our CIL frontend
 			 * doesn't know the exact bit-widths so must use the latter. */
-			if (concrete_t.is_a<base_type_die>() && concrete_t.name_here())
+			if (concrete_t.is_a<base_type_die>() && concrete_t.name_here()
+				&& !concrete_t.as_a<base_type_die>()->is_bitfield_type())
 			{
 				m.insert(
 					make_pair(

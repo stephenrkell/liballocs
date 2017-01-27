@@ -72,10 +72,9 @@ void write_uniqtype_open_base(std::ostream& o,
     const string& unmangled_typename,
     unsigned pos_maxoff,
     unsigned enc,
-    unsigned log_bit_size,
-    signed bit_size_delta,
-    unsigned log_bit_off,
-    signed bit_off_delta,
+    unsigned one_plus_log_bit_size_delta,
+    signed bit_size_delta_delta,
+    signed bit_off,
     opt<const string&> comment_str = opt<const string&>()
 	);
 void write_uniqtype_open_subrange(std::ostream& o,

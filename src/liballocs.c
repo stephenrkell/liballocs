@@ -1464,6 +1464,51 @@ __liballocs_get_outermost_type(void *obj)
 	return __liballocs_get_alloc_type(obj);
 }
 
+struct uniqtype * 
+__liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
+{
+	struct allocator *a = NULL;
+	const void *alloc_start;
+	size_t alloc_size_bytes;
+	struct uniqtype *u = NULL;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj,
+		&a,
+		&alloc_start,
+		&alloc_size_bytes,
+		&u,
+		NULL);
+	
+	if (__builtin_expect(err != NULL, 0)) goto failed;
+	signed target_offset_within_uniqtype = (char*) obj - (char*) alloc_start;
+	if (u->make_precise)
+	{
+		/* FIXME: should really do a fuller treatment of make_precise, to allow e.g. */
+		/* returning a fresh uniqtype into a buffer, and (even) passing mcontext. */
+		u = u->make_precise(u,
+			NULL, 0,
+			(void*) obj, (void*) alloc_start, alloc_size_bytes, __builtin_return_address(0),
+			NULL);
+		/* FIXME: now ask the meta-alloc protocol to update that object's metadata to this type. */
+	}
+	
+	/* Descend the subobject hierarchy until we can't descend any more. */
+	_Bool success = 1;
+	struct uniqtype *cur_containing_uniqtype = NULL;
+	struct uniqtype_rel_info *cur_contained_pos = NULL;
+	while (success)
+	{
+		success = __liballocs_first_subobject_spanning(
+				&target_offset_within_uniqtype, &u, &cur_containing_uniqtype,
+				&cur_contained_pos);
+	}
+	
+	return (skip_at_bottom == 0) ? u
+		 : (skip_at_bottom == 1) ? cur_containing_uniqtype
+		 : NULL; // HACK, horrible, FIXME etc.
+failed:
+	return NULL;
+}
+
 void *
 __liballocs_get_alloc_site(void *obj)
 {
