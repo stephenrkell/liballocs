@@ -343,10 +343,10 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
                                                     1ul<<((u)->un.base.one_plus_log_bit_size_delta - 1) \
                                                     : 0 ) + (u)->un.base.bit_size_delta_delta \
                                                   ) )
-#define UNIQTYPE_BASE_TYPE_BIT_OFFSET(u)         ((((u)->un.info.kind != BASE) ? 0 : \
-                                           ((u)->un.base.bit_offset) < 0) ? \
-                                                    (8*(u)->pos_maxoff - (-((u)->un.base.bit_offset))) \
-                                                       : (u)->un.base.bit_offset)
+#define UNIQTYPE_BASE_TYPE_BIT_OFFSET(u)         (((((u)->un.info.kind != BASE) ? 0 : \
+                                           (((u)->un.base.bit_off) < 0) ? \
+                                                    (8*((u)->pos_maxoff) - (-((u)->un.base.bit_off))) \
+                                                       : (u)->un.base.bit_off)))
 
 #ifdef __cplusplus
 } /* end extern "C" */
