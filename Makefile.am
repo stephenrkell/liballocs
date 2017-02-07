@@ -16,7 +16,7 @@ pkgconfig_DATA = liballocs.pc
 liballocs_includedir = $(includedir)/liballocs
 liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/relf.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsmt.h include/vas.h 
 
-bin_PROGRAMS = tools/dumptypes tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size
+bin_PROGRAMS = tools/dumptypes tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/objdumpallocs-llvm
 lib_LIBRARIES = tools/liballocstool.a 
 
 tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
@@ -83,3 +83,6 @@ LIBANTLR3CXX_CXXFLAGS LIBANTLR3CXX_LIBS \
 DWARFIDL_CXXFLAGS DWARFIDL_LIBS \
 TRAP_SYSCALLS MALLOC_HOOKS LIBDLBIND \
 CC CXX CPP CXXFLAGS LDFLAGS LDLIBS
+
+# dummy target for now
+llvm:

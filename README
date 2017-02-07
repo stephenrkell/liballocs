@@ -26,35 +26,34 @@ Here are some things you'll need in order to build this software.
 
 There are also a lot of dependencies on my other codebases. These are
 now included as git submodules under contrib/, so you can try the (new)
-contrib/Makefile method of building them:
+impatient method for building *if* you're on a Debian-based x86-64
+GNU/Linux machine with gcc 4.9 (5.x and 6.x are currently BROKEN pending
+LTO bug fixes). The following is tested on Debian jessie.
 
-  $ git submodule init
-  $ git submodule update
-  $ make -C contrib
+$ apt-get install libelf-dev autoconf automake libtool pkg-config \
+    autoconf-archive libdwarf-dev ocaml ocaml-findlib \
+    openjdk-7-jre-headless make git g++ gawk libunwind-dev \
+    libc6-dev-i386 zlib1g-dev libc6-dbg gdb \
+    libboost-{iostreams,regex,serialization,filesystem}1.55-dev
+$ git clone https://github.com/stephenrkell/liballocs.git
+$ cd liballocs
+$ git submodule init
+$ git submodule update
+$ make -C contrib -jn         # for your favourite n
+$ ./autogen.sh
+$ . contrib/env.sh
+$ ./configure --prefix=/usr/local
+$ make -jn                    # for your favourite n
 
-... after which you should get files contrib/config.mk and
-contrib/env.sh. Then you can configure and build as follows.
+You will also want to set up space for metadata files to live.
 
-  $ ./autogen.sh     # if not already done
-  $ . contrib/env.sh && ./configure <configure options> && make
-
-If any of that doesn't work (tell me, but...) you can still proceed
-manually by grabbing and building the following other codebases of mine.
-You can find them wherever you found this one (e.g. my GitHub page).
-They depend on each other, so build them in order! You have a choice:
-build and install them, like third-party libraries, or simply build them
-and use their build tree in-place. For the latter, you'll need to set
-the relevant environment variables to point to them at configure time.
-If you expect to be hacking on any of my code, I recommend the latter
-approach, because your hacking might easily stray into these other
-codebases.
-
-* libc++fileno
-* libsrk31c++
-* libdwarfpp
-* libantlr3c++
-* libcxxgen
-* dwarfidl
+$ cd ..
+$ export LIBALLOCS=`pwd`/liballocs
+$ sudo mkdir /usr/lib/allocsites # metadata will live here
+$ sudo chown root:staff /usr/lib/allocsites
+$ sudo chmod g+w /usr/lib/allocsites
+$ make -f "$LIBALLOCS"/tools/Makefile.allocsites \
+  /usr/lib/allocsites$( readlink -f /lib/x86_64-linux-gnu/libc.so.6 )-types.so
 
 Finally, for a fully-functioning liballocs toolchain, you'll also want
 to grab the following (from the same place):
@@ -64,3 +63,9 @@ to grab the following (from the same place):
 ... i.e. my patched binutils. You can get a long way without it, but in
 some awkward cases, liballocs's compilers wrappers need to invoke my
 hacked objcopy, which should therefore be on your PATH.
+
+There are now also some LLVM/clang-based versions of the tools. If you
+want them:
+
+$ make -C contrib llvm
+$ make llvm

@@ -1,6 +1,9 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB_ROOT := $(realpath $(dir $(THIS_MAKEFILE)))
 
+NINJA ?= ninja
+CMAKE ?= cmake
+
 # trap-syscalls's contrib needs to be able to find liballocs
 export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
 export LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
@@ -221,6 +224,16 @@ CONFIG_MK += \nLIBDLBIND ?= $(CONTRIB_ROOT)/libdlbind\n
 # ----------------------------malloc-hooks
 
 CONFIG_MK += \nMALLOC_HOOKS := $(CONTRIB_ROOT)/libmallochooks\n
+
+# ----------------------------optional: LLVM (Chris Diamand's fork, for now)
+.PHONY: llvm llvm-build
+llvm: llvm/build/LLVMBuild.cmake llvm-build
+
+# use -fuse-ld=gold because ld.bfd exhausts memory on my not-short-of-memory machine
+llvm/build/LLVMBuild.cmake:
+	mkdir -p "$(dir $@)" && cd "$(dir $@)" && CXXFLAGS="-fuse-ld=gold $$CXXFLAGS" $(CMAKE) -G Ninja ..
+llvm-build:
+	cd llvm/build && $(NINJA)
 
 # ----------------------------config.mk
 
