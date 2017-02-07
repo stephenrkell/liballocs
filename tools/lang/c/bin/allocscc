@@ -52,39 +52,38 @@ class AllocsCC(AllocsCompilerWrapper):
                 outputFilename = sourceFile + ".o"
                 self.debugMsg("Making a secret output file (from unknown source) " + outputFilename + "\n")
             return outputFilename
-
-    def getCillyArgs(self, sourceFiles):
-        # allocscc uses this unmodified (we're not an abstract base).
-        # PROBLEM: we only want to -include if we're compiling a C file. 
-        # Note that normally cilly will figure out when we're compiling
-        # a .S file, say, and only pass options that are relevant. But
-        # it would be asking too much in this case. 
-        
+    
+    def areAllSourceFilesC(self, sourceFiles):
         allSourceFilesAreC = True
         for sourceFile in sourceFiles:
             if sourceFile.lang != "c" and not sourceFile.endswith(".c"):
+                self.debugMsg("No source files, or not all are C files")
                 allSourceFilesAreC = False
-        
-        includeArgs = []
-        # We can only do monalloca, and anything else that involves -include, 
-        # if we're compiling only C files.
-        if len(sourceFiles) > 0 and allSourceFilesAreC:
+        if allSourceFilesAreC:
             self.debugMsg("All source files (%d) are C files\n" % len(sourceFiles))
-            includeArgs = ["-include", \
-               os.path.dirname(__file__) + "/../../../../include/liballocs_cil_inlines.h", \
-        "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/monalloca/monalloca.cmxs"), \
-        "--domonalloca"]
-        else:
-            self.debugMsg("No source files, or not all (only %d) are C files\n" % len(sourceFiles))
-        
+        return allSourceFilesAreC
+
+    def getIncludeArgs(self, sourceFiles):
+        return ["-include", \
+               os.path.dirname(__file__) + "/../../../../include/liballocs_cil_inlines.h"] \
+               if len(sourceFiles) > 0 and self.areAllSourceFilesC(sourceFiles) else []
+
+    def getCillyArgs(self, sourceFiles):
+        allSourceFilesAreC = self.areAllSourceFilesC(sourceFiles)
+        # We can only do monalloca, and anything else that involves -include, 
+        # if we're compiling only C files. HMM. So if I pass a mixture of C files
+        # and non-C files, this will get screwed up. But we should never do this;
+        # we should generate the .o files individually in that case. FIXME: make that so.
         return [\
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/cilallocs/cilallocs.cmxs"), \
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"), \
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpmemacc/dumpmemacc.cmxs"), \
            "--dodumpallocs", \
            "--dodumpmemacc", \
-            "--keepunused"] \
-            + includeArgs + \
+            "--keepunused", \
+            "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/monalloca/monalloca.cmxs")] + \
+            (["--domonalloca"] \
+               if len(sourceFiles) > 0 and allSourceFilesAreC else []) + \
             ["-Wno-unused-variable", "-Wno-unused-label"]
             # We need the above -Wno-unused-... because CIL creates
             # some unused stuff (unavoidably, I believe) which will
@@ -92,7 +91,7 @@ class AllocsCC(AllocsCompilerWrapper):
             # silence them.
     
     def getUnderlyingCompilerCommand(self, sourceFiles):
-        return [cilly_cmd] + self.getCillyArgs(sourceFiles)
+        return [cilly_cmd] + self.getIncludeArgs(sourceFiles) + self.getCillyArgs(sourceFiles)
     
     def getVerboseArgs(self):
         if "DEBUG_CC" in os.environ:
