@@ -78,7 +78,10 @@ $(ALLOCSITES_BASE)/%-types.c: /% $(ALLOCSITES_BASE)/%.allocs # pipe err through 
 $(ALLOCSITES_BASE)/%-allocsites.c: $(ALLOCSITES_BASE)/%.allocs
 	$(DUMPALLOCS) < "$<" > "$@" || (rm -f "$@"; false)
 
-# no need for a .o rule -- we just use the builtin one
+# can't use builtin .o rule in case CC is not gcc (section flags injection attack
+# using "... comdat# ..." doesn't work except on gcc).
+$(ALLOCSITES_BASE)/%-types.o: $(ALLOCSITES_BASE)/%-types.c
+	gcc $(CFLAGS) $(CPPFLAGS) -c -o "$@" "$<"
 
 # Generate the .so with the necessary base-type aliases
 # NOTE: aliases, including both typedefs and base types, 

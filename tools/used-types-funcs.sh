@@ -27,8 +27,9 @@ compile () {
    src="$1"
    dest="$2"
    asm="$( mktemp --suffix=.s )"
-   ${CC} -S -x c -o "$asm" "$src" && \
-   ${CC} -c -o "$dest" "$asm" && \
+   # HACK: only gcc lets us do the section flags injection attack ("comdat#..." trick)
+   gcc -S -x c -o "$asm" "$src" && \
+   gcc -c -o "$dest" "$asm" && \
    echo "Compiler generated $dest" 1>&2
 }
 
