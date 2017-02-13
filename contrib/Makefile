@@ -231,9 +231,20 @@ llvm: llvm/build/LLVMBuild.cmake llvm-build
 
 # use -fuse-ld=gold because ld.bfd exhausts memory on my not-short-of-memory machine
 llvm/build/LLVMBuild.cmake:
-	mkdir -p "$(dir $@)" && cd "$(dir $@)" && CXXFLAGS="-fuse-ld=gold $$CXXFLAGS" $(CMAKE) -G Ninja ..
-llvm-build:
-	cd llvm/build && $(NINJA)
+	mkdir -p "$(dir $@)" && cd "$(dir $@)" && \
+    LDFLAGS="-fuse-ld=gold -Wl,--gdb-index" \
+    $(CMAKE) \
+    -DLLVM_USE_SPLIT_DWARF=TRUE \
+    -DLLVM_ENABLE_ASSERTIONS=TRUE \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DBUILD_SHARED_LIBS=true \
+    -DLLVM_TARGETS_TO_BUILD=X86 \
+    -G Ninja ..
+llvm-build: llvm/build/LLVMBuild.cmake
+	cd llvm/build && $(NINJA) -v
+
+# this cmake argument doesn't work
+# -DEXTRA_LINK_FLAGS="-fuse-ld=gold" ..
 
 # ----------------------------config.mk
 
