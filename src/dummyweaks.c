@@ -105,4 +105,13 @@ void __liballocs_report_wild_address(const void *ptr)
 {
 }
 
-int __generic_malloc_allocator;
+int __generic_malloc_allocator[20];
+struct uniqtype;
+struct allocator;
+struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
+	struct allocator **out_allocator, const void **out_alloc_start,
+	unsigned long *out_alloc_size_bytes,
+	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site)
+{
+	return NULL;
+}
