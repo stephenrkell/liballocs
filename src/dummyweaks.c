@@ -115,3 +115,22 @@ struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 {
 	return NULL;
 }
+
+
+void __liballocs_malloc_post_init(void) {}
+void __liballocs_malloc_pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
+{}
+void 
+__liballocs_malloc_post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
+                size_t requested_size, size_t requested_alignment, const void *caller)
+{}
+void __liballocs_malloc_pre_nonnull_free(void *userptr, size_t freed_usable_size) {}
+void __liballocs_malloc_post_nonnull_free(void *userptr) {}
+
+void __liballocs_malloc_pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller) 
+{}
+
+void __liballocs_malloc_post_nonnull_nonzero_realloc(void *userptr, 
+	size_t old_usable_size,
+	const void *caller, void *__new_allocptr)
+{}

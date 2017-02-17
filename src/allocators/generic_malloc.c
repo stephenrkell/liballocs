@@ -207,6 +207,7 @@ do_init(void)
 }
 
 void post_init(void) __attribute__((visibility("hidden")));
+void __liballocs_malloc_post_init(void) __attribute__((alias("post_init")));
 void post_init(void)
 {
 	do_init();
@@ -540,6 +541,10 @@ post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alig
 		size_t requested_size, size_t requested_alignment, const void *caller)
 		__attribute__((visibility("hidden")));
 void 
+__liballocs_malloc_post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
+		size_t requested_size, size_t requested_alignment, const void *caller)
+		__attribute__((alias("post_successful_alloc")));
+void 
 post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
 		size_t requested_size, size_t requested_alignment, const void *caller)
 {
@@ -548,6 +553,8 @@ post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alig
 }
 
 void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller) __attribute__((visibility("hidden")));
+void __liballocs_malloc_pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
+	__attribute__((alias("pre_alloc")));
 void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 {
 	/* We increase the size by the amount of extra data we store, 
@@ -730,16 +737,21 @@ out:
 }
 
 void pre_nonnull_free(void *userptr, size_t freed_usable_size) __attribute__((visibility("hidden")));
+void __liballocs_malloc_pre_nonnull_free(void *userptr, size_t freed_usable_size)
+		__attribute__((alias("pre_nonnull_free")));
 void pre_nonnull_free(void *userptr, size_t freed_usable_size)
 {
 	index_delete(userptr/*, freed_usable_size*/);
 }
 
 void post_nonnull_free(void *userptr) __attribute__((visibility("hidden")));
+void __liballocs_malloc_post_nonnull_free(void *userptr) __attribute__((alias("post_nonnull_free")));
 void post_nonnull_free(void *userptr) 
 {}
 
 void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller) __attribute__((visibility("hidden")));
+void __liballocs_malloc_pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller) 
+		__attribute__((alias("pre_nonnull_nonzero_realloc")));
 void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller)
 {
 	/* When this happens, we *may or may not be freeing an area*
@@ -763,6 +775,14 @@ void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller)
 
 	index_delete(userptr/*, malloc_usable_size(ptr)*/);
 }
+void post_nonnull_nonzero_realloc(void *userptr, 
+	size_t modified_size, 
+	size_t old_usable_size,
+	const void *caller, void *__new_allocptr) __attribute__((visibility("hidden")));
+void __liballocs_malloc_post_nonnull_nonzero_realloc(void *userptr, 
+	size_t modified_size, 
+	size_t old_usable_size,
+	const void *caller, void *__new_allocptr) __attribute__((alias("post_nonnull_nonzero_realloc")));
 void post_nonnull_nonzero_realloc(void *userptr, 
 	size_t modified_size, 
 	size_t old_usable_size,

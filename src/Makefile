@@ -63,7 +63,7 @@ LDLIBS += -ldlbind
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size
 
 export BUILD_MALLOC_HOOKS := event
-event_hooks.o event_hooks_fast.o: CFLAGS += -D__next_hook_init=__terminal_hook_init \
+event_hooks.o event_hooks_fast.o event_hooks_nonshared.o: CFLAGS += -D__next_hook_init=__terminal_hook_init \
 -D__next_hook_malloc=__terminal_hook_malloc \
 -D__next_hook_free=__terminal_hook_free \
 -D__next_hook_realloc=__terminal_hook_realloc \
@@ -134,6 +134,7 @@ uniqtypes.o: uniqtypes.c
 ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard allocators/*.c))
 UTIL_OBJS := pageindex.o addrlist.o uniqtype-bfs.o
 NOPRELOAD_OBJS := uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
+NONSHARED_OBJS := nonshared_hooks.o
 MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ) $(ALLOCATOR_OBJS)
 MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 PRELOAD_OBJS := preload.o
@@ -175,6 +176,13 @@ heap_index_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 event_hooks_fast.o: CFLAGS += $(HOOKS_FAST_CFLAGS)
 event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
 
+event_hooks_nonshared.o: CFLAGS += -D'ALLOC_EVENT(s)=__liballocs_malloc_\#\#s' -DALLOC_EVENT_ATTRIBUTES=
+event_hooks_nonshared.o: event_hooks.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o "$@" $+
+
+nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
+	$(LD) -r -o "$@" $+
+
 # HACK override the rule for *.c -> *.o as a possible fix for debug info non-findy (does it work?)
 %.o: %.c
 	$(CC) -o "$@" $(CFLAGS) -c $(realpath $<)
@@ -207,7 +215,7 @@ liballocs_preload.so: systrap.o liballocs_preload.a dlmalloc.a
 liballocs_preload.a: dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
 
-liballocs_nonshared.a: $(NOPRELOAD_OBJS)
+liballocs_nonshared.a: $(NOPRELOAD_OBJS) $(NONSHARED_OBJS)
 	$(AR) r "$@" $+
 
 liballocs.a: systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
