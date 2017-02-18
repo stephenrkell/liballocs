@@ -450,9 +450,15 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	
 	/* Make sure the parent bigalloc knows we're suballocating it. */
 	char *allocptr = userptr_to_allocptr(new_userchunkaddr);
+	struct insert *p_insert = insert_for_chunk(new_userchunkaddr);
 	struct big_allocation *containing_bigalloc = __lookup_deepest_bigalloc(
 		userptr_to_allocptr(new_userchunkaddr));
-	if (!containing_bigalloc) abort();
+	if (!containing_bigalloc)
+	{
+		debug_printf(1, "Warning: heap region around %p not contained in any bigalloc (called from %p)\n", 
+			new_userchunkaddr, caller);
+		goto after_promotion;
+	}
 	if (unlikely(!containing_bigalloc->suballocator))
 	{
 		containing_bigalloc->suballocator = &__generic_malloc_allocator;
@@ -461,7 +467,6 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	// FIXME: split alloca off into a separate table?
 	
 	/* Populate our extra in-chunk fields */
-	struct insert *p_insert = insert_for_chunk(new_userchunkaddr);
 	p_insert->alloc_site_flag = 0U;
 	p_insert->alloc_site = (uintptr_t) caller;
 	
@@ -491,6 +496,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	/* if we got here, it's going in l1 */
 	if (modified_size > biggest_unpromoted_object) biggest_unpromoted_object = modified_size;
 
+after_promotion: ;
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(new_userchunkaddr);
 
 	/* DEBUGGING: sanity check entire bin */

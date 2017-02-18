@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <dlfcn.h>
+#include <malloc.h>
 
 #include <errno.h>
 #include <link.h>
@@ -48,28 +49,32 @@ void __terminal_hook_init(void) {}
 void * __terminal_hook_malloc(size_t size, const void *caller)
 {
 	static void *(*real_malloc)(size_t);
-	if (!real_malloc) real_malloc = fake_dlsym(RTLD_DEFAULT, "malloc");
+	if (!real_malloc) real_malloc = fake_dlsym(RTLD_DEFAULT, "__real_malloc");
+	if (!real_malloc) real_malloc = fake_dlsym(RTLD_DEFAULT, "malloc"); // probably infinite regress...
 	if (!real_malloc) abort();
 	return real_malloc(size);
 }
 void __terminal_hook_free(void *ptr, const void *caller)
 {
 	static void (*real_free)(void*);
-	if (!real_free) real_free = fake_dlsym(RTLD_DEFAULT, "free");
+	if (!real_free) real_free = fake_dlsym(RTLD_DEFAULT, "__real_free");
+	if (!real_free) real_free = fake_dlsym(RTLD_DEFAULT, "free"); // probably infinite regress...
 	if (!real_free) abort();
 	real_free(ptr);
 }
 void * __terminal_hook_realloc(void *ptr, size_t size, const void *caller)
 {
 	static void *(*real_realloc)(void*, size_t);
-	if (!real_realloc) real_realloc = fake_dlsym(RTLD_DEFAULT, "realloc");
+	if (!real_realloc) real_realloc = fake_dlsym(RTLD_DEFAULT, "__real_realloc");
+	if (!real_realloc) real_realloc = fake_dlsym(RTLD_DEFAULT, "realloc"); // probably infinite regress...
 	if (!real_realloc) abort();
 	return real_realloc(ptr, size);
 }
 void * __terminal_hook_memalign(size_t boundary, size_t size, const void *caller)
 {
 	static void *(*real_memalign)(size_t, size_t);
-	if (!real_memalign) real_memalign = fake_dlsym(RTLD_DEFAULT, "memalign");
+	if (!real_memalign) real_memalign = fake_dlsym(RTLD_DEFAULT, "__real_memalign");
+	if (!real_memalign) real_memalign = fake_dlsym(RTLD_DEFAULT, "memalign"); // probably infinite regress...
 	if (!real_memalign) abort();
 	return real_memalign(boundary, size);
 }
@@ -109,6 +114,26 @@ int __wrap___real_posix_memalign(void **memptr, size_t alignment, size_t size)
 	void *ret;
 	ret = hook_memalign(alignment, size, __builtin_return_address(0));
 	
+	if (!ret) return EINVAL; // FIXME: check alignment, return ENOMEM/EINVAL as appropriate
+	else
+	{
+		*memptr = ret;
+		return 0;
+	}
+}
+size_t __mallochooks_malloc_usable_size(void *ptr)
+{
+	return malloc_usable_size(ptr);
+}
+size_t __real_malloc_usable_size(void *ptr)
+{
+	return malloc_usable_size(ptr);
+}
+/* Some impls don't provide posix_memalign. */
+size_t __real_posix_memalign(void **memptr, size_t alignment, size_t size) __attribute__((weak));
+size_t __real_posix_memalign(void **memptr, size_t alignment, size_t size)
+{
+	void *ret = __terminal_hook_memalign(alignment, size, __builtin_return_address(0));
 	if (!ret) return EINVAL; // FIXME: check alignment, return ENOMEM/EINVAL as appropriate
 	else
 	{
