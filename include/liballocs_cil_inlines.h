@@ -36,15 +36,15 @@ extern void *__current_allocsite __attribute__((weak));
 
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *, void *frame_addr);
 
-extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_alloca_caller_frame_cleanup)(void *counter);
-extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_alloca_caller_frame_cleanup)(void *counter)
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca_caller_frame_cleanup)(void *counter);
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca_caller_frame_cleanup)(void *counter)
 {
 	__liballocs_unindex_stack_objects_counted_by((unsigned long *) counter, __builtin_frame_address(0));
 }
 
 /* alloca helpers */
-extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_sp)(void);
-extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_sp)(void)
+extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_sp)(void);
+extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_sp)(void)
 {
 	unsigned long our_sp;
 	#ifdef UNW_TARGET_X86
@@ -55,14 +55,14 @@ extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs
 	return (const void*) our_sp;
 }
 
-extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_bp)(void);
-extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_bp)(void)
+extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_bp)(void);
+extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_bp)(void)
 {
 	return (const void *) __builtin_frame_address(0);
 }
 
-extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller);
-extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller)
+extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller);
+extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller)
 {
 	/* Insert heap trailer etc..
 	 * Basically we have to do everything that our malloc hooks, allocator wrappers
