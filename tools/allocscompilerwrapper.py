@@ -128,24 +128,26 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # Now deal with wrapped functions
             wrappedFns = self.allWrappedSymNames()
             self.debugMsg("Looking for wrapped functions that need unbinding\n")
-            cmdstring = "objdump -t \"%s\" | grep -v UND | egrep \"[ \\.](%s)$\"; exit $?" \
+            cmdstring = "nm -fbsd \"%s\" | grep -v '^[0-9a-f ]\+ U ' | egrep \"^[0-9a-f ]+ . (%s)$\" | sed 's/^[0-9a-f ]\+ . //'" \
                 % (filename, "|".join(wrappedFns))
             self.debugMsg("cmdstring for objdump is " + cmdstring + "\n")
-            grep_ret = subprocess.call(["sh", "-c", cmdstring], stdout=errfile, stderr=errfile)
-            if grep_ret == 0:
+            grep_output = subprocess.Popen(["sh", "-c", cmdstring], stdout=subprocess.PIPE, stderr=errfile).communicate()[0]
+            toUnbind = [l for l in grep_output.split("\n") if l != '']
+            self.debugMsg("grep for defined alloc fns in %s returned %s\n" % (filename, str(toUnbind)))
+            if grep_output != "":
                 # we need to unbind. We unbind the allocsite syms
                 # *and* --prefer-non-section-relocs. 
                 # This will give us a file with __def_ and __ref_ symbols
                 # for the allocation function. We then rename these to 
                 # __real_ and __wrap_ respectively. 
                 backup_filename = os.path.splitext(filename)[0] + ".backup.o"
-                self.debugMsg("Found that we need to unbind some or all of symbols [%s]... making backup as %s\n" % \
-                    (", ".join(wrappedFns), backup_filename))
+                self.debugMsg("Found that we need to unbind symbols [%s]... making backup as %s\n" % \
+                    (", ".join(toUnbind), backup_filename))
                 cp_ret = subprocess.call(["cp", filename, backup_filename], stderr=errfile)
                 if cp_ret != 0:
                     self.print_errors(errfile)
                     return cp_ret
-                unbind_pairs = [["--unbind-sym", sym] for sym in wrappedFns]
+                unbind_pairs = [["--unbind-sym", sym] for sym in toUnbind]
                 unbind_cmd = ["objcopy", "--prefer-non-section-relocs"] \
                  + [opt for pair in unbind_pairs for opt in pair] \
                  + [filename]
@@ -160,7 +162,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     self.debugMsg("Renaming __def_ and __ref_ alloc symbols\n")
                     # instead of objcopying to replace __def_<sym> with <sym>,
                     # we use ld -r to define <sym> and __real_<sym> as *extra* symbols
-                    ref_args = [["--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in wrappedFns]
+                    ref_args = [["--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in toUnbind]
                     objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
                      + [opt for seq in ref_args for opt in seq] \
                      + [filename], stderr=errfile)
@@ -174,7 +176,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         return cp_ret
                     def_args = [["--defsym", sym + "=__def_" + sym, \
                         "--defsym", "__real_" + sym + "=__def_" + sym, \
-                        ] for sym in wrappedFns]
+                        ] for sym in toUnbind]
                     ld_ret = subprocess.call(["ld", "-r"] \
                      + [opt for seq in def_args for opt in seq] \
                      + [tmp_filename, "-o", filename], stderr=errfile)
