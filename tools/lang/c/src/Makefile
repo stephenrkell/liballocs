@@ -14,7 +14,7 @@ LDFLAGS += $(LIBCXXFILENO_LIBS) $(LIBSRK31CXX_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXG
 LDFLAGS += -L`pwd` -Wl,-R`pwd` -L$(ALLOCSTOOL) -Wl,-R$(realpath $(ALLOCSTOOL))
 LDLIBS += -lallocstool -lantlr3c -ldwarfidl -lcxxgen -ldwarfpp -ldwarf \
 -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization  \
--lc++fileno -lsrk31c++ -lelf -lstdc++
+-lc++fileno -lsrk31c++ -lelf -lstdc++ -lz
 
 CPP_SRC := $(wildcard *.cpp)
 

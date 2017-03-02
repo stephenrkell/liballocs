@@ -3,7 +3,7 @@ ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = . tools/lang src lib
 
 # NOTE: being C++, these only affect build of the tools, not the liballocs core.
-AM_CXXFLAGS = -std=c++11 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -DBOOST_OPTIONAL_CONFIG_ALLOW_BINDING_TO_RVALUES
+AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++11 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -DBOOST_OPTIONAL_CONFIG_ALLOW_BINDING_TO_RVALUES
 
 AM_CFLAGS = -Wall -std=gnu99 -ggdb -O3 -flto -Iinclude -fPIC -Wp,-w
 
@@ -16,7 +16,8 @@ pkgconfig_DATA = liballocs.pc
 liballocs_includedir = $(includedir)/liballocs
 liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/relf.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsmt.h include/vas.h 
 
-bin_PROGRAMS = tools/dumptypes tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/objdumpallocs-llvm
+bin_PROGRAMS = tools/dumptypes tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size 
+#tools/objdumpallocs-llvm
 lib_LIBRARIES = tools/liballocstool.a 
 
 tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
@@ -24,17 +25,17 @@ tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
 LIBELF ?= -lelf
 
 tools_dumptypes_SOURCES = tools/dumptypes.cpp
-tools_dumptypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
+tools_dumptypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
 tools_dumpptrs_SOURCES = tools/dumpptrs.cpp
-tools_dumpptrs_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
+tools_dumpptrs_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
 tools_allocsites_SOURCES = tools/allocsites.cpp $(HELPERS)
-tools_allocsites_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
+tools_allocsites_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
 tools_usedtypes_SOURCES = tools/usedtypes.cpp $(HELPERS)
-tools_usedtypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
+tools_usedtypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
-tools_ifacetypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF)
+tools_ifacetypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
-tools_find_allocated_type_size_LDADD = tools/liballocstool.a -ldwarf $(LIBELF)
+tools_find_allocated_type_size_LDADD = tools/liballocstool.a -ldwarf $(LIBELF) -lz
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.
