@@ -524,6 +524,14 @@ int main(int argc, char **argv)
 				 * If we're an executable, they're absolute. 
 				 * If we're a shared library, they should be relative to its load address. */
 				auto opt_cu_base = i_subp.enclosing_cu()->get_low_pc();
+				if (!opt_cu_base)
+				{
+					cerr << "Warning: skipping subprogram " << *i_dyn 
+						<< " -- in CU with no base address (CU: "
+						<< *i_subp.enclosing_cu()
+						<< ")" << endl;
+					continue;
+				}
 				Dwarf_Unsigned cu_base = opt_cu_base->addr;
 				
 				// handle "for all vaddrs" entries
