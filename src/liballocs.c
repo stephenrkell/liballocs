@@ -1445,73 +1445,6 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 	return NULL;
 }
 
-extern inline _Bool 
-(__attribute__((gnu_inline)) __liballocs_find_matching_subobject)(signed target_offset_within_uniqtype,
-	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
-	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched,
-		struct uniqtype **p_cur_containing_uniqtype,
-		struct uniqtype_rel_info **p_cur_contained_pos) __attribute__((visibility("protected")));
-// _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
-// 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
-// 	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-// 		signed *p_cumulative_offset_searched,
-// 		struct uniqtype **p_cur_containing_uniqtype,
-// 		struct uniqtype_rel_info **p_cur_contained_pos)
-// {
-// 	if (target_offset_within_uniqtype == 0 && (!test_uniqtype || cur_obj_uniqtype == test_uniqtype)) return 1;
-// 	else
-// 	{
-// 		/* We might have *multiple* subobjects spanning the offset. 
-// 		 * Test all of them. */
-// 		struct uniqtype *containing_uniqtype = NULL;
-// 		struct uniqtype_rel_info *contained_pos = NULL;
-// 		
-// 		signed sub_target_offset = target_offset_within_uniqtype;
-// 		struct uniqtype *contained_uniqtype = cur_obj_uniqtype;
-// 		
-// 		_Bool success = __liballocs_first_subobject_spanning(
-// 			&sub_target_offset, &contained_uniqtype,
-// 			&containing_uniqtype, &contained_pos);
-// 		// now we have a *new* sub_target_offset and contained_uniqtype
-// 		
-// 		if (!success) return 0;
-// 		
-// 		*p_cumulative_offset_searched += contained_pos->un.memb.off;
-// 		
-// 		if (last_attempted_uniqtype) *last_attempted_uniqtype = contained_uniqtype;
-// 		if (last_uniqtype_offset) *last_uniqtype_offset = sub_target_offset;
-// 		do {
-// 			assert(containing_uniqtype == cur_obj_uniqtype);
-// 			_Bool recursive_test = __liballocs_find_matching_subobject(
-// 					sub_target_offset,
-// 					contained_uniqtype, test_uniqtype, 
-// 					last_attempted_uniqtype, last_uniqtype_offset, p_cumulative_offset_searched);
-// 			if (__builtin_expect(recursive_test, 1)) return 1;
-// 			// else look for a later contained subobject at the same offset
-// 			unsigned subobj_ind = contained_pos - &containing_uniqtype->related[0];
-// 			assert(subobj_ind >= 0);
-// 			assert(subobj_ind == 0 || subobj_ind < UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype));
-// 			if (__builtin_expect(
-// 					UNIQTYPE_COMPOSITE_MEMBER_COUNT(containing_uniqtype) <= subobj_ind + 1
-// 					|| containing_uniqtype->related[subobj_ind + 1].un.memb.off != 
-// 						containing_uniqtype->related[subobj_ind].un.memb.off,
-// 				1))
-// 			{
-// 				// no more subobjects at the same offset, so fail
-// 				return 0;
-// 			} 
-// 			else
-// 			{
-// 				contained_pos = &containing_uniqtype->related[subobj_ind + 1];
-// 				contained_uniqtype = contained_pos->un.memb.ptr;
-// 			}
-// 		} while (1);
-// 		
-// 		assert(0);
-// 	}
-// }
-
 struct uniqtype * 
 __liballocs_get_alloc_type(void *obj)
 {
@@ -1605,3 +1538,12 @@ extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	struct allocator **out_allocator, const void **out_alloc_start,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);
+
+extern inline _Bool 
+__liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
+	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
+	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
+		signed *p_cumulative_offset_searched,
+		struct uniqtype **p_cur_containing_uniqtype,
+		struct uniqtype_rel_info **p_cur_contained_pos);
+

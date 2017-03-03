@@ -8,9 +8,7 @@
 #ifdef __cplusplus
 extern "C" {
 typedef bool _Bool;
-#define INLINE inline
 #else
-#define INLINE inline __attribute__((gnu_inline))
 #endif
 
 #include <sys/types.h>
@@ -188,12 +186,6 @@ inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	struct allocator **out_allocator, const void **out_alloc_start,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);
-extern INLINE _Bool __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
-	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
-	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched,
-		struct uniqtype **p_cur_containing_uniqtype,
-		struct uniqtype_rel_info **p_cur_contained_pos) __attribute__((hot));
 /* Some inlines follow at the bottom. */
 
 /* Public API for l0index / mappings was here. FIXME: why was it public? Presumably
@@ -474,26 +466,6 @@ __liballocs_first_subobject_spanning(
 	}
 }
 
-#ifndef __cplusplus
-extern 
-#endif
-inline
-_Bool 
-__liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
-	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
-	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched,
-		struct uniqtype **p_cur_containing_uniqtype,
-		struct uniqtype_rel_info **p_cur_contained_pos)
-#ifndef __cplusplus
-__attribute__((gnu_inline))
-#endif
-;
-
-#ifndef __cplusplus
-extern 
-__attribute__((gnu_inline))
-#endif
 inline
 _Bool 
 __liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
