@@ -1223,9 +1223,6 @@ void __liballocs_post_systrap_init(void)
 			.pos_maxoff = 0,
 			.un = { base: { .kind = BASE, .enc = DW_ATE_signed_char } }
 		});
-		pointer_to___uniqtype__unsigned_char->related[0] = (struct uniqtype_rel_info) {
-			{ t : { pointer_to___uniqtype__signed_char } }
-		};
 	}
 	pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$8");
 	if (!pointer_to___uniqtype__unsigned_char)
@@ -1234,12 +1231,13 @@ void __liballocs_post_systrap_init(void)
 			.pos_maxoff = 0,
 			.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned_char } }
 		});
-		pointer_to___uniqtype__unsigned_char->related[0] = (struct uniqtype_rel_info) {
-			{ t : { pointer_to___uniqtype__signed_char } }
-		};
 	}
+	
 	if (!(pointer_to___uniqtype__unsigned_char->related[0].un.t.ptr)) pointer_to___uniqtype__unsigned_char->related[0] = 
 		(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__signed_char } } };
+	if (!(pointer_to___uniqtype__signed_char->related[0].un.t.ptr)) pointer_to___uniqtype__signed_char->related[0] = 
+		(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__unsigned_char } } };
+	
 	pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
 	if (!pointer_to___uniqtype____PTR_signed_char)
 	{
