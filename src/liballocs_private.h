@@ -138,6 +138,8 @@ char *__liballocs_private_strndup(const char *s, size_t n) __attribute__((visibi
 extern _Bool __liballocs_systrap_is_initialized;
 void __liballocs_post_systrap_init(void) __attribute__((visibility("hidden")));
 
+void __generic_malloc_allocator_init(void) __attribute__((visibility("hidden")));
+
 /* If this weak function is defined, it will be called when we've loaded
  * the metadata for one object. */
 struct object_metadata

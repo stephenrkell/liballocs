@@ -167,7 +167,12 @@ do_init(void)
 	if (index_region) return; /* already done */
 
 	/* Initialize what we depend on. */
-	__mmap_allocator_init();
+	// __mmap_allocator_init();
+	/* Actually, try without. Since we want to call dl_iterate_phdr and dlopen
+	 * quite early in liballocs init, and they call malloc, we want ourselves
+	 * to be up-and-running quite early, and I don't think the mmap allocator
+	 * is strictly necessary. If we make any bigallocs calls, the pageindex code
+	 * should ensure that the mmap allocator is init'd. */
 	
 	index_begin_addr = (void*) 0U;
 #if defined(__x86_64__) || defined(x86_64)
@@ -209,6 +214,11 @@ do_init(void)
 void post_init(void) __attribute__((visibility("hidden")));
 void __liballocs_malloc_post_init(void) __attribute__((alias("post_init")));
 void post_init(void)
+{
+	do_init();
+}
+
+void (__attribute__((visibility("hidden"))) __generic_malloc_allocator_init)(void)
 {
 	do_init();
 }
@@ -297,7 +307,7 @@ static void list_sanity_check(entry_type *head, const void *should_see_chunk) {}
 // 	/* Allow allocs beginning a short distance into the entry to be 
 // 	 * treated as beginning at the start of the entry.
 // 	 * This is because the malloc header. should not prevent an initial
-// 	 * entry from being marked as belonging to the bigalloc. */
+// 	 * entry from being marked as belonging to the . */
 // 	_Bool covers_whole_initial_entry = ((uintptr_t) allocptr) % PAGE_SIZE
 // 		 <= MAXIMUM_MALLOC_HEADER_OVERHEAD;
 // 	char *malloc_end_address = (char*) allocptr + malloc_usable_size(allocptr);
