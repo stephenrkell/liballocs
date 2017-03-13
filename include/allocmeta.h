@@ -78,8 +78,6 @@ typedef struct lifetime_policy_s
 
 struct allocated_chunk;              /* the start of an allocation, opaquely */
 struct alloc_metadata;               /* metadata associated with a chunk */
-struct lifetime_policy_s;
-typedef struct lifetime_policy_s lifetime_policy_t;
 
 /* The idealised base-level allocator protocol. These operations are mostly
    to be considered logically; some allocators (e.g. stack, GC) "inline" them
