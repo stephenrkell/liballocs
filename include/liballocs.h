@@ -662,8 +662,8 @@ __liballocs_get_alloc_site(void *obj);
 unsigned long
 __liballocs_get_alloc_size(void *obj);
 
-extern inline void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void);
-extern inline void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void)
+extern inline const void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void);
+extern inline const void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void)
 {
 	unw_word_t sp;
 #ifdef __i386__
@@ -673,7 +673,7 @@ extern inline void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_s
 #else
 #error "Unsupported architecture."
 #endif
-	return (void*) sp;
+	return (const void*) sp;
 }
 
 static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void *), void *arg)
@@ -691,7 +691,7 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 
 	unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &higherframe_sp);
 #ifndef NDEBUG
-	assert(__liballocs_get_sp() == higherframe_sp);
+	assert(__liballocs_get_sp() == (const void *) higherframe_sp);
 #endif
 	unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
 
