@@ -26,32 +26,22 @@ class AllocsCC(AllocsCompilerWrapper):
     def defaultFreeFns(self):
         return ["free(P)"]
 
-    def getCustomCompileArgs(self, sourceInputFiles):
+    def getCustomCompileArgs(self):
         # "-pipe" interferes with -save-temps, with disastrous conseqeunces
         # trying to create files named "-.i", "-.s" which then get interpreted
         # as command-line options.
         #saveTempsArgs = ['-save-temps']
-        if not '-pipe' in sys.argv:
+        if not '-pipe' in self.allArgs.values():
             saveTempsArgs = ['-save-temps']
         else:
             saveTempsArgs = []
-        for sourceFile in sourceInputFiles:
+        for sourceFile in self.getSourceInputFiles():
             dirname = os.path.dirname(sourceFile)
             # FIXME: support multiple distinct directories here, if cilly can
             if dirname != "":
                  saveTempsArgs = ["--save-temps=" + dirname]
-        return AllocsCompilerWrapper.getCustomCompileArgs(self, sourceInputFiles) \
+        return AllocsCompilerWrapper.getCustomCompileArgs(self) \
         + saveTempsArgs
-    
-    def makeObjectFileName(self, sourceFile):
-            nameStem, nameExtension = os.path.splitext(sourceFile)
-            if (nameExtension == ".c"):
-                outputFilename = nameStem + ".o"
-                self.debugMsg("Making a secret output file (from .c source) " + outputFilename + "\n")
-            else:
-                outputFilename = sourceFile + ".o"
-                self.debugMsg("Making a secret output file (from unknown source) " + outputFilename + "\n")
-            return outputFilename
     
     def areAllSourceFilesC(self, sourceFiles):
         allSourceFilesAreC = True
@@ -90,28 +80,20 @@ class AllocsCC(AllocsCompilerWrapper):
             # make compilation done with -Werror barf if we don't
             # silence them.
     
-    def getUnderlyingCompilerCommand(self, sourceFiles):
-        return [cilly_cmd] + self.getIncludeArgs(sourceFiles) + self.getCillyArgs(sourceFiles)
-    
+    def getBasicCompilerCommand(self):
+        return [cilly_cmd]
+        
+    def getExtraLinkArgs(self):
+        return []
+
     def getVerboseArgs(self):
-        if "DEBUG_CC" in os.environ:
-            return ["--verbose", "--live_debug"]
-        else:
-            return []
+        return []
     
-    # HACK HACK HACK override buildOneObjectFile so that if we fail, we try the vanilla cc
-    def runUnderlyingCompiler(self, sourceFiles, options):
-        ret1 = AllocsCompilerWrapper.runUnderlyingCompiler(self, sourceFiles, options)
-        if (ret1 != 0):
-#            originalCommand = self.getUnderlyingCompilerCommand(sourceFiles) + options
-#            alternativeCommand = ["cc"] + [s for s in originalCommand if s != "cilly" and \
-#                not s.startswith("--")]
-#            self.debugMsg("Falling back to: " + " ".join(alternativeCommand) + "\n")
-#            ret1 = subprocess.call(alternativeCommand)
-#            if (ret1 == 0):
-#                self.debugMsg("WARNING: fell back to cc to compile [%s]\n" % ", ".join(sourceFiles))
-            pass
-        return ret1
+    def getCompilerCommand(self, itemsAndOptions):
+        sourceFiles = [x for x in itemsAndOptions if isinstance(x, SourceFile)]
+        return AllocsCompilerWrapper.getCompilerCommand(self, itemsAndOptions) + \
+            self.getIncludeArgs(sourceFiles) + self.getCillyArgs(sourceFiles) + self.getVerboseArgs() + \
+            self.getExtraLinkArgs()
 
 if __name__ == '__main__':
     wrapper = AllocsCC()
