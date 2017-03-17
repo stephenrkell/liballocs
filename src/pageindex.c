@@ -36,7 +36,9 @@ static unsigned bigalloc_depth(struct big_allocation *b)
 	return depth;
 }
 
-static void sanity_check_bigalloc(struct big_allocation *b)
+void sanity_check_bigalloc(struct big_allocation *b) __attribute__((visibility("hidden")));
+void __liballocs_sanity_check_bigalloc(struct big_allocation *b) __attribute__((visibility("protected"),alias("sanity_check_bigalloc")));
+void sanity_check_bigalloc(struct big_allocation *b)
 {
 #ifndef NDEBUG
 	if (BIGALLOC_IN_USE(b))
@@ -48,6 +50,9 @@ static void sanity_check_bigalloc(struct big_allocation *b)
 		if (b->parent)
 		{
 			assert(bigalloc_depth(b) == 1 + bigalloc_depth(b->parent));
+			/* Also check bounds w.r.t. parent. */
+			assert(b->begin >= b->parent->begin);
+			assert(b->end <= b->parent->end);
 		}
 		/* Check that old children all have the same depth as each other. */
 		if (b->first_child)
@@ -56,6 +61,8 @@ static void sanity_check_bigalloc(struct big_allocation *b)
 			for (struct big_allocation *child = b->first_child->next_sib; child; child = child->next_sib)
 			{
 				assert(bigalloc_depth(child) == first_child_depth);
+				/* Also recursively sanity-check children. */
+				sanity_check_bigalloc(child);
 			}
 		}
 	}
@@ -383,6 +390,7 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	/* Grab a new bigalloc. */
 	// write_string("BlahA006\n");
 	struct big_allocation *b = bigalloc_new(ptr, size, parent, meta, allocated_by);
+	SANITY_CHECK_BIGALLOC(b);
 	
 	BIG_UNLOCK
 	return b;

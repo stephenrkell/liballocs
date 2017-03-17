@@ -22,7 +22,7 @@ static _Bool initialized;
 int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 	__attribute__((visibility("hidden")));
 
-void __static_allocator_init(void) __attribute__((constructor(101)));
+void __static_allocator_init(void) __attribute__((constructor(102)));
 void __static_allocator_init(void)
 {
 	if (!initialized && !trying_to_initialize)

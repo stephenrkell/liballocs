@@ -41,7 +41,7 @@ else
     DEBUG_EXTRA_CFLAGS := -O0
 endif
 
-default: liballocs_preload.so liballocs_nonshared.a liballocs_dummyweaks.so liballocs_dummyweaks.o liballocs.a
+default: liballocs_preload.so liballocs_test.so liballocs_nonshared.a liballocs_dummyweaks.so liballocs_dummyweaks.o liballocs.a
 all: default
 
 HOOKS_NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
@@ -97,7 +97,7 @@ dlmalloc.a: dlmalloc.o
 	$(AR) r "$@" $^
 dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0 -DUSE_DL_PREFIX -fPIC
 dlmalloc-ext.o: CFLAGS += -fPIC
-liballocs_preload.so: LDFLAGS += -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
+liballocs_preload.so liballocs_test.so: LDFLAGS += -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
  -Wl,--wrap,dlfree -Wl,--wrap,dlrealloc -Wl,--wrap,dlmemalign -Wl,-wrap,dlposix_memalign \
  -Wl,--whole-archive dlmalloc.a  -Wl,--no-whole-archive \
  -Wl,--defsym,__private_malloc=__wrap_dlmalloc \
@@ -199,6 +199,8 @@ nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
 # liballocs.so         -- nasty linker script for clients, working around uniqueness problem
 # liballocs_nonshared.a -- just uniqtypes; linker script points to this, s.t. client exes (-lallocs) get this linked in statically (uniqtypes)
 # liballocs.a          -- the main binary usable for statically-linked exes -- no uniqueness problem
+# liballocs_pic.a         -- PIC non-preload archive, used for testing (_test.so)
+# liballocs_test.so       -- designed to be dlopen()able, to run self-tests in constructors
 # liballocs_dummyweaks.so -- non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
 # liballocs_dummyweaks.o  -- non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
 #
@@ -212,7 +214,16 @@ liballocs_preload.so: systrap.o liballocs_preload.a dlmalloc.a
 	-Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive \
 	$(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) $(LDLIBS)
 
+liballocs_test.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
+liballocs_test.so: systrap_noop.o liballocs_pic.a dlmalloc.a
+	$(CC) $(CFLAGS) -shared -o "$@" \
+	-Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive \
+	$(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) $(LDLIBS)
+
 liballocs_preload.a: dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
+	$(AR) r "$@" $+
+
+liballocs_pic.a: dlmalloc-ext.o $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
 
 liballocs_nonshared.a: $(NOPRELOAD_OBJS) $(NONSHARED_OBJS)

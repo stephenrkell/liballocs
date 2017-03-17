@@ -30,6 +30,8 @@ void __mmap_allocator_notify_mremap_after(void *ret, void *old_addr, size_t old_
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, int prot, int flags,
                   int fd, off_t offset, void *caller)
 			__attribute__((weak));
+void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)
+			__attribute__((weak));
 void __mmap_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
 extern _Bool __liballocs_is_initialized __attribute__((weak));
 int __liballocs_global_init(void);
@@ -157,6 +159,25 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	post(s, ret);
 	
 	/* We need to do our own resumption also. */
+	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+}
+
+void mprotect_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
+void mprotect_replacement(struct generic_syscall *s, post_handler *post)
+{
+	/* Unpack the mprotect arguments. */
+	void *addr = (void*) s->args[0];
+	size_t length = s->args[1];
+	int prot = s->args[2];
+	
+	long int ret = do_syscall3(s);
+	
+	if (ret == 0 && &__mmap_allocator_notify_mprotect)
+	{
+		__mmap_allocator_notify_mprotect(addr, length, prot);
+	}
+	
+	post(s, ret);
 	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
 }
 
@@ -307,17 +328,6 @@ void __liballocs_systrap_init(void)
 			ElfW(Sym) *dynsym_end = dynsym + dynamic_symbol_count(l->l_ld, l);
 
 			/* Now we can look up symbols. */
-#define TRAP_SYSCALLS_IN_SYMBOL_NAMED(n) do { \
-			ElfW(Sym) *found_ ## n = symbol_lookup_linear(dynsym, dynsym_end, dynstr, \
-				dynstr + dynstrsz, #n); \
-			if (found_ ## n && found_ ## n ->st_shndx != STN_UNDEF) \
-			{ \
-				trap_one_instruction_range((unsigned char *)(l->l_addr + found_ ## n ->st_value),  \
-					(unsigned char *)(l->l_addr + found_ ## n ->st_value + found_ ## n ->st_size), \
-					0, 1); \
-			} \
-			} while (0)
-			
 			found_an_mmap |= trap_syscalls_in_symbol_named("mmap",   l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 			found_an_mmap |= trap_syscalls_in_symbol_named("mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 			trap_syscalls_in_symbol_named("munmap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);

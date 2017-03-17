@@ -292,7 +292,7 @@ static struct mapping_entry *find_entry(void *addr, struct mapping_sequence *seq
 
 static void do_mmap(void *mapped_addr, void *requested_addr, size_t length, int prot, int flags,
                   const char *filename, off_t offset, void *caller);
-static _Bool extend_sequence(struct mapping_sequence *cur, 
+static _Bool augment_sequence(struct mapping_sequence *cur, 
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename, void *caller);
 
 static __thread int remembered_prot;
@@ -359,12 +359,10 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 				saw_overlap = 1;
 			}
 		}
-		if (saw_overlap && (flags & MAP_FIXED))
-		{
-			/* Okay, we behave as if we'd unmapped the overlapped area first. */
-			do_munmap(mapped_addr, mapped_length, caller);
-		}
-		else if (saw_overlap) abort();
+		if (saw_overlap && !(flags & MAP_FIXED)) abort();
+		/* We can now handle overlap in mmap(), but it should only happen
+		 * when the caller really wants to map something over the top, 
+		 * not when asking for a free addr. */
 		
 		/* Do we abut any existing mapping? Just do the 'before' case. */
 		struct big_allocation *bigalloc_before = __lookup_bigalloc((char*) mapped_addr - 1, 
@@ -374,23 +372,24 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 			/* See if we can extend it. */
 			struct mapping_sequence *seq = (struct mapping_sequence *) 
 				bigalloc_before->meta.un.opaque_data.data_ptr;
-			_Bool extended = extend_sequence(seq, mapped_addr, (char*) mapped_addr + mapped_length, 
+			_Bool success = augment_sequence(seq, mapped_addr, (char*) mapped_addr + mapped_length, 
 				prot, flags, offset, filename, caller);
-			if (extended)
+			char *requested_new_end = (char*) mapped_addr + mapped_length;
+			if (success && requested_new_end > (char*) bigalloc_before->end)
 			{
 				/* Okay, now the bigalloc is bigger. */
 				_Bool success = __liballocs_extend_bigalloc(bigalloc_before, 
-					(char*) mapped_addr + mapped_length);
+					(char*) requested_new_end);
 				if (!success) abort();
-				return;
 			}
+			if (success) return;
 		}
 
 		/* If we got here, we have to create a new bigalloc. */
 		struct mapping_sequence new_seq;
 		memset(&new_seq, 0, sizeof new_seq);
 		/* "Extend" the empty sequence. */
-		_Bool success = extend_sequence(&new_seq, mapped_addr, (char*) mapped_addr + mapped_length, 
+		_Bool success = augment_sequence(&new_seq, mapped_addr, (char*) mapped_addr + mapped_length, 
 				prot, flags, offset, filename, caller);
 		if (!success) abort();
 		if (!__private_realloc_active && !__private_memalign_active && !__private_posix_memalign_active
@@ -410,6 +409,11 @@ void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_
 	/* HACK: Is it actually a stack or sbrk area? Branch out if so. */
 	// FIXME
 	do_mmap(mapped_addr, requested_addr, length, prot, flags, filename_for_fd(fd), offset, caller);
+}
+
+void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)
+{
+	
 }
 
 static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg);
@@ -564,11 +568,28 @@ void __mmap_allocator_init(void)
 	}
 }
 
-static _Bool extend_sequence(struct mapping_sequence *cur, 
+void copy_all_left_from_by(struct mapping_sequence *s, int from, int by)
+{
+	memmove(s->mappings + from - by, s->mappings + from,
+		sizeof (struct mapping_entry) * (s->nused - from));
+	s->nused -= by;
+}
+
+void copy_all_right_from_by(struct mapping_sequence *s, int from, int by)
+{
+	memmove(s->mappings + from + by, s->mappings + from,
+		sizeof (struct mapping_entry) * (s->nused - from));
+	s->nused += by;
+}
+
+static _Bool augment_sequence(struct mapping_sequence *cur, 
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename,
 	void *caller)
 {
 	if (!cur) return 0;
+#define OVERLAPS(b1, e1, b2, e2) \
+    ((char*) (b1) < (char*) (e2) \
+    && (char*) (e1) >= (char*) (b2))
 	/* Can we extend the current mapping sequence?
 	 * This is tricky because ELF segments, "allocated" by __static_allocator,
 	 * must have a single parent mapping sequence.
@@ -576,38 +597,139 @@ static _Bool extend_sequence(struct mapping_sequence *cur,
 	 * that the *trailing* anonymous mapping gets lumped into the preceding 
 	 * mapping sequence, not the next one. We handle this with the
 	 * filename_is_consistent logic. */
-	_Bool is_contiguous = (!cur->end || cur->end == begin);
+	_Bool is_clean_extension = (!cur->end || cur->end == begin);
+	_Bool bounds_would_remain_contiguous
+		 = is_clean_extension || /* overlaps */ OVERLAPS(cur->begin, cur->end, begin, end);
+	_Bool begin_addr_unchanged = (char*) begin >= (char*) cur->begin;
 	_Bool filename_is_consistent = 
 			(!filename && !cur->filename) // both anonymous -- continue sequence
 			|| (cur->nused == 0) // can always begin afresh
-			|| /* can append at most one anonymous (memsz > filesz) at the end 
+			|| /* can contiguous-append at most one anonymous (memsz > filesz) at the end 
 			    * (I had said "maybe >1 of them" -- WHY?) 
 			    * and provided that caller is in the same object (i.e. both ldso, say). */ 
-			   (!filename && cur->filename && !(cur->mappings[cur->nused - 1].is_anon)
+			   (is_clean_extension
+			    && !filename && cur->filename && !(cur->mappings[cur->nused - 1].is_anon)
 			    && ((!caller && !cur->mappings[cur->nused - 1].caller) ||
 					get_highest_loaded_object_below(caller)
 			      == get_highest_loaded_object_below(cur->mappings[cur->nused - 1].caller)))
 			// ... but if we're not beginning afresh, can't go from anonymous to with-name
 			|| (filename && cur->filename && 0 == strcmp(filename, cur->filename));
-	_Bool not_too_many = cur->nused != MAPPING_SEQUENCE_MAX_LEN;
-	if (is_contiguous && filename_is_consistent && not_too_many)
+	_Bool not_too_many = cur->nused != MAPPING_SEQUENCE_MAX_LEN; /* FIXME: check against increase */
+	if (bounds_would_remain_contiguous && begin_addr_unchanged
+		&& filename_is_consistent && not_too_many)
 	{
-		if (!cur->begin) cur->begin = begin;
-		cur->end = end;
-		if (!cur->filename) cur->filename = filename ? __liballocs_private_strdup(filename) : NULL;
-		cur->mappings[cur->nused] = (struct mapping_entry) {
-			.begin = begin,
-			.end = end,
-			.flags = flags,
-			.prot = prot,
-			.offset = offset,
-			.is_anon = !filename,
-			.caller = caller
-		};
-		++(cur->nused);
-		return 1;
+		if (is_clean_extension)
+		{
+			if (!cur->begin) cur->begin = begin;
+			cur->end = end;
+			if (!cur->filename) cur->filename = filename ? __liballocs_private_strdup(filename) : NULL;
+			cur->mappings[cur->nused] = (struct mapping_entry) {
+				.begin = begin,
+				.end = end,
+				.flags = flags,
+				.prot = prot,
+				.offset = offset,
+				.is_anon = !filename,
+				.caller = caller
+			};
+			++(cur->nused);
+			return 1;
+		}
+		else
+		{
+			/* Skip to the first affected (overlapped) element in the sequence. */
+			int i = 0;
+			while (!(OVERLAPS(cur->mappings[i].begin, cur->mappings[i].end, begin, end))) ++i;
+			int first_overlapped = i;
+			
+			/* Find the last affected (overlapped) element in the sequence. */
+			i = cur->nused - 1;
+			while (!(OVERLAPS(cur->mappings[i].begin, cur->mappings[i].end, begin, end))) --i;
+			int last_overlapped = i;
+
+			_Bool begin_overlap_is_partial = 
+				cur->mappings[first_overlapped].begin != begin;
+			//_Bool begin_overlap_is_partial = 
+			//	!(first_overlap_covers_from_begin
+			//		&& cur->mappings[first_overlapped].end == end);
+			_Bool end_overlap_is_partial = 
+				cur->mappings[last_overlapped].end != end;
+			//_Bool end_overlap_is_partial = 
+			//	!(cur->mappings[last_overlapped].begin == begin
+			//		&& last_overlap_covers_to_end);
+
+			/* If there's only one affected, *and* it's being cleanly replaced,
+			 * just update it directly. */
+// 			if (first_overlapped == last_overlapped &&
+// 					!begin_overlap_is_partial)
+// 			{
+// 				cur->mappings[first_overlapped] = (struct mapping_entry) {
+// 					.begin = begin,
+// 					.end = end,
+// 					.flags = flags,
+// 					.prot = prot,
+// 					.offset = offset,
+// 					.is_anon = !filename,
+// 					.caller = caller
+// 				};
+// 				return 1;
+// 			}
+			
+			/* The number of obsolete mappings is the number to be
+			 * completely replaced. We want it to equal 1. */
+			/* Eliminate partial overlap at the beginning. */
+			if (begin_overlap_is_partial)
+			{
+				copy_all_right_from_by(cur, first_overlapped, 1);
+				if (first_overlapped != last_overlapped) ++last_overlapped;
+
+				cur->mappings[first_overlapped].end = begin;
+				cur->mappings[first_overlapped+1].begin = begin;
+
+				/* Update our state. */
+				begin_overlap_is_partial = 0;
+				if (first_overlapped == last_overlapped) ++last_overlapped;
+				++first_overlapped;
+			}
+			/* Eliminate partial overlap at the end. */
+			if (end_overlap_is_partial)
+			{
+				copy_all_right_from_by(cur, last_overlapped, 1);
+				/* last overlapped stays where it is */
+				
+				cur->mappings[last_overlapped + 1].begin = end;
+				cur->mappings[last_overlapped].end = end;
+
+				/* Update our state. */
+				end_overlap_is_partial = 0;
+			}
+			#define N_OBSOLETE_MAPPINGS (last_overlapped - first_overlapped) + 1
+			
+			assert(N_OBSOLETE_MAPPINGS >= 1);
+			
+			if (N_OBSOLETE_MAPPINGS > 1)
+			{
+				/* Delete in-the-middle mappings that are fully overlapped. */
+				unsigned n = N_OBSOLETE_MAPPINGS - 1;
+				copy_all_left_from_by(cur, last_overlapped + 1, n);
+				last_overlapped -= n;
+			}
+			
+			assert(N_OBSOLETE_MAPPINGS == 1);
+			assert(first_overlapped == last_overlapped);
+			cur->mappings[first_overlapped] = (struct mapping_entry) {
+				.begin = begin,
+				.end = end,
+				.flags = flags,
+				.prot = prot,
+				.offset = offset,
+				.is_anon = !filename,
+				.caller = caller
+			};
+			return 1;
+			
+		}
 	} else return 0;
-	
 }
 
 static _Bool extend_current(struct mapping_sequence *cur, struct proc_entry *ent)
@@ -640,7 +762,7 @@ static _Bool extend_current(struct mapping_sequence *cur, struct proc_entry *ent
 			return 0; // keep going
 	}
 	
-	return extend_sequence(cur, (void*) ent->first, (void*) ent->second, 
+	return augment_sequence(cur, (void*) ent->first, (void*) ent->second, 
 				  ((ent->r == 'r') ? PROT_READ : 0)
 				| ((ent->w == 'w') ? PROT_WRITE : 0)
 				| ((ent->x == 'x') ? PROT_EXEC : 0),
@@ -765,3 +887,231 @@ struct allocator __mmap_allocator = {
 	.get_info = get_info
 	/* FIXME: meta-protocol implementation */
 };
+
+#ifndef NDEBUG
+static void test_mapping_overlap(void)
+{
+	const struct mapping_entry ms[] = {
+		{ .begin = (void*) 0xbeef10000ul, .end = (void*) 0xbeef18000ul },
+		{ .begin = (void*) 0xbeef18000ul, .end = (void*) 0xbeef1c000ul },
+		{ .begin = (void*) 0xbeef1c000ul, .end = (void*) 0xbeef1e000ul },
+		{ .begin = (void*) 0xbeef1e000ul, .end = (void*) 0xbeef22000ul },
+		{ .begin = (void*) 0xbeef22000ul, .end = (void*) 0xbeef2a000ul }
+	};
+#define MAKE_FRESH_MAPPING_SEQUENCE(name) \
+	struct mapping_sequence name = { ms[0].begin, ms[4].end, "/test", sizeof ms / sizeof (struct mapping_entry) }; \
+	memcpy(name.mappings, ms, sizeof ms); \
+	bzero(name.mappings + name.nused, \
+	    sizeof (struct mapping_entry) * (MAPPING_SEQUENCE_MAX_LEN - name.nused));
+	
+	/* case 1: precise pre-overlap on first mapping only */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms1);
+	_Bool success1 = augment_sequence(&ms1, (void*) 0xbeef10000ul, (void*) 0xbeef14000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success1);
+	assert(ms1.nused == 6);
+	assert(ms1.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms1.mappings[0].end == (void*) 0xbeef14000ul);
+	assert(ms1.mappings[0].flags == 1);
+	assert(ms1.mappings[1].begin == (void*) 0xbeef14000ul);
+	assert(ms1.mappings[1].end == (void*) 0xbeef18000ul);
+	assert(ms1.mappings[1].flags == 0);
+	assert(ms1.mappings[5].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 2: mid-overlap on first mapping only */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms2);
+	_Bool success2 = augment_sequence(&ms2, (void*) 0xbeef14000ul, (void*) 0xbeef15000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success2);
+	assert(ms2.nused == 7);
+	assert(ms2.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms2.mappings[0].end == (void*) 0xbeef14000ul);
+	assert(ms2.mappings[0].flags == 0);
+	assert(ms2.mappings[1].begin == (void*) 0xbeef14000ul);
+	assert(ms2.mappings[1].end == (void*) 0xbeef15000ul);
+	assert(ms2.mappings[1].flags == 1);
+	assert(ms2.mappings[2].begin == (void*) 0xbeef15000ul);
+	assert(ms2.mappings[2].end == (void*) 0xbeef18000ul);
+	assert(ms2.mappings[2].flags == 0);
+	assert(ms2.mappings[6].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 3: precise end-overlap on first mapping only */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms3);
+	_Bool success3 = augment_sequence(&ms3, (void*) 0xbeef14000ul, (void*) 0xbeef18000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success3);
+	assert(ms3.nused == 6);
+	assert(ms3.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms3.mappings[0].end == (void*) 0xbeef14000ul);
+	assert(ms3.mappings[0].flags == 0);
+	assert(ms3.mappings[1].begin == (void*) 0xbeef14000ul);
+	assert(ms3.mappings[1].end == (void*) 0xbeef18000ul);
+	assert(ms3.mappings[1].flags == 1);
+	assert(ms3.mappings[5].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 4: overrunning mid-overlap on first mapping spanning 0 more, no last-mapping overlap  */
+	// this doesn't make sense
+
+	/* case 5: overrunning mid-overlap on first mapping spanning 1 more, no last-mapping overlap  */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms5);
+	_Bool success5 = augment_sequence(&ms5, (void*) 0xbeef14000ul, (void*) 0xbeef1c000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success5);
+	assert(ms5.nused == 5);
+	assert(ms5.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms5.mappings[0].end == (void*) 0xbeef14000ul);
+	assert(ms5.mappings[0].flags == 0);
+	assert(ms5.mappings[1].begin == (void*) 0xbeef14000ul);
+	assert(ms5.mappings[1].end == (void*) 0xbeef1c000ul);
+	assert(ms5.mappings[1].flags == 1);
+	assert(ms5.mappings[4].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 6: overrunning mid-overlap on first mapping spanning 2 more, no last-mapping overlap  */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms6);
+	_Bool success6 = augment_sequence(&ms6, (void*) 0xbeef14000ul, (void*) 0xbeef1e000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success6);
+	assert(ms6.nused == 4);
+	assert(ms6.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms6.mappings[0].end == (void*) 0xbeef14000ul);
+	assert(ms6.mappings[0].flags == 0);
+	assert(ms6.mappings[1].begin == (void*) 0xbeef14000ul);
+	assert(ms6.mappings[1].end == (void*) 0xbeef1e000ul);
+	assert(ms6.mappings[1].flags == 1);
+	assert(ms6.mappings[3].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 7: overrunning mid-overlap on first mapping spanning 0 more, last-mapping pre-overlap */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms7);
+	_Bool success7 = augment_sequence(&ms7, (void*) 0xbeef14000ul, (void*) 0xbeef1a000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success7);
+	assert(ms7.nused == 6);
+	assert(ms7.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms7.mappings[0].end == (void*) 0xbeef14000ul);
+	assert(ms7.mappings[0].flags == 0);
+	assert(ms7.mappings[1].begin == (void*) 0xbeef14000ul);
+	assert(ms7.mappings[1].end == (void*) 0xbeef1a000ul);
+	assert(ms7.mappings[1].flags == 1);
+	assert(ms7.mappings[2].begin == (void*) 0xbeef1a000ul);
+	assert(ms7.mappings[2].end == (void*) 0xbeef1c000ul);
+	assert(ms7.mappings[2].flags == 0);
+	assert(ms7.mappings[5].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 8: overrunning mid-overlap on first mapping spanning 1 more, last-mapping pre-overlap */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms8);
+	_Bool success8 = augment_sequence(&ms8, (void*) 0xbeef14000ul, (void*) 0xbeef1d000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success8);
+	assert(ms8.nused == 5);
+	assert(ms8.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms8.mappings[0].end == (void*) 0xbeef14000ul);
+	assert(ms8.mappings[0].flags == 0);
+	assert(ms8.mappings[1].begin == (void*) 0xbeef14000ul);
+	assert(ms8.mappings[1].end == (void*) 0xbeef1d000ul);
+	assert(ms8.mappings[1].flags == 1);
+	assert(ms8.mappings[2].begin == (void*) 0xbeef1d000ul);
+	assert(ms8.mappings[2].end == (void*) 0xbeef1e000ul);
+	assert(ms8.mappings[2].flags == 0);
+	assert(ms8.mappings[4].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 9: overrunning mid-overlap on first mapping spanning 2 more, last-mapping pre-overlap */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms9);
+	_Bool success9 = augment_sequence(&ms9, (void*) 0xbeef14000ul, (void*) 0xbeef1f000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success9);
+	assert(ms9.nused == 4);
+	assert(ms9.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms9.mappings[0].end == (void*) 0xbeef14000ul);
+	assert(ms9.mappings[0].flags == 0);
+	assert(ms9.mappings[1].begin == (void*) 0xbeef14000ul);
+	assert(ms9.mappings[1].end == (void*) 0xbeef1f000ul);
+	assert(ms9.mappings[1].flags == 1);
+	assert(ms9.mappings[2].begin == (void*) 0xbeef1f000ul);
+	assert(ms9.mappings[2].end == (void*) 0xbeef22000ul);
+	assert(ms9.mappings[2].flags == 0);
+	assert(ms9.mappings[3].end == (void*) 0xbeef2a000ul);
+	}
+	
+	/* case 10: overlap spanning 1 middle mapping exactly */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms10);
+	_Bool success10 = augment_sequence(&ms10, (void*) 0xbeef18000ul, (void*) 0xbeef1c000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success10);
+	assert(ms10.nused == 5);
+	assert(ms10.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms10.mappings[0].end == (void*) 0xbeef18000ul);
+	assert(ms10.mappings[0].flags == 0);
+	assert(ms10.mappings[1].begin == (void*) 0xbeef18000ul);
+	assert(ms10.mappings[1].end == (void*) 0xbeef1c000ul);
+	assert(ms10.mappings[1].flags == 1);
+	assert(ms10.mappings[2].begin == (void*) 0xbeef1c000ul);
+	assert(ms10.mappings[2].end == (void*) 0xbeef1e000ul);
+	assert(ms10.mappings[2].flags == 0);
+	assert(ms10.mappings[4].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 11: overlap spanning 2 middle mappings exactly */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms11);
+	_Bool success11 = augment_sequence(&ms11, (void*) 0xbeef18000ul, (void*) 0xbeef1e000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success11);
+	assert(ms11.nused == 4);
+	assert(ms11.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms11.mappings[0].end == (void*) 0xbeef18000ul);
+	assert(ms11.mappings[0].flags == 0);
+	assert(ms11.mappings[1].begin == (void*) 0xbeef18000ul);
+	assert(ms11.mappings[1].end == (void*) 0xbeef1e000ul);
+	assert(ms11.mappings[1].flags == 1);
+	assert(ms11.mappings[2].begin == (void*) 0xbeef1e000ul);
+	assert(ms11.mappings[2].end == (void*) 0xbeef22000ul);
+	assert(ms11.mappings[2].flags == 0);
+	assert(ms11.mappings[3].end == (void*) 0xbeef2a000ul);
+	}
+	
+	/* case 12: precise overlap from first mapping, overrunning 1, precise end */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms12);
+	_Bool success12 = augment_sequence(&ms12, (void*) 0xbeef10000ul, (void*) 0xbeef1c000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success12);
+	assert(ms12.nused == 4);
+	assert(ms12.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms12.mappings[0].end == (void*) 0xbeef1c000ul);
+	assert(ms12.mappings[0].flags == 1);
+	assert(ms12.mappings[1].begin == (void*) 0xbeef1c000ul);
+	assert(ms12.mappings[1].end == (void*) 0xbeef1e000ul);
+	assert(ms12.mappings[1].flags == 0);
+	assert(ms12.mappings[3].end == (void*) 0xbeef2a000ul);
+	}
+
+	/* case 13: precise overlap from first mapping, overrunning 1, pre-overlapping end */
+	{MAKE_FRESH_MAPPING_SEQUENCE(ms13);
+	_Bool success13 = augment_sequence(&ms13, (void*) 0xbeef10000ul, (void*) 0xbeef1d000ul, 
+		0x1, 0x1, 0xfeef, "/test", test_mapping_overlap);
+	assert(success13);
+	assert(ms13.nused == 4);
+	assert(ms13.mappings[0].begin == (void*) 0xbeef10000ul);
+	assert(ms13.mappings[0].end == (void*) 0xbeef1d000ul);
+	assert(ms13.mappings[0].flags == 1);
+	assert(ms13.mappings[1].begin == (void*) 0xbeef1d000ul);
+	assert(ms13.mappings[1].end == (void*) 0xbeef1e000ul);
+	assert(ms13.mappings[1].flags == 0);
+	assert(ms13.mappings[3].end == (void*) 0xbeef2a000ul);
+	}
+}
+
+/* HACK: to integrate this with the test/ infrastructure,
+ * the 'lib-test' test loads the liballocs_test.so library with dlopen.
+ * This *should* run its constructors, including this function. */
+static void run_tests(void) __attribute__((constructor));
+static void run_tests(void)
+{
+	test_mapping_overlap();
+}
+#endif

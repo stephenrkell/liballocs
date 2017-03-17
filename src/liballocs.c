@@ -1195,91 +1195,95 @@ int __liballocs_global_init(void)
 
 void __liballocs_post_systrap_init(void)
 {
-	/* Now we can correctly initialize libdlbind. */
-	__libdlbind_do_init();
-	__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
-	
-	/* Now we can grab our uniqtype pointers, or create them. */
-	/* Because the Unix linker is broken (see notes below on uniquing),
-	 * we can't have uniqueness of anything defined in a preload,
-	 * and from a preload we also can't bind to anything defined elsewhere.
-	 * So we use the dynamic linker to work around this mess. */
-	pointer_to___uniqtype__void = dlsym(RTLD_DEFAULT, "__uniqtype__void");
-#define SIZE_FOR_NRELATED(n) offsetof(struct uniqtype, related) + (n) * sizeof (struct uniqtype_rel_info)
-#define CREATE(varname, symname, nrelated, ...) \
-		size_t sz = SIZE_FOR_NRELATED(nrelated); \
-		pointer_to_ ## varname = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE); \
-		if (!pointer_to_ ## varname) abort(); \
-		*(struct uniqtype *) pointer_to_ ## varname = (struct uniqtype) __VA_ARGS__; \
-		dlbind(__liballocs_rt_uniqtypes_obj, #symname, pointer_to_ ## varname, sz, STT_OBJECT);
-	if (!pointer_to___uniqtype__void)
+	/* For testing, become no-op if systrap was not init'd. */
+	if (__liballocs_systrap_is_initialized)
 	{
-		CREATE(__uniqtype__void, __uniqtype__void, 1, {
-			.pos_maxoff = 0,
-			.un = { _void: { .kind = VOID } }
-		});
-	}
-	pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$8");
-	if (!pointer_to___uniqtype__signed_char)
-	{
-		CREATE(__uniqtype__signed_char, __uniqtype__signed_char$8, 1, {
-			.pos_maxoff = 0,
-			.un = { base: { .kind = BASE, .enc = DW_ATE_signed_char } }
-		});
-	}
-	pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$8");
-	if (!pointer_to___uniqtype__unsigned_char)
-	{
-		CREATE(__uniqtype__unsigned_char, __uniqtype__unsigned_char$8, 1, {
-			.pos_maxoff = 0,
-			.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned_char } }
-		});
-	}
-	
-	if (!(pointer_to___uniqtype__unsigned_char->related[0].un.t.ptr)) pointer_to___uniqtype__unsigned_char->related[0] = 
-		(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__signed_char } } };
-	if (!(pointer_to___uniqtype__signed_char->related[0].un.t.ptr)) pointer_to___uniqtype__signed_char->related[0] = 
-		(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__unsigned_char } } };
-	
-	pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
-	if (!pointer_to___uniqtype____PTR_signed_char)
-	{
-		CREATE(__uniqtype____PTR_signed_char, __uniqtype____PTR_signed_char$8, 1, {
-			.pos_maxoff = sizeof (char*),
-			.un = { address: { .kind = ADDRESS, .indir_level = 1 } }
-		});
-		pointer_to___uniqtype____PTR_signed_char->related[0] = (struct uniqtype_rel_info) {
-			{ t : { pointer_to___uniqtype__signed_char } }
-		};
-	}
-	pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$8");
-	if (!pointer_to___uniqtype____PTR___PTR_signed_char)
-	{
-		CREATE(__uniqtype____PTR___PTR_signed_char, __uniqtype____PTR___PTR_signed_char$8, 1, {
-			.pos_maxoff = sizeof (char**),
-			.un = { address: { .kind = ADDRESS, .indir_level = 2 } }
-		});
-		pointer_to___uniqtype____PTR___PTR_signed_char->related[0] = (struct uniqtype_rel_info) {
-			{ t : { pointer_to___uniqtype____PTR_signed_char } }
-		};
-	}
-	pointer_to___uniqtype__Elf64_auxv_t = dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_auxv_t");
-	if (!pointer_to___uniqtype__Elf64_auxv_t)
-	{
-		// FIXME: handle this
-	}
-	pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
-	if (!pointer_to___uniqtype____ARR0_signed_char)
-	{
-		// FIXME: handle this
-	}
-	pointer_to___uniqtype__intptr_t = dlsym(RTLD_DEFAULT, "__uniqtype__intptr_t");
-	if (!pointer_to___uniqtype__intptr_t)
-	{
-		// FIXME: handle this
-	}
+		/* Now we can correctly initialize libdlbind. */
+		__libdlbind_do_init();
+		__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+
+		/* Now we can grab our uniqtype pointers, or create them. */
+		/* Because the Unix linker is broken (see notes below on uniquing),
+		 * we can't have uniqueness of anything defined in a preload,
+		 * and from a preload we also can't bind to anything defined elsewhere.
+		 * So we use the dynamic linker to work around this mess. */
+		pointer_to___uniqtype__void = dlsym(RTLD_DEFAULT, "__uniqtype__void");
+	#define SIZE_FOR_NRELATED(n) offsetof(struct uniqtype, related) + (n) * sizeof (struct uniqtype_rel_info)
+	#define CREATE(varname, symname, nrelated, ...) \
+			size_t sz = SIZE_FOR_NRELATED(nrelated); \
+			pointer_to_ ## varname = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE); \
+			if (!pointer_to_ ## varname) abort(); \
+			*(struct uniqtype *) pointer_to_ ## varname = (struct uniqtype) __VA_ARGS__; \
+			dlbind(__liballocs_rt_uniqtypes_obj, #symname, pointer_to_ ## varname, sz, STT_OBJECT);
+		if (!pointer_to___uniqtype__void)
+		{
+			CREATE(__uniqtype__void, __uniqtype__void, 1, {
+				.pos_maxoff = 0,
+				.un = { _void: { .kind = VOID } }
+			});
+		}
+		pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$8");
+		if (!pointer_to___uniqtype__signed_char)
+		{
+			CREATE(__uniqtype__signed_char, __uniqtype__signed_char$8, 1, {
+				.pos_maxoff = 0,
+				.un = { base: { .kind = BASE, .enc = DW_ATE_signed_char } }
+			});
+		}
+		pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$8");
+		if (!pointer_to___uniqtype__unsigned_char)
+		{
+			CREATE(__uniqtype__unsigned_char, __uniqtype__unsigned_char$8, 1, {
+				.pos_maxoff = 0,
+				.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned_char } }
+			});
+		}
+
+		if (!(pointer_to___uniqtype__unsigned_char->related[0].un.t.ptr)) pointer_to___uniqtype__unsigned_char->related[0] = 
+			(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__signed_char } } };
+		if (!(pointer_to___uniqtype__signed_char->related[0].un.t.ptr)) pointer_to___uniqtype__signed_char->related[0] = 
+			(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__unsigned_char } } };
+
+		pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
+		if (!pointer_to___uniqtype____PTR_signed_char)
+		{
+			CREATE(__uniqtype____PTR_signed_char, __uniqtype____PTR_signed_char$8, 1, {
+				.pos_maxoff = sizeof (char*),
+				.un = { address: { .kind = ADDRESS, .indir_level = 1 } }
+			});
+			pointer_to___uniqtype____PTR_signed_char->related[0] = (struct uniqtype_rel_info) {
+				{ t : { pointer_to___uniqtype__signed_char } }
+			};
+		}
+		pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$8");
+		if (!pointer_to___uniqtype____PTR___PTR_signed_char)
+		{
+			CREATE(__uniqtype____PTR___PTR_signed_char, __uniqtype____PTR___PTR_signed_char$8, 1, {
+				.pos_maxoff = sizeof (char**),
+				.un = { address: { .kind = ADDRESS, .indir_level = 2 } }
+			});
+			pointer_to___uniqtype____PTR___PTR_signed_char->related[0] = (struct uniqtype_rel_info) {
+				{ t : { pointer_to___uniqtype____PTR_signed_char } }
+			};
+		}
+		pointer_to___uniqtype__Elf64_auxv_t = dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_auxv_t");
+		if (!pointer_to___uniqtype__Elf64_auxv_t)
+		{
+			// FIXME: handle this
+		}
+		pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
+		if (!pointer_to___uniqtype____ARR0_signed_char)
+		{
+			// FIXME: handle this
+		}
+		pointer_to___uniqtype__intptr_t = dlsym(RTLD_DEFAULT, "__uniqtype__intptr_t");
+		if (!pointer_to___uniqtype__intptr_t)
+		{
+			// FIXME: handle this
+		}
 #undef CREATE
 #undef SIZE_FOR_NRELATED
+	}
 }
 
 static void *typeobj_handle_for_addr(void *caller)

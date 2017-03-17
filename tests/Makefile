@@ -1,4 +1,4 @@
-CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -O2
+CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -O2
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
 CFLAGS += -DUSE_FAKE_LIBUNWIND=1
@@ -43,10 +43,6 @@ endif
 
 ifneq ($(LIBALLOCS_USE_PRELOAD),no)
 export PRELOAD := "$(LIBALLOCS)"
-else
-LIBHEAP_INDEX_HOOKS ?= $(realpath $(dir $(THIS_MAKEFILE))/../../libpmirror.hg/lib/libheap_index_fast_hooks.so)
-# FIXME: do we really need to preload liballocs in this case?
-export PRELOAD := "$(LIBHEAP_INDEX_HOOKS) $(LIBALLOCS)"
 endif
 
 INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then /bin/echo -f mk.inc; else true; fi`
