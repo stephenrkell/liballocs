@@ -367,6 +367,18 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		/* Do we abut any existing mapping? Just do the 'before' case. */
 		struct big_allocation *bigalloc_before = __lookup_bigalloc((char*) mapped_addr - 1, 
 			&__mmap_allocator, NULL);
+		if (!bigalloc_before)
+		{
+			struct big_allocation *overlap_begin = __lookup_bigalloc((char*) mapped_addr,
+				&__mmap_allocator, NULL);
+			struct big_allocation *overlap_end = __lookup_bigalloc((char*) mapped_addr + mapped_length - 1, 
+				&__mmap_allocator, NULL);
+			if (overlap_begin && (!overlap_end || overlap_begin == overlap_end))
+			{
+				/* okay, try extending this one */
+				bigalloc_before = overlap_begin;
+			}
+		}
 		if (bigalloc_before)
 		{
 			/* See if we can extend it. */
@@ -383,6 +395,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 				if (!success) abort();
 			}
 			if (success) return;
+			debug_printf(0, "Warning: mapping of %s could not extend preceding bigalloc", filename);
 		}
 
 		/* If we got here, we have to create a new bigalloc. */
@@ -601,25 +614,26 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 	_Bool bounds_would_remain_contiguous
 		 = is_clean_extension || /* overlaps */ OVERLAPS(cur->begin, cur->end, begin, end);
 	_Bool begin_addr_unchanged = (char*) begin >= (char*) cur->begin;
-	_Bool filename_is_consistent = 
-			(!filename && !cur->filename) // both anonymous -- continue sequence
-			|| (cur->nused == 0) // can always begin afresh
-			|| /* can contiguous-append at most one anonymous (memsz > filesz) at the end 
-			    * (I had said "maybe >1 of them" -- WHY?) 
-			    * and provided that caller is in the same object (i.e. both ldso, say). */ 
-			   (is_clean_extension
-			    && !filename && cur->filename && !(cur->mappings[cur->nused - 1].is_anon)
-			    && ((!caller && !cur->mappings[cur->nused - 1].caller) ||
-					get_highest_loaded_object_below(caller)
-			      == get_highest_loaded_object_below(cur->mappings[cur->nused - 1].caller)))
-			// ... but if we're not beginning afresh, can't go from anonymous to with-name
-			|| (filename && cur->filename && 0 == strcmp(filename, cur->filename));
 	_Bool not_too_many = cur->nused != MAPPING_SEQUENCE_MAX_LEN; /* FIXME: check against increase */
 	if (bounds_would_remain_contiguous && begin_addr_unchanged
-		&& filename_is_consistent && not_too_many)
+		&& not_too_many)
 	{
 		if (is_clean_extension)
 		{
+			_Bool filename_is_consistent = 
+					(!filename && !cur->filename) // both anonymous -- continue sequence
+					|| (cur->nused == 0) // can always begin afresh
+					|| /* can contiguous-append at most one anonymous (memsz > filesz) at the end 
+						* (I had said "maybe >1 of them" -- WHY?) 
+						* and provided that caller is in the same object (i.e. both ldso, say). */ 
+						(!filename && cur->filename && !(cur->mappings[cur->nused - 1].is_anon)
+						&& ((!caller && !cur->mappings[cur->nused - 1].caller) ||
+							get_highest_loaded_object_below(caller)
+						  == get_highest_loaded_object_below(cur->mappings[cur->nused - 1].caller)))
+					// ... but if we're not beginning afresh, can't go from anonymous to with-name
+					|| (filename && cur->filename && 0 == strcmp(filename, cur->filename));
+			if (!filename_is_consistent) return 0;
+			
 			if (!cur->begin) cur->begin = begin;
 			cur->end = end;
 			if (!cur->filename) cur->filename = filename ? __liballocs_private_strdup(filename) : NULL;
@@ -657,6 +671,58 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 			//_Bool end_overlap_is_partial = 
 			//	!(cur->mappings[last_overlapped].begin == begin
 			//		&& last_overlap_covers_to_end);
+			
+			/* Do the filename consistency check. This is important to ensure that
+			 * mappings from unrelated objects do not get grouped together as one sequence. */
+			_Bool filename_is_consistent;
+			if ((!filename && !cur->filename) // both anonymous -- continue sequence
+					|| (cur->nused == 0))
+			{
+				// can always begin afresh
+				filename_is_consistent = 1;
+			}
+			else
+			{
+				/* It's never okay to involve more than one filename. */
+				if (filename && cur->filename && 0 != strcmp(filename, cur->filename))
+				{
+					filename_is_consistent = 0;
+				}
+				else
+				{
+					/* Check that we maintain the invariant that all the anonymous
+					 * mappings are at the end. */
+					int maybe_mapping_preceding_overlap = 
+							begin_overlap_is_partial ? first_overlapped : first_overlapped - 1;
+					int maybe_mapping_following_overlap = 
+							end_overlap_is_partial ? last_overlapped : last_overlapped + 1;
+					if (maybe_mapping_following_overlap >= cur->nused)
+					{
+						maybe_mapping_following_overlap = -1;
+					}
+					
+					/* Are we creating an anonymous-to-filename'd "rising edge"? */
+					if ((maybe_mapping_preceding_overlap != -1
+							&& (cur->mappings[maybe_mapping_preceding_overlap].is_anon
+								&& filename))
+						|| (maybe_mapping_following_overlap != -1
+							&& (!filename
+								&& !cur->mappings[maybe_mapping_following_overlap].is_anon))
+						)
+					{
+						/* Edge detected -- oh dear. */
+						filename_is_consistent = 0;
+					}
+					else filename_is_consistent = 1;
+					
+					/* Final check on caller */
+					filename_is_consistent &= 
+						(!caller || !cur->mappings[first_overlapped].caller ||
+							get_highest_loaded_object_below(caller)
+						  == get_highest_loaded_object_below(cur->mappings[first_overlapped].caller));
+				}
+			}
+			if (!filename_is_consistent) return 0;
 
 			/* If there's only one affected, *and* it's being cleanly replaced,
 			 * just update it directly. */
