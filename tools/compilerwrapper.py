@@ -42,18 +42,19 @@ class SourceFile(InputFile):
         return None
     def nameAfterPhase(self, phase):
         stem, ext = os.path.splitext(self)
+        stemDirname, stemBasename = (os.path.dirname(stem), os.path.basename(stem))
         if phase == Phase.DRIVER:
             return self
         if phase == Phase.COMPILE:
-            return stem + ".s"
+            return stemBasename + ".s"
         if phase == Phase.ASSEMBLE:
-            return stem + ".o"
+            return stemBasename + ".o"
         if phase == Phase.PREPROCESS:
             langToUse = lang if lang != None else guessInputLanguageFromFilename(self)
             if langToUse == "c":
-                return stem + ".i"
+                return stemBasename + ".i"
             elif langToUse == "c++":
-                return stem + ".ii"
+                return stemBasename + ".ii"
         # if we got here, then, hmm, we're not sure
         return None
         
