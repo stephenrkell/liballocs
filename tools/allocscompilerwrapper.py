@@ -1,4 +1,6 @@
 import os, sys, re, subprocess, tempfile, copy
+import distutils
+import distutils.spawn
 from compilerwrapper import *
 
 class AllocsCompilerWrapper(CompilerWrapper):
@@ -91,6 +93,20 @@ class AllocsCompilerWrapper(CompilerWrapper):
     # please override me
     def getBasicCompilerCommand(self):
         return ["cc"]
+    
+    # This is different: we want a C compiler that we can reliably use
+    # to compile generate code. To avoid infinite regress or unwanted
+    # recursive application of whatever compiler-wrapping cleverness
+    # we're doing, we need to get one that *is not us*. 
+    def getBasicCCompilerCommand(self):
+        ourPath = os.path.realpath(sys.argv[0])
+        whichOutput = subprocess.Popen(["which", "-a", "cc"], stdout=subprocess.PIPE, stderr=sys.stderr).communicate()[0]
+        for cmd in [l for l in whichOutput.split("\n") if l != '']:
+            if os.path.realpath(cmd) != ourPath:
+                sys.stderr.write("Using basic C compiler: %s (we are: %s)\n" % (str(cmd), str(ourPath)))
+                return [cmd]
+        sys.stderr.write("abort: could not find a C compiler which is not us.\n")
+        exit(2)
     
     def getCompilerCommand(self, itemsAndOptions):
         # we add -ffunction-sections to ensure that references to malloc functions 
@@ -389,7 +405,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # then compile with a more tightly controlled set
             extraFlags = self.getStubGenCompileArgs()
             extraFlags += ["-fPIC"]
-            stubs_pp_cmd = ["cc", "-std=c11", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
+            stubs_pp_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
                 "-I" + self.getLibAllocsBaseDir() + "/tools"] \
                 + [arg for arg in self.phaseItems[Phase.PREPROCESS] if arg.startswith("-D")] \
                 + [stubsfile.name]
@@ -418,7 +434,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
                     % (stubs_pp, ret_stubs_sed))
                 exit(1)
-            stubs_cc_cmd = ["cc", "-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
+            stubs_cc_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
                 "-I" + self.getLibAllocsBaseDir() + "/tools", \
                 stubs_pp]
             self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
