@@ -193,7 +193,9 @@ static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 static void do_munmap(void *addr, size_t length, void *caller)
 {
 	char *cur = (char*) addr;
-	size_t remaining_length = length;
+	/* Linux lets us munmap *less* than a full page, with the effect of 
+	 * unmapping the whole page. Sigh. */
+	size_t remaining_length = ROUND_UP(length, PAGE_SIZE);
 	while (cur < (char*) addr + length)
 	{
 		/* We're always working at level 0 */
@@ -395,7 +397,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 				if (!success) abort();
 			}
 			if (success) return;
-			debug_printf(0, "Warning: mapping of %s could not extend preceding bigalloc", filename);
+			debug_printf(0, "Warning: mapping of %s could not extend preceding bigalloc\n", filename);
 		}
 
 		/* If we got here, we have to create a new bigalloc. */
