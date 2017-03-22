@@ -801,6 +801,7 @@ struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_deepest_bigalloc(const void *mem)
 {
+	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	struct big_allocation *b = find_deepest_bigalloc(mem);
@@ -835,6 +836,7 @@ static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const 
 
 struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr, const void *end)
 {
+	if (!pageindex) init();
 	return get_common_parent_bigalloc(ptr, end);
 }
 
