@@ -19,7 +19,7 @@
 
 /* Prototype the hook_* functions. */
 #undef HOOK_PREFIX
-#define HOOK_PREFIX(i) i
+#define HOOK_PREFIX(i) hook_ ## i
 #include "hook_protos.h"
 #undef HOOK_PREFIX
 /* Prototype the __terminal_hook_* functions. */
