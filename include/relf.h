@@ -745,7 +745,7 @@ ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sy
 	ElfW(Dyn) *gnu_hash_ent = dynamic_lookup(l->l_ld, DT_GNU_HASH);
 	ElfW(Word) *gnu_hash = gnu_hash_ent ? (ElfW(Word) *) gnu_hash_ent->d_un.d_ptr : NULL;
 	if ((intptr_t) gnu_hash < 0) return 0; // HACK: x86-64 vdso workaround
-	if ((uintptr_t) gnu_hash < l->l_addr) return 0; // HACK: x86-64 vdso workaround
+	if (gnu_hash && (uintptr_t) gnu_hash < l->l_addr) return 0; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab = (ElfW(Sym) *) dynamic_xlookup(l->l_ld, DT_SYMTAB)->d_un.d_ptr;
 	if ((intptr_t) symtab < 0) return 0; // HACK: x86-64 vdso workaround
 	ElfW(Sym) *symtab_end = symtab + dynamic_symbol_count(l->l_ld, l);
