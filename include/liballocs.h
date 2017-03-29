@@ -182,7 +182,10 @@ Dl_info dladdr_with_cache(const void *addr);
 int __liballocs_iterate_types(void *typelib_handle, 
 		int (*cb)(struct uniqtype *t, void *arg), void *arg);
 /* Our main API: query allocation information for a pointer */
-inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
+#if defined(__PIC__) || defined(__code_model_large__) /* see note below! */
+inline 
+#endif
+struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);
