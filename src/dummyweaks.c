@@ -65,7 +65,13 @@ void __liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, con
 	
 }
 
+void *__liballocs_allocsmt;
+
 unsigned long __liballocs_get_alloc_size(const void *obj)
+{
+	return 0;
+}
+void *__liballocs_get_alloc_site(const void *obj)
 {
 	return 0;
 }
