@@ -1,6 +1,11 @@
 #ifndef RELF_H_
 #define RELF_H_
 
+#ifdef __cplusplus
+extern "C" {
+typedef bool _Bool;
+#endif
+
 #include <stddef.h> /* for offsetof */
 #include <stdint.h>
 #include <elf.h>
@@ -350,13 +355,13 @@ get_lowest_loaded_object_above(void *ptr)
 
 static inline void *get_local_load_addr(void)
 {
-	return (void*) get_highest_loaded_object_below(&get_local_load_addr)->l_addr;
+	return (void*) get_highest_loaded_object_below((void*) &get_local_load_addr)->l_addr;
 }
 
 extern int _etext;
 static inline void *get_local_text_segment_end(void)
 {
-	char *our_load_addr = get_local_load_addr();
+	char *our_load_addr = (char*) get_local_load_addr();
 	uintptr_t etext_value = (uintptr_t) &_etext;
 	// MONSTER HACK: sometimes _etext references are relocated, others not.
 	// FIXME: understand this.
@@ -453,8 +458,8 @@ ElfW(Sym) *hash_lookup(ElfW(Word) *hash, ElfW(Sym) *symtab, const char *strtab, 
 	ElfW(Word) nbucket = hash[0];
 	ElfW(Word) nchain __attribute__((unused)) = hash[1];
 	/* gcc accepts these funky "dependent types", but frontc doesn't */
-	ElfW(Word) (*buckets)[/*nbucket*/] = (void*) &hash[2];
-	ElfW(Word) (*chains)[/*nchain*/] = (void*) &hash[2 + nbucket];
+	ElfW(Word) (*buckets)[/*nbucket*/] = (ElfW(Word)(*)[]) &hash[2];
+	ElfW(Word) (*chains)[/*nchain*/] = (ElfW(Word)(*)[]) &hash[2 + nbucket];
 
 	unsigned long h = elf64_hash((const unsigned char *) sym);
 	ElfW(Word) first_symind = (*buckets)[h % nbucket];
@@ -478,8 +483,8 @@ int hash_walk_syms(ElfW(Word) *hash, int (*cb)(ElfW(Sym) *, void *), ElfW(Sym) *
 {
 	ElfW(Word) nbucket = hash[0];
 	ElfW(Word) nchain __attribute__((unused)) = hash[1];
-	ElfW(Word) (*buckets)[/*nbucket*/] = (void*) &hash[2];
-	ElfW(Word) (*chains)[/*nchain*/] = (void*) &hash[2 + nbucket];
+	ElfW(Word) (*buckets)[/*nbucket*/] = (ElfW(Word)(*)[]) &hash[2];
+	ElfW(Word) (*chains)[/*nchain*/] = (ElfW(Word)(*)[]) &hash[2 + nbucket];
 
 	for (int bucketn = 0; bucketn < nbucket; ++bucketn)
 	{
@@ -730,7 +735,7 @@ ElfW(Sym) *symbol_lookup_linear_local(const char *sym)
 	if ((intptr_t) strtab < 0) return NULL; // HACK: x86-64 vdso workaround
 	const char *strtab_end = strtab + local_dynamic_xlookup(DT_STRSZ)->d_un.d_val;
 	/* Round down to the alignment of ElfW(Sym). */
-	ElfW(Sym) *symtab_end = ROUND_DOWN_PTR(strtab, sizeof (ElfW(Sym)));
+	ElfW(Sym) *symtab_end = (ElfW(Sym)*) ROUND_DOWN_PTR(strtab, sizeof (ElfW(Sym)));
 	return symbol_lookup_linear(symtab, symtab_end, strtab, strtab_end, sym);
 }
 
@@ -776,7 +781,7 @@ void *sym_to_addr(ElfW(Sym) *sym)
 	/* HACK for ifunc */
 	if (ELF64_ST_TYPE(sym->st_info) == STT_GNU_IFUNC)
 	{
-		void *(*ifunc)(void) = LOAD_ADDR_FIXUP(sym->st_value, sym);
+		void *(*ifunc)(void) = (void*(*)(void)) LOAD_ADDR_FIXUP(sym->st_value, sym);
 		return ifunc();
 	}
 	else return LOAD_ADDR_FIXUP(sym->st_value, sym);
@@ -911,5 +916,9 @@ int fake_dladdr(void *addr, const char **out_fname, void **out_fbase, const char
 	}
 	return success; /* i.e. "return 0 on error", like dladdr */
 }
+
+#ifdef __cplusplus
+} /* end extern "C" */
+#endif
 
 #endif
