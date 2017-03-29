@@ -2,6 +2,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_PREREQ([2.69])
 AC_INIT([liballocs], [0.1], [srk31@cl.cam.ac.uk])
 AC_CONFIG_SRCDIR([tools/ifacetypes.cpp])
+AC_CONFIG_HEADERS([config.h])
 AC_PREFIX_DEFAULT(/usr/local)
 
 CFLAGS="-I$prefix/include $CFLAGS"
@@ -11,7 +12,9 @@ LDFLAGS="-L$prefix/lib $LDFLAGS"
 PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
 export CFLAGS CXXFLAGS LDFLAGS PKG_CONFIG_PATH
 
-LT_INIT
+LT_CONFIG_LTDL_DIR([libltdl])
+LT_INIT([dlopen])
+LTDL_INIT([nonrecursive])
 AC_LANG([C++])
 AM_INIT_AUTOMAKE([foreign subdir-objects -Wno-portability])
 AM_MAINTAINER_MODE

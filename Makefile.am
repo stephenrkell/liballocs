@@ -3,11 +3,20 @@ ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = . tools/lang src lib
 
 # NOTE: being C++, these only affect build of the tools, not the liballocs core.
-AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++11 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -DBOOST_OPTIONAL_CONFIG_ALLOW_BINDING_TO_RVALUES
-
+AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -DBOOST_OPTIONAL_CONFIG_ALLOW_BINDING_TO_RVALUES
+AM_CPPFLAGS =
 AM_CFLAGS = -Wall -std=gnu99 -ggdb -O3 -flto -Iinclude -fPIC -Wp,-w
+AM_LDFLAGS =
 
-AM_LDFLAGS = -Wl,--no-as-needed -lstdc++ -lm -lboost_regex $(DWARFIDL_LIBS) $(LIBCXXGEN_LIBS) $(LIBDWARFPP_LIBS) $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) -ldl
+# ltdl complains if I don't set these....
+noinst_LTLIBRARIES =
+include_HEADERS =
+lib_LTLIBRARIES =
+EXTRA_DIST =
+EXTRA_LTLIBRARIES =
+CLEANFILES =
+BUILT_SOURCES =
+MOSTLYCLEANFILES =
 
 extra_DIST = liballocs.pc.in
 pkgconfigdir = $(libdir)/pkgconfig
@@ -18,24 +27,32 @@ liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack
 
 bin_PROGRAMS = tools/dumptypes tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size 
 #tools/objdumpallocs-llvm
-lib_LIBRARIES = tools/liballocstool.a 
+lib_LIBRARIES = tools/liballocstool.a
 
 tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
 
+pkglib_LTLIBRARIES = tools/gold-plugin.la
+tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
+tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
+
 LIBELF ?= -lelf
 
+TOOLS_LDADD := tools/liballocstool.a \
+ $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(LIBANTLR3CXX_LIBS) $(DWARFIDL_LIBS) \
+-lantlr3c -ldwarf $(LIBELF) -lz
+
 tools_dumptypes_SOURCES = tools/dumptypes.cpp
-tools_dumptypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
+tools_dumptypes_LDADD = $(TOOLS_LDADD)
 tools_dumpptrs_SOURCES = tools/dumpptrs.cpp
-tools_dumpptrs_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
+tools_dumpptrs_LDADD = $(TOOLS_LDADD)
 tools_allocsites_SOURCES = tools/allocsites.cpp $(HELPERS)
-tools_allocsites_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
+tools_allocsites_LDADD = $(TOOLS_LDADD)
 tools_usedtypes_SOURCES = tools/usedtypes.cpp $(HELPERS)
-tools_usedtypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
+tools_usedtypes_LDADD = $(TOOLS_LDADD)
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
-tools_ifacetypes_LDADD = tools/liballocstool.a -lantlr3c -ldwarf $(LIBELF) -lz
+tools_ifacetypes_LDADD = $(TOOLS_LDADD)
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
-tools_find_allocated_type_size_LDADD = tools/liballocstool.a -ldwarf $(LIBELF) -lz
+tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.
@@ -84,6 +101,20 @@ LIBANTLR3CXX_CXXFLAGS LIBANTLR3CXX_LIBS \
 DWARFIDL_CXXFLAGS DWARFIDL_LIBS \
 TRAP_SYSCALLS MALLOC_HOOKS LIBDLBIND \
 CC CXX CPP CXXFLAGS LDFLAGS LDLIBS
+
+include libltdl/Makefile.inc
+
+tools/gold-plugin.so: $(lib_LTLIBRARIES)
+	echo "gold-plugin.so: creating convenience link from $(abs_builddir)/.libs to $(top_builddir)"; \
+            rm -f $(top_builddir)/tools/gold-plugin.so ; \
+            test -e $(abs_builddir)/tools/.libs/gold-plugin.so && \
+            cd $(top_builddir) && \
+            $(LN_S) $(abs_builddir)/tools/.libs/gold-plugin.so tools/gold-plugin.so || true
+
+all-am: tools/gold-plugin.so
+
+clean::
+	rm -f tools/gold-plugin.so
 
 # dummy target for now
 llvm:
