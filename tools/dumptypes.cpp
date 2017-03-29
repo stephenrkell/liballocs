@@ -279,7 +279,7 @@ int main(int argc, char **argv)
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	
-	write_master_relation(master_relation, root, cout, cerr, true /* emit_void */, true, 
+	write_master_relation(master_relation, cout, cerr, true /* emit_void */, true, 
 		names_emitted, types_by_name, /* emit_codeless_alises */ true);
 	
 	cerr << "Allocsites relation has " << allocsites_relation.size() << " members." << endl;

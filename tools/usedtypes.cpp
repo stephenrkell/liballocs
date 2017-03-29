@@ -16,6 +16,7 @@
 #include <cxxgen/cxx_compiler.hpp>
 #include <dwarfpp/lib.hpp>
 #include <fileno.hpp>
+#include <fstream>
 
 #include "helpers.hpp"
 #include "uniqtypes.hpp"
@@ -26,6 +27,7 @@ using std::cerr;
 using std::map;
 using std::multimap;
 using std::make_shared;
+using std::unique_ptr;
 using std::ios;
 using std::ifstream;
 using std::dynamic_pointer_cast;
@@ -62,6 +64,30 @@ using boost::match_default;
 using boost::format_all;
 
 static int debug_out = 1;
+
+static void for_each_uniqtype_reference_in(const string &filename,
+	std::function<void(const string&)> f)
+{
+	FILE *in = popen((string("nm -fposix -u '") + filename
+	 + "' | sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype").c_str(), "r");
+	assert(in);
+	
+	int ret;
+	char *line = NULL;
+	size_t line_len;
+	/* Now popen our input, read lines and match them against the map we just built. */
+	while (ret = getline(&line, &line_len, in), ret > 0)
+	{
+		string key(line);
+		// trim the newline, if any
+		boost::trim(key);
+		f(key);
+		
+		free(line);
+		line = NULL;
+	}
+	fclose(in);
+}
 
 int main(int argc, char **argv)
 {
@@ -107,15 +133,10 @@ int main(int argc, char **argv)
 	   
 	*/
 	
-	if (argc <= 1) 
+	unsigned nfiles = argc - 1;
+	if (nfiles < 1) 
 	{
 		cerr << "Please name an input file." << endl;
-		exit(1);
-	}
-	std::ifstream infstream(argv[1]);
-	if (!infstream) 
-	{
-		cerr << "Could not open file " << argv[1] << endl;
 		exit(1);
 	}
 	
@@ -125,142 +146,147 @@ int main(int argc, char **argv)
 	}
 	
 	using core::root_die;
-
-	root_die r(fileno(infstream));
+	std::vector<std::unique_ptr<std::ifstream> > infstreams(nfiles); 
+	std::vector<std::unique_ptr<root_die> > rs(nfiles);
 	
 	/* First we look through the whole file and index its types by their *codeless*
 	 * *canonical* uniqtype name, i.e. we blank out the first element of the name pair. */
 	multimap<string, iterator_df<type_die> > types_by_codeless_uniqtype_name;
-	get_types_by_codeless_uniqtype_name(types_by_codeless_uniqtype_name, 
-		r.begin(), r.end());
 
-	// FIXME: escape single quotes
-	FILE *in = popen((string("nm -fposix -u '") + argv[1]
-	 + "' | sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype").c_str(), "r");
-	assert(in);
-	
-	int ret;
-	char *line = NULL;
-	size_t line_len;
-	/* Now popen our input, read lines and match them against the map we just built. */
 	master_relation_t master_relation;
 	multimap<string, pair<string, string> > aliases_needed;
-	while (ret = getline(&line, &line_len, in), ret > 0)
+	
+	for (unsigned i = 0; i < nfiles; ++i)
 	{
-		string key(line);
-		// trim the newline, if any
-		boost::trim(key);
-		auto found_pair = types_by_codeless_uniqtype_name.equal_range(key);
-		unsigned found_count = srk31::count(found_pair.first, found_pair.second);
-		
-		switch (found_count)
+		string fname = argv[1+i];
+		infstreams[i] = std::move(unique_ptr<std::ifstream>(new std::ifstream(fname)));
+		std::ifstream & infstream = *infstreams[i];
+		if (!infstream) 
 		{
-			case 0:
-				cerr << "Found no match for " << key << endl;
-				/* HACK around CIL brokenness: if we contain the string 
-				 *     "__FUN_FROM___FUN_TO_" 
-				 * then match against
-				 *     "__FUN_FROM___VA___FUN_TO_" 
-				 * since CIL typesigs don't distinguish between 
-				 * "no specified parameters"        e.g. int f() 
-				 * and "specified as no parameters" e.g. int f(void).
-				 * 
-				 * This will ensure that some type gets emitted, such that we
-				 * can bind up the UNDefined uniqtype to it. 
-				 * BUT
-				 * We will emit it under its rightful name, so the reference
-				 * won't get bound just like that. Previously we dealt with
-				 * this by creating an alias, but in fact we need to emit
-				 * the uniqtype *again* under the correct section name. 
-				 * Otherwise the name we want might get eliminated by COMDAT
-				 * if a non-worked-around section appears in the same link.
-				 */
-				{
-					string search_expr = "__FUN_FROM___FUN_TO_";
-					string replace_expr = "__FUN_FROM___VA___FUN_TO_";
-					string::size_type pos = key.find(search_expr);
-					if (pos != string::npos)
+			cerr << "Could not open file " << argv[1] << endl;
+			exit(1);
+		}
+
+		rs[i] = std::move(unique_ptr<root_die>(new root_die(fileno(infstream))));
+		root_die &r = *rs[i];
+		
+		auto f = [&](const string& key) {
+
+			get_types_by_codeless_uniqtype_name(types_by_codeless_uniqtype_name, 
+				r.begin(), r.end());
+			
+			// FIXME: escape single quotes
+			
+			auto found_pair = types_by_codeless_uniqtype_name.equal_range(key);
+			unsigned found_count = srk31::count(found_pair.first, found_pair.second);
+		
+			switch (found_count)
+			{
+				case 0:
+					cerr << "Found no match for " << key << endl;
+					/* HACK around CIL brokenness: if we contain the string 
+					 *     "__FUN_FROM___FUN_TO_" 
+					 * then match against
+					 *     "__FUN_FROM___VA___FUN_TO_" 
+					 * since CIL typesigs don't distinguish between 
+					 * "no specified parameters"        e.g. int f() 
+					 * and "specified as no parameters" e.g. int f(void).
+					 * 
+					 * This will ensure that some type gets emitted, such that we
+					 * can bind up the UNDefined uniqtype to it. 
+					 * BUT
+					 * We will emit it under its rightful name, so the reference
+					 * won't get bound just like that. Previously we dealt with
+					 * this by creating an alias, but in fact we need to emit
+					 * the uniqtype *again* under the correct section name. 
+					 * Otherwise the name we want might get eliminated by COMDAT
+					 * if a non-worked-around section appears in the same link.
+					 */
 					{
-						string substitute_key = key;
-						substitute_key.replace(pos, search_expr.size(), replace_expr);
-						
-						auto found_retry_pair = types_by_codeless_uniqtype_name.equal_range(substitute_key);
-						if (found_retry_pair.first != found_retry_pair.second)
+						string search_expr = "__FUN_FROM___FUN_TO_";
+						string replace_expr = "__FUN_FROM___VA___FUN_TO_";
+						string::size_type pos = key.find(search_expr);
+						if (pos != string::npos)
 						{
-							cerr << "Working around CIL bug by substituting " << substitute_key << endl;
-							auto name_pair = transitively_add_type(found_retry_pair.first->second, master_relation).second;
-							
-							string orig_substitute_key = substitute_key;
-							
-							substitute_key.replace(0, string("__uniqtype_").size(), "__uniqtype_" + name_pair.first);
-							
-							string orig_key_symname = key;
-							orig_key_symname.replace(0, string("__uniqtype_").size(), "__uniqtype_" + name_pair.first);
-							
-							aliases_needed.insert(make_pair(orig_key_symname, make_pair(orig_substitute_key, substitute_key)));
-							break;
+							string substitute_key = key;
+							substitute_key.replace(pos, search_expr.size(), replace_expr);
+
+							auto found_retry_pair = types_by_codeless_uniqtype_name.equal_range(substitute_key);
+							if (found_retry_pair.first != found_retry_pair.second)
+							{
+								cerr << "Working around CIL bug by substituting " << substitute_key << endl;
+								auto name_pair = transitively_add_type(found_retry_pair.first->second, master_relation).second;
+
+								string orig_substitute_key = substitute_key;
+
+								substitute_key.replace(0, string("__uniqtype_").size(), "__uniqtype_" + name_pair.first);
+
+								string orig_key_symname = key;
+								orig_key_symname.replace(0, string("__uniqtype_").size(), "__uniqtype_" + name_pair.first);
+
+								aliases_needed.insert(make_pair(orig_key_symname, make_pair(orig_substitute_key, substitute_key)));
+								break;
+							}
 						}
 					}
-				}
-				cerr << "Defined are: ";
-				for (auto i_tname = types_by_codeless_uniqtype_name.begin(); i_tname != types_by_codeless_uniqtype_name.end(); ++i_tname)
-				{
-					if (i_tname != types_by_codeless_uniqtype_name.begin()) cerr << ", ";
-					cerr << i_tname->first;
-				}
-				cerr << endl;
-				exit(1);
-				break;
-			case 1: 
-				// cout << "Found match for " << key << ": " << found_pair.first->second << endl;
-				transitively_add_type(found_pair.first->second, master_relation);
-				break;
-			
-			default: 
-				cerr << "Found multiple matches (" << found_count << ") for " << key << ": " << endl;
-				auto first_found = found_pair.first;
-				multimap<opt<uint32_t>, decltype(found_pair.first)> by_code;
-				for (auto i_print = found_pair.first; i_print != found_pair.second; ++i_print)
-				{
-					auto code = type_summary_code(i_print->second);
-					by_code.insert(make_pair(code, i_print));
-					cerr << "\t" 
-						<< i_print->second
-						<< " (code: " 
-						<< summary_code_to_string(code) 
-						<< ")" << endl;
-				}
-				/* Do they all seem to be identical? */
-				auto range_equal_to_first = by_code.equal_range(type_summary_code(first_found->second));
-				if (srk31::count(range_equal_to_first.first, range_equal_to_first.second)
-				 == found_count)
-				{
-					auto code = type_summary_code(first_found->second);
-					cerr << "They all seem to be identical (code " 
-						<< (code ? *code : -1)
-						<< ") so proceeding." << endl;
-					transitively_add_type(first_found->second, master_relation);
-				}
-				else 
-				{
-					cerr << "Not identical, so not proceeding." << endl;
+					cerr << "Defined are: ";
+					for (auto i_tname = types_by_codeless_uniqtype_name.begin(); i_tname != types_by_codeless_uniqtype_name.end(); ++i_tname)
+					{
+						if (i_tname != types_by_codeless_uniqtype_name.begin()) cerr << ", ";
+						cerr << i_tname->first;
+					}
+					cerr << endl;
 					exit(1);
-				}
-			// end case default
-		}
-	
-	continue_loop:
-		free(line);
-		line = NULL;
-	}
-	
-	fclose(in);
+					break;
+				case 1: 
+					// cout << "Found match for " << key << ": " << found_pair.first->second << endl;
+					transitively_add_type(found_pair.first->second, master_relation);
+					break;
+
+				default: 
+					cerr << "Found multiple matches (" << found_count << ") for " << key << ": " << endl;
+					auto first_found = found_pair.first;
+					multimap<opt<uint32_t>, decltype(found_pair.first)> by_code;
+					for (auto i_print = found_pair.first; i_print != found_pair.second; ++i_print)
+					{
+						auto code = type_summary_code(i_print->second);
+						by_code.insert(make_pair(code, i_print));
+						cerr << "\t" 
+							<< i_print->second
+							<< " (code: " 
+							<< summary_code_to_string(code) 
+							<< ")" << endl;
+					}
+					/* Do they all seem to be identical? */
+					auto range_equal_to_first = by_code.equal_range(type_summary_code(first_found->second));
+					if (srk31::count(range_equal_to_first.first, range_equal_to_first.second)
+					 == found_count)
+					{
+						auto code = type_summary_code(first_found->second);
+						cerr << "They all seem to be identical (code " 
+							<< (code ? *code : -1)
+							<< ") so proceeding." << endl;
+						transitively_add_type(first_found->second, master_relation);
+					}
+					else 
+					{
+						cerr << "Not identical, so not proceeding." << endl;
+						exit(1);
+					}
+				// end case default
+			}
+
+		};
+		
+		for_each_uniqtype_reference_in(fname, f);
+		
+	} // end for each input file
 
 	// write the types to stdout
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	map< iterator_df<type_die>, set<string> > names_by_type;
-	write_master_relation(master_relation, r, cout, cerr, true /* emit_void */, true, 
+	write_master_relation(master_relation, cout, cerr, true /* emit_void */, true, 
 		names_emitted, types_by_name, true);
 	
 	// for CIL workaround: for each alias, write a one-element master relation
@@ -284,7 +310,7 @@ int main(int argc, char **argv)
 		
 		set<string> tmp_names_emitted;
 		map<string, set< iterator_df<type_die> > > tmp_types_by_name;
-		write_master_relation(tmp_master_relation, r, cout, cerr, false /* emit_void */, false, 
+		write_master_relation(tmp_master_relation, cout, cerr, false /* emit_void */, false, 
 			tmp_names_emitted, tmp_types_by_name, true);
 	}
 

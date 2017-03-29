@@ -264,7 +264,7 @@ string ensure_contained_length(const string& mangled_name, unsigned contained_le
 	
 	return s.str();
 }
-void write_master_relation(master_relation_t& r, dwarf::core::root_die& root, 
+void write_master_relation(master_relation_t& r, 
 	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def, 
 	std::set< std::string >& names_emitted,
 	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name,
