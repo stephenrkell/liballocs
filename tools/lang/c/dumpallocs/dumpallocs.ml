@@ -585,8 +585,8 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
     let allocFileName = fl.fileName ^ ".allocs" in
     outChannel := try begin
          let chan = open_out allocFileName in
-         (* output_string chan ("run initializer, opened " ^ allocFileName); *)
-         Some(chan)
+         (debug_print 1 ("run initializer, opened " ^ allocFileName ^ "\n");
+         Some(chan))
       end 
       with _ ->
         raise (Arg.Bad ("Cannot open file " ^ allocFileName))
