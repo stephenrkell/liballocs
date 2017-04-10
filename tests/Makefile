@@ -30,6 +30,9 @@ endif
 
 cases := $(wildcard [-a-z]*)
 
+LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
+export LIBALLOCS_BASE
+
 ifneq ($(LIBALLOCS_USE_PRELOAD),no)
 LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_preload.so)
 else
