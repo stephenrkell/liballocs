@@ -1,10 +1,17 @@
-/* 
- * TODO:
- * lock-free bin walking using Harris's algorithm
- * produce allocator-specific versions (dlmalloc, initially) that 
- * - don't need headers/trailers...
- * - ... by stealing bits from the host allocator's "size" field (64-bit only)
- * keep chunk lists sorted within each bin?
+/* Generic heap indexing implementation.
+ * This can index any malloc-like heap, and do so pretty quickly.
+ *
+ * FIXME: currently we use a "trailer" and thread a doubly linked list
+ * through bins of chunks beginning in the same 512-byte window.
+ * BUT
+ * this requires a well-known malloc_usable_size call, but different
+ * allocators bring different metadata.
+ * Could use headers instead of trailers, but then this less extensible:
+            the user's chunk base is now different from the allocator's, so
+            other malloc API calls (mallinfo, etc.) on the same chunk no longer work
+            unless we wrap them all.
+ * So instead we should probably use a bitmap instead of linked lists.
+ * This is also better for thread-safety / lock-freedom.
  */
 
 /* This file uses GNU C extensions */
