@@ -21,11 +21,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <sys/mman.h>
+#include <elf.h>
 #include <cassert>
 #include "plugin-api.h"
 #define RELF_DEFINE_STRUCTURES 1
 #include "relf.h" /* to get our own binary's realpath -- bit of a HACK */
 #include <libgen.h> /* for dirname() */
+#include <unistd.h> /* for sleep() */
 
 using std::vector;
 using std::string;
@@ -229,137 +232,6 @@ defined_symbols_matching(void *fixme_lib_handle, const vector<string>& patterns)
 	
 	assert(false);
 }
-
-/* Handlers that the linker lets us register. */
-
-/* The plugin library's "claim file" handler.  */
-static vector<const struct ld_plugin_input_file *> claimed_files;
-static
-enum ld_plugin_status
-claim_file_handler (
-  const struct ld_plugin_input_file *file, int *claimed)
-{
-	fprintf(stderr, "claim-file handler called (%s, currently %d)\n", file->name, *claimed);
-	
-	/* If we "claim" a file, we are responsible for feeding its contents
-	 * to the linker.
-	 *
-	 * How is this done in, say, the LLVM LTO plugin?
-	 * In the claim-file hook, it just claims files and grabs input data.
-	 * In the all-symbols-read hook, it creates lots of temporary files
-	 * and does codegen. See below (in all_symbols_read_hook) for more on that.
-	 */
-	/* Which input files do we want to claim? Any .o file that needs tweaking.
-	 * What tweaks does that include?
-	 * 
-	 * - uniqtype symbol renaming
-	 * - allocator unbinding
-	 * - allocator globalising
-	 * - allocator definition __real_-aliasing (hmm, can do just with extra syms)
-	 * 
-	 * What about archives? Well, objcopy can handle them so I guess we treat
-	 * them like .o files. But do we need any hacky exclusions for libgcc.a
-	 * etc.? Or crt*.o? I suppose we shouldn't. */
-	auto should_claim = [file]() {
-	/* Things we can do in here: 
-	
-		(*get_input_section_count) (const void* handle, unsigned int *count);
-		(*get_input_section_type) (const struct ld_plugin_section section,
-											 unsigned int *type);
-		(*get_input_section_name) (const struct ld_plugin_section section,
-											 char **section_name_ptr);
-		(*get_input_section_contents) (const struct ld_plugin_section section,
-												 const unsigned char **section_contents,
-												 size_t* len);
-		(*update_section_order) (const struct ld_plugin_section *section_list,
-						   unsigned int num_sections);
-		(*allow_section_ordering) (void);
-		(*allow_unique_segment_for_sections) (void);
-		(*unique_segment_for_sections) (
-			const char* segment_name,
-			uint64_t segment_flags,
-			uint64_t segment_alignment,
-			const struct ld_plugin_section * section_list,
-			unsigned int num_sections);
-		(*get_input_section_alignment) (const struct ld_plugin_section section,
-												  unsigned int *addralign);
-		(*get_input_section_size) (const struct ld_plugin_section section,
-											 uint64_t *secsize);
-	
-		... and possibly some others.
-	 */
-		return false;
-	};
-	
-	if (should_claim())
-	{
-		*claimed = 1;
-		claimed_files.push_back(file);
-	}
-	
-	return LDPS_OK;
-}
-
-/* The plugin library's "all symbols read" handler.  */
-static
-enum ld_plugin_status
-all_symbols_read_handler (void)
-{
-	fprintf(stderr, "all-symbols-read handler called ()\n");
-	/* How is this done in, say, the LLVM LTO plugin?
-	 * In the claim-file hook, it just claims files and grabs input data.
-	 * In the all-symbols-read hook, it creates lots of temporary files
-	 *  and does codegen.
-	 * How does it feed the generated code back to the linker?
-	 * It generates temporary object files and uses add_input_file()
-	 * to add them to the link.
-	 */
-	
-	/* Things we can do in here:
-	/* 
-		(*add_symbols) (void *handle, int nsyms,
-                        		  const struct ld_plugin_symbol *syms);
-
-		(*get_input_file) (const void *handle,
-                            		 struct ld_plugin_input_file *file);
-
-		(*get_view) (const void *handle, const void **viewp);
-
-		(*release_input_file) (const void *handle);
-
-		(*get_symbols) (const void *handle, int nsyms,
-                        		  struct ld_plugin_symbol *syms);
-
-		(*add_input_file) (const char *pathname);
-
-		(*add_input_library) (const char *libname);
-	 */
-	
-	return LDPS_OK;
-}
-
-/* The plugin library's cleanup handler.  */
-static
-enum ld_plugin_status
-cleanup_handler (void)
-{
-	fprintf(stderr, "cleanup handler called ()\n");
-	return LDPS_OK;
-}
-
-/* Linker interfaces: hook registration. */
-
-/* The linker's interface for registering the "claim file" handler.  */
-enum ld_plugin_status
-(*register_claim_file) (ld_plugin_claim_file_handler handler);
-/* The linker's interface for registering the "all symbols read" handler.  */
-enum ld_plugin_status
-(*register_all_symbols_read) (
-  ld_plugin_all_symbols_read_handler handler);
-/* The linker's interface for registering the cleanup handler.  */
-enum ld_plugin_status
-(*register_cleanup) (ld_plugin_cleanup_handler handler);
-
 /* Linker interfaces: direct interaction. */
 
 /* The linker's interface for adding symbols from a claimed input file.  */
@@ -487,11 +359,213 @@ enum ld_plugin_status
 (*get_input_section_size) (const struct ld_plugin_section section,
                                      uint64_t *secsize);
 
+/* Handlers that the linker lets us register. */
+
+/* The plugin library's "claim file" handler.  */
+static vector<const struct ld_plugin_input_file *> claimed_files;
+static
+enum ld_plugin_status
+claim_file_handler (
+  const struct ld_plugin_input_file *file, int *claimed)
+{
+	fprintf(stderr, "claim-file handler called (%s, currently %d)\n", file->name, *claimed);
+	
+	/* If we "claim" a file, we are responsible for feeding its contents
+	 * to the linker.
+	 *
+	 * How is this done in, say, the LLVM LTO plugin?
+	 * In the claim-file hook, it just claims files and grabs input data.
+	 * In the all-symbols-read hook, it creates lots of temporary files
+	 * and does codegen. See below (in all_symbols_read_hook) for more on that.
+	 */
+	/* Which input files do we want to claim? Any .o file that needs tweaking.
+	 * What tweaks does that include?
+	 * 
+	 * - uniqtype symbol renaming
+	 * - allocator unbinding
+	 * - allocator globalising
+	 * - allocator definition __real_-aliasing (hmm, can do just with extra syms)
+	 * 
+	 * What about archives? Well, objcopy can handle them so I guess we treat
+	 * them like .o files. But do we need any hacky exclusions for libgcc.a
+	 * etc.? Or crt*.o? I suppose we shouldn't. */
+	auto should_claim = [file]() {
+	/* Things we can do in here: 
+	
+		(*get_input_section_count) (const void* handle, unsigned int *count);
+		(*get_input_section_type) (const struct ld_plugin_section section,
+											 unsigned int *type);
+		(*get_input_section_name) (const struct ld_plugin_section section,
+											 char **section_name_ptr);
+		(*get_input_section_contents) (const struct ld_plugin_section section,
+												 const unsigned char **section_contents,
+												 size_t* len);
+		(*update_section_order) (const struct ld_plugin_section *section_list,
+						   unsigned int num_sections);
+		(*allow_section_ordering) (void);
+		(*allow_unique_segment_for_sections) (void);
+		(*unique_segment_for_sections) (
+			const char* segment_name,
+			uint64_t segment_flags,
+			uint64_t segment_alignment,
+			const struct ld_plugin_section * section_list,
+			unsigned int num_sections);
+		(*get_input_section_alignment) (const struct ld_plugin_section section,
+												  unsigned int *addralign);
+		(*get_input_section_size) (const struct ld_plugin_section section,
+											 uint64_t *secsize);
+	
+		... and possibly some others.
+	 */
+	 	/* How can we get the number of symbols? 
+		 * We can't.
+		 * As far as the linker is concerned, if we claim the file,
+		 * there are no symbols except the ones we tell it about;
+		 * it's our job to feed the linker symbols (now) and (later)
+		 * sections!
+		 * 
+		 * Oh. But wait. What about the get_input_section_contents stuff?
+		 * It sounds like it can walk the sections for us, just not
+		 * the symbols. That's a bit odd. I suppose it allows ELF-packaging
+		 * of other-format stuff, including intermediate symbol tables.
+		 * So try: test whether it's a relocatable file, and if so, use
+		 * the section calls to find the symtab.
+		 */
+		// auto ret = get_symbols(file, 0, nullptr);
+		void *first_page = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, file->fd, file->offset);
+		if (first_page != MAP_FAILED)
+		{
+			fprintf(stderr, "Mapped it at %p\n", first_page);
+			Elf64_Ehdr *ehdr = (Elf64_Ehdr *) first_page;
+			if (ehdr->e_ident[0] == '\177' && 
+				ehdr->e_ident[1] == 'E' && 
+				ehdr->e_ident[2] == 'L' && 
+				ehdr->e_ident[3] == 'F' && 
+				ehdr->e_ident[EI_CLASS] == ELFCLASS64 &&
+				ehdr->e_ident[EI_DATA] == ELFDATA2LSB &&
+				ehdr->e_type == ET_REL)
+			{
+				fprintf(stderr, "We think `%s' is a relocatable 64-bit LSB object\n",
+					file->name);
+				/* Can we walk its symbols? */
+				
+				
+				unsigned section_count;
+				int ret = get_input_section_count(file->handle, &section_count);
+				if (ret == LDPS_OK)
+				{
+					fprintf(stderr, "We think `%s' has %u sections\n",
+						file->name, section_count);
+					for (unsigned i = 0; i < section_count; ++i)
+					{
+						unsigned int type;
+						int ret = get_input_section_type(
+							(struct ld_plugin_section) { .handle = file->handle, .shndx = i },
+							&type);
+						if (ret == LDPS_OK)
+						{
+							fprintf(stderr, "We think section %u has type 0x%x\n",
+								i, type);
+						}
+					}
+				}
+			}
+			
+			munmap(first_page, 4096);
+		}
+	
+		return false;
+	};
+	
+	if (should_claim())
+	{
+		*claimed = 1;
+		claimed_files.push_back(file);
+	}
+	
+	return LDPS_OK;
+}
+
+/* The plugin library's "all symbols read" handler.  */
+static
+enum ld_plugin_status
+all_symbols_read_handler (void)
+{
+	fprintf(stderr, "all-symbols-read handler called ()\n");
+	/* How is this done in, say, the LLVM LTO plugin?
+	 * In the claim-file hook, it just claims files and grabs input data.
+	 * In the all-symbols-read hook, it creates lots of temporary files
+	 *  and does codegen.
+	 * How does it feed the generated code back to the linker?
+	 * It generates temporary object files and uses add_input_file()
+	 * to add them to the link.
+	 */
+	
+	/* Things we can do in here:
+	/* 
+		(*add_symbols) (void *handle, int nsyms,
+                        		  const struct ld_plugin_symbol *syms);
+
+		(*get_input_file) (const void *handle,
+                            		 struct ld_plugin_input_file *file);
+
+		(*get_view) (const void *handle, const void **viewp);
+
+		(*release_input_file) (const void *handle);
+
+		(*get_symbols) (const void *handle, int nsyms,
+                        		  struct ld_plugin_symbol *syms);
+
+		(*add_input_file) (const char *pathname);
+
+		(*add_input_library) (const char *libname);
+	 */
+	
+	return LDPS_OK;
+}
+
+/* The plugin library's cleanup handler.  */
+static
+enum ld_plugin_status
+cleanup_handler (void)
+{
+	fprintf(stderr, "cleanup handler called ()\n");
+	
+	for (const void *handle : claimed_files)
+	{
+		release_input_file(handle);
+	}
+	
+	return LDPS_OK;
+}
+
+/* Linker interfaces: hook registration. */
+
+/* The linker's interface for registering the "claim file" handler.  */
+enum ld_plugin_status
+(*register_claim_file) (ld_plugin_claim_file_handler handler);
+/* The linker's interface for registering the "all symbols read" handler.  */
+enum ld_plugin_status
+(*register_all_symbols_read) (
+  ld_plugin_all_symbols_read_handler handler);
+/* The linker's interface for registering the cleanup handler.  */
+enum ld_plugin_status
+(*register_cleanup) (ld_plugin_cleanup_handler handler);
+
+
 /* The plugin library's "onload" entry point.  */
+extern "C" {
+enum ld_plugin_status
+onload(struct ld_plugin_tv *tv);
+}
 enum ld_plugin_status
 onload(struct ld_plugin_tv *tv)
 {
-	fprintf(stderr, "Hello from linker plugin\n");
+	fprintf(stderr, "Hello from linker plugin, in pid %d\n", getpid());
+	fflush(stderr);
+	// for debugging
+	if (getenv("LD_DELAY_STARTUP")) sleep(12);
+
 #define CASE(x) \
 	case LDPT_ ## x: fprintf(stderr, "Transfer vector contained LDPT_" #x ", arg %p\n", i_tv->tv_u.tv_string); break;
 #define CASE_INT(x) \
@@ -537,7 +611,7 @@ onload(struct ld_plugin_tv *tv)
 			CASE_FP(GET_INPUT_SECTION_CONTENTS, get_input_section_contents)
 			CASE_FP(UPDATE_SECTION_ORDER, update_section_order)
 			CASE_FP(ALLOW_SECTION_ORDERING, allow_section_ordering)
-			CASE(GET_SYMBOLS_V2)
+			CASE_FP(GET_SYMBOLS_V2, get_symbols)
 			CASE_FP(ALLOW_UNIQUE_SEGMENT_FOR_SECTIONS, allow_unique_segment_for_sections)
 			CASE_FP(UNIQUE_SEGMENT_FOR_SECTIONS, unique_segment_for_sections)
 			CASE(GET_SYMBOLS_V3)
