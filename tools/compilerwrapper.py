@@ -303,6 +303,8 @@ class CompilerWrapper:
             elif args[num] == '-c':
                 self.argItem({Phase.DRIVER}, num)
                 self.enabledPhases = {Phase.PREPROCESS, Phase.COMPILE, Phase.ASSEMBLE}
+            elif args[num] == '-h' or args[num].startswith("--help") or args[num].startswith("--target-help"):
+                self.argItem({Phase.DRIVER}, num)
             elif args[num] == '-E':
                 self.argItem({Phase.DRIVER}, num)
                 self.enabledPhases = {Phase.PREPROCESS}
@@ -365,6 +367,9 @@ class CompilerWrapper:
         # now we've seen all the options, we can tell which one the "-o" applies to (if we saw it)
         if outputFile:
             self.argOption({max(self.enabledPhases)}, outputFileNum, "-o", outputFile)
+        # if we have no input items, not much we can do
+        if len(self.itemsForPhases({Phase.PREPROCESS, Phase.COMPILE, Phase.ASSEMBLE, Phase.LINK})) == 0:
+            self.enabledPhases = {Phase.DRIVER}
         self.debugMsg("enabledPhases: %s\n" % str(self.enabledPhases))
         self.debugMsg("allArgs: %s\n" % str(self.allArgs))
         self.debugMsg("argPhases: %s\n" % str(self.argPhases))
@@ -404,8 +409,8 @@ class CompilerWrapper:
     def getOutputFilename(self, phase=Phase.DRIVER):
         maybeGiven = self.phaseOptions[phase].get("-o")
         if maybeGiven == None:
-            if phase == Phase.LINK and not "-shared" in phaseOptions[Phase.LINK].keys() \
-                and not "-Wl,-r" in phaseOptions[Phase.LINK].keys():
+            if phase == Phase.LINK and not "-shared" in self.phaseOptions[Phase.LINK].keys() \
+                and not "-Wl,-r" in self.phaseOptions[Phase.LINK].keys():
                 return "a.out"
                 # there are no defaults for shared lib outputs (or other linker outputs)
             elif not phase == Phase.LINK:
@@ -497,10 +502,13 @@ class CompilerWrapper:
 
     def runPhasesBeforeLink(self):
         sourceInputFiles = self.getSourceInputFiles()
+        if len(self.itemsForPhases(self.enabledPhases)) == 0 and Phase.LINK not in self.enabledPhases:
+            # just run the driver
+            return self.runCompiler(self.itemsForPhases({Phase.DRIVER}) + self.flatOptions(self.optionsForPhases({Phase.DRIVER})))
         if len(sourceInputFiles) == 0:
-            return 0
-        self.debugMsg("Making .o files from " + " ".join(sourceInputFiles) + "\n")
+            return 0 # nothing to do here
         
+        self.debugMsg("Making .o files from " + " ".join(sourceInputFiles) + "\n")
         # What we want to do is a lot like buildOneObjectFile, but we have to
         # - not do any phases that aren't enabled
         phases = self.enabledPhases.difference({Phase.DRIVER, Phase.LINK})
