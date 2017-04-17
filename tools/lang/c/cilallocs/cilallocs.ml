@@ -57,6 +57,7 @@ let typToString t      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
 let typsigToString ts  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig ts))
 let expToCilString e   = (Pretty.sprint 80 (printExp  (new plainCilPrinterClass) () e))
 let lvalToCilString lv = (Pretty.sprint 80 (printLval (new plainCilPrinterClass) () lv))
+let attrsToString atts = (Pretty.sprint 80 (Pretty.dprintf "%a" d_attrlist atts))
 
 (* Module-ify Cil.typSig *)
 module CilTypeSig = struct
@@ -120,6 +121,13 @@ let rec zip lst1 lst2 = match lst1,lst2 with
   | [],_ -> []
   | _, []-> []
   | (x::xs),(y::ys) -> (x,y) :: (zip xs ys)
+(* unzip -- thank you StackOverflow http://stackoverflow.com/questions/21627749/recursion-in-ocaml *)
+let unzip l = 
+  let rec unzip_aux (l1,l2) = function
+    | [] -> List.rev l1, List.rev l2
+    | (x,y)::tl -> unzip_aux (x::l1, y::l2) tl
+  in 
+  unzip_aux ([],[]) l
 
 let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
 
@@ -484,20 +492,30 @@ let rec tsIsUndefinedType ts wholeFile =
 
 let tsIsIncompleteType ts wholeFile = tsIsUndefinedType ts wholeFile
 
+let rec findFun nm gs = match gs with
+  [] -> None
+|  g :: gg -> match g with 
+        GFun(dec, _) ->
+            (* output_string stderr ("saw a function, name " ^ dec.svar.vname ^ "\n"); *)
+            if dec.svar.vname = nm then Some(dec) else findFun nm gg
+      | _ -> findFun nm gg
+
 let findOrCreateExternalFunctionInFile fl nm proto : fundec = (* findOrCreateFunc fl nm proto *) (* NO! doesn't let us have the fundec *)
-  let rec findFun gs = match gs with
-      [] -> None
-   |  g :: gg -> match g with 
-            GFun(dec, _) ->
-                (* output_string stderr ("saw a function, name " ^ dec.svar.vname ^ "\n"); *)
-                if dec.svar.vname = nm then Some(dec) else findFun gg
-          | _ -> findFun gg
-  in 
-  match findFun fl.globals with 
+  match findFun nm fl.globals with 
     Some(d) -> d
   | None -> let funDec = emptyFunction nm in
         funDec.svar.vtype <- proto;
         fl.globals <- newGlobalsList fl.globals [GVarDecl(funDec.svar, {line = -1; file = "BLAH FIXME"; byte = 0})] isFunction; 
+        funDec
+
+let findOrCreateNewFunctionInFile fl nm proto l createBeforePred : fundec = (* findOrCreateFunc fl nm proto *) (* NO! doesn't let us have the fundec *)
+  match findFun nm fl.globals with 
+    Some(d) -> d
+  | None -> let funDec = emptyFunction nm in
+        funDec.svar.vtype <- proto;
+        fl.globals <- newGlobalsList fl.globals [GFun(funDec, l)] 
+        (* insert it after any -include'd definitions, but before any coming from the file itself. *)
+            createBeforePred;
         funDec
 
 let makeInlineFunctionInFile fl ourFun nm proto body referencedValues = begin
