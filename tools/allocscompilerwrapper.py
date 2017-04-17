@@ -3,6 +3,9 @@ import distutils
 import distutils.spawn
 from compilerwrapper import *
 
+# we have an extra phase
+FAKE_RELOC_LINK = Phase.LINK + 1
+
 class AllocsCompilerWrapper(CompilerWrapper):
 
     def defaultL1AllocFns(self):
@@ -14,8 +17,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def wordSplitEnv(self, key):
         return [s for s in os.environ.get(key, "").split(' ') if s != '']
 
+    def allWrapperAllocFns(self):
+        return self.wordSplitEnv("LIBALLOCS_ALLOC_FNS")
+
     def allL1OrWrapperAllocFns(self):
-        return self.defaultL1AllocFns() + self.wordSplitEnv("LIBALLOCS_ALLOC_FNS")
+        return self.defaultL1AllocFns() + self.allWrapperAllocFns()
 
     def allSubAllocFns(self):
         return self.wordSplitEnv("LIBALLOCS_SUBALLOC_FNS")
@@ -35,24 +41,22 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def allFreeFns(self):
         return self.allL1FreeFns() + self.allSubFreeFns()
 
-    def allWrappedSymNames(self):
+    def symNamesForFns(self, fns):
         syms = []
-        for allocFn in self.allAllocFns():
-            if allocFn != '':
-                m = re.match("(.*)\((.*)\)(.?)", allocFn)
-                fnName = m.groups()[0]
-                syms += [fnName]
-        for freeFn in self.allSubFreeFns():
-            if freeFn != '':
-                m = re.match("(.*)\((.*)\)(->[a-zA-Z0-9_]+)", freeFn)
-                fnName = m.groups()[0]
-                syms += [fnName]
-        for freeFn in self.allL1FreeFns():
-            if freeFn != '':
-                m = re.match("(.*)\((.*)\)", freeFn)
+        for fn in fns:
+            if fn != '':
+                # allocfns are "(.*)\((.*)\)(.?)
+                # subfreefns are "(.*)\((.*)\)(->[a-zA-Z0-9_]+)"
+                # l1freefns are "(.*)\((.*)\)"
+                m = re.match("(.*)\((.*)\)(->[a-zA-Z0-9_]+|.)?", fn)
                 fnName = m.groups()[0]
                 syms += [fnName]
         return syms
+
+    # FIXME: we shouldn't caller-wrap allocator entry points (non-wrappers),
+    # though we should callee-wrap them (whic we currently do with --wrap,__real_*)
+    def allWrappedSymNames(self):
+        return self.symNamesForFns(self.allAllocFns() + self.allSubFreeFns() + self.allL1FreeFns())
 
     def findFirstUpperCase(self, s):
         allLower = s.lower()
@@ -109,7 +113,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         sys.stderr.write("abort: could not find a C compiler which is not us.\n")
         exit(2)
     
-    def getCompilerCommand(self, itemsAndOptions):
+    def getCompilerCommand(self, itemsAndOptions, phases):
         # we add -ffunction-sections to ensure that references to malloc functions 
         # generate a relocation record -- since a *static, address-taken* malloc function
         # might otherwise have its address taken without a relocation record. 
@@ -234,7 +238,14 @@ class AllocsCompilerWrapper(CompilerWrapper):
             #  -Wl,--wrap,__real_malloc
             #
             #  i.e. to link in the callee-side instrumentation.
-            matches = self.listDefinedSymbolsMatching(filename, self.allWrappedSymNames())
+            # For standard allocators, these are defined in liballocs_nonshared.a.
+            # For user-specific allocators, we have generated the callee wrappers
+            # ourselves, earlier, in  *only* do this for non-wrappers,
+            # i.e. for actual allocators.
+            syms = [x for x in self.allWrappedSymNames() \
+                if x not in self.symNamesForFns(self.allWrapperAllocFns() + self.allAllocSzFns() + \
+                    self.allL1FreeFns())]
+            matches = self.listDefinedSymbolsMatching(filename, syms)
             return (0, sum([["-Wl,--defsym," + m + "=__wrap___real_" + m, "-Wl,--wrap,__real_" + m] \
               for m in matches], []))
             
@@ -309,7 +320,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def getStubGenCompileArgs(self):
         return []
             
-    def generateAllocCallerStubsObject(self):
+    def generateAllocStubsObject(self):
         # make a temporary file for the stubs
         # -- we derive the name from the output binary,
         # -- ... and bail if it's taken? NO, because we want repeat builds to succeed
@@ -327,13 +338,28 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     stubsfile.write("make_arg(%d, %c)" % (ndx, c))
                     ndx += 1
                 stubsfile.write("\n")
+                stubsfile.write("#define rev_arglist_%s(make_arg) " % fnName)
+                ndx = len(fnSig) - 1
+                for c in fnSig[::-1]: # reverse
+                    if ndx != len(fnSig) - 1:
+                        stubsfile.write(", ")
+                    stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                    ndx -= 1
+                stubsfile.write("\n")
                 stubsfile.write("#define arglist_nocomma_%s(make_arg) " % fnName)
                 ndx = 0
                 for c in fnSig: 
                     stubsfile.write("make_arg(%d, %c)" % (ndx, c))
                     ndx += 1
                 stubsfile.write("\n")
+                stubsfile.write("#define rev_arglist_nocomma_%s(make_arg) " % fnName)
+                ndx = len(fnSig) - 1
+                for c in fnSig[::-1]: # reverse
+                    stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                    ndx -= 1
+                stubsfile.write("\n")
 
+            # generate caller-side alloc stubs
             for allocFn in self.allAllocFns():
                 m = re.match("(.*)\((.*)\)(.?)", allocFn)
                 fnName = m.groups()[0]
@@ -366,13 +392,16 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     sz = int(outp_lines[0].split("\t")[0])
                     stubsfile.write("#define size_arg_%s %d\n" % (fnName, sz))
                 if allocFn in self.allL1OrWrapperAllocFns():
-                    stubsfile.write("make_wrapper(%s, %s)\n" % (fnName, retSig))
+                    stubsfile.write("make_caller_wrapper(%s, %s)\n" % (fnName, retSig))
                 elif allocFn in self.allAllocSzFns():
-                    stubsfile.write("make_size_wrapper(%s, %s)\n" % (fnName, retSig))
+                    stubsfile.write("make_size_caller_wrapper(%s, %s)\n" % (fnName, retSig))
                 else:
-                    stubsfile.write("make_suballocator_alloc_wrapper(%s, %s)\n" % (fnName, retSig))
+                    stubsfile.write("make_suballocator_alloc_caller_wrapper(%s, %s)\n" % (fnName, retSig))
+                # for genuine allocators (not wrapper fns), also make a callee wrapper
+                if allocFn in self.allSubAllocFns(): # FIXME: cover non-sub clases
+                    stubsfile.write("make_callee_wrapper(%s, %s)\n" % (fnName, retSig))
                 stubsfile.flush()
-            # also do subfree wrappers
+            # also do caller-side subfree wrappers
             for freeFn in self.allSubFreeFns():
                 m = re.match("(.*)\((.*)\)(->([a-zA-Z0-9_]+))", freeFn)
                 fnName = m.groups()[0]
@@ -383,9 +412,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     # it's a ptr, so flag that up
                     stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
                 writeArgList(fnName, fnSig)
-                stubsfile.write("make_suballocator_free_wrapper(%s, %s)\n" % (fnName, allocFnName))
+                stubsfile.write("make_suballocator_free_caller_wrapper(%s, %s)\n" % (fnName, allocFnName))
                 stubsfile.flush()
-            # also do free (non-sub) -wrappers
+                if allocFn in self.allSubFreeFns(): # FIXME: cover non-sub and non-void clases
+                    stubsfile.write("make_void_callee_wrapper(%s)\n" % (fnName))
+            # also do caller-side free (non-sub) -wrappers
             for freeFn in self.allL1FreeFns():
                 m = re.match("(.*)\((.*)\)", freeFn)
                 fnName = m.groups()[0]
@@ -395,7 +426,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     # it's a ptr, so flag that up
                     stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
                 writeArgList(fnName, fnSig)
-                stubsfile.write("make_free_wrapper(%s)\n" % fnName)
+                stubsfile.write("make_free_caller_wrapper(%s)\n" % fnName)
                 stubsfile.flush()
             # now we compile the C file ourselves, rather than cilly doing it, 
             # because it's a special magic stub
@@ -408,7 +439,10 @@ class AllocsCompilerWrapper(CompilerWrapper):
             extraFlags = self.getStubGenCompileArgs()
             extraFlags += ["-fPIC"]
             stubs_pp_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
-                "-I" + self.getLibAllocsBaseDir() + "/tools"] \
+                "-I" + self.getLibAllocsBaseDir() + "/tools", \
+                "-I" + self.getLibAllocsBaseDir() + "/include", \
+                "-DRELF_DEFINE_STRUCTURES"
+                ] \
                 + [arg for arg in self.phaseItems[Phase.PREPROCESS] if arg.startswith("-D")] \
                 + [stubsfile.name]
             self.debugMsg("Preprocessing stubs file %s to %s with command %s\n" \
@@ -445,10 +479,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
             try:
                 stubs_output = subprocess.check_output(stubs_cc_cmd, stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError, e:
-                self.debugMsg("Could not compile stubs file %s: compiler returned %d\n" \
-                    % (stubs_pp, e.returncode))
-                if stubs_output:
-                    self.debugMsg("Compiler said: %s\n" % stubs_output)
+                self.debugMsg("Could not compile stubs file %s: compiler returned %d and said %s\n" \
+                    % (stubs_pp, e.returncode, str(e.output)))
                 exit(1)
             if stubs_output != "":
                 self.debugMsg("Compiling stubs file %s: compiler said \"%s\"\n" \
@@ -548,6 +580,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # allocation functions, and we want them to set the alloc site. 
         # So we do want to link in the wrappers. Do we need to rewrite
         # references to __real_X after this?
+        for sym in self.allWrappedSymNames():
+            stubsLinkArgs += ["-Wl,--wrap," + sym]
         if self.doingFinalLink():
             # Each allocation function, e.g. xmalloc, is linked with --wrap.
             # If we're outputting a shared library, we leave it like this,
@@ -557,12 +591,10 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # then we link a thread-local variable "__liballocs_current_allocsite"
             # into the executable,
             # and for each allocation function, we link a generated stub.
-            for sym in self.allWrappedSymNames():
-                stubsLinkArgs += ["-Wl,--wrap," + sym]
             # FIXME: is it really true that the alloc caller stubs goes only in a final link?
             # Or might we also want it to go in a non-final link?
             # In fact it NEEDS to go in the non-final link so that --wrap can have its effect.
-            stubsObject = self.generateAllocCallerStubsObject()
+            stubsObject = self.generateAllocStubsObject()
             # CARE: we must insert the wrapper object on the cmdline *before* any 
             # archive that is providing the wrapped functions -- e.g. libc. 
             # HACK: the easiest way is to insert it first, it appears.
@@ -603,7 +635,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             assert("-o" not in self.flatItems(self.itemsForPhases({Phase.LINK})))
             self.debugMsg("running underlying compiler once to link with reloc output, with args: " + \
                 " ".join(allArgs) + "\n")
-            ret = self.runCompiler(allArgs)
+            ret = self.runCompiler(allArgs, {FAKE_RELOC_LINK})
             if ret != 0:
                 return ret
             ret, extraFinalLinkArgs = self.fixupLinkedObject(relocFilename, None)
@@ -619,7 +651,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         
         self.debugMsg(("running underlying compiler for %s link, with args: " + \
             " ".join(finalItemsAndOpts) + "\n") % ("final" if self.doingFinalLink() else "relocatable"))
-        ret = self.runCompiler(finalItemsAndOpts)
+        ret = self.runCompiler(finalItemsAndOpts, {Phase.LINK})
         if ret != 0 or not self.doingFinalLink():
             return ret
         return self.doPostLinkMetadataBuild(finalLinkOutput)

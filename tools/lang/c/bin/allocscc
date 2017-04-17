@@ -88,15 +88,18 @@ class AllocsCC(AllocsCompilerWrapper):
         
     def getExtraLinkArgs(self):
         return []
+        
+    def getExtraRelocLinkArgs(self):
+        return []
 
     def getVerboseArgs(self):
         return []
     
-    def getCompilerCommand(self, itemsAndOptions):
+    def getCompilerCommand(self, itemsAndOptions, phases):
         sourceFiles = [x for x in itemsAndOptions if isinstance(x, SourceFile)]
-        return AllocsCompilerWrapper.getCompilerCommand(self, itemsAndOptions) + \
+        return AllocsCompilerWrapper.getCompilerCommand(self, itemsAndOptions, phases) + \
             self.getIncludeArgs(sourceFiles) + self.getCillyArgs(sourceFiles) + self.getVerboseArgs() + \
-            self.getExtraLinkArgs()
+            (self.getExtraLinkArgs() if FAKE_RELOC_LINK not in phases else self.getExtraRelocLinkArgs())
 
 if __name__ == '__main__':
     wrapper = AllocsCC()

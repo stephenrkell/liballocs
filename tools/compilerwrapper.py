@@ -116,7 +116,7 @@ class CompilerWrapper:
     __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod
-    def getCompilerCommand(self, itemsAndOptions):
+    def getCompilerCommand(self, itemsAndOptions, phases):
         """return a list of strings that is the command (including arguments) to invoke
            the underlying compiler"""
         return
@@ -473,8 +473,8 @@ class CompilerWrapper:
     # Instead of saying "run underlying compiler (sourceFiles, otherOptions)"
     # we use the power of our input options: source files are instances of
     # SourceFile so are easily distinguished
-    def runCompiler(self, itemsAndOptions):
-        commandAndArgs = self.getCompilerCommand(itemsAndOptions)
+    def runCompiler(self, itemsAndOptions, phases):
+        commandAndArgs = self.getCompilerCommand(itemsAndOptions, phases)
         #self.debugMsg("Environment is %s\n" % str(os.environ))
         self.debugMsg("Running compiler command: " + " ".join(commandAndArgs) + "\n")
         ret1 = subprocess.call(commandAndArgs)
@@ -489,7 +489,7 @@ class CompilerWrapper:
         # IMPORTANT: "-I" is an item! so we're interested in more than just options
         args = self.flatOptions(options) + self.flatItems([x for x in itemsForPhases(phases) if not isinstance(x, SourceFile)])
         return self.runCompiler([sourceFile if isinstance(x, SourceFile) else SourceFile(x, lang)] \
-         + args + ["-c", "-o", outputFilename])
+         + args + ["-c", "-o", outputFilename], {Phase.PREPROCESS, Phase.COMPILE, Phase.ASSEMBLE})
     
     def optionToStopAfterPhase(self, phase):
         if phase == Phase.PREPROCESS:
@@ -504,7 +504,9 @@ class CompilerWrapper:
         sourceInputFiles = self.getSourceInputFiles()
         if len(self.itemsForPhases(self.enabledPhases)) == 0 and Phase.LINK not in self.enabledPhases:
             # just run the driver
-            return self.runCompiler(self.itemsForPhases({Phase.DRIVER}) + self.flatOptions(self.optionsForPhases({Phase.DRIVER})))
+            return self.runCompiler(self.itemsForPhases({Phase.DRIVER}) + \
+                self.flatOptions(self.optionsForPhases({Phase.DRIVER})), \
+                self.enabledPhases)
         if len(sourceInputFiles) == 0:
             return 0 # nothing to do here
         
@@ -524,8 +526,10 @@ class CompilerWrapper:
             # we let the preprocessor, compiler and/or assembler choose it for us
             pass
         # we remove this driver option, but other driver options *can* be present
-        ret = self.runCompiler(self.flatOptions(options) + self.flatItems(self.itemsForPhases(phases)) \
-            + [self.optionToStopAfterPhase(max(phases))])
+        ret = self.runCompiler(self.flatOptions(options) + \
+            self.flatItems(self.itemsForPhases(phases)) + \
+            [self.optionToStopAfterPhase(max(phases))], \
+            self.enabledPhases)
         if ret != 0 or not Phase.ASSEMBLE in self.enabledPhases:
             return ret
         # if we just assembled any objects, do the postprocessing
