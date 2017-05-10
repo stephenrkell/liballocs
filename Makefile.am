@@ -31,10 +31,6 @@ lib_LIBRARIES = tools/liballocstool.a
 
 tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
 
-pkglib_LTLIBRARIES = tools/gold-plugin.la
-tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
-tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
-
 LIBELF ?= -lelf
 
 TOOLS_LDADD := tools/liballocstool.a \
@@ -53,6 +49,11 @@ tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
 tools_ifacetypes_LDADD = $(TOOLS_LDADD)
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
+
+pkglib_LTLIBRARIES = tools/gold-plugin.la
+tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
+tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
+tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.

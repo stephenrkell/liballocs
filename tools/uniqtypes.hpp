@@ -145,4 +145,5 @@ void write_uniqtype_close(std::ostream& o,
 	const string& mangled_name,
 	opt<unsigned> n_contained = opt<unsigned>());
 
+int dump_usedtypes(const std::vector<std::string>& fnames, std::ostream& out, std::ostream& cerr);
 #endif
