@@ -225,7 +225,8 @@ void post_init(void)
 	do_init();
 }
 
-void (__attribute__((visibility("hidden"))) __generic_malloc_allocator_init)(void)
+void __generic_malloc_allocator_init(void) __attribute__((visibility("hidden")));
+void __generic_malloc_allocator_init(void)
 {
 	do_init();
 }
