@@ -1,5 +1,5 @@
-#ifndef PMIRROR_FAKE_LIBUNWIND_H_
-#define PMIRROR_FAKE_LIBUNWIND_H_
+#ifndef ALLOCS_FAKE_LIBUNWIND_H_
+#define ALLOCS_FAKE_LIBUNWIND_H_
 
 #include <stdlib.h> /* for size_t */
 
@@ -19,7 +19,7 @@ extern "C" {
 typedef unsigned long unw_word_t;
 typedef void *unw_addr_space_t;
 extern long local_addr_space;
-extern unw_addr_space_t unw_local_addr_space;
+extern unw_addr_space_t unw_local_addr_space __asm__("__liballocs_unw_local_addr_space");
 struct accessors
 {
 	int (*access_mem) (unw_addr_space_t as, unw_word_t addr, unw_word_t *data, int dir, void *priv);
@@ -137,14 +137,15 @@ typedef struct
 typedef unw_cursor_t unw_context_t;
 
 
-/* These are defined in fake-unwind.c (hidden, to allow them to be 
- * inlined at link time, and to avoid their replacing the non-fake libunwind in others
- * parts of the program. */
-int unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest);
-int unw_init_local(unw_cursor_t *cursor, unw_context_t *context);
-int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp);
-int unw_getcontext(unw_context_t *ucp);
-int unw_step(unw_cursor_t *cp);
+/* These are defined in fake-unwind.c. They have protected visibility
+ * to allow them to be inlined at link time, and a symbol prefix
+ * to avoid their replacing the non-fake libunwind in others parts of 
+ * the program. */
+int unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest) __asm__("__liballocs_unw_get_reg");
+int unw_init_local(unw_cursor_t *cursor, unw_context_t *context) __asm__("__liballocs_unw_init_local");
+int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp) __asm__("__liballocs_unw_get_proc_name");
+int unw_getcontext(unw_context_t *ucp) __asm__("__liballocs_unw_getcontext");
+int unw_step(unw_cursor_t *cp) __asm__("__liballocs_unw_step");
 
 #if defined(__cplusplus) || defined(c_plusplus)
 }

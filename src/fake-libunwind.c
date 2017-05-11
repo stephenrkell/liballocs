@@ -3,8 +3,9 @@
 #include <stdint.h>
 #include "fake-libunwind.h"
 
-long local_addr_space;
-unw_addr_space_t unw_local_addr_space = &local_addr_space;
+long local_addr_space __attribute__((visibility("hidden")));
+unw_addr_space_t unw_local_addr_space __asm__("__liballocs_unw_local_addr_space") __attribute__((visibility("protected")))
+ = &local_addr_space;
 static int access_mem(unw_addr_space_t as, unw_word_t addr, unw_word_t *data,int dir, void *priv)
 {
 	if (dir == 0) /* 0 means read */
@@ -108,8 +109,8 @@ int unw_step(unw_cursor_t *cp)
 		/* context bp = */ SANE_BP_OR_NULL(candidate_bp, sp),
 		/* context ip = */ (unw_word_t) return_addr
 	};
-		
-	// sanity check the results -- should move down in memory, but not more than 256MB
+	
+	// sanity check the results -- should move down in memory, but (HACK) not more than 256MB
 	if (new_ctxt.frame_sp > (uintptr_t) sp || new_ctxt.frame_sp <= ((uintptr_t) sp - 0x10000000ul))
 	{
 		// looks dodgy -- say we failed
