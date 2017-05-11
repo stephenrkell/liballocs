@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdint.h>
+#include "fake-libunwind.h"
 
 /* NOTE: is linking -R, i.e. "symbols only", the right solution for 
  * getting the weak references to pop out the way we want them?
@@ -140,3 +141,10 @@ void __liballocs_malloc_post_nonnull_nonzero_realloc(void *userptr,
 	size_t old_usable_size,
 	const void *caller, void *__new_allocptr)
 {}
+
+unw_addr_space_t unw_local_addr_space __asm__("__liballocs_unw_local_addr_space") __attribute__((visibility("protected")));
+int unw_get_reg(unw_cursor_t *cursor, int reg, unw_word_t *dest) { return 0; }
+int unw_init_local(unw_cursor_t *cursor, unw_context_t *context) { return 0; }
+int unw_getcontext(unw_context_t *ucp) { return 0; }
+int unw_step(unw_cursor_t *cp) { return 0; }
+
