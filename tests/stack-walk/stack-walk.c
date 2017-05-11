@@ -17,7 +17,7 @@ static int cb(void *ip, void *sp, void *bp, void *arg)
 int (__attribute__((optimize("O0"))) h)(void)
 {
 	__liballocs_walk_stack(cb, NULL);
-	return 42;
+	return 0;
 }
 
 int (__attribute__((optimize("O0"))) g)(void)
@@ -34,5 +34,5 @@ int (__attribute__((optimize("O0"))) f)(void)
 
 int main(void)
 {
-	return h();
+	return f();
 }

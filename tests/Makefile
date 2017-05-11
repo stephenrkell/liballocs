@@ -6,11 +6,11 @@ endif
 
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-UNIQTYPES_BASE ?= /usr/lib/allocsites
-ALLOCSITES_BASE ?= /usr/lib/allocsites
+UNIQTYPES_BASE ?= /usr/lib/meta
+META_BASE ?= /usr/lib/meta
 
 export UNIQTYPES_BASE
-export ALLOCSITES_BASE
+export META_BASE
 
 CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
@@ -89,6 +89,8 @@ checkrun-%:
 		(tail -n20 $$err; false)
 
 # Some cases are special and require only an exit status of zero
+checkrun-stack-walk:
+	$(MAKE) cleanrun-stack-walk >/dev/null 2>&1
 checkrun-sloppy-dumptypes:
 	$(MAKE) cleanrun-sloppy-dumptypes >/dev/null 2>&1
 checkrun-section-group:
@@ -103,6 +105,8 @@ checkrun-relf-auxv-dynamic:
 	$(MAKE) cleanrun-relf-auxv-dynamic >/dev/null 2>&1
 checkrun-relf-auxv-static:
 	$(MAKE) cleanrun-relf-auxv-static >/dev/null 2>&1
+checkrun-uniqtype-make-precise:
+	$(MAKE) cleanrun-uniqtype-make-precise >/dev/null 2>&1
 
 _onlyrun-nopreload-%:
 	./nopreload-$*
