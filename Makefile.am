@@ -114,7 +114,8 @@ tools/gold-plugin.so: $(lib_LTLIBRARIES)
 
 all-am: tools/gold-plugin.so
 
-clean::
+clean:
+	$(MAKE) clean-recursive
 	rm -f tools/gold-plugin.so
 
 # dummy target for now
