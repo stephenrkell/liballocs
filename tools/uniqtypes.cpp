@@ -276,6 +276,12 @@ void write_master_relation(master_relation_t& r,
 
 	std::map< std::string, std::set< pair<string, string> > > name_pairs_by_name;
 	
+	/* Some types are too obscure to be considered for the codeless
+	 * alias thing. Specifically, this is bitfields: if we have a 
+	 * bitfield type called "int", it should not prevent us choosing
+	 * a generic alias "int". */
+	std::map< std::string, std::set< string > > codeless_alias_blacklist;
+	
 	/* Note the very nasty hack with __attribute__((section (...))): 
 	 * we embed a '#' into the section string, after adding our own
 	 * assembler-level flags and attributes. This causes the compiler-
@@ -319,7 +325,16 @@ void write_master_relation(master_relation_t& r,
 			 /* HACK: only complement zero-off cases for now, since we don't track the 
 			  * bit offset in the big _by_size_and_signedness map. */
 	};
-		
+	auto avoid_aliasing_as = [&codeless_alias_blacklist](const string& alias,
+		const string& codestring, iterator_df<type_die> t) {
+		if (!t.is_a<base_type_die>()) return false;
+		auto base_t = t.as_a<base_type_die>();
+		/* Funky bitfield types are 
+		 * too obscure to be considered for codeless aliasing. */
+		return (base_t->bit_size_and_offset().second != 0
+			|| base_t->bit_size_and_offset().first != 8 * (*base_t->calculate_byte_size()));
+	};
+	
 	/* Emit forward declarations, building the complement relation as we go. */
 	for (auto i_pair = r.begin(); i_pair != r.end(); ++i_pair)
 	{
@@ -347,6 +362,12 @@ void write_master_relation(master_relation_t& r,
 				{
 					integer_base_types_by_size_and_signedness[bit_size][signedness].insert(*i_pair);
 				}
+				
+			}
+			
+			if (avoid_aliasing_as(name.second, name.first, t))
+			{
+				codeless_alias_blacklist[name.second].insert(name.first);
 			}
 		}
 		
@@ -873,6 +894,11 @@ void write_master_relation(master_relation_t& r,
 					out << "extern struct uniqtype " << mangle_typename(complement_name_pair)
 						<< " __attribute__((weak,alias(\"" << mangle_typename(k) << "\")));" << endl;
 					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
+					if (avoid_aliasing_as(compl_equiv[0], complement_name_pair.first,
+						i_vert->second))
+					{
+						codeless_alias_blacklist[compl_equiv[0]].insert(complement_name_pair.first);
+					}
 				}
 			}
 		}
@@ -886,6 +912,10 @@ void write_master_relation(master_relation_t& r,
 				<< " __attribute__((weak,alias(\"" << mangle_typename(i_vert->first) << "\")));" << endl;
 			types_by_name[*i_alias].insert(i_vert->second);
 			name_pairs_by_name[*i_alias].insert(i_vert->first);
+			if (avoid_aliasing_as(*i_alias, i_vert->first.first, i_vert->second))
+			{
+				codeless_alias_blacklist[*i_alias].insert(i_vert->first.first);
+			}
 		}
 	}
 	
@@ -897,10 +927,22 @@ void write_master_relation(master_relation_t& r,
 		for (auto i_by_name_pair = name_pairs_by_name.begin(); i_by_name_pair != name_pairs_by_name.end();
 			++i_by_name_pair)
 		{
-			if (i_by_name_pair->second.size() == 1)
+			std::vector<const pair<string, string> *> aliases_to_consider;
+			for (auto i = i_by_name_pair->second.begin(); i != i_by_name_pair->second.end();
+				++i)
+			{
+				const string& codeful = i->first;
+				if (codeless_alias_blacklist[i->second].find(codeful)
+						== codeless_alias_blacklist[i->second].end())
+				{
+					aliases_to_consider.push_back(&*i);
+				}
+			}
+			
+			if (aliases_to_consider.size() == 1)
 			{
 				/* This name only denotes one type, so we can alias it if it's complete. */
-				auto full_name_pair = *i_by_name_pair->second.begin();
+				auto& full_name_pair = **aliases_to_consider.begin();
 				if (full_name_pair.first != "")
 				{
 					string full_name = mangle_typename(full_name_pair);
@@ -913,10 +955,10 @@ void write_master_relation(master_relation_t& r,
 			else
 			{
 				out << "/* Not aliasing \"" << i_by_name_pair->first << "\"; set is {\n";
-				for (auto i_t = i_by_name_pair->second.begin(); i_t != i_by_name_pair->second.end(); ++i_t)
+				for (auto i_t = aliases_to_consider.begin(); i_t != aliases_to_consider.end(); ++i_t)
 				{
-					if (i_t != i_by_name_pair->second.begin()) cout << ",\n";
-					out << "\t" << mangle_typename(*i_t);
+					if (i_t != aliases_to_consider.begin()) cout << ",\n";
+					out << "\t" << mangle_typename(**i_t);
 				}
 
 				out << "\n} */" << endl;
