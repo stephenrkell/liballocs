@@ -289,22 +289,22 @@ class AllocsCompilerWrapper(CompilerWrapper):
         
     def doPostLinkMetadataBuild(self, outputFile):
         # We've just output an object, so invoke make to collect the allocsites, 
-        # with our target name as the file we've just built, using ALLOCSITES_BASE 
+        # with our target name as the file we've just built, using META_BASE 
         # to set the appropriate prefix
-        if "ALLOCSITES_BASE" in os.environ:
-            baseDir = os.environ["ALLOCSITES_BASE"]
+        if "META_BASE" in os.environ:
+            baseDir = os.environ["META_BASE"]
         else:
-            baseDir = "/usr/lib/allocsites"
+            baseDir = "/usr/lib/meta"
         if os.path.exists(os.path.realpath(outputFile)):
             targetNames = [baseDir + os.path.realpath(outputFile) + ext \
-                for ext in [".allocs", "-types.c", "-types.so", "-allocsites.c", "-allocsites.so"]]
+                for ext in [".allocs", "-meta.c", "-meta.so"]]
             errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
 
             ret2 = 42
             with self.makeErrFile(errfilename, "w+") as errfile:
                 cmd = ["make", "CC=" + " ".join(self.getBasicCCompilerCommand()), \
                     "-C", self.getLibAllocsBaseDir() + "/tools", \
-                    "-f", "Makefile.allocsites"] +  targetNames
+                    "-f", "Makefile.meta"] +  targetNames
                 errfile.write("Running: " + " ".join(cmd) + "\n")
                 ret2 = subprocess.call(cmd, stderr=errfile, stdout=errfile)
                 errfile.write("Exit status was %d\n" % ret2)

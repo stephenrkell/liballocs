@@ -103,7 +103,7 @@ opt<vector<allocsite> > read_allocsites_for_binary(const string& s)
 	char *real_path = realpath(s.c_str(), NULL);
 	assert(real_path);
 	
-	string full_path = string(getenv("ALLOCSITES_BASE")?:"/usr/lib/allocsites") + "/" + real_path + ".allocs";
+	string full_path = string(getenv("META_BASE")?:"/usr/lib/meta") + "/" + real_path + ".allocs";
 	std::ifstream in(full_path);
 	if (in)
 	{

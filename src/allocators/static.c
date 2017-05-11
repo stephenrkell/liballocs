@@ -226,7 +226,7 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 {
 	for (struct link_map *inner_l = _r_debug.r_map; inner_l; inner_l = inner_l->l_next)
 	{
-		if (is_meta_object_for_lib(inner_l, l, "-types.so" /* HACK */))
+		if (is_meta_object_for_lib(inner_l, l)) /* HACK: we shouldn't need this... or should we? */
 		{
 			ElfW(Sym) *statics_sym = symbol_lookup_in_object(inner_l, "statics");
 			if (!statics_sym) abort();

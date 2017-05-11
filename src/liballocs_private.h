@@ -104,12 +104,10 @@ struct frame_uniqtype_and_offset
 vaddr_to_stack_uniqtype(const void *vaddr)
 		__attribute__((visibility("hidden")));
 struct uniqtype *
-static_addr_to_uniqtype(const void *static_addr, void **out_object_start) 
+static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 		__attribute__((visibility("hidden")));
-
-#define TYPES_OBJ_SUFFIX "-types.so"
-#define ALLOCSITES_OBJ_SUFFIX "-allocsites.so"
-_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, const char *meta_suffix)
+#define META_OBJ_SUFFIX "-meta.so"
+_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l)
 			__attribute__((visibility("hidden")));
 
 /* avoid dependency on libc headers (in this header only) */
@@ -142,12 +140,7 @@ void __generic_malloc_allocator_init(void) __attribute__((visibility("hidden")))
 
 /* If this weak function is defined, it will be called when we've loaded
  * the metadata for one object. */
-struct object_metadata
-{
-	void *types_handle;
-	void *allocsites_handle;
-};
-int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *object_metadata) __attribute__((weak));
+int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *meta_object_handle) __attribute__((weak));
 int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 	__attribute__((visibility("hidden")));
 

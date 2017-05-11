@@ -1,0 +1,85 @@
+# This Makefile maintains a repository of allocation site
+# metadata, shadowing libraries and executables in the system,
+# similar to the /usr/lib/debug hierarchy. 
+
+# HACK! for spaces
+nullstring :=
+space := $(nullstring) # end
+
+THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
+
+META_BASE ?= /usr/lib/meta
+$(warning META_BASE is $(META_BASE))
+
+UNIQTYPES ?= $(dir $(THIS_MAKEFILE))/uniqtypes
+DUMPTYPES ?= $(dir $(THIS_MAKEFILE))/dumptypes
+ALLOCSITES ?= $(dir $(THIS_MAKEFILE))/allocsites
+LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
+OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
+MERGE_ALLOCS ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh
+GATHER_SRCALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-srcallocs.sh
+OBJDUMPMEMACC ?= $(dir $(THIS_MAKEFILE))/objdumpmemacc
+MERGE_MEMACC ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh # FIXME: change name
+GATHER_SRCMEMACC ?= $(dir $(THIS_MAKEFILE))/gather-srcmemacc.sh
+
+# By default, remake everything we have already made,
+# but don't make new .allocsites files.
+default: $(shell find $(META_BASE) -type f -name '*.allocsites*' ! -name 'Makefile.meta' )
+
+# Remaking a .allocsites file from the analogous file 
+# in the system.
+prefix_exactly_one_slash = $(shell echo "$1" | sed 's|^/*\(.*\)|/\1|' )
+$(META_BASE)/%.objallocs: $(call prefix_exactly_one_slash,%)
+	mkdir -p $$(dirname "$@")
+	$(OBJDUMPALLOCS) "$<" | sed "s|.*|$<\t&|" > "$@" || (rm -f "$@"; false)
+$(META_BASE)/%.objmemacc: $(call prefix_exactly_one_slash,%)
+	mkdir -p $$(dirname "$@")
+	$(OBJDUMPMEMACC) "$<" | sed "s|.*|$<\t&|" > "$@" || (rm -f "$@"; false)
+
+# We also know how to build a lib%-uniqtypes.so for each executable.
+# Which allocsites files does an executable's uniqtypes depend on?
+# depend = $(shell $(OBJDEPS) "$1" 2>/dev/null | cut -f1 | while read line; do readlink -f "$$line"; done )
+
+# # Note that $1 is always '/'-prefixed here, so we don't insert another L-- here
+# # allocsites_from_obj = $(patsubst %,$(META_BASE)%.allocsites,$1)
+# # all_allocsites_for_obj = $(foreach f,$1 $(call depend,$1),$(call allocsites_from_obj,$(f)))
+
+# don't build /usr/lib/allocsites/usr/lib/allocsites/anything... 
+# and it's a bug if we try
+$(META_BASE)$(META_BASE)/%:
+	false
+
+$(META_BASE)/%.srcallocs: $(META_BASE)/%.objallocs
+	( $(GATHER_SRCALLOCS) "$<" 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
+	test -e "$@"
+
+$(META_BASE)/%.allocs: $(META_BASE)/%.objallocs $(META_BASE)/%.srcallocs
+	( $(MERGE_ALLOCS) $+ 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
+	test -e "$@"
+
+$(META_BASE)/%.srcmemacc: $(META_BASE)/%.objmemacc
+	( $(GATHER_SRCMEMACC) "$<" 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
+	test -e "$@"
+
+$(META_BASE)/%.memacc: $(META_BASE)/%.objmemacc $(META_BASE)/%.srcmemacc
+	( $(MERGE_MEMACC) $+ 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
+	test -e "$@"
+
+$(META_BASE)/%-meta.c: $(META_BASE)/%.allocs /% # pipe err through zip, so need to swap stdout and stderr
+	( \
+	  ( \
+	     ( bin=$$( bash -c 'source $(dir $(THIS_MAKEFILE))/../lib/debug-funcs.sh && find_debug_file_for "/$*"' ); \
+	       $(DUMPTYPES) "$$bin"; \
+	       $(ALLOCSITES) < "$<" \
+	      ) 3>&2 2>&1 1>&3 \
+	  ) 2>"$@" || ( rm -f "$@"; false ) \
+	) | gzip >"$@".log.gz
+	test -e "$@"
+
+# can't use builtin .o rule in case CC is not gcc (section flags injection attack
+# using "... comdat# ..." doesn't work except on gcc). (FIXME: use configure-time
+# adaptation found in glibc's libc-symbols.h?)
+$(META_BASE)/%-meta.o: $(META_BASE)/%-meta.c
+	gcc $(CFLAGS) $(CPPFLAGS) -c -o "$@" "$<"
+$(META_BASE)/%-meta.so: $(META_BASE)/%-meta.o
+	$(CC) -shared -Wl,--hash-style=both -o "$@" "$<"

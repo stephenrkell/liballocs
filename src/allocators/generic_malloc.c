@@ -175,11 +175,15 @@ do_init(void)
 
 	/* Initialize what we depend on. */
 	// __mmap_allocator_init();
-	/* Actually, try without. Since we want to call dl_iterate_phdr and dlopen
-	 * quite early in liballocs init, and they call malloc, we want ourselves
-	 * to be up-and-running quite early, and I don't think the mmap allocator
-	 * is strictly necessary. If we make any bigallocs calls, the pageindex code
-	 * should ensure that the mmap allocator is init'd. */
+	/* We need this, because without it we might not see a sbrk() or mmap()
+	 * that our malloc does. That *should* be okay, because we use /proc
+	 * to snapshot the memory mappings when doing the mmap init.
+	 * 
+	 * Ther circularity problem is that we want to call dl_iterate_phdr and
+	 * dlopen quite early in liballocs init, and they call malloc. So we want 
+	 * ourselves to be up-and-running quite early. I don't think the mmap 
+	 * allocator is strictly necessary. If we make any bigallocs calls, the 
+	 * pageindex code should ensure that the mmap allocator is init'd. */
 	
 	index_begin_addr = (void*) 0U;
 #if defined(__x86_64__) || defined(x86_64)

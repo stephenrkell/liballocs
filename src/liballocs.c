@@ -169,8 +169,8 @@ FILE *stream_err __attribute__((visibility("hidden")));
 
 struct addrlist __liballocs_unrecognised_heap_alloc_sites = { 0, 0, NULL };
 
-static const char *allocsites_base;
-static unsigned allocsites_base_len;
+static const char *meta_base;
+static unsigned meta_base_len;
 
 int __liballocs_debug_level;
 _Bool __liballocs_is_initialized;
@@ -528,19 +528,19 @@ const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
 	}
 }
 
-static const char *helper_libfile_name(const char *objname, const char *suffix)
+static const char *meta_libfile_name(const char *objname)
 {
 	/* we must have a canonical filename */
 	if (objname[0] != '/') return NULL;
 	
-	static char libfile_name[4096];
+	static __thread char libfile_name[4096]; // FIXME
 	unsigned bytes_left = sizeof libfile_name - 1;
 	
 	libfile_name[0] = '\0';
 	bytes_left--;
 	// append the uniqtypes base path
-	strncat(libfile_name, allocsites_base, bytes_left);
-	bytes_left -= (bytes_left < allocsites_base_len) ? bytes_left : allocsites_base_len;
+	strncat(libfile_name, meta_base, bytes_left);
+	bytes_left -= (bytes_left < meta_base_len) ? bytes_left : meta_base_len;
 	
 	// now append the object name
 	unsigned file_name_len = strlen(objname);
@@ -549,7 +549,7 @@ static const char *helper_libfile_name(const char *objname, const char *suffix)
 	bytes_left -= (bytes_left < file_name_len) ? bytes_left : file_name_len;
 	
 	// now append the suffix
-	strncat(libfile_name, suffix, bytes_left);
+	strncat(libfile_name, META_OBJ_SUFFIX, bytes_left);
 	// no need to compute the last bytes_left
 	
 	return &libfile_name[0];
@@ -558,70 +558,20 @@ static const char *helper_libfile_name(const char *objname, const char *suffix)
 // HACK
 extern void __libcrunch_scan_lazy_typenames(void *handle) __attribute__((weak));
 
-int load_types_for_one_object(struct dl_phdr_info *info, size_t size, void *maybe_out_handle)
-{
-	// get the canonical libfile name
-	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
-	if (!canon_objname) return 0;
-	
-	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
-
-	// skip objects that are themselves types/allocsites objects
-	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
-	
-	// get the -types.so object's name
-	const char *libfile_name = helper_libfile_name(canon_objname, "-types.so");
-	if (!libfile_name) return 0;
-	// don't load if we end with "-types.so"
-	if (0 == strcmp("-types.so", canon_objname + strlen(canon_objname) - strlen("-types.so")))
-	{
-		return 0;
-	}
-
-	// fprintf(stream_err, "liballocs: trying to open %s\n", libfile_name);
-
-	dlerror();
-	// load with NOLOAD first, so that duplicate loads are harmless
-	void *handle = (orig_dlopen ? orig_dlopen :dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
-	if (handle) return 0;
-	
-	dlerror();
-	handle = (orig_dlopen ? orig_dlopen :dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
-	if (!handle)
-	{
-		debug_printf(is_exe ? 0 : 1, "loading types object: %s\n", dlerror());
-		return 0;
-	}
-	debug_printf(3, "loaded types object: %s\n", libfile_name);
-	if (maybe_out_handle) *(void**) maybe_out_handle = handle;
-	
-	// if we want maximum output, print it
-// 	if (__liballocs_debug_level >= 6)
-// 	{
-// 		__liballocs_iterate_types(handle, print_type_cb, NULL);
-// 	}
-	
-	// HACK: scan it for lazy-heap-alloc types
-	if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(handle);
-
-	// always continue with further objects
-	return 0;
-}
-
-_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, const char *meta_suffix)
+_Bool is_meta_object_for_lib(struct link_map *maybe_meta, struct link_map *l)
 {
 	// get the canonical libfile name
 	const char *canon_l_objname = dynobj_name_from_dlpi_name(l->l_name,
 		(void*) l->l_addr); // always returns non-null
-	const char *types_objname_not_norm = helper_libfile_name(canon_l_objname, meta_suffix);
+	const char *types_objname_not_norm = meta_libfile_name(canon_l_objname);
 	if (!types_objname_not_norm) return 0;
 	const char *types_objname_norm = realpath_quick(types_objname_not_norm);
 	if (!types_objname_norm) return 0; /* meta obj does not exist */
 	char types_objname_buf[4096];
 	strncpy(types_objname_buf, types_objname_norm, sizeof types_objname_buf - 1);
 	types_objname_buf[sizeof types_objname_buf - 1] = '\0';
-	const char *canon_types_objname = dynobj_name_from_dlpi_name(maybe_types->l_name,
-		(void*) maybe_types->l_addr); // always returns nonnull
+	const char *canon_types_objname = dynobj_name_from_dlpi_name(maybe_meta->l_name,
+		(void*) maybe_meta->l_addr); // always returns nonnull
 	if (0 == strcmp(types_objname_buf, canon_types_objname)) return 1;
 	else return 0;
 }
@@ -674,99 +624,36 @@ static void chain_allocsite_entries(struct allocsite_entry *cur_ent,
 #undef FIXADDR
 }
 
-int load_and_init_allocsites_for_one_object(struct dl_phdr_info *info, size_t size, void *maybe_out_handle)
-{
-	// write_string("Blah10000\n");
-	// get the canonical libfile name
-	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
-	if (!canon_objname) return 0;
-	
-	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
-	
-	// skip objects that are themselves types/allocsites objects
-	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
-	
-	// get the -allocsites.so object's name
-	const char *libfile_name = helper_libfile_name(canon_objname, ALLOCSITES_OBJ_SUFFIX);
-	if (!libfile_name) return 0;
-	// don't load if we end with "-allocsites.so"
-	if (0 == strcmp(ALLOCSITES_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(ALLOCSITES_OBJ_SUFFIX)))
-	{
-		return 0;
-	}
-
-	// fprintf(stream_err, "liballocs: trying to open %s\n", libfile_name);
-	// load with NOLOAD first, so that duplicate loads are harmless
-	dlerror();
-	void *allocsites_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_NOLOAD);
-	if (allocsites_handle) return 0;
-	
-	dlerror();
-	allocsites_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW);
-	if (!allocsites_handle)
-	{
-		debug_printf(is_exe ? 0 : 1, "loading allocsites object: %s\n", dlerror());
-		return 0;
-	}
-	debug_printf(3, "loaded allocsites object: %s\n", libfile_name);
-	if (maybe_out_handle) *(void**) maybe_out_handle = allocsites_handle;
-	
-	dlerror();
-	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(allocsites_handle, "allocsites");
-	// allocsites cannot be null anyhow
-	assert(first_entry && "symbol 'allocsites' must be present in -allocsites.so"); 
-
-	/* We walk through allocsites in this object, chaining together those which
-	 * should be in the same bucket. NOTE that this is the kind of thing we'd
-	 * like to get the linker to do for us, but it's not quite expressive enough. */
-	struct allocsite_entry *cur_ent = first_entry;
-	struct allocsite_entry *prev_ent = NULL;
-	unsigned current_bucket_size = 1; // out of curiosity...
-	for (; cur_ent->allocsite; prev_ent = cur_ent++)
-	{
-		chain_allocsite_entries(cur_ent, prev_ent, &current_bucket_size, 
-			info->dlpi_addr, 0);
-	}
-
-	// debugging: check that we can look up the first entry, if we are non-empty
-	assert(!first_entry || !first_entry->allocsite || 
-		allocsite_to_uniqtype(first_entry->allocsite) == first_entry->uniqtype);
-	
-	// always continue with further objects
-	return 0;
-}
-
 int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
-	// write_string("Blah11000\n");
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
 
-	// skip objects that are themselves types/allocsites objects
-	if (0 == strncmp(canon_objname, allocsites_base, allocsites_base_len)) return 0;
+	// skip objects that are themselves meta objects
+	if (0 == strncmp(canon_objname, meta_base, meta_base_len)) return 0;
 	
-	// get the -allocsites.so object's name
-	const char *libfile_name = helper_libfile_name(canon_objname, TYPES_OBJ_SUFFIX);
+	// get the meta object's name
+	const char *libfile_name = meta_libfile_name(canon_objname);
 	if (!libfile_name) return 0;
-	// don't load if we end with "-types.so"
-	if (0 == strcmp(TYPES_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(TYPES_OBJ_SUFFIX)))
+	// don't load if we end with "-meta.so"
+	if (0 == strcmp(META_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(META_OBJ_SUFFIX)))
 	{
 		return 0;
 	}
 
 	dlerror();
-	void *types_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_NOLOAD);
-	if (!types_handle)
+	void *meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_NOLOAD);
+	if (!meta_handle)
 	{
-		debug_printf(1, "re-loading types object: %s\n", dlerror());
+		debug_printf(1, "re-loading meta object: %s\n", dlerror());
 		return 0;
 	}
 	
 	{
 		dlerror();
 		struct frame_allocsite_entry *first_frame_entry
-		 = (struct frame_allocsite_entry *) dlsym(types_handle, "frame_vaddrs");
+		 = (struct frame_allocsite_entry *) dlsym(meta_handle, "frame_vaddrs");
 		if (!first_frame_entry)
 		{
 			debug_printf(1, "Could not load frame vaddrs (%s)\n", dlerror());
@@ -795,7 +682,7 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 	{
 		dlerror();
 		struct static_allocsite_entry *first_static_entry
-		 = (struct static_allocsite_entry *) dlsym(types_handle, "statics");
+		 = (struct static_allocsite_entry *) dlsym(meta_handle, "statics");
 		if (!first_static_entry)
 		{
 			debug_printf(1, "Could not load statics (%s)", dlerror());
@@ -827,21 +714,73 @@ int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, s
 
 int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
-	void *types_handle = NULL;
-	int types_said_stop = load_types_for_one_object(info, size, &types_handle);
-	void *allocsites_handle = NULL;
+	void *meta_handle = NULL;
+	void *maybe_out_handle = data;
+	// get the canonical libfile name
+	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
+	if (!canon_objname) return 0;
+	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
+
+	// skip objects that are themselves meta objects
+	// FIXME: what about embedded meta objects?
+	if (0 == strncmp(canon_objname, meta_base, meta_base_len)) return 0;
+	
+	// get the -types.so object's name
+	const char *libfile_name = meta_libfile_name(canon_objname);
+	if (!libfile_name) return 0;
+	// don't load if we end with "-meta.so"
+	if (0 == strcmp(META_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(META_OBJ_SUFFIX)))
+	{
+		return 0;
+	}
+
+	dlerror();
+	// load with NOLOAD first, so that duplicate loads are harmless
+	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+	if (meta_handle) return 0;
+	dlerror();
+	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
+	if (!meta_handle)
+	{
+		debug_printf(is_exe ? 0 : 1, "loading meta object: %s\n", dlerror());
+		return 0;
+	}
+	debug_printf(3, "loaded meta object: %s\n", libfile_name);
+	if (maybe_out_handle) *(void**) maybe_out_handle = meta_handle;
+
+	// HACK: scan it for lazy-heap-alloc types
+	if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(meta_handle);
+
+	// always continue with further objects
 #ifndef NO_MEMTABLE
-	int allocsites_said_stop = load_and_init_allocsites_for_one_object(info, size,
-		&allocsites_handle);
+	dlerror();
+	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(meta_handle, "allocsites");
+	// allocsites cannot be null anyhow
+	assert(first_entry && "symbol 'allocsites' must be present in -allocsites.so"); 
+
+	/* We walk through allocsites in this object, chaining together those which
+	 * should be in the same bucket. NOTE that this is the kind of thing we'd
+	 * like to get the linker to do for us, but it's not quite expressive enough. */
+	struct allocsite_entry *cur_ent = first_entry;
+	struct allocsite_entry *prev_ent = NULL;
+	unsigned current_bucket_size = 1; // out of curiosity...
+	for (; cur_ent->allocsite; prev_ent = cur_ent++)
+	{
+		chain_allocsite_entries(cur_ent, prev_ent, &current_bucket_size, 
+			info->dlpi_addr, 0);
+	}
+
+	// debugging: check that we can look up the first entry, if we are non-empty
+	assert(!first_entry || !first_entry->allocsite || 
+		allocsite_to_uniqtype(first_entry->allocsite) == first_entry->uniqtype);
 	int link_said_stop = link_stackaddr_and_static_allocs_for_one_object(info, size, NULL);
 #endif
-	struct object_metadata meta = { types_handle, allocsites_handle };
-	if (&__hook_loaded_one_object_meta) __hook_loaded_one_object_meta(info, size, &meta);
-	return types_said_stop
+	if (&__hook_loaded_one_object_meta) __hook_loaded_one_object_meta(info, size, meta_handle);
 #ifndef NO_MEMTABLE
-		|| allocsites_said_stop || link_said_stop
+	return link_said_stop;
+#else
+	return 0;
 #endif
-	;
 }
 
 static _Bool check_blacklist(const void *obj)
@@ -1121,9 +1060,9 @@ int __liballocs_global_init(void)
 	assert(stream_err);
 
 	// the user can specify where we get our -types.so and -allocsites.so
-	allocsites_base = getenv("ALLOCSITES_BASE");
-	if (!allocsites_base) allocsites_base = "/usr/lib/allocsites";
-	allocsites_base_len = strlen(allocsites_base);
+	meta_base = getenv("META_BASE");
+	if (!meta_base) meta_base = "/usr/lib/meta";
+	meta_base_len = strlen(meta_base);
 	
 	const char *debug_level_str = getenv("LIBALLOCS_DEBUG_LEVEL");
 	if (debug_level_str) __liballocs_debug_level = atoi(debug_level_str);
@@ -1286,7 +1225,7 @@ void __liballocs_post_systrap_init(void)
 	}
 }
 
-static void *typeobj_handle_for_addr(void *caller)
+static void *metaobj_handle_for_addr(void *caller)
 {
 	// find out what object the caller is in
 	Dl_info info;
@@ -1294,29 +1233,29 @@ static void *typeobj_handle_for_addr(void *caller)
 	int dladdr_ret = dladdr(caller, &info);
 	assert(dladdr_ret != 0);
 	
-	// dlopen the typeobj
-	const char *types_libname = helper_libfile_name(dynobj_name_from_dlpi_name(info.dli_fname, info.dli_fbase), "-types.so");
-	if (!types_libname)
+	// dlopen the metaobj
+	const char *meta_libname = meta_libfile_name(dynobj_name_from_dlpi_name(info.dli_fname, info.dli_fbase));
+	if (!meta_libname)
 	{
-		debug_printf(1, "No typeobj handle for addr %p", caller);
+		debug_printf(1, "No metaobj handle for addr %p", caller);
 		return NULL;
 	}
 	
-	void *handle = (orig_dlopen ? orig_dlopen : dlopen)(types_libname, RTLD_NOW | RTLD_NOLOAD);
+	void *handle = (orig_dlopen ? orig_dlopen : dlopen)(meta_libname, RTLD_NOW | RTLD_NOLOAD);
 	if (handle == NULL)
 	{
-		debug_printf(1, "No typeobj loaded for addr %p, typeobj name %s", caller, types_libname);
+		debug_printf(1, "No metaobj loaded for addr %p, typeobj name %s", caller, meta_libname);
 		return NULL;
 	}
 	// FIXME: this has bumped the refcount and we'll never unbump it
 	return handle;
 }
 
-void *__liballocs_my_typeobj(void) __attribute__((visibility("protected")));
-void *__liballocs_my_typeobj(void)
+void *__liballocs_my_metaobj(void) __attribute__((visibility("protected")));
+void *__liballocs_my_metaobj(void)
 {
 	__liballocs_ensure_init();
-	return typeobj_handle_for_addr(__builtin_return_address(0));
+	return metaobj_handle_for_addr(__builtin_return_address(0));
 }
 
 /* This is left out-of-line because it's inherently a slow path. */

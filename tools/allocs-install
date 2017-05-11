@@ -10,15 +10,15 @@ escape_regexp () {
     sed -r 's/(\*|\.|\[|\^|\$|\[|\]|\\)/\\\1/g'
 }
 
-ALLOCSITES_BASE="${ALLOCSITES_BASE:-/usr/lib/allocsites}"
+META_BASE="${META_BASE:-/usr/lib/meta}"
 
 find "$prefix" -type f -cmin -30 \( -name '*.so*' -o -perm +001 \) | sed "s^$prefix^^" | while read suffix; do
     size="$( stat -c%s "$prefix"/"$suffix" )" &&
     found="$( find . -type f -name "$( basename "$suffix" )" -size "$size"c )" &&
     if [[ -n "$found" ]]; then
         # echo "We think file $prefix/$suffix came from $found" 1>&2
-        stem="${ALLOCSITES_BASE}/$( readlink -f "$found" )"
-        dest_stem="${ALLOCSITES_BASE}/$prefix/$suffix"
+        stem="${META_BASE}/$( readlink -f "$found" )"
+        dest_stem="${META_BASE}/$prefix/$suffix"
         for fname in "$stem".*  "$stem"-*; do
             ext="$( echo "$fname" | sed "s#^$( echo "$stem" | escape_regexp )##" )"
             mkdir -p "$( dirname "$dest_stem" )" &&

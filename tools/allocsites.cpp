@@ -87,6 +87,8 @@ int main(int argc, char **argv)
 		make_allocsites_relation(allocsites_relation, allocsites_to_add, types_by_codeless_name, *p_root);
 	}	
 	
+	// FIXME: make this configurable. Right now we don't need it -- dumptypes has done it
+#if 0
 	cout << "struct allocsite_entry\n\
 { \n\
 	void *next; \n\
@@ -94,6 +96,7 @@ int main(int argc, char **argv)
 	void *allocsite; \n\
 	struct uniqtype *uniqtype; \n\
 };\n";
+#endif
 
 	// extern-declare the uniqtypes
 	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)

@@ -1,4 +1,4 @@
-export UNIQTYPES_BASE=/usr/lib/allocsites
+export UNIQTYPES_BASE=/usr/lib/meta
 export LD_PRELOAD=${HOME}/work/devel/liballocs.hg/lib/libheap_index_fast_hooks.so
 if [[ -z "$( echo "$PATH" | tr ':' '\n' | grep '/cil[^/]*/bin' )" ]]; then
    export PATH=/usr/local/src/cil/bin:${PATH}
