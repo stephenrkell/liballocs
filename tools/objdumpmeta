@@ -117,7 +117,7 @@ get_raw_addresses () {
 
 raw_addresses="$( get_raw_addresses )"
 
-addr2line_output="$( if -n "$raw_addresses"; then addr2line -a -e "$1" $raw_addresses; else true; fi | sed -r 's/^0x[0-9a-f]{8,}/\f&\t/' | tr -d '\n' | tr '\f' '\n' | tail -n+2 )"
+addr2line_output="$( if test -n "$raw_addresses"; then addr2line -a -e "$1" $raw_addresses; else true; fi | sed -r 's/^0x[0-9a-f]{8,}/\f&\t/' | tr -d '\n' | tr '\f' '\n' | tail -n+2 )"
 echo "addr2line said $addr2line_output" 1>&2
 
 addr2line_tmpfile="$(mktemp)"
