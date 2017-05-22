@@ -103,7 +103,7 @@ DWARFIDL_CXXFLAGS DWARFIDL_LIBS \
 TRAP_SYSCALLS MALLOC_HOOKS LIBDLBIND \
 CC CXX CPP CXXFLAGS LDFLAGS LDLIBS
 
-include libltdl/Makefile.inc
+include libltdl/ltdl.mk
 
 tools/gold-plugin.so: $(lib_LTLIBRARIES)
 	echo "gold-plugin.so: creating convenience link from $(abs_builddir)/.libs to $(top_builddir)"; \
