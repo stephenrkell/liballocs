@@ -22,7 +22,7 @@ pad_numbers () {
     sed 's/\f\t/\n/g'
 }
 
-. $(dirname "$0")/../lib/debug-funcs.sh
+. $(dirname "$0")/debug-funcs.sh
 
 # HACK 1: to make this work for llvm, we just use gold to generate
 # a native file with DWARF info, 

@@ -17,7 +17,7 @@ use_src_realpaths () {
 }
 
 # for readelf_debug
-. $(dirname $0)/../lib/debug-funcs.sh
+. $(dirname $0)/debug-funcs.sh
 
 our_name="$(basename "$0")"
 our_name_rewritten="$( echo "$our_name" | sed 's/gather-\(.*\)\.sh/gather-\1/' )"
