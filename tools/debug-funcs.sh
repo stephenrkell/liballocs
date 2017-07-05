@@ -147,7 +147,8 @@ resolve_debuglink () {
     canon_obj_path="$( readlink -f "$obj" )"
 
     for candidate in "$( dirname "$canon_obj_path" )/.debug/$debuglink_value" \
-       /usr/lib/debug"$( dirname ${canon_obj_path} )"/$debuglink_value ; do
+       /usr/lib/debug"$( dirname ${canon_obj_path} )"/$debuglink_value \
+       /usr/lib/debug/.build-id/*/$debuglink_value; do
         if contains_debug_symbols "$candidate"; then
             echo "detected debug info within debuglink $debuglink_value resolved at $candidate" 1>&2
             echo "$candidate"
