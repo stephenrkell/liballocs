@@ -11,7 +11,7 @@ pad_numbers () {
 
 use_src_realpaths () {
     while IFS=$'\t' read -r alloc_sourcefile alloc_sourceline alloc_fun alloc_rest; do
-	echo "Saw alloc_rest: $alloc_rest" 1>&2
+    echo "Saw alloc_rest: $alloc_rest" 1>&2
         echo "$( readlink -f $alloc_sourcefile)"$'\t'"$alloc_sourceline"$'\t'"$alloc_fun"$'\t'"$alloc_rest"
     done
 }
