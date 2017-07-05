@@ -106,7 +106,7 @@ int main(int argc, char **argv)
 
 		auto i_next_cu = i_cu; ++i_next_cu;
 
-		for (iterator_df<> i = i_cu.base().base(); i != i_next_cu.base().base(); ++i)
+		for (iterator_df<> i = i_cu; i != i_next_cu; ++i)
 		{
 			if (i.is_a<base_type_die>() && i.name_here())
 			{
