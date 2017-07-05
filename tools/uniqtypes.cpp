@@ -158,7 +158,7 @@ pair<bool, uniqued_name> add_concrete_type_if_absent(iterator_df<type_die> t, ma
 // 		// (to the same as the ikind/fkinds come out from Cil.Pretty)
 // 	}
 
-	uniqued_name n = canonical_key_from_type(t);
+	uniqued_name n = canonical_key_for_type(t);
 	
 	smatch m;
 	bool already_present = r.find(n) != r.end();
@@ -166,7 +166,7 @@ pair<bool, uniqued_name> add_concrete_type_if_absent(iterator_df<type_die> t, ma
 		&& t.tag_here() != DW_TAG_base_type
 		&& !regex_match(n.second, m, regex(".*__(PTR|REF|FUN|RR|ARR[0-9]+)_.*")))
 	{
-		cerr << "warning: non-base non-pointer non-array non-function type named " << n.second << " already exists!" << endl;
+		// cerr << "warning: non-base non-pointer non-array non-function type named " << n.second << " already exists!" << endl;
 	}
 	r[n] = t;
 	return make_pair(!already_present, n);
@@ -228,11 +228,18 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 	dwarf::core::iterator_df<> end)
 {
 	lib::Dwarf_Off previous_offset = 0UL;
+	bool done_some_output = false;
 	for (iterator_df<> i = begin; i != end; ++i)
 	{
 		assert(i.offset_here() >= previous_offset); // == for initial case, > afterwards
 		if (i.is_a<type_die>())
 		{
+			if (isatty(fileno(std::cerr)))
+			{
+				if (done_some_output) std::cerr << "\r";
+				std::cerr << "Master relation: adding DIE at 0x" << std::hex << i.offset_here() << std::dec;
+				done_some_output = true;
+			}
 			// add it to the relation
 			opt<string> opt_name = !i.is_a<subprogram_die>() ? i.name_here() : opt<string>(); // for debugging
 			if (opt_name)
@@ -467,7 +474,7 @@ void write_master_relation(master_relation_t& r,
 				if (!opt_offset) continue;
 				else
 				{ 
-					real_members.push_back(i_edge.base().base()); 
+					real_members.push_back(i_edge); 
 					real_member_offsets.push_back(*opt_offset);
 				}
 			}
@@ -567,7 +574,7 @@ void write_master_relation(master_relation_t& r,
 			);
 			
 			// compute and print destination name
-			auto k = canonical_key_from_type(i_vert->second.as_a<array_type_die>()->get_type());
+			auto k = canonical_key_for_type(i_vert->second.as_a<array_type_die>()->get_type());
 			/* FIXME: do multidimensional arrays get handled okay like this? 
 			 * I reckon so, but am not yet sure. */
 			string mangled_name = mangle_typename(k);
@@ -597,7 +604,7 @@ void write_master_relation(master_relation_t& r,
 				0 /* FIXME */
 			);
 			// compute and print destination name
-			auto k = canonical_key_from_type(i_vert->second.as_a<address_holding_type_die>()->get_type());
+			auto k = canonical_key_for_type(i_vert->second.as_a<address_holding_type_die>()->get_type());
 			string mangled_name = mangle_typename(k);
 			write_uniqtype_related_pointee_type(out, mangled_name);
 		}
@@ -616,12 +623,12 @@ void write_master_relation(master_relation_t& r,
 			 * a return type, even if it's &__uniqtype__void. */
 			auto return_type = i_vert->second.as_a<type_describing_subprogram_die>()->find_type();
 			write_uniqtype_related_subprogram_return_type(out,
-				true, mangle_typename(canonical_key_from_type(return_type)));
+				true, mangle_typename(canonical_key_for_type(return_type)));
 			
 			for (auto i_t = fp_types.begin(); i_t != fp_types.end(); ++i_t)
 			{
 				write_uniqtype_related_subprogram_argument_type(out,
-					mangle_typename(canonical_key_from_type(*i_t))
+					mangle_typename(canonical_key_for_type(*i_t))
 				);
 				
 				++contained_length;
@@ -786,7 +793,7 @@ void write_master_relation(master_relation_t& r,
 			{
 				++contained_length;
 				auto i_edge = i_i_edge->as_a<member_die>();
-				auto k = canonical_key_from_type(i_edge->find_or_create_type_handling_bitfields());
+				auto k = canonical_key_for_type(i_edge->find_or_create_type_handling_bitfields());
 				string mangled_name = mangle_typename(k);
 				if (names_emitted.find(mangled_name) == names_emitted.end())
 				{
@@ -1247,12 +1254,12 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 	std::vector<std::unique_ptr<std::ifstream> > infstreams(fnames.size()); 
 	std::vector<std::unique_ptr<root_die> > rs(fnames.size());
 	
-	/* First we look through the whole file and index its types by their *codeless*
-	 * *canonical* uniqtype name, i.e. we blank out the first element of the name pair. */
+	/* The codeless map, alias map and and master relation are shared across 
+	 * *all* files that we process. */
 	multimap<string, iterator_df<type_die> > types_by_codeless_uniqtype_name;
-
 	master_relation_t master_relation;
 	multimap<string, pair<string, string> > aliases_needed;
+	
 	for (unsigned i = 0; i < fnames.size(); ++i)
 	{
 		const string& fname = fnames.at(i);
@@ -1266,14 +1273,11 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 
 		rs[i] = std::move(unique_ptr<root_die>(new root_die(fileno(infstream))));
 		root_die &r = *rs[i];
+		get_types_by_codeless_uniqtype_name(types_by_codeless_uniqtype_name, 
+			r.begin(), r.end());
 		
 		auto f = [&](const string& key) {
-
-			get_types_by_codeless_uniqtype_name(types_by_codeless_uniqtype_name, 
-				r.begin(), r.end());
-			
 			// FIXME: escape single quotes
-			
 			auto found_pair = types_by_codeless_uniqtype_name.equal_range(key);
 			unsigned found_count = srk31::count(found_pair.first, found_pair.second);
 		

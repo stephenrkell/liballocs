@@ -81,11 +81,15 @@ name_for_type_die(core::iterator_df<core::type_die> t)
 	else return *t.name_here();
 }
 
+string
+canonical_name_for_type(core::iterator_df<core::type_die> t);
+string
+canonical_codestring_from_type(core::iterator_df<core::type_die> t);
 uniqued_name
-canonical_key_from_type(core::iterator_df<core::type_die> t);
+canonical_key_for_type(core::iterator_df<core::type_die> t);
 
 uniqued_name
-language_specific_key_from_type(core::iterator_df<core::type_die> t);
+language_specific_key_for_type(core::iterator_df<core::type_die> t);
 
 /* We expand all the possible names for a type, using synonyms along the 
  * chain starting from t. Don't use C-equivalences though; this is generic code. */

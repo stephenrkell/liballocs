@@ -106,7 +106,7 @@ int main(int argc, char **argv)
 	{
 		master_relation.insert(
 			make_pair(
-				canonical_key_from_type(*i_t), 
+				canonical_key_for_type(*i_t), 
 				*i_t ? (*i_t)->get_concrete_type() : *i_t
 			)
 		);
@@ -152,7 +152,7 @@ int main(int argc, char **argv)
 			<< " = &";
 		iterator_df<type_die> t = *found;
 		iterator_df<type_die> concrete_t = t ? t->get_concrete_type() : t;
-		auto mangled_name = mangle_typename(canonical_key_from_type(concrete_t));
+		auto mangled_name = mangle_typename(canonical_key_for_type(concrete_t));
 		cout << mangled_name;
 		cout << ";" << endl;
 	}

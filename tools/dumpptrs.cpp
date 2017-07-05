@@ -762,7 +762,7 @@ int main(int argc, char **argv)
 						// -- push zero (a.k.a. the frame base) onto the initial stack
 						initial_stack.push(0);
 						// FIXME: really want to push the offset of the stack pointer from the frame base
-						lib::evaluator e(i_el_pair->second,
+						dwarf::expr::evaluator e(i_el_pair->second,
 							i_el_pair->first.spec_here(),
 							/* fb */ 0, 
 							initial_stack);
@@ -1045,7 +1045,7 @@ int main(int argc, char **argv)
 						 << dwarf_regnames_for_elf_machine(elf_machine)[i_by_off->loc.regnum()]
 						 << " */ } }\n\t\t}";
 				}
-// 					string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->local_die->find_type()));
+// 					string mangled_name = mangle_typename(canonical_key_for_type(i_by_off->local_die->find_type()));
 // 					else
 // 					{
 // 						cout << "\"" << "register "

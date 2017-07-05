@@ -230,7 +230,12 @@ int main(int argc, char **argv)
 	{
 		using root_die::root_die;
 		
-		// virtual bool is_sticky(const core::abstract_die& d) { return true; }
+		virtual bool is_sticky(const core::abstract_die& d) 
+		{
+			return this->root_die::is_sticky(d)
+				|| dwarf::spec::DEFAULT_DWARF_SPEC.tag_is_type(d.get_tag())
+				;
+		}
 		
 	} root(fileno(infstream));
 	assert(&root.get_frame_section());
@@ -252,6 +257,7 @@ int main(int argc, char **argv)
 	if (allocsites)
 	{
 		make_allocsites_relation(allocsites_relation, *allocsites, types_by_codeless_name, root);
+		cerr << "Allocsites relation contains " << allocsites_relation.size() << " data types." << endl;
 	}
 
 	struct subprogram_key : public pair< pair<string, string>, string > // ordering for free
@@ -740,7 +746,7 @@ int main(int argc, char **argv)
 					// -- push zero (a.k.a. the frame base) onto the initial stack
 					initial_stack.push(0); 
 					// FIXME: really want to push the offset of the stack pointer from the frame base
-					lib::evaluator e(i_el_pair->second,
+					dwarf::expr::evaluator e(i_el_pair->second,
 						i_el_pair->first.spec_here(),
 						/* fb */ 0, 
 						initial_stack);
@@ -918,7 +924,7 @@ int main(int argc, char **argv)
 						i_by_off->second.tag_here())
 					<< " @" << std::hex << i_by_off->second.offset_here() << std::dec;
 
-				string mangled_name = mangle_typename(canonical_key_from_type(i_by_off->second->find_type()));
+				string mangled_name = mangle_typename(canonical_key_for_type(i_by_off->second->find_type()));
 				assert(names_emitted.find(mangled_name) != names_emitted.end());
 				
 				write_uniqtype_related_contained_member_type(cout,
@@ -1089,7 +1095,7 @@ int main(int argc, char **argv)
 			<< "\n\t  { (void*)0, (void*)0, "
 			<< "(char*) " << "0" // will fix up at load time
 			<< " + " << addr << "UL, " 
-			<< "&" << mangle_typename(canonical_key_from_type(
+			<< "&" << mangle_typename(canonical_key_for_type(
 				i_var.is_a<subprogram_die>() ? i_var.as_a<type_die>() : i_var.as_a<variable_die>()->find_type()))
 			<< " }\n\t}";
 		cout << ",";

@@ -151,7 +151,7 @@ void make_allocsites_relation(
 // 				auto seq = i_cu.children_here().subseq_of<type_die>();
 // 				for (auto i = seq.first; i != seq.second; ++i)
 // 				{
-// 					auto t = i.base().base(); // FIXME
+// 					auto t = i; // FIXME
 // 					if (t.name_here())
 // 					{
 // 						if (t.is_a<core::base_type_die>())
@@ -317,7 +317,7 @@ void make_allocsites_relation(
 		// now we found the type
 		//cerr << "SUCCESS: found type: " << *found_type << endl;
 
-		uniqued_name name_used = canonical_key_from_type(found_type);
+		uniqued_name name_used = canonical_key_for_type(found_type);
 
 		// add to the allocsites table too
 		// recall: this is the mapping from allocsites to uniqtype addrs
@@ -348,12 +348,12 @@ void merge_and_rewrite_synthetic_data_types(root_die& r, vector<allocsite>& as)
 				i_cu != cus_seq.second; 
 				++i_cu, (i_cu != cus_seq.second && ((last_cu = i_cu), true)));
 
-			auto created = dwarfidl::create_dies(last_cu.base().base(), i_a->clean_typename);
+			auto created = dwarfidl::create_dies(last_cu, i_a->clean_typename);
 			assert(created);
 			assert(created.is_a<type_die>());
 			/* We use the codeless name here, which is what dumpallocs would emit. */
 			i_a->clean_typename = mangle_typename(make_pair("", 
-				canonical_key_from_type(created.as_a<type_die>()).second));
+				canonical_key_for_type(created.as_a<type_die>()).second));
 			i_a->declare_as_array0 = false;
 		}
 	}
@@ -525,7 +525,6 @@ all_names_for_type_t::all_names_for_type_t() :
 		}
 		cerr << "] typenames." << endl;
 		
-		
 		/* Invariant: the working deque consists of partial names for the function type, 
 		 * such that all argument types up to the last iteration have been dealt with. 
 		 
@@ -640,25 +639,11 @@ deque<string> all_names_for_type_t::operator()(iterator_df<type_die> t) const
 
 all_names_for_type_t default_all_names_for_type;
 
-uniqued_name
-canonical_key_from_type(iterator_df<type_die> t)
+string canonical_name_for_type(iterator_df<type_die> t)
 {
-	if (!t) return make_pair("", "void");
-	assert(t);
+	if (!t) return "void";
 	t = t->get_concrete_type();
-	if (!t) return make_pair("", "void");
-	assert(t);
-
-	/* we no longer use the defining_header -- use instead
-	 * the type summary code */
-	opt<uint32_t> code = type_summary_code(t);
-	string summary_string;
-	if (code)
-	{
-		summary_string = summary_code_to_string(*code);
-		assert(summary_string.size() == 2 * sizeof *code);
-	} else summary_string = "";
-	
+	if (!t) return "void";
 	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>()
 		&& !t.is_a<subprogram_die>())
 	{
@@ -668,17 +653,6 @@ canonical_key_from_type(iterator_df<type_die> t)
 		string name_to_use;
 		if (t.is_a<base_type_die>())
 		{
-// 			optional<string> c_normalized_name;
-// 			if (t.name_here())
-// 			{
-// 				const char **c_equiv_class = abstract_c_compiler::get_equivalence_class_ptr(
-// 					t.name_here()->c_str());
-// 				if (c_equiv_class)
-// 				{
-// 					c_normalized_name = c_equiv_class[0];
-// 				}
-// 			}
-			
 			/* For base types, we use our own language-independent naming scheme. */
 			name_to_use = name_for_base_type(t.as_a<base_type_die>());
 		} 
@@ -713,36 +687,7 @@ canonical_key_from_type(iterator_df<type_die> t)
 				else name_to_use = offsetstr;
 			}
 		}
-// 		else // t->name_here() && t.tag_here() == DW_TAG_base_type
-// 		{
-// 			assert(t.name_here() && t.tag_here() == DW_TAG_base_type);
-// 			string name_to_search_for = *t.name_here();
-// 			// search equiv classes for a type of this name
-// 			for (const char ** const*p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
-// 			{
-// 				// assert this equiv class has at least one element
-// 				assert((*p_equiv)[0] != NULL);
-// 				
-// 				for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
-// 				{
-// 					// is this the relevant equiv class?
-// 					if (name_to_search_for == string(*p_el))
-// 					{
-// 						// yes, so grab its first element
-// 						name_to_use = (*p_equiv)[0];
-// 						break;
-// 					}
-// 				}
-// 				if (name_to_use != "") break; // we've got it
-// 			}
-// 			
-// 			// if we've still not got it....
-// 			if (name_to_use == "") name_to_use = name_to_search_for;
-// 			
-// 			assert(name_to_use != "char"); // ... for example. It should be "signed char" of course! since cxx_compiler.cpp puts that one first
-// 		}
-
-		return make_pair(summary_string, name_to_use);
+		return name_to_use;
 	}
 	else if (t.is_a<subroutine_type_die>() || t.is_a<subprogram_die>())
 	{
@@ -755,7 +700,7 @@ canonical_key_from_type(iterator_df<type_die> t)
 		{
 			/* args should not be void */
 			/* We're making a canonical typename, so use canonical argnames. */
-			s << "__ARG" << argnum << "_" << canonical_key_from_type(i_fp->find_type()).second;
+			s << "__ARG" << argnum << "_" << canonical_name_for_type(i_fp->find_type());
 		}
 		if (IS_VARIADIC(t))
 		{
@@ -763,8 +708,9 @@ canonical_key_from_type(iterator_df<type_die> t)
 		}
 		s << "__FUN_TO_";
 		iterator_df<type_die> return_t = RETURN_TYPE(t);
-		s << ((!return_t || !return_t->get_concrete_type()) ? string("void") : canonical_key_from_type(return_t).second);
-		return make_pair(summary_string, s.str());
+		
+		s << ((!return_t || !return_t->get_concrete_type()) ? string("void") : canonical_name_for_type(return_t));
+		return s.str();
 	}
 	else if (t.is_a<array_type_die>())
 	{
@@ -787,7 +733,8 @@ canonical_key_from_type(iterator_df<type_die> t)
 		ostringstream array_prefix;
 		opt<Dwarf_Unsigned> element_count = array_t->element_count();
 		array_prefix << "__ARR" << (element_count ? *element_count : 0) << "_";
-		return make_pair(summary_string, array_prefix.str() + canonical_key_from_type(array_t->get_type()).second);
+		string el_type_name = canonical_name_for_type(array_t->get_type());
+		return array_prefix.str() + el_type_name;
 	}
 	else if (t.is_a<string_type_die>())
 	{
@@ -801,7 +748,7 @@ canonical_key_from_type(iterator_df<type_die> t)
 		string_prefix << "__STR" << (element_count ? *element_count : 0) << "_"
 			<< element_size;
 
-		return make_pair(summary_string, string_prefix.str());
+		return string_prefix.str();
 	}
 	else // DW_TAG_pointer_type and friends
 	{
@@ -837,11 +784,33 @@ canonical_key_from_type(iterator_df<type_die> t)
 		assert(levels_of_indirection >= 1);
 		
 		ostringstream os;
-		os << indirection_prefix.str() << (!working_t ? "void" : canonical_key_from_type(working_t).second);
-		return make_pair(summary_string, os.str());
+		os << indirection_prefix.str() << (!working_t ? "void" : canonical_name_for_type(working_t));
+		return os.str();
 	}
-	
-	assert(false); // should have returned by now
+	assert(false);
+	abort();
+}
+
+string canonical_codestring_for_type(iterator_df<type_die> t)
+{
+	if (!t) return "";
+	t = t->get_concrete_type();
+	if (!t) return "";
+
+	opt<uint32_t> code = type_summary_code(t);
+	string summary_string;
+	if (code)
+	{
+		summary_string = summary_code_to_string(*code);
+		assert(summary_string.size() == 2 * sizeof *code);
+	} else summary_string = "";
+	return summary_string;
+}
+
+uniqued_name
+canonical_key_for_type(iterator_df<type_die> t)
+{
+	return make_pair(canonical_codestring_for_type(t), canonical_name_for_type(t));
 }
 
 // iterator_df<type_die>
@@ -896,10 +865,17 @@ void get_types_by_codeless_uniqtype_name(
 {	
 	/* First we look through the whole file and index its types by their *codeless*
 	 * *canonical* uniqtype name, i.e. we blank out the first element of the name pair. */
+	bool done_some_output = false;
 	for (iterator_df<> i = begin; i != end; ++i)
 	{
 		if (i.is_a<type_die>())
 		{
+			if (isatty(fileno(std::cerr)))
+			{
+				if (done_some_output) std::cerr << "\r";
+				std::cerr << "Codeless uniqtypes: adding DIE at 0x" << std::hex << i.offset_here() << std::dec;
+				done_some_output = true;
+			}
 			opt<string> opt_name = i.name_here(); // for debugging
 			if (opt_name)
 			{
@@ -913,8 +889,8 @@ void get_types_by_codeless_uniqtype_name(
 			pair<string, string> uniqtype_name_pair;
 			
 			// handle void case specially
-			uniqtype_name_pair = canonical_key_from_type(t);
-
+			string canonical_typename = canonical_name_for_type(t);
+			
 			/* CIL/trumptr will only generate references to aliases in the case of 
 			 * base types. We need to handle these here. What should happen? 
 			 * 
@@ -934,15 +910,15 @@ void get_types_by_codeless_uniqtype_name(
 			 * This is now done in link-used-types (and will be 
 			 * */
 			
-			string canonical_or_base_typename = uniqtype_name_pair.second;
-			if (canonical_or_base_typename == "")
+			
+			if (canonical_typename == "")
 			{
 				assert(concrete_t.is_a<base_type_die>());
 				// if the base type has no name, this DWARF type is useless to us
 				if (!concrete_t.name_here()) continue;
-				canonical_or_base_typename = *name_for_type_die(concrete_t);
+				canonical_typename = *name_for_type_die(concrete_t);
 			}
-			string codeless_symname = mangle_typename(make_pair("", canonical_or_base_typename));
+			string codeless_symname = mangle_typename(make_pair("", canonical_typename));
 
 			m.insert(make_pair(codeless_symname, concrete_t));
 
