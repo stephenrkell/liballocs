@@ -41,7 +41,7 @@ read_allocsites(std::istream& in)
 	
 	vector<allocsite> allocsites_to_add;
 	
-	optional<string> seen_objname;
+	opt<string> seen_objname;
 	
 	while (in.getline(buf, sizeof buf - 1)
 		&& 0 == read_allocs_line(string(buf), objname, symname, file_addr, sourcefile, line, end_line, alloc_typename))
@@ -129,7 +129,7 @@ void make_allocsites_relation(
 		bool declare_as_array0 = i_alloc->declare_as_array0;
 
 		iterator_df<compile_unit_die> found_cu;
-		optional<string> found_sourcefile_path;
+		opt<string> found_sourcefile_path;
 		iterator_df<type_die> found_type;
 		iterator_df<type_die> second_chance_type;
 		/* Find a CU such that 

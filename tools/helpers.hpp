@@ -16,6 +16,7 @@
 // FIXME: shouldn't have toplevel "using" in header file
 using std::string;
 using std::endl;
+using std::cerr;
 using std::map;
 using std::deque;
 using std::pair;
