@@ -8,11 +8,6 @@
  * Since we only run at link time, not after compilation, we
  * assume that input .o files have not yet undergone any of the
  * usual post-compile/assembly fixups (link-used-types etc.).
- * 
- * We use both liballocstool and LLVM APIs in this file. There's
- * no easy way that either can be eliminated, except in the very
- * long run perhaps. Style-wise, it's easier for me to use my own
- * style.
  */
 
 #include <vector>
@@ -161,6 +156,12 @@ find_first_upper_case(const string& s)
 	}
 	return s.end();
 }
+/* Horrible HACK: assume that our plugin ld.so resides within a liballocs
+ * tree, and use the link map to fish out its path. WHY do we need to
+ * know the liballocs base dir? It's to add -L and -rpath options.
+ * If we can eliminate the liballocs dummyweaks DT_NEEDED, we won't
+ * need any of this and it'll be cleaner. (Won't work for libcrunch's
+ * stubs library, but let's worry about that over in libcrunch/.) */
 static
 string
 get_liballocs_base_dir()
@@ -694,7 +695,6 @@ claim_file_handler (
 	if (should_claim)
 	{
 		*claimed = 1;
-		char tempnambuf[] = "/tmp/tmp.allocplugin.XXXXXX";
 		auto tmpfile = new_temp_file("allocplugin");
 		string tmpname = tmpfile.first;
 		int tmpfd = tmpfile.second;
@@ -778,11 +778,6 @@ static void do_unbind(claimed_file& f, const vector<string>& u)
 		" --defsym __real_" + sym + "=__def_" + sym);
 	ret = system(cmd.c_str());
 	if (ret) abort();
-}
-
-static void generate_used_types_tmpfile(claimed_file& f)
-{
-
 }
 
 static void do_link_used_types(const ld_plugin_input_file *pf)
@@ -924,7 +919,6 @@ enum ld_plugin_status
 /* The linker's interface for registering the cleanup handler.  */
 enum ld_plugin_status
 (*register_cleanup) (ld_plugin_cleanup_handler handler);
-
 
 /* The plugin library's "onload" entry point.  */
 extern "C" {
