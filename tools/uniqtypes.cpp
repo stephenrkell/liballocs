@@ -435,7 +435,7 @@ void write_master_relation(master_relation_t& r,
 		string s = mangle_typename(k);
 
 		out << "extern struct uniqtype " << s << " __attribute__((weak)); "
-			<< "/* synthetic signedness complement of " << name_for_base_type(*i_need_comp) 
+			<< "/* synthetic signedness complement of " << (*i_need_comp)->get_canonical_name()
 			<< " */" << endl;
 	}
 

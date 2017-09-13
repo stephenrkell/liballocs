@@ -46,53 +46,14 @@ read_allocsites(std::istream& in)
 	while (in.getline(buf, sizeof buf - 1)
 		&& 0 == read_allocs_line(string(buf), objname, symname, file_addr, sourcefile, line, end_line, alloc_typename))
 	{
-		/* alloc_typename is in C declarator form.
-		   What to do about this?
-		   HACK: for now, support only a limited set of cases:
-		   IDENT
-		   IDENT '*'+
-		   
-		   AND delete the tokens "const", "volatile", "struct" and "union" first!
-		   HACK: we are not respecting the C struct/union namespacing here. OH well.
-		 */
-		
 		string nonconst_typename = alloc_typename;
-// 		const char *to_delete[] = { "const", "volatile", "struct", "union" };
-// 		for (int i = 0; i < srk31::array_len(to_delete); ++i)
-// 		{
-// 			size_t pos = 0;
-// 			size_t foundpos;
-// 			while ((foundpos = nonconst_typename.find(to_delete[i], pos)) != string::npos) 
-// 			{
-// 				/* Is this a well-bounded match, i.e. not part of a token? 
-// 				 * - start must be beginning-of-string or following a non-a-zA-Z0-9_ char 
-// 				 * - end must be end-of-string or followed by a non-a-zA-Z0-9_ char */
-// 				size_t endpos = foundpos + string(to_delete[i]).length();
-// 				if (
-// 					(foundpos == 0 || (!isalnum(nonconst_typename[foundpos - 1]) 
-// 					               &&  '_' != nonconst_typename[foundpos - 1] ))
-// 				  && 
-// 					(endpos == nonconst_typename.length()
-// 					|| (!isalnum(nonconst_typename[endpos] || '_' != nonconst_typename[endpos])))
-// 					)
-// 				{
-// 					/* it's a proper match -- delete that string and then start in the same place */
-// 					nonconst_typename.replace(foundpos, endpos - foundpos, "");
-// 					pos = foundpos;
-// 				}
-// 				else
-// 				{
-// 					/* It's not a proper match -- advance past this match. */
-// 					pos = foundpos + 1;
-// 				}
-// 			}
-// 		}
-		//cerr << "After nonconsting, typename " << alloc_typename << " is " << nonconst_typename << endl;
 		string clean_typename = nonconst_typename;
 		boost::trim(clean_typename);
-
 		
-		allocsites_to_add.push_back((allocsite){ clean_typename, sourcefile, objname, file_addr, true });
+		allocsites_to_add.push_back((allocsite){
+			clean_typename, sourcefile, objname, file_addr,
+			/* is_synthetic */ clean_typename.substr(0, sizeof "__uniqtype_" - 1) != "__uniqtype_"
+		});
 	} // end while read line
 	cerr << "Found " << allocsites_to_add.size() << " allocation sites" << endl;
 	return allocsites_to_add;
@@ -126,7 +87,6 @@ void make_allocsites_relation(
 		string sourcefile = i_alloc->sourcefile;
 		string objname = i_alloc->objname;
 		unsigned file_addr = i_alloc->file_addr;
-		bool declare_as_array0 = i_alloc->declare_as_array0;
 
 		iterator_df<compile_unit_die> found_cu;
 		opt<string> found_sourcefile_path;
@@ -173,7 +133,7 @@ void make_allocsites_relation(
 // 							// also add the language-independent canonical name
 // 							named_toplevel_types.insert(
 // 								make_pair(
-// 									name_for_base_type(t),
+// 									t.as_a<base_type_die>()->get_canonical_name(),
 // 									t
 // 								)
 // 							);
@@ -318,6 +278,14 @@ void make_allocsites_relation(
 		//cerr << "SUCCESS: found type: " << *found_type << endl;
 
 		uniqued_name name_used = canonical_key_for_type(found_type);
+		/* NOTE: we can still get incomplete types used as sizeof, if the 
+		 * user did "offsetof" on a field in them. That is how we will get
+		 * them here. FIXME: if the user uses offsetof even on a *complete*
+		 * type, we should skip the ARR0 here. E.g. if we have the variable-
+		 * -length array be [1] not [0], we would ues offsetof to allocate
+		 * space for extra training elements. */
+		bool incomplete = !found_type->calculate_byte_size();
+		bool declare_as_array0 = !i_alloc->is_synthetic && !incomplete;
 
 		// add to the allocsites table too
 		// recall: this is the mapping from allocsites to uniqtype addrs
@@ -335,7 +303,7 @@ void merge_and_rewrite_synthetic_data_types(root_die& r, vector<allocsite>& as)
 {
 	for (auto i_a = as.begin(); i_a != as.end(); ++i_a)
 	{
-		if (i_a->clean_typename.substr(0, sizeof "__uniqtype_" - 1) != "__uniqtype_")
+		if (i_a->is_synthetic)
 		{
 			cerr << "Found synthetic typename " << i_a->clean_typename;
 
@@ -354,7 +322,6 @@ void merge_and_rewrite_synthetic_data_types(root_die& r, vector<allocsite>& as)
 			/* We use the codeless name here, which is what dumpallocs would emit. */
 			i_a->clean_typename = mangle_typename(make_pair("", 
 				canonical_key_for_type(created.as_a<type_die>()).second));
-			i_a->declare_as_array0 = false;
 		}
 	}
 }
@@ -386,7 +353,7 @@ string summary_code_to_string(opt<uint32_t> maybe_code)
 		<< std::dec;
 	return summary_string_str.str();
 }
-string 
+string
 name_for_complement_base_type(iterator_df<base_type_die> base_t)
 {
 	/* For base types, we use our own language-independent naming scheme. */
@@ -404,246 +371,13 @@ name_for_complement_base_type(iterator_df<base_type_die> base_t)
 	return name.str();
 }
 
-string 
-name_for_base_type(iterator_df<base_type_die> base_t)
-{
-	/* For base types, we use our own language-independent naming scheme. */
-	ostringstream name;
-	string encoding_name = base_t.spec_here().encoding_lookup(base_t->get_encoding());
-	assert(encoding_name.substr(0, sizeof "DW_ATE_" - 1) == "DW_ATE_");
-	unsigned size = *base_t->get_byte_size();
-	switch (base_t->get_encoding())
-	{
-		case DW_ATE_signed:
-			name << "int";
-			break;
-		case DW_ATE_unsigned: 
-			name << "uint";
-			break;
-		default:
-			name << encoding_name.substr(sizeof "DW_ATE_" - 1);
-			break;
-	}
-	
-	pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = base_t->bit_size_and_offset();
-	bool needs_suffix = !((bit_size_and_offset.second == 0) 
-		&& (bit_size_and_offset.first == 8 * size));
-	name << "$" << bit_size_and_offset.first;
-	if (needs_suffix) name << "$" << bit_size_and_offset.second;
-
-	return name.str();
-}
-
-/* Subtlety about mangling: does "all names" mean mangled or no? 
- * We take the view that this is a DWARF-/source-level function, so no. 
- * Our caller has to mangle names. */
-all_names_for_type_t::all_names_for_type_t() :
-	void_case      ([this](iterator_df<type_die> t)            { return deque<string>(1, "void"); }), 
-	qualified_case ([this](iterator_df<qualified_type_die> t)  { return operator()(t->get_unqualified_type()); }), 
-	typedef_case   ([this](iterator_df<type_chain_die> t)      { 
-		// we're a synonym
-		assert(t.name_here());
-		assert(t.is_a<type_chain_die>());
-		deque<string> synonyms = operator()(t.as_a<type_chain_die>()->get_type());
-		// append our name at the end (less canonical)
-		synonyms.push_back(*name_for_type_die(t));
-		return synonyms;
-	}),
-	base_type_case([this](iterator_df<base_type_die> t)        { 
-		// we treat these like a typedef of the language-independent canonical name
-		deque<string> synonyms(1, name_for_base_type(t.as_a<base_type_die>()));
-		if (t.name_here() && !t->is_bitfield_type())
-		{
-			synonyms.push_back(*name_for_type_die(t));
-		}
-		return synonyms;
-	}),
-	pointer_case([this](iterator_df<address_holding_type_die> t) {
-		// get the name of whatever the target is, and prepend a prefix
-		deque<string> all = operator()(t.as_a<address_holding_type_die>()->get_type());
-
-		for (auto i_name = all.begin(); i_name != all.end(); ++i_name)
-		{
-			ostringstream prefix;
-			switch (t.tag_here())
-			{
-				case DW_TAG_pointer_type: 
-					prefix << "__PTR_"; break;
-				case DW_TAG_reference_type:
-					prefix << "__REF_"; break;
-				case DW_TAG_rvalue_reference_type:
-					prefix << "__RR_"; break;
-				default:
-					assert(false);
-			}
-			*i_name = prefix.str() + *i_name;
-		}
-		return all;		
-	}),
-	array_case([this](iterator_df<array_type_die> t) {
-		auto array_t = t.as_a<array_type_die>();
-		// get the name of whatever the element type is, and prepend a prefix
-		deque<string> all = operator()(array_t->get_type());
-		ostringstream array_prefix;
-		opt<Dwarf_Unsigned> element_count = array_t->element_count();
-		array_prefix << "__ARR" << (element_count ? *element_count : 0) << "_";
-
-		for (auto i_name = all.begin(); i_name != all.end(); ++i_name)
-		{
-			*i_name = array_prefix.str() + *i_name;
-		}
-		return all;
-	}),
-	string_case([this](iterator_df<string_type_die> t) {
-		auto string_t = t.as_a<string_type_die>();
-		// get the name of whatever the element type is, and prepend a prefix
-		const Dwarf_Unsigned element_size = 1; /* FIXME: always 1? */
-		opt<Dwarf_Unsigned> opt_byte_size = string_t->fixed_length_in_bytes();
-		opt<Dwarf_Unsigned> element_count
-		 = opt_byte_size ? (*opt_byte_size / element_size ) : opt<Dwarf_Unsigned>();
-		ostringstream string_prefix;
-		string_prefix << "__STR" << (element_count ? *element_count : 0) << "_"
-			<< element_size;
-
-		return deque<string>(1, string_prefix.str());
-	}),
-	subroutine_case([this](iterator_df<type_die> t) {
-		// "__FUN_FROM_" ^ (labelledArgTs argTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (stringFromSig returnTs) 		
-		deque<string> working;
-
-		string funprefix = "__FUN_FROM_";
-		working.push_back(funprefix);
-		auto fps = t.children().subseq_of<formal_parameter_die>();
-		
-		// get a feel for the size of the problem.
-		cerr << "We have " << srk31::count(fps.first, fps.second) << " fps with [";
-		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp)
-		{
-			if (i_fp != fps.first) cerr << ", ";
-			deque<string> arg_allnames = operator()(i_fp->find_type());
-			cerr << arg_allnames.size();
-		}
-		cerr << "] typenames." << endl;
-		
-		/* Invariant: the working deque consists of partial names for the function type, 
-		 * such that all argument types up to the last iteration have been dealt with. 
-		 
-		 * For each fp we erase each deque element, then replace it with a sequence 
-		 * of elements, one per name of the fp type. */
-		unsigned argnum;
-		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp, ++argnum)
-		{
-			cerr << "Set of working names is: {";
-			for (auto i_working = working.begin(); i_working != working.end(); ++i_working)
-			{
-				if (i_working != working.begin()) cerr << ", ";
-				cerr << *i_working;
-			}
-			cerr << endl;
-
-			ostringstream argprefix;
-			argprefix << "__ARG" << argnum << "_";
-
-			deque<string> arg_allnames = operator()(i_fp->find_type());
-			cerr << "Found an fp with " << arg_allnames.size() << " names" << endl;
-			auto i_working = working.begin(); 
-			while (i_working != working.end())
-			{
-				string working_str = *i_working;
-				i_working = working.erase(i_working);
-				cerr << "working size is now " << working.size() << ", we are "
-					<< (i_working - working.begin()) << " from the start" << endl;
-				bool was_at_end = (i_working == working.end());
-
-				struct my_output_iter : public std::insert_iterator<std::deque<string> >
-				{
-					using insert_iterator::insert_iterator;
-					deque<string>::iterator get_iter() const { return iter; }
-				} i_insert(working, i_working);
-
-				for (auto i_syn = arg_allnames.begin(); i_syn != arg_allnames.end(); ++i_syn)
-				{
-					*i_insert = working_str + argprefix.str() + *i_syn;
-					cerr << "working size is now " << working.size() << ", we are "
-						<< (i_working - working.begin()) << " from the start" << endl;
-				}
-				i_working = i_insert.get_iter();
-				// if we were at the end before, we should be at the end now
-				assert(!was_at_end || i_working == working.end());
-				cerr << "working size is now " << working.size() << ", we are "
-					<< (i_working - working.begin()) << " from the start" << endl;
-			}
-		}
-		if (IS_VARIADIC(t))
-		{
-			for (auto i_working = working.begin(); i_working != working.end(); ++i_working)
-			{
-				*i_working = "__VA_" + *i_working;
-			}
-		}	
-		for (auto i_working = working.begin(); i_working != working.end(); ++i_working)
-		{
-			*i_working = *i_working + "__FUN_TO_";
-		}
-
-		deque<string> all_retnames = operator()(RETURN_TYPE(t));
-		auto i_working = working.begin(); 
-		while (i_working != working.end())
-		{
-			string working_str = *i_working;
-			i_working = working.erase(i_working);
-			bool was_at_end = (i_working == working.end());
-
-			struct my_output_iter : public std::insert_iterator<std::deque<string> >
-			{
-				using insert_iterator::insert_iterator;
-				deque<string>::iterator get_iter() const { return iter; }
-			} i_insert(working, i_working);
-
-			for (auto i_syn = all_retnames.begin(); i_syn != all_retnames.end(); ++i_syn)
-			{
-				*i_insert = working_str + *i_syn;
-			}
-			i_working = i_insert.get_iter();
-			// if we were at the end before, we should be at the end now
-			assert(!was_at_end || i_working == working.end());
-		}
-
-		return working;
-	}),
-	with_data_members_case([this](iterator_df<with_data_members_die> t) {
-		// we're a named struct/union/class type or an enumeration
-		return deque<string>(1, t.name_here() ? *name_for_type_die(t) : offset_to_string(t.offset_here()));
-	}), 
-	default_case([this](iterator_df<type_die> t) -> deque<string> {
-		// we're probably a subrange type
-		return deque<string>(1, t.name_here() ? *name_for_type_die(t) : offset_to_string(t.offset_here()));
-	})
-{} // constructor body
-
-//all_names_for_type(iterator_df<type_die> t)
-deque<string> all_names_for_type_t::operator()(iterator_df<type_die> t) const
-{
-	if (!t) return void_case(t);
-	if (t != t->get_unqualified_type()) return qualified_case(t.as_a<qualified_type_die>());
-	if (t != t->get_concrete_type()) return typedef_case(t.as_a<type_chain_die>());
-	if (t.is_a<base_type_die>()) return base_type_case(t.as_a<base_type_die>());
-	if (t.is_a<address_holding_type_die>()) return pointer_case(t.as_a<address_holding_type_die>());
-	if (t.is_a<array_type_die>()) return array_case(t.as_a<array_type_die>());
-	if (t.is_a<string_type_die>()) return string_case(t.as_a<string_type_die>());
-	if (t.is_a<subroutine_type_die>()
-	||  t.is_a<subprogram_die>()) return subroutine_case(t);
-	if (t.is_a<with_data_members_die>()) return with_data_members_case(t.as_a<with_data_members_die>());
-	return default_case(t);
-}
-
-all_names_for_type_t default_all_names_for_type;
-
 string canonical_name_for_type(iterator_df<type_die> t)
 {
-	if (!t) return "void";
+	/* This is now reimplemented in libdwarfpp. But test against the old code. */
+	string libdwarfpp_said = abstract_name_for_type(t);
+	if (!t) { assert(libdwarfpp_said == "void"); return "void"; }
 	t = t->get_concrete_type();
-	if (!t) return "void";
+	if (!t) { assert(libdwarfpp_said == "void"); return "void"; }
 	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>()
 		&& !t.is_a<subprogram_die>())
 	{
@@ -654,7 +388,7 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		if (t.is_a<base_type_die>())
 		{
 			/* For base types, we use our own language-independent naming scheme. */
-			name_to_use = name_for_base_type(t.as_a<base_type_die>());
+			name_to_use = t.as_a<base_type_die>()->get_canonical_name();
 		} 
 		else
 		{
@@ -687,6 +421,7 @@ string canonical_name_for_type(iterator_df<type_die> t)
 				else name_to_use = offsetstr;
 			}
 		}
+		assert(libdwarfpp_said == name_to_use || t.is_a<subrange_type_die>());
 		return name_to_use;
 	}
 	else if (t.is_a<subroutine_type_die>() || t.is_a<subprogram_die>())
@@ -710,7 +445,9 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		iterator_df<type_die> return_t = RETURN_TYPE(t);
 		
 		s << ((!return_t || !return_t->get_concrete_type()) ? string("void") : canonical_name_for_type(return_t));
-		return s.str();
+		string result = s.str();
+		assert(libdwarfpp_said == result);
+		return result;
 	}
 	else if (t.is_a<array_type_die>())
 	{
@@ -725,15 +462,14 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		 * Answer: nothing special: just cut off the array first part and emit it specially,
 		 * with a reference to the remainder (what it's an array of).
 		 * This handles multidimensional arrays too.
-		 * NOTE that our __PTR___PTR_... practice is also redundant now that we 
-		 * output every type, because every __PTR prefix is also in the DWARF so
-		 * is also emitted. */
+		 */
 		
 		auto array_t = t.as_a<array_type_die>();
 		ostringstream array_prefix;
 		opt<Dwarf_Unsigned> element_count = array_t->element_count();
 		array_prefix << "__ARR" << (element_count ? *element_count : 0) << "_";
 		string el_type_name = canonical_name_for_type(array_t->get_type());
+		assert(libdwarfpp_said == array_prefix.str() + el_type_name);
 		return array_prefix.str() + el_type_name;
 	}
 	else if (t.is_a<string_type_die>())
@@ -748,6 +484,7 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		string_prefix << "__STR" << (element_count ? *element_count : 0) << "_"
 			<< element_size;
 
+		assert(libdwarfpp_said == string_prefix.str());
 		return string_prefix.str();
 	}
 	else // DW_TAG_pointer_type and friends
@@ -785,6 +522,7 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		
 		ostringstream os;
 		os << indirection_prefix.str() << (!working_t ? "void" : canonical_name_for_type(working_t));
+		assert(libdwarfpp_said == os.str());
 		return os.str();
 	}
 	assert(false);

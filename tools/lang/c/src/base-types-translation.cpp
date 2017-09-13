@@ -116,7 +116,7 @@ int main(int argc, char **argv)
 				{
 					cout << mangle_string(equiv[0]) 
 						<< "\t" 
-						<< mangle_string(name_for_base_type(i.as_a<base_type_die>()))
+						<< mangle_string(i.as_a<base_type_die>()->get_canonical_name())
 						<< endl;
 				}
 
