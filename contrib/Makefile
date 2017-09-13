@@ -9,8 +9,6 @@ export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
 export LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 
 # things we need to build:
-# - libc++fileno
-# - libsrk31c++
 # - libdwarfpp
 # - libcxxgen
 # - libantlr3cxx
@@ -28,7 +26,7 @@ export LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 # - cil (in liballocs/tools/lang/c)
 
 default: env.sh config.mk trap-syscalls/libsystrap/libsystrap.a \
-build-dwarfidl build-libdwarfpp build-libcxxgen build-libsrk31c++ build-libc++fileno \
+build-dwarfidl build-libdwarfpp build-libcxxgen \
 build-libantlr3c++ build-libantlr3c build-libdlbind
 
 .PHONY: clean default
@@ -70,59 +68,19 @@ CONFIG_MK += \nCXXFLAGS += -I\$$(ANTLR3C_DIR)/include -I\$$(ANTLR3C_DIR)/\n
 CONFIG_MK += \nLDFLAGS += -L\$$(ANTLR3C_DIR)/.libs -Wl,-rpath,\$$(ANTLR3C_DIR)/.libs\n
 
 # ----------------------------other libs that are autotools'd
-# ----------------------------libc++fileno
-
-build-libc++fileno: libc++fileno/config.status
-	$(MAKE) -C libc++fileno
-
-libc++fileno/config.status:
-	cd libc++fileno && aclocal && \
-                autoconf && \
-                libtoolize && \
-                automake --add-missing && \
-                automake && \
-                ./configure --prefix=$(CONTRIB_ROOT)/usr
-
-clean::
-	$(MAKE) -C libc++fileno clean
-
-CONFIG_MK += \nLIBCXXFILENO_CXXFLAGS += -I$(CONTRIB_ROOT)/libc++fileno/include\n
-CONFIG_MK += \nLIBCXXFILENO_LIBS += -L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib -lc++fileno\n
-
-# ----------------------------libsrk31c++
-
-.PHONY: build-libsrk31c++
-build-libsrk31c++: libsrk31c++/config.status build-libc++fileno
-	$(MAKE) -C libsrk31c++
-
-libsrk31c++/config.status:
-	cd libsrk31c++ && ./autogen.sh && \
-	LIBCXXFILENO_CXXFLAGS="-I$(CONTRIB_ROOT)/libc++fileno/include" \
-	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib" \
-	 ./configure --prefix=$(CONTRIB_ROOT)/usr
-
-clean::
-	$(MAKE) -C libsrk31c++ clean
-
-CONFIG_MK += \nLIBSRK31CXX_CXXFLAGS += -I$(CONTRIB_ROOT)/libsrk31c++/include\n
-CONFIG_MK += \nLIBSRK31CXX_LIBS += -L$(CONTRIB_ROOT)/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib -lsrk31c++\n
-
 # ----------------------------libdwarfpp
 
 libdwarfpp/config.status:
-	cd libdwarfpp && ./autogen.sh && \
-	LIBCXXFILENO_CXXFLAGS="-I$(CONTRIB_ROOT)/libc++fileno/include" \
-	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib" \
-	LIBSRK31CXX_CXXFLAGS="-I$(CONTRIB_ROOT)/libsrk31c++/include" \
-	LIBSRK31CXX_LIBS="-L$(CONTRIB_ROOT)/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib" \
-	 ./configure --prefix=$(CONTRIB_ROOT)/usr $(LIBDWARFPP_CONFIGURE_FLAGS)
+	cd libdwarfpp && ./autogen.sh && git submodule init && git submodule update && \
+	$(MAKE) -C contrib && ( . contrib/env.sh && \
+	 ./configure --prefix=$(CONTRIB_ROOT)/usr $(LIBDWARFPP_CONFIGURE_FLAGS) )
 
 .PHONY: build-libdwarfpp
-build-libdwarfpp: libdwarfpp/config.status build-libc++fileno build-libsrk31c++
+build-libdwarfpp: libdwarfpp/config.status
 	$(MAKE) -C libdwarfpp
 
 clean::
-	$(MAKE) -C libdwarfpp clean
+	if test -f libdwarfpp/Makefile; then $(MAKE) -C libdwarfpp clean; fi
 
 CONFIG_MK += \nLIBDWARFPP_CXXFLAGS += -I$(CONTRIB_ROOT)/libdwarfpp/include\n
 CONFIG_MK += \nLIBDWARFPP_LIBS += -L$(CONTRIB_ROOT)/libdwarfpp/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib -ldwarfpp\n
@@ -135,21 +93,21 @@ libcxxgen/config.status:
                 libtoolize && \
                 automake --add-missing && \
                 automake &&  \
-	LIBCXXFILENO_CXXFLAGS="-I$(CONTRIB_ROOT)/libc++fileno/include" \
-	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno/lib" \
-	LIBSRK31CXX_CXXFLAGS="-I$(CONTRIB_ROOT)/libsrk31c++/include" \
-	LIBSRK31CXX_LIBS="-L$(CONTRIB_ROOT)/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib" \
+	LIBCXXFILENO_CXXFLAGS="-I$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno/include" \
+	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno/lib" \
+	LIBSRK31CXX_CXXFLAGS="-I$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/include" \
+	LIBSRK31CXX_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/lib" \
 	LIBDWARFPP_CXXFLAGS=-I$(CONTRIB_ROOT)/libdwarfpp/include \
 	LIBDWARFPP_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/lib \
         -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib -ldwarfpp" \
 	 ./configure --prefix=$(CONTRIB_ROOT)/usr $(LIBCXXGEN_CONFIGURE_FLAGS)
 
 .PHONY: build-libcxxgen
-build-libcxxgen: libcxxgen/config.status build-libdwarfpp build-libsrk31c++ build-libc++fileno
+build-libcxxgen: libcxxgen/config.status build-libdwarfpp
 	$(MAKE) -C libcxxgen
 
 clean::
-	$(MAKE) -C libcxxgen clean
+	if test -e libcxxgen/Makefile; then $(MAKE) -C libcxxgen clean; fi
 
 CONFIG_MK += \nLIBCXXGEN_CXXFLAGS += -I$(CONTRIB_ROOT)/libcxxgen/include\n
 CONFIG_MK += \nLIBCXXGEN_LIBS += -L$(CONTRIB_ROOT)/libcxxgen/lib -Wl,-rpath,$(CONTRIB_ROOT)/libcxxgen/lib -lcxxgen\n
@@ -165,7 +123,7 @@ build-libantlr3c++: libantlr3c++/config.status
 	$(MAKE) -C libantlr3c++
 
 clean::
-	$(MAKE) -C libantlr3c++ clean
+	if test -e libantlr3c++/Makefile; then $(MAKE) -C libantlr3c++ clean; fi
 
 CONFIG_MK += \nLIBANTLR3CXX_CXXFLAGS += -I$(CONTRIB_ROOT)/libantlr3c++/include\n
 CONFIG_MK += \nLIBANTLR3CXX_LIBS += -L$(CONTRIB_ROOT)/libantlr3c++/lib -Wl,-rpath,$(CONTRIB_ROOT)/libantlr3c++/lib\n
@@ -174,12 +132,12 @@ CONFIG_MK += \nLIBANTLR3CXX_LIBS += -L$(CONTRIB_ROOT)/libantlr3c++/lib -Wl,-rpat
 
 dwarfidl/config.status: libantlr3c-3.4/antlr3config.h
 	cd dwarfidl && git submodule init && git submodule update && ./autogen.sh && \
-	LIBCXXFILENO_CXXFLAGS=-I$(CONTRIB_ROOT)/libc++fileno/include \
-	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libc++fileno/lib \
-        -Wl,-rpath,$(CONTRIB_ROOT)/libc++fileno -lc++fileno" \
-	LIBSRK31CXX_CXXFLAGS=-I$(CONTRIB_ROOT)/libsrk31c++/include \
-	LIBSRK31CXX_LIBS="-L$(CONTRIB_ROOT)/libsrk31c++/lib \
-	-Wl,-rpath,$(CONTRIB_ROOT)/libsrk31c++/lib -lsrk31c++" \
+	LIBCXXFILENO_CXXFLAGS=-I$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno/include \
+	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno/lib \
+        -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno -lc++fileno" \
+	LIBSRK31CXX_CXXFLAGS=-I$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/include \
+	LIBSRK31CXX_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/lib \
+	-Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/lib -lsrk31c++" \
 	LIBDWARFPP_CXXFLAGS=-I$(CONTRIB_ROOT)/libdwarfpp/include \
 	LIBDWARFPP_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/lib \
         -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib -ldwarfpp" \
@@ -194,11 +152,11 @@ dwarfidl/config.status: libantlr3c-3.4/antlr3config.h
 	./configure --prefix=$(CONTRIB_ROOT)/usr
 
 .PHONY: build-dwarfidl
-build-dwarfidl: dwarfidl/config.status build-libdwarfpp build-libcxxgen build-libsrk31c++ build-libc++fileno build-libantlr3c++ build-libantlr3c antlr-3.4-complete.jar
+build-dwarfidl: dwarfidl/config.status build-libdwarfpp build-libcxxgen build-libantlr3c++ build-libantlr3c antlr-3.4-complete.jar
 	$(MAKE) -C dwarfidl
 
 clean::
-	$(MAKE) -C dwarfidl clean
+	if test -e dwarfidl/Makefile; then $(MAKE) -C dwarfidl clean; fi
 
 CONFIG_MK += \nDWARFIDL_CXXFLAGS += -I$(CONTRIB_ROOT)/dwarfidl/include\n
 CONFIG_MK += \nDWARFIDL_LIBS += -L$(CONTRIB_ROOT)/dwarfidl/lib -Wl,-rpath,$(CONTRIB_ROOT)/dwarfidl/lib -ldwarfidl\n
@@ -243,6 +201,8 @@ llvm/build/LLVMBuild.cmake:
 llvm-build: llvm/build/LLVMBuild.cmake
 	cd llvm/build && $(NINJA) -v
 
+# FIXME: clean target
+
 # this cmake argument doesn't work
 # -DEXTRA_LINK_FLAGS="-fuse-ld=gold" ..
 
@@ -264,3 +224,6 @@ config.mk:
 
 env.sh: config.mk
 	$(MAKE) -f "$<" "$@"
+
+clean::
+	rm -f config.mk env.sh
