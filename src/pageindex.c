@@ -702,7 +702,7 @@ static struct big_allocation *find_deepest_bigalloc_recursive(struct big_allocat
 			if (maybe_deeper) return maybe_deeper;
 		}
 	}
-	
+
 	/* We didn't find an overlapping child, so start is the best we can do. */
 	return start;
 }
@@ -846,8 +846,11 @@ _Bool __liballocs_notify_unindexed_address(const void *ptr)
 	/* We get called if the caller finds an address that's not indexed anywhere. 
 	 * It's a way of asking us to check. 
 	 * We ask all our allocators in turn whether they own this address.
-	 * Only stack is expected to reply positively. */
+	 * Usually only stack is expected to reply positively.
+	 * Very early on, mmap may reply positively (if we're not yet systrapping mmap). */
 	_Bool ret = __stack_allocator_notify_unindexed_address(ptr);
+	if (ret) return 1;
+	ret = __mmap_allocator_notify_unindexed_address(ptr);
 	if (ret) return 1;
 	// FIXME: loop through the others
 	return 0;

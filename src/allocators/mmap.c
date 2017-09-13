@@ -460,6 +460,11 @@ void add_missing_mappings_from_proc(void)
 static _Bool initialized;
 static _Bool trying_to_initialize;
 
+_Bool __mmap_allocator_is_initialized(void)
+{
+	return initialized;
+}
+
 static void *executable_end_addr;
 static void *data_segment_start_addr;
 
@@ -474,22 +479,23 @@ void __mmap_allocator_notify_brk(void *new_curbrk);
 struct big_allocation *executable_data_segment_mapping_bigalloc __attribute__((visibility("hidden")));
 static void update_data_segment_end(void *new_curbrk);
 
+_Bool __mmap_allocator_notify_unindexed_address(const void *mem)
+{
+	if (initialized) return 0;
+	if (!executable_data_segment_mapping_bigalloc) return 0; // can't do anything
+	void *old_sbrk = current_sbrk(); // what we *think* sbrk is
+	void *new_sbrk = sbrk(0);
+	update_data_segment_end(new_sbrk); // ... update it to what it actually is
+	return ((char *) mem >= (char*) old_sbrk 
+		&& (char *) mem < (char *) new_sbrk);
+}
+
 void __mmap_allocator_init(void) __attribute__((constructor(101)));
 void __mmap_allocator_init(void)
 {
 	if (!initialized && !trying_to_initialize)
 	{
 		trying_to_initialize = 1;
-		
-		/* Do the liballocs global init first. This is important! It's 
-		 * going to walk the loaded objects and load the types/allocsites
-		 * objects. We have to do this before we init systrap, because
-		 * systrap needs that metadata. We also have to do it before we
-		 * add the missing mappings; if we do it afterwards, the mappings
-		 * created when loading the metadata objects won't be seen. */
-		__liballocs_global_init();
-		
-		add_missing_mappings_from_proc();
 		
 		/* Grab the executable's end address
 		 * We used to try dlsym()'ing "_end", but that doesn't work:
@@ -546,8 +552,26 @@ void __mmap_allocator_init(void)
 		// write_ulong((unsigned long) executable_end_addr);
 		// write_string("\n");
 		
+		
+		/* Do the liballocs global init now. This is important! It's 
+		 * going to walk the loaded objects and load the types/allocsites
+		 * objects. We have to do this before we init systrap, because
+		 * systrap needs that metadata. We also have to do it before we
+		 * add the missing mappings; if we do it afterwards, the mappings
+		 * created when loading the metadata objects won't be seen. 
+		 * PROBLEM: the dlopens that we do here will call malloc, which
+		 * want to do indexing using the pageindex, which wants the
+		 * bigallocs already populated. FIXME: how to avoid this? I think
+		 * the answer is to do a "rough" preliminary pass over /proc/pid/maps
+		 * first, then do another pass. Needs to make add_missing_cb
+		 * idemopotent. OH, but that doesn't work because the malloc() may
+		 * move the sbrk() arbitrarily far, and by definition we won't see it
+		 * because we're not trapping sbrk() yet. We need the bigalloc lookup
+		 * (in the indexing logic, or in pageindex) to have a second-attempt
+		 * at getting the bigalloc after re-checking the sbrk(). */
+		add_missing_mappings_from_proc();
 		/* Which bigalloc is top-level and spans the executable's data segment
-		 * *start* */
+		 * *start*? */
 		for (int i = 1; BIGALLOC_IN_USE(&big_allocations[i]); ++i)
 		{
 			if (!big_allocations[i].parent)
@@ -573,6 +597,8 @@ void __mmap_allocator_init(void)
 		
 		/* Also extend the data segment to account for the current brk. */
 		update_data_segment_end(sbrk(0));
+		__liballocs_global_init(); // will add mappings; may change sbrk
+		add_missing_mappings_from_proc();
 
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
@@ -847,6 +873,12 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg)
 	// if this mapping looks like a memtable, we skip it
 	if (size > BIGGEST_SANE_USER_ALLOC) return 0; // keep going
 
+	if (size == 0 || (intptr_t) ent->first < 0)  return 0; // don't add kernel pages
+	
+	// is it present already?
+	assert(pageindex);
+	if (pageindex[PAGENUM(ent->first)]) return 0;
+
 	/* If it looks like a stack... */
 	if (0 == strncmp(ent->rest, "[stack", 6))
 	{
@@ -862,20 +894,17 @@ static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg)
 	}
 
 	// ... but if we do, and it's not square-bracketed and nonzero-sizes, it's a mapping
-	if (size > 0 && (intptr_t) ent->first >= 0) // don't add kernel pages
+	void *obj = (void *)(uintptr_t) ent->first;
+	void *obj_lastbyte __attribute__((unused)) = (void *)((uintptr_t) ent->second - 1);
+
+	_Bool extended = extend_current(cur, ent);
+	if (!extended)
 	{
-		void *obj = (void *)(uintptr_t) ent->first;
-		void *obj_lastbyte __attribute__((unused)) = (void *)((uintptr_t) ent->second - 1);
-		
-		_Bool extended = extend_current(cur, ent);
-		if (!extended)
-		{
-			add_mapping_sequence_bigalloc(cur);
-			memset(cur, 0, sizeof (struct mapping_sequence));
-			_Bool began_new = extend_current(cur, ent);
-			if (!began_new) abort();
-		}
-	} // end if size > 0
+		add_mapping_sequence_bigalloc(cur);
+		memset(cur, 0, sizeof (struct mapping_sequence));
+		_Bool began_new = extend_current(cur, ent);
+		if (!began_new) abort();
+	}
 
 	return 0; // keep going
 }
@@ -920,10 +949,11 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 {
 	if (!initialized)
 	{
-		/* HMM. This is happening in a signal context so it's probably not 
-		 * safe to just do the init now. What we're worried about is not
-		 * having a stale value of sbrk. Since we're not yet init'd, we trivially
-		 * don't, so there's no need to do anything... */
+		/* HMM. This is called in a signal context so it's probably not 
+		 * safe to just do the init now. But we don't start taking traps until
+		 * we're initialized, so that's okay. BUT see the note in 
+		 * __mmap_allocator_init... before we're initialized, we need
+		 * another mechanism to probe for brk updates. */
 		return;
 	}
 	update_data_segment_end(new_curbrk);

@@ -141,6 +141,8 @@ void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size,
 void __mmap_allocator_notify_mremap_after(void *ret_addr, void *old_addr, size_t old_size, 
 	size_t new_size, int flags, void *new_address, void *caller);
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller);
+_Bool __mmap_allocator_is_initialized(void) __attribute__((visibility("hidden")));
+_Bool __mmap_allocator_notify_unindexed_address(const void *ptr);
 
 void __static_allocator_init(void);
 void __static_allocator_notify_load(void *handle);
