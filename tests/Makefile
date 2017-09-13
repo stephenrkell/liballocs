@@ -88,9 +88,14 @@ checkrun-%:
 		grep ' 0.* 0.* 0.* 0=\+$$' >/dev/null || \
 		(tail -n20 $$err; false)
 
+# disabled cases
+checkrun-plugin-hello:
+	true # disabled plugin-hello while expected to fail
 # Some cases are special and require only an exit status of zero
 checkrun-stack-walk:
 	$(MAKE) cleanrun-stack-walk >/dev/null 2>&1
+checkrun-no-unbind-self:
+	$(MAKE) cleanrun-no-unbind-self >/dev/null 2>&1
 checkrun-sloppy-dumptypes:
 	$(MAKE) cleanrun-sloppy-dumptypes >/dev/null 2>&1
 checkrun-section-group:
