@@ -24,6 +24,10 @@
 #include "liballocs_private.h"
 #include "dlbind.h"
 
+#ifdef _LIBGEN_H
+#error "liballocs.c needs GNU basename() so must not include libgen.h"
+#endif
+
 void *__liballocs_rt_uniqtypes_obj;
 
 struct uniqtype *
@@ -720,12 +724,15 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
 	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
+	const char *canon_basename = basename(canon_objname);
+	_Bool is_libc = ((0 == strncmp(canon_basename, "libc", 4))
+				&& (canon_basename[4] == '-' || canon_basename[4] == '.'));
 
 	// skip objects that are themselves meta objects
 	// FIXME: what about embedded meta objects?
 	if (0 == strncmp(canon_objname, meta_base, meta_base_len)) return 0;
 	
-	// get the -types.so object's name
+	// get the -meta.so object's name
 	const char *libfile_name = meta_libfile_name(canon_objname);
 	if (!libfile_name) return 0;
 	// don't load if we end with "-meta.so"
@@ -742,7 +749,7 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	if (!meta_handle)
 	{
-		debug_printf(is_exe ? 0 : 1, "loading meta object: %s\n", dlerror());
+		debug_printf((is_exe || is_libc) ? 0 : 1, "loading meta object: %s\n", dlerror());
 		return 0;
 	}
 	debug_printf(3, "loaded meta object: %s\n", libfile_name);
