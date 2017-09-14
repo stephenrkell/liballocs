@@ -31,3 +31,9 @@
 [submodule "contrib/libdlbind"]
 	path = contrib/libdlbind
 	url = git://github.com/stephenrkell/libdlbind.git
+[submodule "contrib/llvm"]
+	path = contrib/llvm
+	url = git://github.com/stephenrkell/llvm.git
+[submodule "contrib/llvm/tools/clang"]
+	path = contrib/llvm/tools/clang
+	url = git://github.com/stephenrkell/clang.git

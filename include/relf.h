@@ -20,8 +20,11 @@ typedef Elf64_Auxinfo Elf64_auxv_t;
 /* #include <link.h> -- we don't do this because it can pollute us with libc stuff
  * when clients (like trap-syscalls) want to use us in sub-libc (asm-level) code. 
  * Use RELF_DEFINE_STRUCTURES instead. */
-#include <string.h>
 
+#undef strncmp
+int strncmp(const char *s1, const char *s2, size_t n);
+#undef strcmp
+int strcmp(const char *s1, const char *s2);
 extern void 
 __assert_fail (const char *assertion, const char *file,
 	unsigned int line, const char *function) __attribute__((__noreturn__));
