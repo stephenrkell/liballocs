@@ -4,12 +4,6 @@
 [submodule "tools/lang/c/cil"]
 	path = tools/lang/c/cil
 	url = git://github.com/stephenrkell/cil.git
-[submodule "contrib/libc++fileno"]
-	path = contrib/libc++fileno
-	url = git://github.com/stephenrkell/libcxxfileno.git
-[submodule "contrib/libsrk31c++"]
-	path = contrib/libsrk31c++
-	url = git://github.com/stephenrkell/libsrk31cxx.git
 [submodule "contrib/libdwarfpp"]
 	path = contrib/libdwarfpp
 	url = git://github.com/stephenrkell/libdwarfpp.git
