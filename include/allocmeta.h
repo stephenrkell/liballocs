@@ -3,6 +3,21 @@
 
 #include <sys/resource.h> /* for rlim_t */
 #include <sys/time.h>
+#include <elf.h>
+#include <dlfcn.h>
+
+struct liballocs_err;
+typedef struct liballocs_err *liballocs_err_t;
+
+struct big_allocation;
+#if !defined(_GNU_SOURCE) && !defined(HAVE_DLADDR) /* FIXME: proper autoconf'able test */
+typedef struct {
+	const char *dli_fname;
+	void       *dli_fbase;
+	const char *dli_sname;
+	void       *dli_saddr;
+} Dl_info;
+#endif
 
 /* A tentative meta-protocol for allocators. 
  * 

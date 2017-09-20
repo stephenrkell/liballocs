@@ -1,5 +1,7 @@
+#define _GNU_SOURCE
 #include <stdlib.h>
 #include <stdint.h>
+#include "allocmeta.h"
 #include "fake-libunwind.h"
 
 /* NOTE: is linking -R, i.e. "symbols only", the right solution for 
@@ -80,6 +82,16 @@ struct uniqtype * __liballocs_get_alloc_type(const void *obj)
 {
 	return NULL;
 }
+struct allocator * __liballocs_get_leaf_allocator(const void *obj)
+{
+	return NULL;
+}
+struct allocator * __liballocs_leaf_allocator_for(const void *obj,
+	struct big_allocation **out_containing_bigalloc,
+	struct big_allocation **out_maybe_the_allocation)
+{
+	return NULL;
+}
 
 struct uniqtype * 
 __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
@@ -112,9 +124,18 @@ void __liballocs_report_wild_address(const void *ptr)
 {
 }
 
-int __generic_malloc_allocator[20];
-struct uniqtype;
-struct allocator;
+struct allocator __stack_allocator;
+struct allocator __stackframe_allocator;
+struct allocator __mmap_allocator; /* mmaps */
+struct allocator __sbrk_allocator; /* sbrk() */
+struct allocator __static_allocator; /* ldso; nests under file? */
+struct allocator __auxv_allocator; /* nests under stack? */
+struct allocator __alloca_allocator; /* nests under stack? */
+struct allocator __generic_malloc_allocator; /* covers all chunks */
+struct allocator __generic_small_allocator; /* usual suballoc impl */
+struct allocator __generic_uniform_allocator; /* usual suballoc impl */
+struct allocator __generic_malloc_allocator;
+
 struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,
 	unsigned long *out_alloc_size_bytes,

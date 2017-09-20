@@ -121,18 +121,12 @@ _Bool __liballocs_notify_unindexed_address(const void *);
 /* mappings of 4GB or more in size are assumed to be memtables and are ignored */
 #define BIGGEST_BIGALLOC BIGGEST_SANE_USER_ALLOC
 
-extern inline
-struct big_allocation *(__attribute__((always_inline,gnu_inline))
-__liballocs_get_bigalloc_containing)(const void *obj);
 /* FIXME: tweak this logic so that important liballocs workloads
  * (e.g. libcrunch benchmarks) go fast. We can be relatively precise, 
  * by calling into the pageindex, or we can be crude,
  * using the stack-pointer and sbrk heuristics. Opt initially 
  * to be precise. */
-extern inline
-struct big_allocation *(__attribute__((always_inline,gnu_inline))
-__liballocs_get_bigalloc_containing)
-(const void *obj)
+inline struct big_allocation *__liballocs_get_bigalloc_containing(const void *obj)
 {
 	// if (__builtin_expect(obj == 0, 0)) return NULL;
 	// if (__builtin_expect(obj == (void*) -1, 0)) return NULL;
@@ -143,14 +137,10 @@ __liballocs_get_bigalloc_containing)
 	return b;
 }
 
-extern inline
-struct allocator *(__attribute__((always_inline,gnu_inline))
-__liballocs_leaf_allocator_for)
-(const void *obj, struct big_allocation **out_containing_bigalloc, struct big_allocation **out_maybe_the_allocation);
-extern inline
-struct allocator *(__attribute__((always_inline,gnu_inline))
-__liballocs_leaf_allocator_for)
-(const void *obj, struct big_allocation **out_containing_bigalloc, struct big_allocation **out_maybe_the_allocation)
+inline
+struct allocator *__liballocs_leaf_allocator_for(const void *obj,
+	struct big_allocation **out_containing_bigalloc,
+	struct big_allocation **out_maybe_the_allocation)
 {
 	struct big_allocation *deepest = NULL;
 	for (struct big_allocation *cur = __liballocs_get_bigalloc_containing(obj);

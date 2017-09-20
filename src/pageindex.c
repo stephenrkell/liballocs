@@ -24,6 +24,12 @@ static pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 #define BIG_UNLOCK
 #endif
 
+/* Instantiate some inlines. */
+extern struct allocator *__liballocs_leaf_allocator_for(const void *obj, 
+	struct big_allocation **out_containing_bigalloc,
+	struct big_allocation **out_maybe_the_allocation);
+extern struct big_allocation *__liballocs_get_bigalloc_containing(const void *obj);
+
 /* How many big allocs? 256 is a bit stingy. 
  * Each bigalloc record is 48--64 bytes, so 4096 of them would take 256KB.
  * Maybe stick to 1024? */

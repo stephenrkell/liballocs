@@ -19,15 +19,16 @@ typedef bool _Bool;
 #include <string.h>
 #include <dlfcn.h>
 #include <link.h>
-#include "heap_index.h"
-#include "pageindex.h"
 
 extern void warnx(const char *fmt, ...); // avoid repeating proto
 #ifndef NDEBUG
 #include <assert.h>
 #endif
 
+#include "memtable.h"
 #include "uniqtype.h"
+struct insert; // instead of heap_index.h
+struct allocator; // instead of allocmeta.h
 
 #define ALLOC_IS_DYNAMICALLY_SIZED(all, as) \
 	((all) != (as))
@@ -231,6 +232,14 @@ __liballocs_ensure_init(void)
 			__FILE__, __LINE__, __func__);
 	}
 }
+// inline definition in pageindex.h, instantiated in pageindex.c
+// GAH -- so clients including only this header will complain "used but not defined"
+inline struct allocator *__liballocs_leaf_allocator_for(const void *obj, 
+	struct big_allocation **out_containing_bigalloc,
+	struct big_allocation **out_maybe_the_allocation);
+// declare some more stuff that our inlines need, but is really liballocs-internal
+_Bool __liballocs_notify_unindexed_address(const void *obj);
+void __liballocs_report_wild_address(const void *ptr);
 
 /* Here "walk" is primarily walking "down". We do a little walking along,
  * in the case of unions. We do both iteratively. */
@@ -664,6 +673,8 @@ void *
 __liballocs_get_alloc_site(void *obj);
 unsigned long
 __liballocs_get_alloc_size(void *obj);
+struct allocator *
+__liballocs_get_leaf_allocator(void *obj);
 
 extern inline const void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void);
 extern inline const void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void)

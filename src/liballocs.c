@@ -1484,6 +1484,18 @@ __liballocs_get_alloc_size(void *obj)
 	return alloc_size;
 }
 
+struct allocator *
+__liballocs_get_leaf_allocator(void *obj)
+{
+	struct allocator *a = NULL;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, &a, NULL, 
+		NULL, NULL, NULL);
+	
+	if (err && err != &__liballocs_err_unrecognised_alloc_site) return 0;
+	
+	return a;
+}
+
 /* Instantiate inlines from liballocs.h. */
 extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,
