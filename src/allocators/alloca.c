@@ -105,15 +105,19 @@ void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_s
 	 *    pad the stack to a page boundary, and pad the amount to something
 	 *    page-aligned, so that the pageindex always gives an exact hit.)
 	 */
+	// XXX: sp as passed by caller is unreliable -- can come out much higher
+	// than the actual post-alloca rsp. Not sure why. But can use the chunk addr
+	// as our stack lower bound.
+	//assert((char*) new_userchunkaddr >= (char*) sp_at_caller);
 	struct big_allocation *b = __stackframe_allocator_find_or_create_bigalloc(
-		frame_counter, caller, sp_at_caller, bp_at_caller);
+		frame_counter, caller, /*sp_at_caller*/ new_userchunkaddr, bp_at_caller);
 	assert(b);
 	if (!b->suballocator) b->suballocator = &__alloca_allocator;
 	else if (b->suballocator != &__alloca_allocator) abort();
 	
 	/* Extend the frame bigalloc to include this alloca. Note that we're *prepending*
 	 * to the allocation. */
-	__liballocs_pre_extend_bigalloc(b, sp_at_caller);
+	__liballocs_pre_extend_bigalloc(b, /*sp_at_caller*/ new_userchunkaddr);
 	 
 	/* index it */
 	__liballocs_index_insert(new_userchunkaddr, modified_size, caller);
