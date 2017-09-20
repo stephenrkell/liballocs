@@ -1,4 +1,4 @@
-CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -O2
+CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -O2 -save-temps
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
 CFLAGS += -DUSE_FAKE_LIBUNWIND=1
@@ -28,7 +28,7 @@ ifeq ($(CC),)
 $(error Could not find allocscc)
 endif
 
-cases := $(wildcard [-a-z]*)
+cases := $(sort $(wildcard [-a-z]*))
 
 LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 export LIBALLOCS_BASE
