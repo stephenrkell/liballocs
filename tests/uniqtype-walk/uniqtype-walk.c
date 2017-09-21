@@ -20,7 +20,7 @@ static void on_blacken(void *obj, struct uniqtype *t, void *arg)
 {
 	++blackened_count;
 	fprintf(stderr, "Blackened an object %p, seen as having type %s\n", 
-			obj, t->name ? t->name : "(no name)");
+			obj, UNIQTYPE_NAME(t));
 }
 
 int main(void)
@@ -39,8 +39,26 @@ int main(void)
 		head = new_node;
 	}
 	
-	struct uniqtype *list_node_t = __liballocs_get_outermost_type(head);
+	// to do make-precise we need the size. FIXME: get_outermost_type should do this
+	//struct uniqtype *list_node_t = __liballocs_get_outermost_type(head);
+
+	struct allocator *a;
+	const void *alloc_start;
+	unsigned long alloc_size_bytes;
+	struct uniqtype *list_node_t = NULL;
+	struct liballocs_err *err = __liballocs_get_alloc_info(head, &a,
+			&alloc_start, &alloc_size_bytes, &list_node_t, /* alloc site */NULL);
 	assert(list_node_t);
+	if (list_node_t->make_precise)
+	{
+		// HACK: make_precise is sanity-checking that we get a multiple of 
+		// list_node's size, even though we don't because we get some malloc
+		// padding. it should know that we only allocated 1. 
+		// Kludge the range length for now.
+		list_node_t = list_node_t->make_precise(list_node_t, NULL, 0, head, alloc_start,
+			/*alloc_size_bytes*/ sizeof (struct list_node), NULL, NULL);
+		assert(!list_node_t->make_precise);
+	}
 	
 	/* Use our uniqtype bfs walker to walk the list. */
 	__uniqtype_walk_bfs_from_object(head, list_node_t, 
