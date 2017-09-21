@@ -62,11 +62,9 @@ int main(void)
 	for (int i = 0; i < 200; ++i) blah[i] = 42;
 	
 	void *fake = blah;
+	assert(__liballocs_get_alloc_type(fake));
 
-	// FIXME: actually check liballocs works here!
-	int *recovered = (int *) fake;
-
-	printf("It says: %d\n", recovered[0]);
+	printf("It says: %d\n", ((int*)fake)[0]);
 
 	xfree(blah);
 	
