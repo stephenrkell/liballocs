@@ -72,7 +72,7 @@ checkrun-fail-alloca-clang:
 
 # Some cases are expected to abort
 checkrun-abort-%:
-	@echo "expected-fail case is fail-$*" && \
+	@echo "expected-fail case is abort-$*" && \
 	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
 	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
 	if $(MAKE) cleanrun-abort-$* 1>$$out 2>$$err; then false; else true; fi
@@ -112,6 +112,8 @@ checkrun-relf-auxv-static:
 	$(MAKE) cleanrun-relf-auxv-static >/dev/null 2>&1
 checkrun-uniqtype-make-precise:
 	$(MAKE) cleanrun-uniqtype-make-precise >/dev/null 2>&1
+checkrun-lib-test:
+	$(MAKE) cleanrun-lib-test >/dev/null 2>&1
 
 _onlyrun-nopreload-%:
 	./nopreload-$*
