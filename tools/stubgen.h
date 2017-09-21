@@ -362,8 +362,7 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
  * to wrappers; for your own actual allocators, they need to be a suballoc.
  */
 #define make_callee_wrapper(name, retchar) \
-	type_for_argchar_ ## retchar __wrap___real_ ## name( arglist_ ## name (make_argdecl) ) \
-	type_for_argchar_ ## retchar __real_ ## name ( arglist_ ## name (make_argdecl) ); \
+	type_for_argchar_ ## retchar __wrap___real_ ## name ( arglist_ ## name (make_argdecl) ) \
 	{ \
 		static type_for_argchar_ ## retchar (*real_ ## name)( arglist_ ## name (make_argtype) ); \
 		if (!real_ ## name) real_ ## name = fake_dlsym(RTLD_DEFAULT, "__real_" #name); \
@@ -375,7 +374,6 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 	}
 #define make_void_callee_wrapper(name) \
 	void __wrap___real_ ## name( arglist_ ## name (make_argdecl) ) \
-	void __real_ ## name ( arglist_ ## name (make_argdecl) ); \
 	{ \
 		void (*real_ ## name)( arglist_ ## name (make_argtype) ); \
 		if (!real_ ## name) real_ ## name = fake_dlsym(RTLD_DEFAULT, "__real_" #name); \
