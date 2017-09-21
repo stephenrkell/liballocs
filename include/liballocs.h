@@ -110,7 +110,8 @@ extern _Bool __liballocs_is_initialized __attribute__((weak));
 int __liballocs_global_init(void) __attribute__((weak));
 // declare as const void *-returning, to simplify trumptr
 const void *__liballocs_typestr_to_uniqtype(const char *typestr) __attribute__((weak));
-void *__liballocs_my_typeobj(void) __attribute__((weak));
+// used by section-group test case, among others
+void *__liballocs_my_metaobj(void);
 
 /* Uniqtypes for signed_char and unsigned_char and so on.
  * 
@@ -194,7 +195,7 @@ struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 
 /* Public API for l0index / mappings was here. FIXME: why was it public? Presumably
  * for libcrunch's consumption, i.e. clients that "extend". But libcrunch
- * already includes liballocs_private.h, so there's no need for this to be here. 
+ * already includes liballocs_private.h, so there's no need for this to be here.
  * I've moved it to liballocs_private.h. */
 
 #include "allocmeta.h"
@@ -214,21 +215,12 @@ extern inline void
 __attribute__((always_inline,gnu_inline))
 __liballocs_ensure_init(void)
 {
-	//__liballocs_private_assert(__liballocs_check_init() == 0, "liballocs init", 
-	//	__FILE__, __LINE__, __func__);
-	if (__builtin_expect(! & __liballocs_is_initialized, 0))
-	{
-		/* This means that we're not linked with libcrunch. 
-		 * There's nothing we can do! */
-		__liballocs_private_assert(0, "liballocs presence", 
-			__FILE__, __LINE__, __func__);
-	}
 	if (__builtin_expect(!__liballocs_is_initialized, 0))
 	{
 		/* This means we haven't initialized.
 		 * Try that now (it won't try more than once). */
 		int ret = __liballocs_global_init();
-		__liballocs_private_assert(ret == 0, "liballocs init", 
+		__liballocs_private_assert(ret == 0, "liballocs init",
 			__FILE__, __LINE__, __func__);
 	}
 }
