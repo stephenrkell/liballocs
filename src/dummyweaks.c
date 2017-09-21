@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include "allocmeta.h"
 #include "fake-libunwind.h"
+#include "uniqtype.h"
+#include "uniqtype-bfs.h"
 
 /* NOTE: is linking -R, i.e. "symbols only", the right solution for 
  * getting the weak references to pop out the way we want them?
@@ -38,6 +40,8 @@
  * Can we use -R with a linker script?
  */
 
+_Bool __liballocs_is_initialized;
+
 uint16_t *pageindex __attribute__((visibility("protected")));
 
 __thread void *__current_allocfn;
@@ -66,6 +70,11 @@ __liballocs_index_delete(void *userptr)
 void __liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 {
 	
+}
+
+void *__liballocs_my_metaobj(void)
+{
+	return NULL;
 }
 
 void *__liballocs_allocsmt;
@@ -169,3 +178,10 @@ int unw_init_local(unw_cursor_t *cursor, unw_context_t *context) { return 0; }
 int unw_getcontext(unw_context_t *ucp) { return 0; }
 int unw_step(unw_cursor_t *cp) { return 0; }
 
+void __uniqtype_default_follow_ptr(void **p_obj, struct uniqtype **p_t, void *arg)
+{ /* no-op */ }
+
+void __uniqtype_walk_bfs_from_object(
+	void *object, struct uniqtype *t,
+	follow_ptr_fn *follow_ptr, void *fp_arg,
+	on_blacken_fn *on_blacken, void *ob_arg) {}
