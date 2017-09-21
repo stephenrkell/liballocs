@@ -13,7 +13,7 @@ struct s2
 void *l2(int arg)
 {
 	/* Get our __uniqtype__s1. */
-	struct uniqtype *resolved = dlsym(__liballocs_my_typeobj(), "__uniqtype__s2");
+	struct uniqtype *resolved = dlsym(__liballocs_my_metaobj(), "__uniqtype__s2");
 	struct uniqtype *int32 = resolved->related[0].un.memb.ptr;
 	
 	/* Check that we're using the same "__uniqtype_int$32" as l2a is. */
