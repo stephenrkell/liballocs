@@ -12,6 +12,38 @@
             unless we wrap them all.
  * So instead we should probably use a bitmap instead of linked lists.
  * This is also better for thread-safety / lock-freedom.
+ * 
+ * Alternatively we could make malloc_usable_size be a function that the
+ * containing bigalloc records. That would mean lots of indirect calls
+ * in this code, which is not good.
+ * 
+ * Alternatively our caller could supply the chunk size? This doesn't work
+ * because we don't only care about one chunk; we need to be able to walk
+ * the linked lists, containing many chunks.
+ *
+ * If we do the bitmap, where does the metadata go? We *could* punt *that*
+ * to the caller: the bitmap basically removes the linked list problem.
+ * It means we can no longer offer a get_info call; simply a get_chunk_base
+ * call, and each allocator provides get_info by doing something like
+ *
+ *     (char*) obj + malloc_usable_size(get_chunk_base(obj))
+ * 
+ * That means all we really do in this module is keep a bitmap, and handle
+ * delegation to promoted bigallocs.
+ *
+ * Crazy alternative: link one copy of this .o file for every distinct
+ * malloc[-like allocator] in the process? as specified by LIBALLOCS_ALLOC_FNS.
+ * This because part of the process of instantiating 'struct allocator'
+ * for that allocator; if it needs our get_info, give it its own copy
+ * that is linked to the relevant size function functions. So, say, at 
+ * link time, we'd rename refs to __usable_size to some function, by 
+ * default malloc_usable_size.
+ *
+ * That probably means we no longer have a single process-wide memtable; we must
+ * make smaller per-arena (i.e. per-bigalloc) memtables. That might be fine.
+ * Alternatively, split the process-wide memtable into a separate file that
+ * all copies use. Linking this is non-trivial; references from an executable
+ * will have to reach into a shared library.
  */
 
 /* This file uses GNU C extensions */
