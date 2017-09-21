@@ -103,6 +103,13 @@ static void build_adjacency_list_recursive(
 	follow_ptr_fn *follow_ptr, void *fp_arg)
 {
 	if (t_at_offset == &__uniqtype__void) return;
+
+	/* Make the allocation type precise. */
+	if (t_at_offset->make_precise)
+	{
+		t_at_offset = t_at_offset->make_precise(t_at_offset, NULL, 0, obj_start, NULL, 0, NULL, NULL);
+		assert(!t_at_offset->make_precise);
+	}
 	
 	fprintf(stderr, "Descending through subobjects of object at %p, "
 		"currently at subobject offset %ld of type %s\n",
@@ -128,7 +135,8 @@ static void build_adjacency_list_recursive(
 	else
 	{
 		is_array = 1;
-		nmemb = UNIQTYPE_ARRAY_LENGTH(t_at_offset); /* FIXME: dynamically-sized arrays */
+		nmemb = UNIQTYPE_ARRAY_LENGTH(t_at_offset);
+		assert(nmemb != UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
 	}
 
 	for (unsigned i = 0; i < nmemb; ++i, related += (is_array ? 0 : 1))
@@ -318,4 +326,6 @@ static node_rec *make_node(void *obj, struct uniqtype *t)
 }
 
 void __uniqtype_default_follow_ptr(void **p_obj, struct uniqtype **p_t, void *arg)
-{ /* no-op */ }
+{
+	/* No-op. */
+}
