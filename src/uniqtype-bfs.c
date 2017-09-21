@@ -104,12 +104,7 @@ static void build_adjacency_list_recursive(
 {
 	if (t_at_offset == &__uniqtype__void) return;
 
-	/* Make the allocation type precise. */
-	if (t_at_offset->make_precise)
-	{
-		t_at_offset = t_at_offset->make_precise(t_at_offset, NULL, 0, obj_start, NULL, 0, NULL, NULL);
-		assert(!t_at_offset->make_precise);
-	}
+	assert(!t_at_offset->make_precise);
 	
 	fprintf(stderr, "Descending through subobjects of object at %p, "
 		"currently at subobject offset %ld of type %s\n",
