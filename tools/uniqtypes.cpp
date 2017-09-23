@@ -470,8 +470,14 @@ void write_master_relation(master_relation_t& r,
 			for (auto i_edge = members.first; i_edge != members.second; ++i_edge)
 			{
 				/* if we don't have a byte offset, skip it ( -- it's a static var?) */
-				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(false /* true */);
-				if (!opt_offset) continue;
+				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(
+					true /* assume packed -- needed for synthetic types' members */);
+				if (!opt_offset)
+				{
+					err << "Warning: member " << i_edge.summary()
+						<< " has no byte offset, so skipping" << std::endl;
+					continue;
+				}
 				else
 				{ 
 					real_members.push_back(i_edge); 
