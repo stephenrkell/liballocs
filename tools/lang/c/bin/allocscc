@@ -23,7 +23,7 @@ class AllocsCC(AllocsCompilerWrapper):
     def defaultL1AllocFns(self):
         return ["malloc(Z)p", "calloc(zZ)p", "realloc(pZ)p", "memalign(zZ)p"]
 
-    def defaultFreeFns(self):
+    def defaultL1FreeFns(self):
         return ["free(P)"]
 
     def getCustomCompileArgs(self):

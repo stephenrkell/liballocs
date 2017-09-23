@@ -11,7 +11,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def defaultL1AllocFns(self):
         return []
 
-    def defaultFreeFns(self):
+    def defaultL1FreeFns(self):
         return []
     
     def wordSplitEnv(self, key):
@@ -32,14 +32,17 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def allAllocFns(self):
         return self.allL1OrWrapperAllocFns() + self.allSubAllocFns() + self.allAllocSzFns()
 
-    def allL1FreeFns(self):
-        return self.defaultFreeFns() + self.wordSplitEnv("LIBALLOCS_FREE_FNS")
+    def allWrapperFreeFns(self):
+        return self.wordSplitEnv("LIBALLOCS_FREE_FNS")
+
+    def allL1OrWrapperFreeFns(self):
+        return self.defaultL1FreeFns() + self.allWrapperFreeFns()
 
     def allSubFreeFns(self):
         return self.wordSplitEnv("LIBALLOCS_SUBFREE_FNS")
 
     def allFreeFns(self):
-        return self.allL1FreeFns() + self.allSubFreeFns()
+        return self.allL1OrWrapperFreeFns() + self.allSubFreeFns()
 
     def symNamesForFns(self, fns):
         syms = []
@@ -56,7 +59,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
     # FIXME: we shouldn't caller-wrap allocator entry points (non-wrappers),
     # though we should callee-wrap them (whic we currently do with --wrap,__real_*)
     def allWrappedSymNames(self):
-        return self.symNamesForFns(self.allAllocFns() + self.allSubFreeFns() + self.allL1FreeFns())
+        return self.symNamesForFns(self.allAllocFns() + self.allFreeFns())
 
     def findFirstUpperCase(self, s):
         allLower = s.lower()
@@ -244,7 +247,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # i.e. for actual allocators.
             syms = [x for x in self.allWrappedSymNames() \
                 if x not in self.symNamesForFns(self.allWrapperAllocFns() + self.allAllocSzFns() + \
-                    self.allL1FreeFns())]
+                    self.allWrapperFreeFns())]
             matches = self.listDefinedSymbolsMatching(filename, syms)
             return (0, sum([["-Wl,--defsym," + m + "=__wrap___real_" + m, "-Wl,--wrap,__real_" + m] \
               for m in matches], []))
@@ -417,7 +420,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 if allocFn in self.allSubFreeFns(): # FIXME: cover non-sub and non-void clases
                     stubsfile.write("make_void_callee_wrapper(%s)\n" % (fnName))
             # also do caller-side free (non-sub) -wrappers
-            for freeFn in self.allL1FreeFns():
+            for freeFn in self.allL1OrWrapperFreeFns():
                 m = re.match("(.*)\((.*)\)", freeFn)
                 fnName = m.groups()[0]
                 fnSig = m.groups()[1]
