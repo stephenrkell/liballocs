@@ -313,7 +313,7 @@ static void list_sanity_check(entry_type *head, const void *should_see_chunk)
 			)
 		);
 #endif
-		assert(next_userchunk != head_chunk);
+		assert((next_userchunk != head_chunk) && "saw head chunk again; missed a free()?");
 		assert(next_userchunk != cur_userchunk);
 
 		/* If we're not the first element, we should have a 
@@ -564,7 +564,6 @@ after_promotion: ;
 	list_sanity_check(index_entry, NULL);
 
 	void *head_chunkptr = entry_ptr_to_addr(index_entry);
-	
 
 	/* Add it to the index. We always add to the start of the list, for now. */
 	/* 1. Initialize our insert. */
