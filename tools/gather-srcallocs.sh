@@ -1,12 +1,25 @@
 #!/bin/bash
 
-pad_numbers () {
+# turn tab-separated lines into one line per field, with \f for original newlines
+fields_as_lines () {
     tr '\n' '\f' | \
     sed 's/\f/\f\n/g' | \
-    tr '\t' '\n' | \
-    sed -r "s/^[[:space:]]*[0-9]+[[:space:]]*\$/printf '%06d' '&'/e" | \
+    tr '\t' '\n'
+    # now a line break is \f\n and a field break is \n
+}
+
+recover_lines () {
     tr '\n' '\t' | \
-    sed 's/\f\t/\n/g'
+     sed 's/\f\t/\n/g'
+}
+
+pad_numbers () {
+    # be careful not to swallow a trailing \f
+    fields_as_lines | \
+    sed -r "s/^([[:space:]]*[0-9]+[[:space:]]*)(\\f|\$)/printf '%06d' '\\1'; printf '\\2'/e" | \
+    recover_lines
+    # this gawk replacement doesn't work
+    #gawk '/^[[:space:]]*[0-9]+[[:space:]]*$/ { printf "%06d%s\n", $0, gensub(/.*[^[:space:]]*([[:space:]]*)$/, "\\1", ""); next }; /.*/ { printf "%s", $0; }' | \
 }
 
 use_src_realpaths () {

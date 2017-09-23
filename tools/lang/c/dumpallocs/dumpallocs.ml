@@ -69,7 +69,7 @@ let rec sizeExprHasNoSizeof (e: exp) =
 
 type sz = 
     Undet
-  | Existing of typsig
+  | Existing of typsig * bool (* complete? *)
   | Synthetic of typsig list
 
 let dwarfIdlExprFromSynthetic tss ident : string = 
@@ -80,7 +80,7 @@ let dwarfIdlExprFromSynthetic tss ident : string =
     "structure_type " ^ ident ^ " { " ^ (List.fold_left ( fun s t -> s ^ "member : " ^ (dwarfidlFromSig t) ^ "; " ) "" tss) ^ "};"
 
 let maybeDecayArrayTypesig maybeTs = match maybeTs with
-    Existing(ts) -> Existing(decayArrayInTypesig ts)
+    Existing(ts, isComplete) -> Existing(decayArrayInTypesig ts, isComplete)
   | _ -> Undet
 
 let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz = 
@@ -193,12 +193,12 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
              (Undet, Undet) -> Undet
            | (Undet, _) -> sz2 (* a bit weird, pre-padding but okay *) 
            | (_, Undet) -> sz1 (* character padding *)
-           | (Existing(s1), Existing(s2)) ->
+           | (Existing(s1, isComplete1), Existing(s2, isComplete2)) ->
                  (* If we're adding Xs to Xs, OR array of Xs to some more sizeof X, the whole
                     expr has sizeofness X *)
                  let decayedS1 = decayArrayInTypesig s1 in 
                  let decayedS2 = decayArrayInTypesig s2 in 
-                 if decayedS1 = decayedS2 then Existing(decayedS1)
+                 if decayedS1 = decayedS2 then Existing(decayedS1, isComplete1)
                  else 
                     (* GAH. Arrays! we often do 
                            
@@ -207,8 +207,8 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
                        in which case our last element is a variable-length thing.
                      *)
                     Synthetic([s1; TSArray(s2, None, [])])
-           | (Synthetic(l1), Existing(s2)) -> Synthetic(l1 @ [s2])
-           | (Existing(s1), Synthetic(l2)) -> Synthetic(s1 :: l2)
+           | (Synthetic(l1), Existing(s2, _)) -> Synthetic(l1 @ [s2])
+           | (Existing(s1, _), Synthetic(l2)) -> Synthetic(s1 :: l2)
            | (Synthetic(l1), Synthetic(l2)) -> Synthetic(l1 @ l2)
         end
    |  BinOp(Div, e1, e2, t) -> begin
@@ -218,34 +218,39 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
          let maybeDecayedS2 = (maybeDecayArrayTypesig (getSizeExpr e2 env))
          in
          match (maybeDecayedS1, maybeDecayedS2) with 
-             (Existing(decayed1), Existing(decayed2)) -> if decayed1 = decayed2 then Undet (* divided away *)
-              else (* dimensionally incompatible division -- what to do? *) Existing(decayed1)
-            | (Existing(s), Undet) -> Existing(s)
+             (Existing(decayed1, isc1), Existing(decayed2, isc2)) -> if decayed1 = decayed2 then Undet (* divided away *)
+              else (* dimensionally incompatible division -- what to do? *) Existing(decayed1, isc1)
+            | (Existing(s, isc1), Undet) -> Existing(s, isc1)
             | _ -> Undet (* this includes the Synthetic cases*)
          
       end
-   |  SizeOf(t) -> Existing(typeSig t)
-   |  SizeOfE(e) -> Existing(typeSig (typeOf e))
-   |  SizeOfStr(s) -> Existing(typeSig charType)
+   |  SizeOf(t) -> Existing(typeSig t, isCompleteType t (* should always be true *)) 
+   |  SizeOfE(e) -> Existing(typeSig (typeOf e), isCompleteType (typeOf e) (* should always be true *))
+   |  SizeOfStr(s) -> Existing(typeSig charType, true)
    |  Lval(lhost, offset) -> begin
         (* debug_print 1 ("Hello from Lval case in getSizeExpr\n");  flush Pervasives.stderr; *) 
         match lhost with 
            Var(v) -> begin
              if v.vglob then Undet else try 
-               let found = Existing(assoc v.vid env) in 
+               let found = Existing(assoc v.vid env, isCompleteType v.vtype) in 
                (* debug_print 1 ("environment tells us that vid " ^ (string_of_int v.vid) ^ " has a sizeofness\n"); *)
                found 
              with Not_found -> Undet
            end
         |  Mem(_) -> Undet
       end
-   | CastE(t, e) -> (getSizeExpr e env)
+   | CastE(t, e) -> (getSizeExpr e env) (* i.e. recurse down e *)
    | AddrOf(lv) -> begin 
         debug_print 1 ("Hello from AddrOf case in getSizeExpr\n");  flush Pervasives.stderr;
         let ts = containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv 
         in match ts with
             None -> Undet
-          | Some(someTs) -> Existing(someTs)
+          | Some(someTs) ->
+                (* If we're using offsetof not sizeof,
+                 * it means that we're splicing in some extra stuff,
+                 * so we can't be making an array of the whole type. So
+                 * the effect is like an incomplete type. *)
+                Existing(someTs, false)
       end
    | _ -> Undet
 
@@ -290,7 +295,7 @@ let rec warnIfLikelyAllocFn (i: instr) (maybeFunName: string option) (arglist: e
       (* (debug_print 1 ("call to function " ^ funName ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
 | None -> ()
 
-let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctionType : sz =
+let matchUserAllocArgs i arglist signature env maybeFunNameToPrint (calledFunctionType : Cil.typ) : sz =
  let signatureArgSpec = try (
      let nskip = search_forward (regexp "(.*)") signature 0
      in
@@ -315,7 +320,7 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctio
           getSizeExpr (nth arglist s) env 
        in 
        match szEx with
-         Existing(szType) -> (debug_print 1 ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
+         Existing(szType, _) -> (debug_print 1 ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
                szEx
        | Undet -> debug_print 1 ("Could not infer what we are allocating\n"); flush Pervasives.stderr; szEx
        | Synthetic(_) -> debug_print 1 ("We are allocating a composite: FIXME\n"); flush Pervasives.stderr; szEx
@@ -329,13 +334,19 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint calledFunctio
  | None -> 
       (* If we have no sizearg pos, use the return type of the function: 
          if it is a pointer to non-void, we assume the pointer target type is the allocated type. *)
-      match calledFunctionType with 
-        TSFun(returnTs, paramTss, isVarArgs, attrs) -> begin
-            match returnTs with
+      match (unrollType calledFunctionType) with
+        TFun(returnT, paramTs, isVarArgs, attrs) -> begin
+            match typeSig returnT with
             TSBase(TVoid(_)) -> Undet
-         |  TSPtr(targetTs, _) -> Existing(targetTs)
+         |  TSPtr(targetTs, _) -> Existing(targetTs, isCompleteType (
+                 match unrollType returnT with
+                    TPtr(targetT, _) -> targetT
+                  | _ -> failwith "impossible pointer type"
+                 )
+             )
          |  _ -> Undet (* it returns something else *)
-         end
+            
+        end
       | _ -> raise (Failure "impossible function type")
 
 let explodeString s = 
@@ -377,7 +388,7 @@ let functionArgCountMatchesSignature arglist signature =
     debug_print 1 ("Signature " ^ signature ^ " has argcount " ^ (string_of_int (List.length friendlyArgChars)) ^ "\n"); 
     (List.length arglist) = (List.length friendlyArgChars)
 
-let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env calledFunctionType : sz option = 
+let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env (calledFunctionType : Cil.typ) : sz option = 
  (* destruct the signature string *)
  debug_print 1 ("Warning: matching against signature " ^ signature ^ " when argcount is " 
     ^ (string_of_int (List.length arglist)) ^ "\n"); 
@@ -411,7 +422,7 @@ let userAllocFunctions () : string list =
 
 (* Return 'None' if none of the candidate alloc fun signatures matches the instr, 
  * or Some(sz) if one did and seemed to be allocating sz (which might still be Undet). *)
-let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates calledFunctionType : sz option = 
+let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates (calledFunctionType : Cil.typ) : sz option = 
   (* debug_print 1 "Looking for user alloc expr\n"; flush Pervasives.stderr; *)
   try begin
     (* match f.vname with each candidate *) 
@@ -450,7 +461,7 @@ let allAllocFunctions () : string list =
    return Some(sz)
    where sz is the data type we inferred was being allocated (might be Undet)
    else None. *)
-let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) env calledFunctionType : sz option = 
+let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) env (calledFunctionType : Cil.typ) : sz option = 
   let maybeFunName = match maybeFun with 
     Some(f) -> Some(f.vname)
   | None -> None
@@ -458,7 +469,7 @@ let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) e
   getUserAllocExpr i maybeFunName arglist env (allAllocFunctions ()) calledFunctionType
 
 (* I so do not understand Pretty.dprintf *)
-let printAllocFn fileAndLine chan maybeFunvar allocType = 
+let printAllocFn fileAndLine chan maybeFunvar allocType mightBeArrayOfThis = 
    (* debug_print 1 ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
    output_string chan fileAndLine;
    let targetFunc = match maybeFunvar with 
@@ -467,7 +478,7 @@ let printAllocFn fileAndLine chan maybeFunvar allocType =
             d_lval (Var(funvar), NoOffset)) 
    | None -> "\t(indirect)\t"
    in
-   output_string chan (targetFunc ^ allocType ^ "\n");
+   output_string chan (targetFunc ^ allocType ^ "\t" ^ (if mightBeArrayOfThis then "1" else "0") ^ "\n");
    flush chan
 
 (* What we do is:
@@ -528,7 +539,7 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
            match host with
             Var(v) -> if v.vglob then acc else begin
                match getSizeExpr e acc with
-                 Existing(t) -> (
+                 Existing(t, _) -> (
                  (* debug_print 1 ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofTypsig " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig t)) ^  ")\n")
                  ; flush Pervasives.stderr; *) (v.vid, t) :: (remove_assoc v.vid acc))
               |  _ -> acc
@@ -622,7 +633,8 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
       ) ^ "\n"); flush Pervasives.stderr);
       match i with 
       Call(_, funExpr, args, l) -> begin
-         let handleCall maybeFunvar functionTs = begin
+         let handleCall maybeFunvar (functionT : Cil.typ) = begin
+          let functionTs = typeSig functionT in
           match functionTs with 
           | TSFun(returnType, optParamList, isVarArgs, attrs) -> begin
             (* Where to write our output? We want the .allocs to be output 
@@ -659,11 +671,11 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Sizeof T lets us terminate
                  Sizeof V also lets us terminate
                  Mul where an arg is a Sizeof lets us terminate *)
-              match (getAllocExpr i maybeFunvar args !sizeEnv functionTs) with
-                 Some(Existing(ts)) -> printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts); SkipChildren
-              |  Some(Synthetic(tss)) -> printAllocFn fileAndLine chan maybeFunvar (dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine))) ); SkipChildren
+              match (getAllocExpr i maybeFunvar args !sizeEnv functionT) with
+                 Some(Existing(ts, isComplete)) -> printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts) isComplete; SkipChildren
+              |  Some(Synthetic(tss)) -> printAllocFn fileAndLine chan maybeFunvar (dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine))) ) false; SkipChildren
               |  Some(Undet) -> (* it is an allocation function, but... *)
-                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype__void"; SkipChildren
+                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype__void" false; SkipChildren
               |  None -> 
                   (* (debug_print 1 (
                      "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
@@ -673,17 +685,17 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
         | _ -> raise(Failure "impossible function type")
         end
         in
-        let getCalledFunctionOrFunctionPointerTypeSig fexp : Cil.typsig * Cil.varinfo option = 
+        let getCalledFunctionOrFunctionPointerType fexp : Cil.typ * Cil.varinfo option = 
            match fexp with 
-             Lval(Var(v), NoOffset) -> ((typeSig v.vtype), Some(v))
-         |   _ -> (typeSig (typeOf fexp), None)
+             Lval(Var(v), NoOffset) -> (v.vtype, Some(v))
+         |   _ -> (typeOf fexp, None)
         in 
-        let (functionTs, maybeVarinfo) = getCalledFunctionOrFunctionPointerTypeSig funExpr
+        let (functionT, maybeVarinfo) = getCalledFunctionOrFunctionPointerType funExpr
         in
-        match functionTs with
-          TSFun(returnTs, paramTss, isVarArgs, attrs) -> handleCall maybeVarinfo functionTs
-        | TSPtr(fts, ptrAttrs) -> handleCall (None) fts
-        | _ -> raise (Failure("impossible called function typesig" ^ (Pretty.sprint 80 (d_typsig () functionTs))))
+        match unrollType functionT with
+          TFun(returnT, paramTs, isVarArgs, attrs) -> handleCall maybeVarinfo functionT
+        | TPtr(ft, ptrAttrs) -> handleCall (None) ft
+        | _ -> raise (Failure("impossible called function type" ^ (Pretty.sprint 80 (d_type () functionT))))
         
         (* TSPtr(TSFun(returnTs, paramTss, isVarArgs, funAttrs), ptrAttrs) -> handleCall None returnTs paramTss isVarArgs funAttrs
                | _ (* match v.vtype *) -> (debug_print 1 ("skipping call to non-function var " ^ v.vname ^ "\n"); flush Pervasives.stderr; SkipChildren)

@@ -37,6 +37,7 @@ struct allocsite
 	string objname;
 	unsigned file_addr;
 	bool is_synthetic;
+	bool might_be_array;
 };
 
 vector<allocsite> read_allocsites(std::istream& in);
@@ -158,7 +159,8 @@ inline int read_allocs_line(
 	string& cuname,
 	unsigned& line,
 	unsigned& end_line,
-	string& alloc_typename
+	string& alloc_typename,
+	bool& might_be_array
 )
 {
 	istringstream s(str);
@@ -166,6 +168,7 @@ inline int read_allocs_line(
 	string file_addrstr;
 	string linestr;
 	string endlinestr;
+	string might_be_array_str;
 
 	#define report_error(fieldname, buf) \
 	do { cerr << "Error reading field '" #fieldname "' from line: " << (buf) << endl; \
@@ -184,6 +187,7 @@ inline int read_allocs_line(
 	std::getline(s, endlinestr, '\t'); check_error(s, endline, str);
 	std::getline(s, alloc_targetfun, '\t'); check_error(s, alloc_targetfun, str);
 	std::getline(s, alloc_typename, '\t'); check_error(s, alloc_typename, str);
+	std::getline(s, might_be_array_str, '\t'); check_error(s, might_be_array, str);
 	// don't bother reading rest -- the line below doesn't work
 	//std::getline(s, rest, '\n'); check_error(s, rest);
 
@@ -195,6 +199,7 @@ inline int read_allocs_line(
 	istringstream offsetstream(file_addrstr.substr(2)); offsetstream >> std::hex >> file_addr; check_error(offsetstream, file_addr, file_addrstr);
 	istringstream linestream(linestr); linestream >> line; check_error(linestream, line, linestr);
 	istringstream endlinestream(endlinestr); endlinestream >> end_line; check_error(endlinestream, end_line, endlinestr);
+	istringstream might_be_array_stream(might_be_array_str); might_be_array_stream >> might_be_array; check_error(might_be_array_stream, might_be_aray, might_be_array_str);
 	return 0;
 }
 

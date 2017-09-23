@@ -38,13 +38,14 @@ read_allocsites(std::istream& in)
 	unsigned line;
 	unsigned end_line;
 	string alloc_typename;
+	bool might_be_array;
 	
 	vector<allocsite> allocsites_to_add;
 	
 	opt<string> seen_objname;
 	
 	while (in.getline(buf, sizeof buf - 1)
-		&& 0 == read_allocs_line(string(buf), objname, symname, file_addr, sourcefile, line, end_line, alloc_typename))
+		&& 0 == read_allocs_line(string(buf), objname, symname, file_addr, sourcefile, line, end_line, alloc_typename, might_be_array))
 	{
 		string nonconst_typename = alloc_typename;
 		string clean_typename = nonconst_typename;
@@ -52,7 +53,8 @@ read_allocsites(std::istream& in)
 		
 		allocsites_to_add.push_back((allocsite){
 			clean_typename, sourcefile, objname, file_addr,
-			/* is_synthetic */ clean_typename.substr(0, sizeof "__uniqtype_" - 1) != "__uniqtype_"
+			/* is_synthetic */ clean_typename.substr(0, sizeof "__uniqtype_" - 1) != "__uniqtype_",
+			might_be_array
 		});
 	} // end while read line
 	cerr << "Found " << allocsites_to_add.size() << " allocation sites" << endl;
@@ -285,7 +287,7 @@ void make_allocsites_relation(
 		 * -length array be [1] not [0], we would ues offsetof to allocate
 		 * space for extra training elements. */
 		bool incomplete = !found_type->calculate_byte_size();
-		bool declare_as_array0 = !i_alloc->is_synthetic && !incomplete;
+		bool declare_as_array0 = !i_alloc->is_synthetic && i_alloc->might_be_array && !incomplete;
 
 		// add to the allocsites table too
 		// recall: this is the mapping from allocsites to uniqtype addrs
