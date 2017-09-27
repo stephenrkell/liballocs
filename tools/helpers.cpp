@@ -481,7 +481,7 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		const Dwarf_Unsigned element_size = 1; /* FIXME: always 1? */
 		opt<Dwarf_Unsigned> opt_byte_size = string_t->fixed_length_in_bytes();
 		opt<Dwarf_Unsigned> element_count
-		 = opt_byte_size ? (*opt_byte_size / element_size ) : opt<Dwarf_Unsigned>();
+		 = opt_byte_size ? opt<Dwarf_Unsigned>(*opt_byte_size / element_size ) : opt<Dwarf_Unsigned>();
 		ostringstream string_prefix;
 		string_prefix << "__STR" << (element_count ? *element_count : 0) << "_"
 			<< element_size;

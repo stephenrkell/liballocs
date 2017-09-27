@@ -806,7 +806,7 @@ int main(int argc, char **argv)
 				{
 					//by_frame_off[frame_offset] = *i_el;
 					set< retained_element > singleton_set;
-					singleton_set.insert(retained_element(make_pair(-1, frame_offset), *i_el));
+					singleton_set.insert(retained_element(store_location(-1, frame_offset), *i_el));
 					unsigned previous_size = frame_intervals.size();
 					SANITY_CHECK_PRE(frame_intervals);
 					frame_intervals += make_pair(i_int->first, singleton_set);
@@ -815,7 +815,7 @@ int main(int argc, char **argv)
 				else
 				{
 					set< pair< iterator_df< with_dynamic_location_die >, string> > singleton_set;
-					singleton_set.insert(make_pair(*i_el, string("no_concrete_type")));
+					singleton_set.insert(make_pair(*i_el, string("no concrete type")));
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 				}
 			}
@@ -846,7 +846,7 @@ int main(int argc, char **argv)
 			set<int> all_columns;
 			all_columns.insert(DW_FRAME_CFA_COL3);
 			for (auto i_row = result.rows.begin(); i_row != result.rows.end(); ++i_row)
-			{	
+			{
 				for (auto i_reg = i_row->second.begin(); i_reg != i_row->second.end(); ++i_reg)
 				{
 					all_columns.insert(i_reg->first);
