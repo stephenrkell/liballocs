@@ -27,10 +27,11 @@ Here are some things you'll need in order to build this software.
 There are also a lot of dependencies on my other codebases. These are
 now included as git submodules under contrib/, so you can try the (new)
 impatient method for building *if* you're on a Debian-based x86-64
-GNU/Linux machine with gcc 4.9 (5.x and 6.x are currently BROKEN pending
-a fix to bug 78407 <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78407>).
+GNU/Linux machine with gcc 4.9 or 7.2 and later. (Builds by gcc 5.x 
+and 6.x are currently BROKEN pending a fix to bug 78407 
+<https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78407>).
 
-The following is tested on Debian jessie. On stretch and certain other
+The following is tested on Debian jessie; on stretch and certain other
 distributions (Fedora), you must first do
 
 $ export LIBDWARFPP_CONFIGURE_FLAGS=--with-libdwarf-includes=/usr/include/libdwarf
@@ -38,10 +39,12 @@ $ sudo apt-get install libdw-dev
 
 ... or somehow provide your own /usr/include/{lib,}dwarf.h. Then:
 
-$ sudo apt-get install libelf-dev autoconf automake libtool pkg-config \
-    autoconf-archive libdwarf-dev ocaml ocaml-findlib \
-    default-jre-headless make git g++ gawk libunwind-dev \
-    libc6-dev-i386 zlib1g-dev libc6-dbg gdb \
+$ sudo apt-get install binutils-dev libelf-dev libdwarf-dev \
+    autoconf automake libtool pkg-config autoconf-archive \
+    g++ ocaml ocaml-findlib \
+    default-jre-headless \
+    make git gawk gdb \
+    libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
     libboost-{iostreams,regex,serialization,filesystem}-dev
 $ git clone https://github.com/stephenrkell/liballocs.git
 $ cd liballocs
