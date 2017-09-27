@@ -44,9 +44,9 @@ int open(const char *pathname, int flags, ...);
 int close(int fd);
 
 #define GUESS_CALLER(uc) \
-	( (&pageindex && pageindex[ ((uintptr_t) ((uc).rsp)) >> LOG_PAGE_SIZE ] != 0) \
-		? *(void**) ((uintptr_t) ((uc).rsp)) \
-		: (void*) ((uc).rip) )
+	( (&pageindex && pageindex[ ((uintptr_t) ((uc).MC_REG(rsp, RSP))) >> LOG_PAGE_SIZE ] != 0) \
+		? *(void**) ((uintptr_t) ((uc).MC_REG(rsp, RSP))) \
+		: (void*) ((uc).MC_REG(rip, RIP)) )
 
 void brk_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void brk_replacement(struct generic_syscall *s, post_handler *post)
