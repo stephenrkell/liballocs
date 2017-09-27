@@ -38,13 +38,17 @@ size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("pr
 #include "raw-syscalls.h"
 #include "allocmeta.h"
 
-/* including signal.h breaks asm includes, so just supply the decls here. */
+/* On some glibcs,
+ * including signal.h breaks asm includes, so just supply the decls here. */
+#ifdef AVOID_LIBC_SIGNAL_H_
 typedef void (*sighandler_t)(int);
 sighandler_t signal(int signum, sighandler_t handler);
 struct __libc_sigaction;
 int sigaction(int signum, const struct __libc_sigaction *act,
              struct __libc_sigaction *oldact);
-
+#else
+#define __libc_sigaction sigaction
+#endif
 
 /* We should be safe to use it once malloc is initialized. */
 // #define safe_to_use_bigalloc (__liballocs_is_initialized)
