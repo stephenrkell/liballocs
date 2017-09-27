@@ -28,13 +28,21 @@ There are also a lot of dependencies on my other codebases. These are
 now included as git submodules under contrib/, so you can try the (new)
 impatient method for building *if* you're on a Debian-based x86-64
 GNU/Linux machine with gcc 4.9 (5.x and 6.x are currently BROKEN pending
-LTO bug fixes). The following is tested on Debian jessie.
+a fix to bug 78407 <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78407>).
 
-$ apt-get install libelf-dev autoconf automake libtool pkg-config \
+The following is tested on Debian jessie. On stretch and certain other
+distributions (Fedora), you must first do
+
+$ export LIBDWARFPP_CONFIGURE_FLAGS=--with-libdwarf-includes=/usr/include/libdwarf
+$ sudo apt-get install libdw-dev
+
+... or somehow provide your own /usr/include/{lib,}dwarf.h. Then:
+
+$ sudo apt-get install libelf-dev autoconf automake libtool pkg-config \
     autoconf-archive libdwarf-dev ocaml ocaml-findlib \
-    openjdk-7-jre-headless make git g++ gawk libunwind-dev \
+    default-jre-headless make git g++ gawk libunwind-dev \
     libc6-dev-i386 zlib1g-dev libc6-dbg gdb \
-    libboost-{iostreams,regex,serialization,filesystem}1.55-dev
+    libboost-{iostreams,regex,serialization,filesystem}-dev
 $ git clone https://github.com/stephenrkell/liballocs.git
 $ cd liballocs
 $ git submodule init
@@ -45,7 +53,7 @@ $ . contrib/env.sh
 $ ./configure --prefix=/usr/local
 $ make -jn                    # for your favourite n
 
-You will also want to set up space for metadata files to live.
+You will also want to set up space to hold metadata files.
 
 $ cd ..
 $ export LIBALLOCS=`pwd`/liballocs
