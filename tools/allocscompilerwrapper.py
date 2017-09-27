@@ -626,6 +626,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
             assert ("-o" not in self.flatOptions(opts))
             relocFilename = finalLinkOutput + ".linked.o"
             extraFirstOpts = ["-Wl,-r", "-o", relocFilename, "-nostartfiles", "-nodefaultlibs", "-nostdlib"]
+            if self.recognisesOption("-no-pie"):
+                extraFirstOpts += ["-no-pie"]
             allLinkItems = self.flatItems(self.itemsForPhases({Phase.LINK}))
             linkItemsIncluded = []
             linkItemsDeferred = []

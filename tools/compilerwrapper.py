@@ -431,6 +431,25 @@ class CompilerWrapper:
     
     def __init__(self):
         self.parseInputAndOutputFiles()
+    
+    # HACK: regrettably, in at least one case we need to probe the compiler
+    # for the options it supports. That's for -no-pie, because some GCCs
+    # make position-independent executables by default. In allocscompilerwrapper.py
+    # we want to make a relocatable version of the output, so we use "-r", but
+    # this conflicts with the -pie that is implied on gcc 6+... so we need to add
+    # -no-pie, but gcc 4.9 does not understand that.
+    #
+    # For probing the compiler, the heuristic we use is that if the compiler
+    # doesn't support an option, passing just that option will cause it to 
+    # echo the option back on stderr with some spacing/quoting stuff around it.
+    def recognisesOption(self, opt):
+        errOutput = subprocess.Popen(self.getCompilerCommand([], {}) + [opt], \
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[1] 
+        m = re.match(".*[^-a-z0-9]" + opt + "([^-a-z0-9].*|$)", errOutput) # FIXME: escaping
+        if m:
+            return False
+        else:
+            return True
 
     def doingFinalLink(self):
         return Phase.LINK in self.enabledPhases and \
