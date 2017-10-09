@@ -206,7 +206,7 @@ void open_replacement(struct generic_syscall *s, post_handler *post)
 	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
 }
 
-static int trap_ldso_or_libdl_cb(struct proc_entry *ent, char *linebuf, void *interpreter_fname_as_void)
+static int trap_ldso_or_libdl_cb(struct maps_entry *ent, char *linebuf, void *interpreter_fname_as_void)
 {
 	const char *interpreter_fname = (const char *) interpreter_fname_as_void;
 	if (ent->x == 'x' && (0 == strcmp(interpreter_fname, ent->rest)
@@ -287,15 +287,29 @@ void __liballocs_systrap_init(void)
 		}
 	}
 	if (!interpreter_fname) abort();
-	struct proc_entry entry;
+	struct maps_entry entry;
 	char proc_buf[4096];
 	int ret;
 	ret = snprintf(proc_buf, sizeof proc_buf, "/proc/%d/maps", getpid());
 	if (!(ret > 0)) abort();
 	int fd = open(proc_buf, O_RDONLY);
 	if (fd == -1) abort();
+	/* Copy the whole file into a buffer. */
+	const size_t filebuf_sz = 64 * 8192;
+	char *filebuf = alloca(64 * 8192); // HACK: guessing maximum /proc/pid/maps file size
+	char *filebuf_pos = filebuf;
+	const size_t amt_to_read = 4096;
+	ssize_t amt_read = 0;
+	do
+	{
+		if (filebuf + filebuf_sz - filebuf_pos < amt_to_read) break; // shouldn't happen
+		amt_read = read(fd, filebuf_pos, amt_to_read);
+		if (amt_read != -1) filebuf_pos += amt_read;
+	} while (amt_read > 0);
+	struct maps_buf m = { filebuf, 0, filebuf_pos - filebuf };
 	char linebuf[8192];
-	for_each_maps_entry(fd, linebuf, sizeof linebuf, &entry, trap_ldso_or_libdl_cb, (void*) interpreter_fname);
+	for_each_maps_entry((intptr_t) &m, get_a_line_from_maps_buf,
+		linebuf, sizeof linebuf, &entry, trap_ldso_or_libdl_cb, (void*) interpreter_fname);
 	close(fd);
 
 	/* Also trap the mmap and mmap64 calls in the libc so. Again, we use relf

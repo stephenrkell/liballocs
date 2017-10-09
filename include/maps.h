@@ -15,10 +15,10 @@ int sscanf(const char *str, const char *format, ...);
 int open(const char *pathname, int flags, ...);
 
 /* Rethinking this "maps" concept in the name of portability (to FreeBSD), we have
- * 
+ *
  * a "line" that is really a "raw entry" and read via sysctl() or read();
  * a "proc entry" which is our abstraction of a memory mapping.
- * 
+ *
  * Then we have some functions:
  * get_a_line really reads a single raw entry into the user's buffer;
  * process_one_maps_entry decodes a raw entry and calls the cb on the decoded entry;
@@ -27,7 +27,7 @@ int open(const char *pathname, int flags, ...);
  * In trap-syscalls we avoid race conditions by doing it differently: rather
  * than use for_each_maps_entry, we snapshot all the raw entries and then
  * call process_one on each.
- * 
+ *
  */
 
 static inline intptr_t get_maps_handle(void)
@@ -45,7 +45,7 @@ static inline intptr_t get_maps_handle(void)
 	if (buf)
 	{
 		error = sysctl(name, sizeof name / sizeof name[0], buf + sizeof (off_t), &fudged_len, NULL, 0);
-		if (error) 
+		if (error)
 		{
 			free(buf);
 			return (intptr_t) NULL;
@@ -72,10 +72,10 @@ static inline intptr_t get_maps_handle(void)
 				}
 				/* We need to give the caller
 				 * a single buffer that they can easily iterate through
-				 * and then free in one go. 
-				 * So we reallocate the buffer to the actual size required, 
+				 * and then free in one go.
+				 * So we reallocate the buffer to the actual size required,
 				 * then work backwards to copy the packed structs onto
-				 * the old storage. By the end we will be overwriting the 
+				 * the old storage. By the end we will be overwriting the
 				 * packed records. */
 				buf = realloc(buf, cnt * sizeof (struct kinfo_vmentry));
 				if (buf)
@@ -83,18 +83,12 @@ static inline intptr_t get_maps_handle(void)
 					for (int i = cnt - 1; i >= 0; --i)
 					{
 						memcpy(((struct kinfo_vmentry *) buf) + i, start_positions[i], struct_sizes[i]);
-					} 
-					
+					}
 				}
-				
 				free(struct_sizes);
 			}
-		
-		
 			free(start_positions);
 		}
-		
-
 
 	kiv = calloc(cnt, sizeof(*kiv));
 	if (kiv == NULL) {
@@ -118,9 +112,7 @@ static inline intptr_t get_maps_handle(void)
 		kp++;
 	}
 	free(buf);
-
 	}
-	
 	#endif
 #else
 	return (intptr_t) open("/proc/self/maps", O_RDONLY);
@@ -136,9 +128,9 @@ static inline void free_maps_handle(intptr_t handle)
 #endif
 }
 
-static inline ssize_t get_a_line(char *buf, size_t size, intptr_t handle)
-{
 #ifdef __FreeBSD__
+static inline ssize_t get_a_line_from_kinfo(char *buf, size_t size, intptr_t handle)
+{
 	/* "Getting a line" just means reading one raw record into a buffer. */
 	char *handle_buf_start =  (char*) handle + sizeof (off_t);
 	char *handle_pos = handle_buf_start + *(off_t *)handle_buf_start;
@@ -146,24 +138,24 @@ static inline ssize_t get_a_line(char *buf, size_t size, intptr_t handle)
 	ssize_t actual_size_to_copy = (sz < size) ? sz : size;
 	*(off_t *)handle_buf_start += actual_size_to_copy;
 	memcpy(buf, (char*) handle_pos, actual_size_to_copy);
-	return actual_size_to_copy;
+	return actual_size_to_copy ? actual_size_to_copy : -1;
+}
 #else
+static inline ssize_t get_a_line_from_maps_fd(char *buf, size_t size, intptr_t handle)
+{
 	if (size == 0) return -1; // now size is at least 1
 	int fd = (int) handle;
-	
 	// read some stuff, at most `size - 1' bytes (we're going to add a null), into the buffer
 	ssize_t bytes_read = read(fd, buf, size - 1);
-	
 	// if we got EOF and read zero bytes, return -1
 	if (bytes_read == 0) return -1;
-	
 	// did we get enough that we have a whole line?
 	char *found = memchr(buf, '\n', bytes_read);
 	// if so, rewind the file to just after the newline
 	if (found)
 	{
 		size_t end_of_newline_displacement = (found - buf) + 1;
-		(void) lseek(fd, 
+		(void) lseek(fd,
 				end_of_newline_displacement - bytes_read /* i.e. negative if we read more */,
 				SEEK_CUR);
 		buf[end_of_newline_displacement] = '\0';
@@ -174,11 +166,53 @@ static inline ssize_t get_a_line(char *buf, size_t size, intptr_t handle)
 		/* We didn't read enough. But that should only be because of EOF of error.
 		 * So just return whatever we got. */
 		buf[bytes_read] = '\0';
-		return bytes_read;
+		return -1;
 	}
-#endif
 }
-struct proc_entry
+struct maps_buf
+{
+	char *buf;
+	off_t pos;
+	size_t len;
+};
+static inline ssize_t get_a_line_from_maps_buf(char *outbuf, size_t outsize, intptr_t handle)
+{
+	if (outsize == 0) return -1; // now size is at least 1
+	struct maps_buf *m = (struct maps_buf *) handle;
+	// read some stuff, at most `size - 1' bytes (we're going to add a null), into the line buffer
+	// HACK: we may not have MIN, so...
+	#ifndef MIN
+	#define MIN(x, y) ((x) > (y) ? (y) : (x))
+	#define MIN_defined
+	#endif
+	size_t max_size_to_copy = MIN(outsize - 1, m->len - m->pos);
+	if (max_size_to_copy == 0) return -1; // EOF-like case
+	strncpy(outbuf, m->buf + m->pos, max_size_to_copy);
+	// ensure that even in the worst case, we're NUL-terminated
+	outbuf[MIN(outsize, max_size_to_copy) - 1] = '\0';
+	#ifdef MIN_defined
+	#undef MIN_defined
+	#undef MIN
+	#endif
+	size_t bytes_read = strlen(outbuf);
+	// did we get enough that we have a whole line?
+	char *found = memchr(outbuf, '\n', bytes_read);
+	// if so, rewind the file to just after the newline
+	if (found)
+	{
+		m->pos += 1 + (found - outbuf);
+		return bytes_read + 1;
+	}
+	else
+	{
+		/* Else we didn't read enough. But that should only be because of EOF or error.
+		 * So just return whatever we got. */
+		m->pos += 1 + strlen(outbuf);
+		return -1;
+	}
+}
+#endif
+struct maps_entry
 {
 	unsigned long first, second;
 	char r, w, x, p;
@@ -187,15 +221,15 @@ struct proc_entry
 	unsigned inode;
 	char rest[4096];
 };
-typedef int maps_cb_t(struct proc_entry *ent, char *linebuf, void *arg);
+typedef int maps_cb_t(struct maps_entry *ent, char *linebuf, void *arg);
 
-static inline int process_one_maps_entry(char *linebuf, struct proc_entry *entry_buf,
-		maps_cb_t *cb, void *arg)
+static inline int process_one_maps_entry(char *linebuf, struct maps_entry *entry_buf,
+	maps_cb_t *cb, void *arg)
 {
 #ifdef __FreeBSD__
 	struct kinfo_vmentry *kve = (struct kinfo_vmentry *) linebuf;
 	/* Populate the entry buf with data from the kinfo_vmentry. */
-	*entry_buf = (struct proc_entry) {
+	*entry_buf = (struct maps_entry) {
 		.first = kve->kve_start,
 		.second = kve->kve_end,
 		.r = kve->kve_protection & KVME_PROT_READ ? 'r' : '-',
@@ -208,7 +242,6 @@ static inline int process_one_maps_entry(char *linebuf, struct proc_entry *entry
 		.inode = kve->kve_vn_fileid,
 		.rest = kve->kve_path
 	};
-	
 #else
 	#define NUM_FIELDS 11
 	entry_buf->rest[0] = '\0';
@@ -226,61 +259,17 @@ static inline int process_one_maps_entry(char *linebuf, struct proc_entry *entry
 	else return 0;
 }
 
-static inline int for_each_maps_entry(int fd, char *linebuf, size_t bufsz, struct proc_entry *entry_buf, 
-		maps_cb_t *cb, void *arg)
+static inline int for_each_maps_entry(intptr_t handle,
+	ssize_t (*get_a_line)(char *, size_t, intptr_t),
+	char *linebuf, size_t bufsz, struct maps_entry *entry_buf,
+	maps_cb_t *cb, void *arg)
 {
-	while (get_a_line(linebuf, bufsz, fd) != -1)
+	while (get_a_line(linebuf, bufsz, handle) != -1)
 	{
 		int ret = process_one_maps_entry(linebuf, entry_buf, cb, arg);
 		if (ret) return ret;
 	}
 	return 0;
-	
-	/* Here's how we open-coded it in trap-syscalls's saw_mapping(), 
-	 * before we started using selected C library calls in there.
-void saw_mapping(const char *line_begin_pos, const char *line_end_pos)
-{
-	const char *line_pos = line_begin_pos;
-	unsigned long begin_addr = read_hex_num(&line_pos, line_end_pos);
-	++line_pos;
-	unsigned long end_addr = read_hex_num(&line_pos, line_end_pos);
-	++line_pos;
-	char r = *line_pos++;
-	char w = *line_pos++;
-	char x = *line_pos++;
-	char p __attribute__((unused)) = *line_pos++;
-	const char *newline = strchr(line_pos, '\n');
-	if (!newline) newline = line_pos;
-	const char *slash = strchr(line_pos, '/');
-	const char *filename_src = NULL;
-	size_t filename_sz;
-	if (slash && slash < newline && *(slash - 1) == ' ')
-	{
-		filename_src = slash;
-		const char *filename_end = strchr(filename_src, '\n');
-		if (!filename_end)
-		{
-			// hmm -- slash but no newline
-			filename_end = line_end_pos;
-		}
-		filename_sz = filename_end - filename_src;
-	}
-	else
-	{
-		// no filename present
-		filename_sz = 0;
-		filename_src = line_pos;
-	}
-	
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
-	char filename[PATH_MAX + 1];
-	size_t copy_sz = (filename_sz < PATH_MAX) ? filename_sz : PATH_MAX;
-	strncpy(filename, filename_src, copy_sz);
-	filename[copy_sz] = '\0';
-	 
-	 */
 }
 
 #endif
