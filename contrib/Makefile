@@ -27,7 +27,7 @@ export LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 
 default: env.sh config.mk trap-syscalls/libsystrap/libsystrap.a \
 build-dwarfidl build-libdwarfpp build-libcxxgen \
-build-libantlr3c++ build-libantlr3c build-libdlbind
+build-libantlr3c++ build-libantlr3c build-libdlbind build-libsystrap
 
 .PHONY: clean default
 
@@ -169,8 +169,11 @@ trap-syscalls/contrib/config.mk:
 	$(MAKE) -C trap-syscalls/contrib
 
 # HACK: need to add liballocs include dir to CFLAGS, for relf.h
-trap-syscalls/libsystrap/libsystrap.a: trap-syscalls/contrib/config.mk
+trap-syscalls/libsystrap/libsystrap.a: trap-syscalls/contrib/config.mk $(wildcard trap-syscalls/libsystrap/*.[ch])
 	CFLAGS=-I$(CONTRIB_ROOT)/../include $(MAKE) -C trap-syscalls/libsystrap
+
+.PHONY: build-libsystrap
+build-libsystrap: trap-syscalls/libsystrap/libsystrap.a
 
 CONFIG_MK += \nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls\n
 
