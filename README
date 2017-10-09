@@ -9,6 +9,11 @@ brief introduction you could watch the talk from Strange Loop 2014.
 
 Here are some things you'll need in order to build this software.
 
+* C and C++ compilers supporting GNU C extensions
+** gcc 4.9.x are known good
+** gcc 7.2.x are known good
+** gcc 5.x and 6.x are KNOWN BAD (bug 78407)
+** clang has been known to work at various times....
 * GNU make 3.81 or later
 * GNU bash
 * autoconf 2.69 or greater
@@ -16,7 +21,6 @@ Here are some things you'll need in order to build this software.
 * libtool
 * pkg-config
 * autoconf-archive
-* g++ 4.8 or later, or some comparably compliant C++ compiler
 * boost 1.55 or later (1.55 is "known good" as of this writing)
 * libdwarf (a recent version)
 * libelf1
@@ -26,18 +30,17 @@ Here are some things you'll need in order to build this software.
 
 There are also a lot of dependencies on my other codebases. These are
 now included as git submodules under contrib/, so you can try the (new)
-impatient method for building *if* you're on a Debian-based x86-64
-GNU/Linux machine with gcc 4.9 or 7.2 and later. (Builds by gcc 5.x 
-and 6.x are currently BROKEN pending a fix to bug 78407 
-<https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78407>).
+"impatient" method for building, as follows.
 
-The following is tested on Debian jessie; on stretch and certain other
-distributions (Fedora), you must first do
+If your system's libdwarf packages don't put libdwarf.h in /usr/include,
+such as on Debian stretch and later, and certain other distributions
+(Fedora), you must first do something like this.
 
 $ export LIBDWARFPP_CONFIGURE_FLAGS=--with-libdwarf-includes=/usr/include/libdwarf
 $ sudo apt-get install libdw-dev
 
-... or somehow provide your own /usr/include/{lib,}dwarf.h. Then:
+Then on Debian-based systems, proceed like so (tested on jessie and
+stretch)....
 
 $ sudo apt-get install binutils-dev libelf-dev libdwarf-dev \
     autoconf automake libtool pkg-config autoconf-archive \
@@ -66,17 +69,25 @@ $ sudo chmod g+w /usr/lib/meta
 $ make -f "$LIBALLOCS"/tools/Makefile.meta \
   /usr/lib/meta$( readlink -f /lib/x86_64-linux-gnu/libc.so.6 )-meta.so
 
+Next, get ready to report bugs to me....
+
+$ cd liballocs/test
+$ make
+
 Finally, for a fully-functioning liballocs toolchain, you'll also want
-to grab the following (from the same place):
+to grab the following (from the same place, likely my GitHub page):
 
 * binutils-gdb
 
 ... i.e. my patched binutils. You can get a long way without it, but in
 some awkward cases, liballocs's compilers wrappers need to invoke my
-hacked objcopy, which should therefore be on your PATH.
+hacked objcopy. Build and install, and it should end up on your PATH as
+required.
 
 There are now also some LLVM/clang-based versions of the tools. If you
 want them:
 
 $ make -C contrib llvm
 $ make llvm
+
+... but be aware that they're a work in progress!
