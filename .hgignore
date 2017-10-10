@@ -146,3 +146,6 @@ tools/dumptypes.static
 tools/dwarfc/dwarf-machine
 tools/dwarfc/frame-machine
 tools/dwarfc/stack-machine
+contrib/libsrk31c++
+contrib/libc++fileno
+*.bc
