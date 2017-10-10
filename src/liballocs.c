@@ -102,12 +102,12 @@ __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
  * from the wrapper function. */
 int 
 __liballocs_walk_subobjects_spanning_rec(
-	signed accum_offset, unsigned accum_depth,
-	const signed target_offset_within_u,
+	unsigned accum_offset, unsigned accum_depth,
+	const unsigned target_offset_within_u,
 	struct uniqtype *u, 
-	int (*cb)(struct uniqtype *spans, signed span_start_offset, unsigned depth,
+	int (*cb)(struct uniqtype *spans, unsigned span_start_offset, unsigned depth,
 		struct uniqtype *containing, struct uniqtype_rel_info *contained_pos, 
-		signed containing_span_start_offset, void *arg),
+		unsigned containing_span_start_offset, void *arg),
 	void *arg
 	);
 
@@ -1430,7 +1430,7 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
 		NULL);
 	
 	if (__builtin_expect(err != NULL, 0)) goto failed;
-	signed target_offset_within_uniqtype = (char*) obj - (char*) alloc_start;
+	unsigned target_offset_within_uniqtype = (char*) obj - (char*) alloc_start;
 	if (u->make_precise)
 	{
 		/* FIXME: should really do a fuller treatment of make_precise, to allow e.g. */
@@ -1496,6 +1496,23 @@ __liballocs_get_leaf_allocator(void *obj)
 	return a;
 }
 
+struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
+		struct big_allocation **maybe_out_bigalloc)
+{
+	struct big_allocation *the_bigalloc = __lookup_bigalloc_top_level(obj);
+	if (!the_bigalloc) return NULL;
+	assert(the_bigalloc->allocated_by == &__mmap_allocator);
+	assert(the_bigalloc->meta.what == DATA_PTR);
+	struct mapping_sequence *seq = the_bigalloc->meta.un.opaque_data.data_ptr;
+	struct mapping_entry *found = __mmap_allocator_find_entry(obj, seq);
+	if (found)
+	{
+		if (maybe_out_bigalloc) *maybe_out_bigalloc = the_bigalloc;
+		return found;
+	}
+	return NULL;
+}
+
 /* Instantiate inlines from liballocs.h. */
 extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,
@@ -1503,10 +1520,10 @@ extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);
 
 extern inline _Bool 
-__liballocs_find_matching_subobject(signed target_offset_within_uniqtype,
+__liballocs_find_matching_subobject(unsigned target_offset_within_uniqtype,
 	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
-	struct uniqtype **last_attempted_uniqtype, signed *last_uniqtype_offset,
-		signed *p_cumulative_offset_searched,
+	struct uniqtype **last_attempted_uniqtype, unsigned *last_uniqtype_offset,
+		unsigned *p_cumulative_offset_searched,
 		struct uniqtype **p_cur_containing_uniqtype,
 		struct uniqtype_rel_info **p_cur_contained_pos);
 

@@ -100,9 +100,9 @@ struct alloc_metadata;               /* metadata associated with a chunk */
    corresponding entry points, like malloc; here it would make sense to implement 
    these operations as an abstraction layer. I'm not yet sure how useful this is. */
 #define ALLOC_BASE_API(fun, arg) \
-fun(struct allocated_chunk *,new_uninit     ,arg(size_t, sz),arg(size_t,align),arg(struct uniqtype *,t)) \
-fun(struct allocated_chunk *,new_zero       ,arg(size_t, sz),arg(size_t,align),arg(struct uniqtype *,t)) \
-fun(void,                    delete         ,arg(struct allocated_chunk *,start)) \
+fun(struct allocated_chunk *,alloc_uninit   ,arg(size_t, sz),arg(size_t,align),arg(struct uniqtype *,t)) \
+fun(struct allocated_chunk *,alloc_zero     ,arg(size_t, sz),arg(size_t,align),arg(struct uniqtype *,t)) \
+fun(void,                    free           ,arg(struct allocated_chunk *,start)) \
 fun(_Bool,                   resize_in_place,arg(struct allocated_chunk *,start),arg(size_t,new_sz)) \
 fun(struct allocated_chunk *,safe_migrate,   arg(struct allocated_chunk *,start),arg(struct allocator *,recipient)) /* may fail */\
 fun(struct allocated_chunk *,unsafe_migrate, arg(struct allocated_chunk *,start),arg(struct allocator *,recipient)) /* needn't free existing (stack) */\
@@ -158,6 +158,10 @@ void __mmap_allocator_notify_mremap_after(void *ret_addr, void *old_addr, size_t
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller);
 _Bool __mmap_allocator_is_initialized(void) __attribute__((visibility("hidden")));
 _Bool __mmap_allocator_notify_unindexed_address(const void *ptr);
+struct mapping_entry;
+struct mapping_sequence;
+struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mapping_sequence *seq)
+	__attribute__((visibility("protected")));
 
 void __static_allocator_init(void);
 void __static_allocator_notify_load(void *handle);

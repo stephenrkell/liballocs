@@ -54,17 +54,7 @@ static const char *filename_for_fd(int fd)
 }
 
 #define MAPPING_SEQUENCE_MAX_LEN 8
-struct mapping_entry
-{
-	void *begin;
-	void *end;
-	int prot;
-	int flags;
-	off_t offset;
-	_Bool is_anon;
-	void *caller;
-};
-struct mapping_sequence 
+struct mapping_sequence
 {
 	void *begin;
 	void *end;
@@ -279,7 +269,7 @@ void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller)
 	do_munmap(addr, length, caller);
 }
 
-static struct mapping_entry *find_entry(void *addr, struct mapping_sequence *seq)
+struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mapping_sequence *seq)
 {
 	for (unsigned i = 0; i < seq->nused; ++i)
 	{
@@ -312,7 +302,7 @@ void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size
 		&__mmap_allocator, NULL);
 	if (!bigalloc_before) abort();
 	struct mapping_sequence *seq = bigalloc_before->meta.un.opaque_data.data_ptr;
-	struct mapping_entry *maybe_ent = find_entry(old_addr, seq);
+	struct mapping_entry *maybe_ent = __mmap_allocator_find_entry(old_addr, seq);
 	if (!maybe_ent) abort();
 	remembered_prot = maybe_ent->prot;
 	remembered_offset = maybe_ent->offset;
