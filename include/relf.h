@@ -524,7 +524,7 @@ ElfW(Sym) *gnu_hash_lookup(ElfW(Word) *gnu_hash, ElfW(Sym) *symtab, const char *
 	uint32_t nbuckets = gnu_hash_words[0];
 	uint32_t symbias = gnu_hash_words[1]; // only symbols at symbias up are gnu_hash'd
 	uint32_t maskwords = gnu_hash_words[2]; // number of ELFCLASS-sized words in pt2 of table
-	uint32_t shift2 = gnu_hash_words[3];
+	uint32_t shift2 __attribute__((unused)) = gnu_hash_words[3];
 
 	ElfW(Off) *bloom = (ElfW(Off) *) &gnu_hash_words[4];
 	uint32_t *buckets = (uint32_t*) (bloom + maskwords);
@@ -632,11 +632,11 @@ int gnu_hash_walk_syms(ElfW(Word) *gnu_hash, int (*cb)(ElfW(Sym) *, void *), Elf
 	uint32_t nbuckets = gnu_hash_words[0];
 	uint32_t symbias = gnu_hash_words[1]; // only symbols at symbias up are gnu_hash'd
 	uint32_t maskwords = gnu_hash_words[2]; // number of ELFCLASS-sized words in pt2 of table
-	uint32_t shift2 = gnu_hash_words[3];
+	uint32_t shift2 __attribute__((unused)) = gnu_hash_words[3];
 
 	ElfW(Off) *bloom = (ElfW(Off) *) &gnu_hash_words[4];
 	uint32_t *buckets = (uint32_t*) (bloom + maskwords);
-	uint32_t *hasharr = buckets + nbuckets;
+	uint32_t *hasharr __attribute__((unused)) = buckets + nbuckets;
 	
 	// uint32_t lowest_symidx = buckets[hashval % nbuckets]; // might be 0
 	struct LINK_MAP_STRUCT_TAG *l = get_highest_loaded_object_below(gnu_hash);
@@ -763,7 +763,6 @@ ElfW(Sym) *symbol_lookup_in_object(struct LINK_MAP_STRUCT_TAG *l, const char *sy
 	
 	/* Try the GNU hash lookup, if we can. Or else try SvsV hash. 
 	 * If we found no hash table of either kind, try linear. */
-	ElfW(Sym) *found_sym = NULL;
 	ElfW(Sym) *found = NULL;
 	if (gnu_hash) found = gnu_hash_lookup(gnu_hash, symtab, strtab, sym);
 	else if (hash) found = hash_lookup(hash, symtab, strtab, sym);
@@ -805,9 +804,7 @@ void *fake_dlsym(void *handle, const char *symname)
 	 * "the one after us (RTLD_NEXT);
 	 * "this one". */
 
-	struct LINK_MAP_STRUCT_TAG *default_match = NULL;
 	struct LINK_MAP_STRUCT_TAG *ourselves = NULL;
-	struct LINK_MAP_STRUCT_TAG *handle_match = NULL;
 	
 	for (struct LINK_MAP_STRUCT_TAG *l = _r_debug.r_map;
 			l;

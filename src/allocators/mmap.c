@@ -421,10 +421,10 @@ void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)
 	
 }
 
-static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg);
+static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg);
 void add_missing_mappings_from_proc(void)
 {
-	struct proc_entry entry;
+	struct maps_entry entry;
 
 	char proc_buf[4096];
 	int ret;
@@ -441,7 +441,7 @@ void add_missing_mappings_from_proc(void)
 	struct mapping_sequence current = {
 		.begin = NULL
 	};
-	for_each_maps_entry(fd, linebuf, sizeof linebuf, &entry, add_missing_cb, &current);
+	for_each_maps_entry(fd, get_a_line_from_maps_fd, linebuf, sizeof linebuf, &entry, add_missing_cb, &current);
 	/* Finish off the last mapping. */
 	if (current.nused > 0) add_mapping_sequence_bigalloc(&current);
 
@@ -816,7 +816,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 	} else return 0;
 }
 
-static _Bool extend_current(struct mapping_sequence *cur, struct proc_entry *ent)
+static _Bool extend_current(struct mapping_sequence *cur, struct maps_entry *ent)
 {
 	const char *filename;
 	// if 'rest' is '/' it's static, else it's heap or thread
@@ -855,7 +855,7 @@ static _Bool extend_current(struct mapping_sequence *cur, struct proc_entry *ent
 				filename, NULL);
 };
 
-static int add_missing_cb(struct proc_entry *ent, char *linebuf, void *arg)
+static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 {
 	unsigned long size = ent->second - ent->first;
 	struct mapping_sequence *cur = (struct mapping_sequence *) arg;
