@@ -489,7 +489,7 @@ int hash_walk_syms(ElfW(Word) *hash, int (*cb)(ElfW(Sym) *, void *), ElfW(Sym) *
 	ElfW(Word) (*buckets)[/*nbucket*/] = (ElfW(Word)(*)[]) &hash[2];
 	ElfW(Word) (*chains)[/*nchain*/] = (ElfW(Word)(*)[]) &hash[2 + nbucket];
 
-	for (int bucketn = 0; bucketn < nbucket; ++bucketn)
+	for (unsigned bucketn = 0; bucketn < nbucket; ++bucketn)
 	{
 		for (ElfW(Word) symind = ((ElfW(Word) *)buckets)[bucketn]; 
 				symind != STN_UNDEF; symind = (*chains)[symind])
