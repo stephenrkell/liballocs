@@ -26,6 +26,10 @@
 #include "helpers.hpp"
 #include "uniqtypes.hpp"
 
+#include <elf.h>
+#include <link.h>
+#include "libelf/gelf.h"
+
 using std::cin;
 using std::cout;
 using std::cerr;
@@ -226,6 +230,7 @@ int main(int argc, char **argv)
 	}
 	
 	using core::root_die;
+	int fd = fileno(infstream);
 	struct sticky_root_die : public root_die
 	{
 		using root_die::root_die;
@@ -237,7 +242,63 @@ int main(int argc, char **argv)
 				;
 		}
 		
-	} root(fileno(infstream));
+		// FIXME: support non-host-native size
+	private:
+		opt<ElfW(Sym) *> opt_symtab;
+		char *strtab;
+		unsigned n;
+	public:
+		pair<pair<ElfW(Sym) *, char*>, unsigned> get_symtab()
+		{
+			if (!opt_symtab)
+			{
+				Elf *e = get_elf();
+				char *name; // *p , pc [4* sizeof ( char )];
+				Elf_Scn *scn = NULL;
+				Elf_Data *data;
+				GElf_Shdr shdr;
+				size_t n;
+				size_t shstrndx;
+				size_t sz;
+				if (elf_getshdrstrndx(e, &shstrndx) != 0)
+				{
+					throw lib::No_entry();
+				}
+				// iterate through sections looking for symtab
+				while (NULL != (scn = elf_nextscn(e, scn)))
+				{
+					if (gelf_getshdr(scn, &shdr) != &shdr)
+					{
+						cerr << "Unexpected ELF error" << std::endl;
+						throw lib::No_entry(); 
+					}
+					if (shdr.sh_type == SHT_SYMTAB) break;
+				}
+				if (!scn) throw lib::No_entry();
+				Elf_Data tmp_data;
+				ElfW(Sym) *symtab = reinterpret_cast<ElfW(Sym) *>(elf_rawdata(scn, &tmp_data)->d_buf);
+				opt_symtab = symtab;
+				n = tmp_data.d_size / sizeof (ElfW(Sym));
+				int strtab_ndx = shdr.sh_link;
+				if (strtab_ndx == 0) throw lib::No_entry();
+				scn = elf_getscn(e, strtab_ndx);
+				strtab = reinterpret_cast<char *>(elf_rawdata(scn, &tmp_data)->d_buf);
+				assert(strtab);
+				assert(symtab);
+			}
+			return make_pair(make_pair(*opt_symtab, strtab), n);
+		}
+		~sticky_root_die()
+		{
+			if (opt_symtab)
+			{
+				// anything to free?
+			}
+			
+			// this->root_die::~root_die(); // uncomment this when ~root_die is virtual. OH. it is.
+		}
+		
+	} root(fd);
 	assert(&root.get_frame_section());
 	opt<core::root_die&> opt_r = root; // for debugging
 	
@@ -425,6 +486,8 @@ int main(int argc, char **argv)
 	map< iterator_df<subprogram_die>, frame_intervals_t > intervals_by_subprogram;
 	map< iterator_df<subprogram_die>, unsigned > frame_offsets_by_subprogram;
 	
+	using dwarf::core::with_static_location_die;
+	
 	for (auto i_i_subp = subprograms_list.begin(); i_i_subp != subprograms_list.end(); ++i_i_subp)
 	{
 		auto i_subp = i_i_subp->second;
@@ -433,8 +496,35 @@ int main(int argc, char **argv)
 
 		/* Put this subp's vaddr ranges into the map */
 		auto subp_intervals = i_subp->file_relative_intervals(
-			root, 
-			nullptr, nullptr /* FIXME: write a symbol resolver -- do we need this? can just pass 0? */
+			root,
+			[&i_subp, &root](const std::string&, void *) -> with_static_location_die::sym_binding_t {
+				/* We need this symbol resolver because sometimes the DWARF info
+				 * won't include a with-address-range entry for a function. I have
+				 * seen this for external-definition-emmited C99 inline functions
+				 * in gcc 7.2.x, but other cases are possible. */
+				Dwarf_Off file_relative_start_addr; 
+				Dwarf_Unsigned size;
+				
+				if (!i_subp.name_here()) throw No_entry();
+				string s = *i_subp.name_here();
+				
+				auto symtab_etc = root.get_symtab();
+				auto &symtab = symtab_etc.first.first;
+				auto &strtab = symtab_etc.first.second;
+				unsigned &n = symtab_etc.second;
+				
+				for (auto p = symtab; p < symtab + n; ++p)
+				{
+					if (p->st_name != 0 && string(strtab + p->st_name) == s)
+					{
+						return (with_static_location_die::sym_binding_t)
+						{ p->st_value, p->st_size };
+					}
+				}
+				
+				throw No_entry();
+				
+			}, nullptr /* FIXME: write a symbol resolver -- do we need this? can just pass 0? */
 		);
 
 		core::iterator_df<> start_df(i_subp);
@@ -1020,11 +1110,17 @@ int main(int argc, char **argv)
 
 	for (auto i = root.begin(); i != root.end(); ++i)
 	{
+		cerr << i.summary() << std::endl;
 		boost::icl::interval_map<Dwarf_Addr, Dwarf_Unsigned> intervals;
 		if (i.tag_here() == DW_TAG_variable
-			&& i.has_attribute_here(DW_AT_location)
-			&& i.as_a<variable_die>()->has_static_storage())
+			&& i.has_attribute_here(DW_AT_location))
+			
 		{
+			if (!i.as_a<variable_die>()->has_static_storage())
+			{
+				// cerr << "Skipping non-static var " << i.summary() << std::endl;
+				continue;
+			}
 			iterator_df<variable_die> i_var = i.as_a<variable_die>();
 			try
 			{
