@@ -69,20 +69,24 @@ $ sudo chmod g+w /usr/lib/meta
 $ make -f "$LIBALLOCS"/tools/Makefile.meta \
   /usr/lib/meta$( readlink -f /lib/x86_64-linux-gnu/libc.so.6 )-meta.so
 
-Next, get ready to report bugs to me....
-
-$ cd liballocs/test
-$ make
-
 Finally, for a fully-functioning liballocs toolchain, you'll also want
-to grab the following (from the same place, likely my GitHub page):
+my patched binutils. You can get a long way without it, but in some
+awkward cases, liballocs's compilers wrappers need to invoke my hacked
+objcopy. Assuming you're grabbing my code from my GitHub page:
 
-* binutils-gdb
+$ sudo apt-get install bison flex texinfo
+$ git clone https://github.com/stephenrkell/binutils-gdb.git
+$ cd binutils-gdb.git
+$ ./configure --prefix=/usr/local
+$ make -jn                    # it's that n again
 
-... i.e. my patched binutils. You can get a long way without it, but in
-some awkward cases, liballocs's compilers wrappers need to invoke my
-hacked objcopy. Build and install, and it should end up on your PATH as
-required.
+Now you should have my patched objcopy on your PATH. If you've got this
+far, you may as well run the tests.
+
+$ cd liballocs/tests
+$ make                        # please report any failures to me
+
+That's it! Enjoy liballocs and do fun things with it.
 
 There are now also some LLVM/clang-based versions of the tools. If you
 want them:
