@@ -253,13 +253,9 @@ int main(int argc, char **argv)
 			if (!opt_symtab)
 			{
 				Elf *e = get_elf();
-				char *name; // *p , pc [4* sizeof ( char )];
 				Elf_Scn *scn = NULL;
-				Elf_Data *data;
 				GElf_Shdr shdr;
-				size_t n;
 				size_t shstrndx;
-				size_t sz;
 				if (elf_getshdrstrndx(e, &shstrndx) != 0)
 				{
 					throw lib::No_entry();
@@ -275,16 +271,25 @@ int main(int argc, char **argv)
 					if (shdr.sh_type == SHT_SYMTAB) break;
 				}
 				if (!scn) throw lib::No_entry();
-				Elf_Data tmp_data;
-				ElfW(Sym) *symtab = reinterpret_cast<ElfW(Sym) *>(elf_rawdata(scn, &tmp_data)->d_buf);
+				Elf_Data *symtab_rawdata = elf_rawdata(scn, NULL);
+				assert(symtab_rawdata);
+				assert(symtab_rawdata->d_size >= shdr.sh_size);
+				ElfW(Sym) *symtab = reinterpret_cast<ElfW(Sym) *>(symtab_rawdata->d_buf);
 				opt_symtab = symtab;
-				n = tmp_data.d_size / sizeof (ElfW(Sym));
+				n = shdr.sh_size / shdr.sh_entsize;
 				int strtab_ndx = shdr.sh_link;
 				if (strtab_ndx == 0) throw lib::No_entry();
-				scn = elf_getscn(e, strtab_ndx);
-				strtab = reinterpret_cast<char *>(elf_rawdata(scn, &tmp_data)->d_buf);
+				Elf_Scn *strtab_scn = NULL;
+				strtab_scn = elf_getscn(e, strtab_ndx);
+				GElf_Shdr strtab_shdr;
+				if (gelf_getshdr(strtab_scn, &strtab_shdr) != &strtab_shdr) throw lib::No_entry();
+				Elf_Data *strtab_rawdata = elf_rawdata(strtab_scn, NULL);
+				assert(strtab_rawdata);
+				assert(strtab_rawdata->d_size >= strtab_shdr.sh_size);
+				strtab = reinterpret_cast<char *>(strtab_rawdata->d_buf);
 				assert(strtab);
 				assert(symtab);
+				// FIXME: cleanup?
 			}
 			return make_pair(make_pair(*opt_symtab, strtab), n);
 		}
