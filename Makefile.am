@@ -51,10 +51,10 @@ tools_ifacetypes_LDADD = $(TOOLS_LDADD)
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
 
-pkglib_LTLIBRARIES = tools/gold-plugin.la
-tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
-tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
-tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
+#pkglib_LTLIBRARIES = tools/gold-plugin.la
+#tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
+#tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
+#tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.
@@ -106,14 +106,14 @@ CC CXX CPP CXXFLAGS LDFLAGS LDLIBS
 
 include libltdl/ltdl.mk
 
-tools/gold-plugin.so: $(lib_LTLIBRARIES)
-	echo "gold-plugin.so: creating convenience link from $(abs_builddir)/.libs to $(top_builddir)"; \
-            rm -f $(top_builddir)/tools/gold-plugin.so ; \
-            test -e $(abs_builddir)/tools/.libs/gold-plugin.so && \
-            cd $(top_builddir) && \
-            $(LN_S) $(abs_builddir)/tools/.libs/gold-plugin.so tools/gold-plugin.so || true
-
-all-am: tools/gold-plugin.so
+#tools/gold-plugin.so: $(lib_LTLIBRARIES)
+#	echo "gold-plugin.so: creating convenience link from $(abs_builddir)/.libs to $(top_builddir)"; \
+#            rm -f $(top_builddir)/tools/gold-plugin.so ; \
+#            test -e $(abs_builddir)/tools/.libs/gold-plugin.so && \
+#            cd $(top_builddir) && \
+#            $(LN_S) $(abs_builddir)/tools/.libs/gold-plugin.so tools/gold-plugin.so || true
+#
+#all-am: tools/gold-plugin.so
 
 clean:
 	$(MAKE) clean-recursive
