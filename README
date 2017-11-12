@@ -22,8 +22,7 @@ Here are some things you'll need in order to build this software.
 * pkg-config
 * autoconf-archive
 * boost 1.55 or later (1.55 is "known good" as of this writing)
-* libdwarf (a recent version)
-* libelf1
+* libelfg0 (i.e. the elfutils implementation)
 * OCaml 4.01.0 or newer
 * a Java 6 (or newer) runtime 
 * libunwind
@@ -32,17 +31,30 @@ There are also a lot of dependencies on my other codebases. These are
 now included as git submodules under contrib/, so you can try the (new)
 "impatient" method for building, as follows.
 
-If your system's libdwarf packages don't put libdwarf.h in /usr/include,
-such as on Debian stretch and later, and certain other distributions
-(Fedora), you must first do something like this.
+Next, you must have GNU binutils 2.26 or later. In fact, for a
+fully-functioning liballocs toolchain, you'll also want my *patched*
+binutils. You can get a long way without it, so this step is optional,
+but in some awkward cases, liballocs's compilers wrappers need to
+invoke my hacked objcopy. Also, Debian jessie's binutils 2.25 is too
+old to build the liballocs linker plugin (also optional), adding extra
+motivation to do this step. (I will remove this requirement
+eventually.) For now, assuming you're grabbing my code from my GitHub
+page:
 
-$ export LIBDWARFPP_CONFIGURE_FLAGS=--with-libdwarf-includes=/usr/include/libdwarf
-$ sudo apt-get install libdw-dev
+$ sudo apt-get install bison flex texinfo
+$ git clone https://github.com/stephenrkell/binutils-gdb.git
+$ cd binutils-gdb
+$ ./configure --prefix=/usr/local --enable-gold --enable-plugins
+$ make -jn                    # for your favourite n
+$ sudo make install
+
+Now you should have my patched objcopy on your PATH... it defines an
+option --unbind-sym, if you want to check.
 
 Then on Debian-based systems, proceed like so (tested on jessie and
 stretch)....
 
-$ sudo apt-get install binutils-dev libelf-dev libdwarf-dev \
+$ sudo apt-get install libelfg0-dev \
     autoconf automake libtool pkg-config autoconf-archive \
     g++ ocaml ocaml-findlib \
     default-jre-headless \
@@ -69,19 +81,7 @@ $ sudo chmod g+w /usr/lib/meta
 $ make -f "$LIBALLOCS"/tools/Makefile.meta \
   /usr/lib/meta$( readlink -f /lib/x86_64-linux-gnu/libc.so.6 )-meta.so
 
-Finally, for a fully-functioning liballocs toolchain, you'll also want
-my patched binutils. You can get a long way without it, but in some
-awkward cases, liballocs's compilers wrappers need to invoke my hacked
-objcopy. Assuming you're grabbing my code from my GitHub page:
-
-$ sudo apt-get install bison flex texinfo
-$ git clone https://github.com/stephenrkell/binutils-gdb.git
-$ cd binutils-gdb.git
-$ ./configure --prefix=/usr/local
-$ make -jn                    # it's that n again
-
-Now you should have my patched objcopy on your PATH. If you've got this
-far, you may as well run the tests.
+If you've got this far, you may as well run the tests.
 
 $ cd liballocs/tests
 $ make                        # please report any failures to me
