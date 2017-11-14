@@ -75,6 +75,7 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 		void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
 			allocated, sz, STT_OBJECT);
 		assert(reloaded);
+		__liballocs_rt_uniqtypes_obj = reloaded;
 		
 		return allocated_uniqtype;
 	}
