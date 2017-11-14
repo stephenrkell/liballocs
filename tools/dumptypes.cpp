@@ -238,7 +238,7 @@ int main(int argc, char **argv)
 		virtual bool is_sticky(const core::abstract_die& d) 
 		{
 			return this->root_die::is_sticky(d)
-				|| dwarf::spec::DEFAULT_DWARF_SPEC.tag_is_type(d.get_tag())
+				// || dwarf::spec::DEFAULT_DWARF_SPEC.tag_is_type(d.get_tag())
 				;
 		}
 		
