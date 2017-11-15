@@ -44,7 +44,9 @@ page:
 $ sudo apt-get install bison flex texinfo
 $ git clone https://github.com/stephenrkell/binutils-gdb.git
 $ cd binutils-gdb
-$ ./configure --prefix=/usr/local --enable-gold --enable-plugins
+$ CFLAGS="-fPIC -g -O2" ./configure --prefix=/usr/local \
+      --enable-gold --enable-plugins --enable-install-libiberty \
+# a PIC libbfd.a and co-lo'd libiberty helps e.g. build OProfile
 $ make -jn                    # for your favourite n
 $ sudo make install
 
