@@ -1400,9 +1400,19 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 	return extract_and_output_alloc_site_and_type(heap_info, out_type, (void**) out_site);
 }
 
+liballocs_err_t __generic_heap_set_type(void *obj, struct uniqtype *new_type)
+{
+	struct insert *heap_info = lookup_object_info(obj, NULL, NULL, NULL);
+	if (!heap_info) return &__liballocs_err_unindexed_heap_object;
+	heap_info->alloc_site_flag = 1; /* 1 means "it's a type" */
+	heap_info->alloc_site = (uintptr_t) new_type;
+	return NULL;
+}
+
 struct allocator __generic_malloc_allocator = {
 	.name = "generic malloc",
 	.get_info = __generic_heap_get_info,
 	.is_cacheable = 1,
-	.ensure_big = ensure_big
+	.ensure_big = ensure_big,
+	.set_type = __generic_heap_set_type
 };

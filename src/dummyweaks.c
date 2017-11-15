@@ -185,3 +185,9 @@ void __uniqtype_walk_bfs_from_object(
 	void *object, struct uniqtype *t,
 	follow_ptr_fn *follow_ptr, void *fp_arg,
 	on_blacken_fn *on_blacken, void *ob_arg) {}
+
+struct uniqtype *
+__liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_t, */...)
+{
+	return NULL;
+}

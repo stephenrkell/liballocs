@@ -98,6 +98,84 @@ __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
 	return __liballocs_get_or_create_array_type(element_t, precise_size / element_t->pos_maxoff);
 }
 
+/* This is the "bzip2 fix". We need the ability to dynamically re-bless memory
+ * as a simultaneous combination (union) of a new type and the type it had earlier.
+ * PROBLEM: what do we call the union? OK, we can make it anonymous, but we're going
+ * (for now) to skip computing the summary code. So build a name by concatenating
+ * the constituent element names. */
+struct uniqtype *
+__liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_t, */...)
+{
+	if (n == 0) return NULL;
+	va_list ap;
+	va_start(ap, n);
+#define UNION_NAME_MAXLEN 4096
+	char union_raw_name[UNION_NAME_MAXLEN] = { '\0' };
+	unsigned cur_len = 0;
+	struct uniqtype *membs[n]; // ooh, C99 variable-length array...
+	unsigned n_left = n;
+	unsigned max_len = 0;
+	while (n_left > 0)
+	{
+		struct uniqtype *memb_t = va_arg(ap, struct uniqtype *);
+		assert(memb_t);
+		assert(memb_t->pos_maxoff > 0);
+		assert(memb_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
+		const char *memb_name = NAME_FOR_UNIQTYPE(memb_t);
+		membs[n - n_left] = memb_t;
+		unsigned len = strlen(memb_name);
+		if (cur_len + len >= UNION_NAME_MAXLEN) return NULL;
+		strcat(union_raw_name, memb_name);
+		if (memb_t->pos_maxoff > max_len) max_len = memb_t->pos_maxoff;
+		--n_left;
+	}
+	char union_uniqtype_name[UNION_NAME_MAXLEN + sizeof "__uniqtype____SYNTHUNION_"] = { '\0' };
+	strcat(union_uniqtype_name, "__uniqtype____SYNTHUNION_");
+	strcat(union_uniqtype_name, union_raw_name);
+#undef UNION_NAME_MAXLEN
+	/* FIXME: compute hash code. Should be an easy case. */
+	/* Does such a type exist? */
+	void *found = NULL;
+	if (NULL != (found = dlsym(NULL, union_uniqtype_name)))
+	{
+		return (struct uniqtype *) found;
+	}
+	/* Create it and memoise using libdlbind. */
+	size_t sz = offsetof(struct uniqtype, related) + n * (sizeof (struct uniqtype_rel_info));
+	void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+	struct uniqtype *allocated_uniqtype = allocated;
+	*allocated_uniqtype = (struct uniqtype) {
+		.pos_maxoff = max_len,
+		.un = {
+			composite: {
+				.kind = COMPOSITE,
+				.nmemb = n,
+				.not_simultaneous = 0
+			}
+		},
+		.make_precise = NULL
+	};
+	for (unsigned i = 0; i < n; ++i)
+	{
+		struct uniqtype *memb_t = membs[i];
+		allocated_uniqtype->related[i] = (struct uniqtype_rel_info) {
+			.un = {
+				memb: {
+					.ptr = memb_t,
+					.off = 0,
+					.is_absolute_address = 0,
+					.may_be_invalid = 0
+				}
+			}
+		};
+	}
+	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, union_uniqtype_name,
+		allocated, sz, STT_OBJECT);
+	assert(reloaded);
+
+	return allocated_uniqtype;
+}
+
 /* Force a definition of this inline function to be emitted.
  * Debug builds use this, since they won't inline the call to it
  * from the wrapper function. */
