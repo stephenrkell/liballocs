@@ -17,7 +17,7 @@ translate_symnames() {
     
     # join the substitutions into a big sed program
     sed_program=""
-    echo ${BASE_TYPES_TRANSLATION} "$objfile" 1>&2
+    echo ${BASE_TYPES_TRANSLATION} "$objfile" "$cu_fname" "$cu_compdir"  1>&2
     while read c_base canon_base; do
         sed_program="${sed_program}; s/(${type_pred_regexp})${c_base}(${type_succ_regexp})/\1${canon_base}\2/g"
     done<<<"$( ${BASE_TYPES_TRANSLATION} "$objfile" "$cu_fname" "$cu_compdir" )"
