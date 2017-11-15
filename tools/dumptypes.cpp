@@ -349,18 +349,9 @@ int main(int argc, char **argv)
 
 	// write a forward declaration for every uniqtype we need
 	set<string> names_emitted;
-	map<string, set< iterator_df<type_die> > > types_by_name;
-	
-	write_master_relation(master_relation, cout, cerr, true /* emit_void */, true, 
-		names_emitted, types_by_name, /* emit_codeless_alises */ true);
-	
-	cerr << "Allocsites relation has " << allocsites_relation.size() << " members." << endl;
-	
-	/* Now write any ARR0 ones we need. But WAIT: what about any ARR0 that we 
-	 * have already emitted? Find them in names_emitted and skip them. FIXME:
-	 * better to do it in the other order, so we skip during the master relation.
-	 * Then we need to forward-declare. Just like in allocsites! So, finally,
-	 * merge allocsites and types meta-objs into a single one (please) (FIXME). */
+	/* As a pre-pass, write any ARR0 ones we need. These need special handling,
+	 * as flexible arrays with their make_precise members set. */
+	map<string, pair<string, string> > arr0_needed_by_allocsites;
 	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
 	{
 		auto objname = i_site->second.first.first;
@@ -379,27 +370,65 @@ int main(int argc, char **argv)
 			pair<string, string> array_codeless_name
 			 = make_pair(string(""), string("__ARR0_") + name_used_ident);
 			string mangled_array_name = mangle_typename(array_codeless_name);
+			arr0_needed_by_allocsites.insert(
+				make_pair(mangled_array_name, 
+					make_pair(mangled_name, array_codeless_name.second)
+				)
+			);
 			
-			if (names_emitted.find(mangled_array_name) == names_emitted.end())
-			{
-				// compute and print destination name
-				write_uniqtype_open_flex_array(cout,
-					mangled_array_name,
-					array_codeless_name.second
-				);
-				write_uniqtype_related_array_element_type(cout,
-					mangled_name // i.e. the element type
-				);
+			/* forward-declare it right now; we'll define it after everything else */
+			cout << "extern struct uniqtype " << mangled_name << ";" << endl;
+			/* pretend we've already emitted it... */
+			names_emitted.insert(mangled_array_name);
+		}
+	}
+	map<string, set< iterator_df<type_die> > > types_by_name;
+	
+	write_master_relation(master_relation, cout, cerr, true /* emit_void */, true, 
+		names_emitted, types_by_name, /* emit_codeless_alises */ true);
+	
+	// now write those pesky ARR0 ones
+	for (auto i_mangled_name = arr0_needed_by_allocsites.begin();
+		i_mangled_name != arr0_needed_by_allocsites.end();
+		++i_mangled_name)
+	{
+		const string& mangled_array_name = i_mangled_name->first;
+		// we were intending to forestall the emission during the master relation
+		// FIXME: there might be two cases here! want ARR0 and FLEXARR?
+		// If we introduce FLEXARR, be sure to update symname-funcs.sh / translate_symnames
+		// assert(names_emitted.find(mangled_array_name) == names_emitted.end());
+		// This OBVIOUSLY doesn't work because we added to names_emitted!
+		// Let the multiple definition error get us.
+		// compute and print destination name
+		write_uniqtype_open_flex_array(cout,
+			mangled_array_name,
+			/* array_codeless_name.second */ i_mangled_name->second.second
+		);
+		write_uniqtype_related_array_element_type(cout,
+			i_mangled_name->second.first // i.e. the element type
+		);
 
-				write_uniqtype_close(cout, mangled_array_name);
-				
-				names_emitted.insert(mangled_array_name);
-			}
-			else cout << "/* Already emitted one of this name: " << mangled_array_name << " */" << endl;
-		} else 	cout << "/* Allocation site type not needing ARR0 type: " 
+		write_uniqtype_close(cout, mangled_array_name);
+	}
+	
+	cerr << "Allocsites relation has " << allocsites_relation.size() << " members." << endl;
+	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
+	{
+		auto objname = i_site->second.first.first;
+		auto file_addr = i_site->second.first.second;
+		string name_used_code = i_site->second.first.first;
+		string name_used_ident = i_site->second.first.second;
+		bool declare_as_array0 = i_site->second.second;
+		
+		if (!declare_as_array0)
+		{
+			cout << "/* Allocation site type not needing ARR0 type: " 
 				<< i_site->second.first.second
 				<< " */" << endl;
+		} else cout << "/* We should have emitted a type of this name earlier: "
+			<< i_site->second.first.second << " */" << endl;
 	}
+	
 	
 	// now output for the subprograms
 	cout << "/* Begin stack frame types. */" << endl;

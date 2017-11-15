@@ -272,7 +272,7 @@ string ensure_contained_length(const string& mangled_name, unsigned contained_le
 	return s.str();
 }
 void write_master_relation(master_relation_t& r, 
-	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def, 
+	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def,
 	std::set< std::string >& names_emitted,
 	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name,
 	bool emit_codeless_aliases,
@@ -343,11 +343,17 @@ void write_master_relation(master_relation_t& r,
 	};
 	
 	/* Emit forward declarations, building the complement relation as we go. */
+	set<string> names_previously_emitted;
 	for (auto i_pair = r.begin(); i_pair != r.end(); ++i_pair)
 	{
 		auto name = i_pair->first;
 		string s = mangle_typename(name);
-		names_emitted.insert(s);
+		bool not_previously_emitted = names_emitted.insert(s).second;
+		if (!not_previously_emitted)
+		{
+			names_previously_emitted.insert(s);
+			// don't skip the rest; complement stuff to do, and harmless to forward-decl it again
+		}
 		iterator_df<type_die> t = i_pair->second;
 		if (t && t != t->get_concrete_type())
 		{
@@ -449,6 +455,15 @@ void write_master_relation(master_relation_t& r,
 				<< endl;
 			continue;
 		}
+		string mangled_name = mangle_typename(i_vert->first);
+		if (names_previously_emitted.find(mangled_name) != names_previously_emitted.end())
+		{
+			// we think we have done this one already, probably as an ARR0
+			out << "\n/* We should have previously output a definition of uniqtype for \""
+				<< i_vert->first.second 
+				<< "\" with summary code " << i_vert->first.first << " */\n";
+			continue;
+		}
 		auto opt_sz = i_vert->second->calculate_byte_size();
 		
 		out << "\n/* uniqtype for \"" << i_vert->first.second 
@@ -511,7 +526,6 @@ void write_master_relation(master_relation_t& r,
 			 * sort of thing. */
 			array_len = /* MAGIC_LENGTH_POINTER */(1u << 19) - 1u;
 		} else array_len = 0;
-		string mangled_name = mangle_typename(i_vert->first);
 		
 		/* Our last chance to skip things we don't want to emit. 
 		 * NOTE that for incompletes, we distinguish "flexible", "opaque" and "undefined" types
