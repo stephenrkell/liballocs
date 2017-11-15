@@ -586,12 +586,23 @@ void write_master_relation(master_relation_t& r,
 		unsigned contained_length = 1;
 		if (i_vert->second.is_a<array_type_die>())
 		{
-			write_uniqtype_open_array(out,
-				mangled_name,
-				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
-				array_len
-			);
+			if (array_len > 0)
+			{
+				write_uniqtype_open_array(out,
+					mangled_name,
+					i_vert->first.second,
+					(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+					array_len
+				);
+			}
+			else
+			{
+				/* FIXME: we should really distinguish the other cases of zero/0-length
+				 * arrays. For now, just assume that the memory-bounds flex treatment
+				 * is appropriate.*/
+				write_uniqtype_open_flex_array(out, mangled_name, i_vert->first.second,
+					opt<const string&>());
+			}
 			
 			// compute and print destination name
 			auto k = canonical_key_for_type(i_vert->second.as_a<array_type_die>()->get_type());
