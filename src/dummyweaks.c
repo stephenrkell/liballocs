@@ -191,3 +191,8 @@ __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_
 {
 	return NULL;
 }
+int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
+{
+	return 0;
+}
+

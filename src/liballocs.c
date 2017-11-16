@@ -1592,6 +1592,31 @@ struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 	return NULL;
 }
 
+/* Utility code. Suspiciously convenient for bzip2. */
+int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
+{
+	struct allocator *a = __liballocs_leaf_allocator_for(block, NULL, NULL);
+	if (!a) return 1;
+	struct uniqtype *old_type = NULL;
+	void *base;
+	size_t sz;
+	liballocs_err_t err = a->get_info(/* a, */ block, NULL, &old_type, &base, &sz, NULL);
+	if (!old_type) return 2;
+	if (old_type->make_precise) old_type = old_type->make_precise(old_type,
+		NULL, 0, block, block, sz, __builtin_return_address(0), NULL);
+	struct uniqtype *new_type = __liballocs_get_or_create_array_type(t, sz / t->pos_maxoff);
+	if (!new_type) return 3;
+	struct uniqtype *union_type = __liballocs_get_or_create_union_type(2,
+		old_type,
+		new_type
+    );
+	err = a->set_type(/*a, */ block, union_type);
+	assert(!err);
+	struct uniqtype *got_t = __liballocs_get_alloc_type(block);
+	assert(got_t == union_type);
+	return 0;
+}
+
 /* Instantiate inlines from liballocs.h. */
 extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,
