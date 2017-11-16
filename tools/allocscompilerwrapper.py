@@ -192,9 +192,12 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     self.debugMsg("Renaming __def_ and __ref_ alloc symbols\n")
                     # instead of objcopying to replace __def_<sym> with <sym>,
                     # we use ld -r to define <sym> and __real_<sym> as *extra* symbols
+                    # ... and also ensure __def_ is global, while we're at it
                     ref_args = [["--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in toUnbind]
+                    def_global_args = [["--globalize-symbol", "__def_" + sym] for sym in toUnbind]
                     objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
                      + [opt for seq in ref_args for opt in seq] \
+                     + [opt for seq in def_global_args for opt in seq] \
                      + [filename], stderr=errfile)
                     if objcopy_ret != 0:
                         self.printErrors(errfile)
