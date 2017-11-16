@@ -391,6 +391,27 @@ let isPointerType t = match (getConcreteType (typeSig t)) with
     TSPtr(_, _) -> true
   | _ -> false
 
+let isVoidPointerType t = match (getConcreteType (typeSig t)) with
+    TSPtr(TSBase(TVoid(_)), _) -> true
+  | _ -> false
+
+let rec indirectionLevel someTs = match someTs with
+    TSPtr(subTs, _) -> 1 + indirectionLevel subTs
+  | _ -> 0
+
+let rec ultimatePointeeTs someTs = match someTs with
+    TSPtr(TSPtr(subTs, attrs), _) -> ultimatePointeeTs (TSPtr(subTs, attrs))
+  | TSPtr(subTs, _) -> subTs
+  | _ -> raise Not_found
+  
+
+let isGenericPointerType (t : Cil.typ) = 
+    indirectionLevel (Cil.typeSig t) >= 1 &&
+    let upts = ultimatePointeeTs (getConcreteType(Cil.typeSig t))
+    in
+    upts = Cil.typeSig(voidType)
+     || upts = Cil.typeSig(charType)
+
 let newGlobalsList globals toAdd insertBeforePred = 
   let (preList, postList) = 
       let rec buildPre l accumPre = match l with 
@@ -577,15 +598,6 @@ let tsIsFunctionPointer ts =
         TSPtr(nestedTs, _) when tsIsFunction nestedTs -> true
       | _ -> false
 
-let rec indirectionLevel someTs = match someTs with
-    TSPtr(subTs, _) -> 1 + indirectionLevel subTs
-  | _ -> 0
-
-let rec ultimatePointeeTs someTs = match someTs with
-    TSPtr(TSPtr(subTs, attrs), _) -> ultimatePointeeTs (TSPtr(subTs, attrs))
-  | TSPtr(subTs, _) -> subTs
-  | _ -> raise Not_found
-  
 let rec ultimatePointeeT someT = match someT with
     TPtr(pt, _) when tIsPointer pt -> ultimatePointeeT pt
   | TNamed(ti, _) -> ultimatePointeeT ti.ttype
