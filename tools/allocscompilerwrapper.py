@@ -187,36 +187,35 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     self.debugMsg("problem doing objcopy (unbind) (ret %d)\n" % objcopy_ret)
                     self.printErrors(errfile)
                     return objcopy_ret
-                else:
-                    # one more objcopy to rename the __def_ and __ref_ symbols
-                    self.debugMsg("Renaming __def_ and __ref_ alloc symbols\n")
-                    # instead of objcopying to replace __def_<sym> with <sym>,
-                    # we use ld -r to define <sym> and __real_<sym> as *extra* symbols
-                    # ... and also ensure __def_ is global, while we're at it
-                    ref_args = [["--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in toUnbind]
-                    def_global_args = [["--globalize-symbol", "__def_" + sym] for sym in toUnbind]
-                    objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
-                     + [opt for seq in ref_args for opt in seq] \
-                     + [opt for seq in def_global_args for opt in seq] \
-                     + [filename], stderr=errfile)
-                    if objcopy_ret != 0:
-                        self.printErrors(errfile)
-                        return objcopy_ret
-                    tmp_filename = os.path.splitext(filename)[0] + ".tmp.o"
-                    cp_ret = subprocess.call(["cp", filename, tmp_filename], stderr=errfile)
-                    if cp_ret != 0:
-                        self.printErrors(errfile)
-                        return cp_ret
-                    def_args = [["--defsym", sym + "=__def_" + sym, \
-                        "--defsym", "__real_" + sym + "=__def_" + sym, \
-                        ] for sym in toUnbind]
-                    ld_ret = subprocess.call(["ld", "-r"] \
-                     + [opt for seq in def_args for opt in seq] \
-                     + [tmp_filename, "-o", filename], stderr=errfile)
-                    if ld_ret != 0:
-                        self.debugMsg("problem doing ld -r (__real_ = __def_) (ret %d)\n" % ld_ret)
-                        self.printErrors(errfile)
-                        return ld_ret
+                # one more objcopy to rename the __def_ and __ref_ symbols
+                self.debugMsg("Renaming __def_ and __ref_ alloc symbols\n")
+                # instead of objcopying to replace __def_<sym> with <sym>,
+                # we use ld -r to define <sym> and __real_<sym> as *extra* symbols
+                # ... and also ensure __def_ is global, while we're at it
+                ref_args = [["--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in toUnbind]
+                def_global_args = [["--globalize-symbol", "__def_" + sym] for sym in toUnbind]
+                objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
+                 + [opt for seq in ref_args for opt in seq] \
+                 + [opt for seq in def_global_args for opt in seq] \
+                 + [filename], stderr=errfile)
+                if objcopy_ret != 0:
+                    self.printErrors(errfile)
+                    return objcopy_ret
+                tmp_filename = os.path.splitext(filename)[0] + ".tmp.o"
+                cp_ret = subprocess.call(["cp", filename, tmp_filename], stderr=errfile)
+                if cp_ret != 0:
+                    self.printErrors(errfile)
+                    return cp_ret
+                def_args = [["--defsym", sym + "=__def_" + sym, \
+                    "--defsym", "__real_" + sym + "=__def_" + sym, \
+                    ] for sym in toUnbind]
+                ld_ret = subprocess.call(["ld", "-r"] \
+                 + [opt for seq in def_args for opt in seq] \
+                 + [tmp_filename, "-o", filename], stderr=errfile)
+                if ld_ret != 0:
+                    self.debugMsg("problem doing ld -r (__real_ = __def_) (ret %d)\n" % ld_ret)
+                    self.printErrors(errfile)
+                    return ld_ret
 
             self.debugMsg("Looking for wrapped functions that need globalizing\n")
             # grep for local symbols -- a lower-case letter after the symname is the giveaway
