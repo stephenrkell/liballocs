@@ -430,6 +430,13 @@ let rec findStructTypeByName gs n = match gs with
             (* debug_print 1 "strange; uniqtype is defined\n"; *) TComp(c, [])
       | _ -> findStructTypeByName rest n
 
+let rec findUnionTypeByName gs n = match gs with 
+    [] -> raise Not_found
+  | g :: rest -> match g with 
+        GCompTagDecl(c, _) when not c.cstruct && c.cname = n -> TComp(c, [])
+      | GCompTag(c, _) when not c.cstruct && c.cname = n -> TComp(c, [])
+      | _ -> findUnionTypeByName rest n
+
 let getOrCreateUniqtypeGlobal m concreteType globals = 
   let typename = symnameFromSig concreteType
   in
