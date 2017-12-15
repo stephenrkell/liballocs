@@ -121,8 +121,8 @@ fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
 fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
 fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \
 fun(size_t             ,raw_metadata,  arg(struct allocated_chunk *,start),arg(struct alloc_metadata **, buf)) \
-fun(liballocs_err_t    ,set_type,      arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
-fun(liballocs_err_t    ,set_site,      arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */
+fun(liballocs_err_t    ,set_type,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
+fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */
 
 #define __allocmeta_fun_arg(argt, name) argt
 #define __allocmeta_fun_ptr(rett, name, ...) \
