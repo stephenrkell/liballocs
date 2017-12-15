@@ -35,13 +35,20 @@ class AllocsCC(AllocsCompilerWrapper):
             saveTempsArgs = ['-save-temps']
         else:
             saveTempsArgs = []
+        # bit of a HACK: always give a '-std=' arg to cilly
+        # -- this gets around cilly's lack of default -std=gnu89, w.r.t. extern inline semantics
+        stdArgs = [arg for arg in self.allArgs.values() if arg.startswith('-std=')]
+        if not stdArgs:
+            maybeSetStdArg = ['-std=gnu89']
+        else:
+            maybeSetStdArg = []
         for sourceFile in self.getSourceInputFiles():
             dirname = os.path.dirname(sourceFile)
             # FIXME: support multiple distinct directories here, if cilly can
             if dirname != "":
                  saveTempsArgs = ["--save-temps=" + dirname]
         return AllocsCompilerWrapper.getCustomCompileArgs(self) \
-        + saveTempsArgs
+        + saveTempsArgs + maybeSetStdArg
     
     def areAllSourceFilesC(self, sourceFiles):
         allSourceFilesAreC = True
