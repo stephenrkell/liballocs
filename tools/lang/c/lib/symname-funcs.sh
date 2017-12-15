@@ -1,3 +1,19 @@
+# horrible HACK
+this_filename () {
+    # look through the defined functions
+    ctr=0
+    while true; do
+        if [[ -z "${FUNCNAME[$ctr]}" ]]; then
+            echo "Error: couldn't find this_filename" 1>&2
+            exit 1
+        fi
+        if [[ "${FUNCNAME[$ctr]}" == "this_filename" ]]; then
+            echo ${BASH_SOURCE[$ctr]}
+            exit 0
+        fi
+        ctr=$(( $ctr + 1 ))
+    done
+}
 
 translate_symnames() {
     objfile="$1"
@@ -9,12 +25,16 @@ translate_symnames() {
     cu_fname="$2"
     cu_compdir="$3"
     
-    BASE_TYPES_TRANSLATION=${BASE_TYPES_TRANSLATION:-$( dirname $0 )/../src/base-types-translation}
+    BASE_TYPES_TRANSLATION=${BASE_TYPES_TRANSLATION:-$( dirname "$(this_filename)" )/../src/base-types-translation}
 
     signpost_frag_regexp="__ARG[0-9]+_|__PTR_|__REF_|__RR_|__ARR[0-9]+_|__FUN_FROM_|__FUN_TO_|__VA_"
     type_pred_regexp="__uniqtype__|${signpost_frag_regexp}"
     type_succ_regexp="${signpost_frag_regexp}|\$|"$'\t'
     
+    # FIXME: we should really use our hard-coded table of base type equivalences here,
+    # to save me the pain of remembering it's "short unsigned int" and not
+    # "unsigned short int", say.
+
     # join the substitutions into a big sed program
     sed_program=""
     echo ${BASE_TYPES_TRANSLATION} "$objfile" "$cu_fname" "$cu_compdir"  1>&2
