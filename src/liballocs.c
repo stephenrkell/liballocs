@@ -1619,7 +1619,7 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 		old_type,
 		new_type
     );
-	err = a->set_type(/*a, */ block, union_type);
+	err = a->set_type(/*a, */ maybe_the_allocation, block, union_type);
 	assert(!err);
 	struct uniqtype *got_t = __liballocs_get_alloc_type(block);
 	assert(got_t == union_type);

@@ -513,6 +513,7 @@ int main(int argc, char **argv)
 				compare_first_signed_second_offset 
 			>
 		> frame_intervals_t;
+#ifdef DEBUG
 	typedef boost::icl::interval_map< 
 			Dwarf_Off, 
 			iterfirst_pair_hash< 
@@ -521,6 +522,7 @@ int main(int argc, char **argv)
 			>::set/* ,
 				compare_first_iter_offset<string> */
 		> discarded_intervals_t;
+#endif
 		
 	map< iterator_df<subprogram_die>, frame_intervals_t > intervals_by_subprogram;
 	map< iterator_df<subprogram_die>, unsigned > frame_offsets_by_subprogram;
@@ -573,21 +575,23 @@ int main(int argc, char **argv)
 		
 		struct iterator_bf_skipping_types : public core::iterator_bf<>
 		{
-			void increment()
+			typedef core::iterator_bf<> super;
+			void increment(unsigned min_depth)
 			{
 				if (spec_here().tag_is_type(tag_here()))
 				{
 					increment_skipping_subtree();
-				} else increment();
-			}			
+				} else this->super::increment();
+				if (*this != END && depth() < min_depth) *this = END;
+			}
+			void increment() { this->increment(0); }
 			// forward constructors
 			using core::iterator_bf<>::iterator_bf;
 		} start_bf(start_df);
-		
-		for (auto i_bf = start_bf;
-			i_bf != core::iterator_base::END
-			&& (i_bf == start_bf || i_bf.depth() > initial_depth); 
-			++i_bf)
+		unsigned start_bf_depth = start_bf.depth();
+		for (iterator_bf_skipping_types i_bf = start_bf;
+			i_bf != core::iterator_base::END;
+			i_bf.increment(start_bf_depth + 1))
 		{
 			// skip if not a with_dynamic_location_die
 			if (!i_bf.is_a<with_dynamic_location_die>()) continue;
@@ -779,7 +783,9 @@ int main(int argc, char **argv)
 		 * When finished, walk it and build another map keyed by 
 		  */
 		frame_intervals_t frame_intervals;
+#ifdef DEBUG
 		discarded_intervals_t discarded_intervals;
+#endif
 		 
 		for (auto i_int = subp_vaddr_intervals.begin(); 
 			i_int != subp_vaddr_intervals.end(); ++i_int)
@@ -832,7 +838,9 @@ int main(int argc, char **argv)
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
 						compare_first_iter_offset<string>*/ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("static-masquerading-as-local")));
+#ifdef DEBUG
 					discarded_intervals += make_pair(i_int->first, singleton_set);
+#endif
 					continue;
 				}
 				
@@ -865,7 +873,9 @@ int main(int argc, char **argv)
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
 						compare_first_iter_offset<string> */ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("register-located")));
+#ifdef DEBUG
 					discarded_intervals += make_pair(i_int->first, singleton_set);
+#endif
 					continue;
 				}
 				else try
@@ -896,7 +906,9 @@ int main(int argc, char **argv)
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
 						compare_first_iter_offset<string> */ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("unknown")));
+#ifdef DEBUG
 					discarded_intervals += make_pair(i_int->first, singleton_set);
+#endif
 					continue;
 				}
 				catch (...)
@@ -907,7 +919,9 @@ int main(int argc, char **argv)
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
 						compare_first_iter_offset<string> */ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("something-strange")));
+#ifdef DEBUG
 					discarded_intervals += make_pair(i_int->first, singleton_set);
+#endif
 					continue;
 				}
 				Dwarf_Signed frame_offset = static_cast<Dwarf_Signed>(addr_from_zero);
@@ -929,7 +943,9 @@ int main(int argc, char **argv)
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
 						compare_first_iter_offset<string> */ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("no_concrete_type")));
+#ifdef DEBUG
 					discarded_intervals += make_pair(i_int->first, singleton_set);
+#endif
 				}
 			}
 		} /* end for i_int */

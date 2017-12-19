@@ -1087,10 +1087,10 @@ struct insert *object_insert(const void *obj, struct insert *ins)
 /* A client-friendly lookup function that knows about bigallocs.
  * FIXME: this needs to go away! Clients shouldn't have to know about inserts,
  * and not all allocators maintain them. */
-struct insert *__liballocs_get_insert(const void *mem)
+struct insert *__liballocs_get_insert(struct big_allocation *maybe_the_allocation, const void *mem)
 {
-	struct big_allocation *b = __lookup_bigalloc(mem,
-		&__generic_malloc_allocator, NULL);
+	struct big_allocation *b = maybe_the_allocation ? maybe_the_allocation :
+		__lookup_bigalloc(mem,	&__generic_malloc_allocator, NULL);
 	if (b)
 	{
 		assert(b->meta.what == INS_AND_BITS);
@@ -1400,12 +1400,13 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 	return extract_and_output_alloc_site_and_type(heap_info, out_type, (void**) out_site);
 }
 
-liballocs_err_t __generic_heap_set_type(void *obj, struct uniqtype *new_type)
+liballocs_err_t __generic_heap_set_type(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type)
 {
+	struct insert *ins = __liballocs_get_insert(maybe_the_allocation, obj);
 	struct insert *heap_info = lookup_object_info(obj, NULL, NULL, NULL);
-	if (!heap_info) return &__liballocs_err_unindexed_heap_object;
-	heap_info->alloc_site_flag = 1; /* 1 means "it's a type" */
-	heap_info->alloc_site = (uintptr_t) new_type;
+	if (!ins) return &__liballocs_err_unindexed_heap_object;
+	ins->alloc_site = (uintptr_t) new_type;
+	ins->alloc_site_flag = 1; // meaning it's a type, not a site
 	return NULL;
 }
 
