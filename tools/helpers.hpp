@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <deque>
 #include <map>
+#include <locale.h>
 
 // FIXME: shouldn't have toplevel "using" in header file
 using std::string;
@@ -45,7 +46,7 @@ opt<vector<allocsite> > read_allocsites_for_binary(const string& s);
 void merge_and_rewrite_synthetic_data_types(core::root_die& r, vector<allocsite>& as);
 std::pair<std::unique_ptr<core::root_die>, std::unique_ptr<std::ifstream> >
 make_root_die_and_merge_synthetics(vector<allocsite>& as);
-
+iterator_df<type_die> get_or_create_uninterpreted_byte_type(root_die& r);
 #define IS_VARIADIC(t) \
 ((t).is_a<subroutine_type_die>() ? (t).as_a<subroutine_type_die>()->is_variadic() \
 		:   (t).is_a<subprogram_die>() ? (t).as_a<subprogram_die>()->is_variadic() \
@@ -111,10 +112,14 @@ inline string mangle_nonalphanums(const string& s)
 {
 	string mangled = s;
 	
+	static locale_t c_locale = newlocale(LC_CTYPE_MASK, "C", NULL);
+	assert(c_locale);
+	
 	replace_if(mangled.begin(), mangled.end(), [](char c) -> bool {
-			static const set<char> to_replace
-			 = { '/', '-', '.', ':', '<', '>', ',', '*', '&', '[', ']', '(', ')', '+', '=' };
-			return to_replace.find(c) != to_replace.end();
+			//static const set<char> to_replace
+			// = { '/', '-', '.', ':', '<', '>', ',', '*', '&', '[', ']', '(', ')', '+', '=' };
+			//return to_replace.find(c) != to_replace.end();
+			return c != ' ' && c != '_' && c != '$' && !isalnum_l(c, c_locale);
 		}, '_');
 	return mangled;
 }
