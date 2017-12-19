@@ -114,6 +114,8 @@ checkrun-uniqtype-make-precise:
 	$(MAKE) cleanrun-uniqtype-make-precise >/dev/null 2>&1
 checkrun-lib-test:
 	$(MAKE) cleanrun-lib-test >/dev/null 2>&1
+checkrun-forward-decls:
+	$(MAKE) cleanrun-forward-decls >/dev/null 2>&1
 
 _onlyrun-nopreload-%:
 	./nopreload-$*

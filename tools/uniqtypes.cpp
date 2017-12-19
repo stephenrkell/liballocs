@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstddef>
 #include <memory>
+#include <cmath>
 #include <boost/regex.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/icl/interval_map.hpp>
@@ -71,6 +72,13 @@ using boost::regex_constants::egrep;
 using boost::match_default;
 using boost::format_all;
 
+/* Forward declaration of a local helper function */
+static void write_uniqtype_open_generic(std::ostream& o,
+    const string& mangled_typename,
+    const string& unmangled_typename,
+    const string& pos_maxoff_str
+	);
+
 uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
 {
 	auto result = add_type_if_absent(t, r);
@@ -97,7 +105,8 @@ pair<bool, uniqued_name> add_type_if_absent(iterator_df<type_die> t, master_rela
 		auto concrete_t = t->get_concrete_type();
 		auto ret = add_concrete_type_if_absent(concrete_t, r);
 		// add the alias, if we have a name
-		if (t.name_here() && !t.as_a<base_type_die>()->is_bitfield_type())
+		if (t.name_here() && *t.name_here() != "__uninterpreted_byte"
+			&& !t.as_a<base_type_die>()->is_bitfield_type())
 		{
 			add_alias_if_absent(*name_for_type_die(t), concrete_t, r);
 			/* HACK: for good measure, also ensure that we add the 
@@ -121,8 +130,9 @@ void add_alias_if_absent(const string& s, iterator_df<type_die> concrete_t, mast
 	/* HACK: since in C, "struct X" and "X" are distinct, but we don't distinguish them, 
 	 * we also need to ignore this kind of alias here. Be careful about base types though: 
 	 * we *do* need their actual-name aliases. */
-	if (!concrete_t.is_a<base_type_die>() 
-		&& concrete_t.name_here() && s == *name_for_type_die(concrete_t)) return;
+	if (!concrete_t.is_a<base_type_die>()
+		&& concrete_t.name_here()
+		&& s == *name_for_type_die(concrete_t)) return;
 	
 	r.aliases[concrete_t].insert(s);
 }
@@ -294,33 +304,75 @@ void write_master_relation(master_relation_t& r,
 	 * assembler-level flags and attributes. This causes the compiler-
 	 * -generated flags and attributes to be ignored, because the '#' 
 	 * comments them out. Without this trick, there is no way of supplying
-	 * our own section flags and attributes to override the compiler. */
+	 * our own section flags and attributes to override the compiler.
+	 * FIXME: this works with gcc-generated assembly but not clang's.
+	 * Borrow glibc's somewhat-portable way of doing this, if that fixes things.
+	 * FIXME: fix the same thing elsewhere, too. */
 	if (emit_void)
 	{
 		/* DWARF doesn't reify void, but we do. So output a rec for void first of all.
 		 * We make it void so that multiple definitions in the same final link do not
 		 * cause a problem. */
-		out << "\n/* uniqtype for void */\n";
-		if (emit_subobject_names)
-		{
-			out << "const char *" << mangle_typename(make_pair(string(""), string("void")))
+		auto emit_empty_subobject_names = [&out](const string& name) {
+			out << "const char *" << mangle_typename(make_pair(string(""), name))
 				<< "_subobj_names[] "
-				<< " __attribute__((section (\".data.__uniqtype__void, \\\"awG\\\", @progbits, __uniqtype__void, comdat#\")))"
+				<< " __attribute__((section (\".data.__uniqtype__" << name
+					<< ", \\\"awG\\\", @progbits, __uniqtype__" << name << ", comdat#\")))"
 				<< "= { (void*)0 };\n";
-		}
+		};
 		
+		out << "\n/* uniqtype for void */\n";
+		if (emit_subobject_names) emit_empty_subobject_names("void");
 		string mangled_name = mangle_typename(make_pair(string(""), string("void")));
 		write_uniqtype_open_void(out,
 			mangled_name,
 			"void",
 			string("void")
 		);
+		write_uniqtype_related_dummy(out);
 		write_uniqtype_close(out, mangled_name);
+		
+		/* We also now emit two further "special" types: the type of
+		 * generic pointers, and the type of uninterpreted bytes. */
+		out << "\n/* uniqtype for generic pointers */\n";
+		if (emit_subobject_names) emit_empty_subobject_names("__EXISTS1___PTR__1");
+		mangled_name = mangle_typename(make_pair(string(""), string("__EXISTS1___PTR__1")));
+		/* How do we model a generic pointer? */
+		write_uniqtype_open_generic(out,
+			mangled_name,
+			"__EXISTS1___PTR__1",
+			"8" /* FIXME HACK FIXME HACK */
+		);
+		out << "{ address: { .kind = ADDRESS, .genericity = 1, .indir_level = 1 } },\n\t"
+			<< "/* make_precise */ __liballocs_make_precise_identity, /* related */ {\n\t\t";
+		write_uniqtype_related_dummy(out);
+		write_uniqtype_close(out, mangled_name);
+		
+		out << "\n/* uniqtype for uninterpreted bytes */\n";
+		if (emit_subobject_names) emit_empty_subobject_names("__uninterpreted_byte");
+		mangled_name = mangle_typename(make_pair(string(""), string("__uninterpreted_byte")));
+		write_uniqtype_open_generic(out,
+			mangled_name,
+			"__uninterpreted_byte",
+			"1"
+		);
+		out << "{ base: { .kind = BASE, .enc = 0 /* no encoding */ } },\n\t"
+			<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
+		write_uniqtype_related_dummy(out);
+		write_uniqtype_close(out, mangled_name);
+		
 	}
-	else // always declare it, at least, with weak attribute
+	else // always declare them, at least, with weak attribute
 	{
-		out << "extern struct uniqtype " << mangle_typename(make_pair(string(""), string("void")))
-			<< " __attribute__((weak));" << endl;
+		const char *raw_names[] = { "void", "__EXISTS1___PTR__1", "__uninterpreted_byte" };
+		for (const char **p_n = &raw_names[0];
+			p_n != raw_names + (sizeof raw_names / sizeof raw_names[0]);
+			++p_n)
+		{
+			const char *n = *p_n;
+			out << "extern struct uniqtype " << mangle_typename(make_pair(string(""), string(n)))
+				<< " __attribute__((weak));" << endl;
+		}
 	}
 	
 	/* The complement relation among signed and unsigned integer types. */
@@ -341,7 +393,6 @@ void write_master_relation(master_relation_t& r,
 		return (base_t->bit_size_and_offset().second != 0
 			|| base_t->bit_size_and_offset().first != 8 * (*base_t->calculate_byte_size()));
 	};
-	
 	/* Emit forward declarations, building the complement relation as we go. */
 	set<string> names_previously_emitted;
 	for (auto i_pair = r.begin(); i_pair != r.end(); ++i_pair)
@@ -375,15 +426,12 @@ void write_master_relation(master_relation_t& r,
 				{
 					integer_base_types_by_size_and_signedness[bit_size][signedness].insert(*i_pair);
 				}
-				
 			}
-			
 			if (avoid_aliasing_as(name.second, name.first, t))
 			{
 				codeless_alias_blacklist[name.second].insert(name.first);
 			}
 		}
-		
 		out << "extern struct uniqtype " << s;
 		// incompletes are weak-ref'd
 		if (i_pair->first.first == "")
@@ -391,7 +439,6 @@ void write_master_relation(master_relation_t& r,
 			out << " __attribute__((weak))";
 		}
 		out << ";" << endl;
-
 	}
 	/* Declare any signedness-complement base types that we didn't see. 
 	 * We will emit these specially. */
@@ -501,31 +548,6 @@ void write_master_relation(master_relation_t& r,
 			}
 		}
 		unsigned members_count = real_members.size();
-		unsigned array_len;
-		if  (i_vert->second.is_a<array_type_die>())
-		{
-			auto opt_array_len = i_vert->second.as_a<array_type_die>()->element_count();
-			if (opt_array_len) array_len = *opt_array_len;
-			else array_len = 0;
-		} 
-		else if  (i_vert->second.is_a<string_type_die>())
-		{
-			auto opt_fixed_size = i_vert->second.as_a<string_type_die>()->fixed_length_in_bytes();
-			if (opt_fixed_size) array_len = *opt_fixed_size;
-			else array_len = 0;
-		}
-		else if (i_vert->second.is_a<type_describing_subprogram_die>())
-		{
-			/* use array len to encode the number of fps */
-			array_len = fp_types.size();
-		} 
-		else if (i_vert->second.is_a<address_holding_type_die>())
-		{
-			/* HACK HACK HACK: encode the type's pointerness into array_len. 
-			 * We should rationalise struct uniqtype to require less of this
-			 * sort of thing. */
-			array_len = /* MAGIC_LENGTH_POINTER */(1u << 19) - 1u;
-		} else array_len = 0;
 		
 		/* Our last chance to skip things we don't want to emit. 
 		 * NOTE that for incompletes, we distinguish "flexible", "opaque" and "undefined" types
@@ -586,6 +608,10 @@ void write_master_relation(master_relation_t& r,
 		unsigned contained_length = 1;
 		if (i_vert->second.is_a<array_type_die>())
 		{
+			unsigned array_len;
+			auto opt_array_len = i_vert->second.as_a<array_type_die>()->element_count();
+			if (opt_array_len) array_len = *opt_array_len;
+			else array_len = 0;
 			if (array_len > 0)
 			{
 				write_uniqtype_open_array(out,
@@ -615,29 +641,43 @@ void write_master_relation(master_relation_t& r,
 		}
 		else if (i_vert->second.is_a<string_type_die>())
 		{
+			auto opt_fixed_size = i_vert->second.as_a<string_type_die>()->fixed_length_in_bytes();
 			write_uniqtype_open_array(out,
 				mangled_name,
 				i_vert->first.second,
 				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
-				array_len
+				(opt_fixed_size ? *opt_fixed_size : 0)
 			);
 			/* FIXME */
 			write_uniqtype_related_array_element_type(out, string("__uniqtype__unsigned_char$8"));
 		}
 		else if (i_vert->second.is_a<address_holding_type_die>())
 		{
+			auto t = i_vert->second.as_a<address_holding_type_die>();
+			unsigned indir_level = 0;
+			iterator_df<address_holding_type_die> ultimate_pointee = t;
+			while (ultimate_pointee.is_a<address_holding_type_die>())
+			{
+				++indir_level;
+				ultimate_pointee = ultimate_pointee.as_a<address_holding_type_die>()->get_type();
+			}
+			bool is_generic = t.enclosing_cu()->is_generic_pointee_type(ultimate_pointee);
+			unsigned machine_word_size = t.enclosing_cu()->get_address_size();
 			write_uniqtype_open_address(out,
 				mangled_name,
 				i_vert->first.second,
-				sizeof (void*) /* FIXME */,
-				0 /* FIXME */,
-				0 /* FIXME */,
-				0 /* FIXME */
+				*t->calculate_byte_size(),
+				is_generic ? 0 : indir_level,
+				is_generic,
+				ceil(log2(machine_word_size)) /* HMM -- may be wrong on some machines */
 			);
 			// compute and print destination name
-			auto k = canonical_key_for_type(i_vert->second.as_a<address_holding_type_die>()->get_type());
-			string mangled_name = mangle_typename(k);
-			write_uniqtype_related_pointee_type(out, mangled_name);
+			auto k1 = canonical_key_for_type(t->get_type());
+			string mangled_name1 = mangle_typename(k1);
+			write_uniqtype_related_pointee_type(out, mangled_name1);
+			auto k2 = canonical_key_for_type(ultimate_pointee);
+			string mangled_name2 = mangle_typename(k2);
+			write_uniqtype_related_ultimate_pointee_type(out, mangled_name2);
 		}
 		else if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
@@ -941,7 +981,9 @@ void write_master_relation(master_relation_t& r,
 			}
 		}
 		
-		/* Output any (typedef-or-base-type) aliases for this type. */
+		/* Output any (typedef-or-base-type) aliases for this type. NOTE that here we are
+		 * assuming that the canonical name for any base type (used above) is not the same as its
+		 * programmatic name (aliased here). */
 		for (auto i_alias = r.aliases[i_vert->second].begin(); 
 			i_alias != r.aliases[i_vert->second].end();
 			++i_alias)
@@ -1172,10 +1214,23 @@ void write_uniqtype_related_array_element_type(std::ostream& o,
 	if (comment_str) o << " /* " << *comment_str << " */ ";
 }
 void write_uniqtype_related_pointee_type(std::ostream& o,
-    opt<const string&> maybe_mangled_typename,
+	opt<const string&> maybe_mangled_typename,
 	opt<const string&> comment_str
-    )
+	)
 {
+	/* begin the struct */
+	o << "{ { t: { ";
+	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;
+	else o << "(void*) 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
+void write_uniqtype_related_ultimate_pointee_type(std::ostream& o,
+	opt<const string&> maybe_mangled_typename,
+	opt<const string&> comment_str
+	)
+{
+	o << ",\n\t\t";
 	/* begin the struct */
 	o << "{ { t: { ";
 	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;

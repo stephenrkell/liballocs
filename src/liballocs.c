@@ -98,6 +98,14 @@ __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
 	return __liballocs_get_or_create_array_type(element_t, precise_size / element_t->pos_maxoff);
 }
 
+struct uniqtype *
+__liballocs_make_precise_identity(struct uniqtype *in,
+   struct uniqtype *out, unsigned long out_len,
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt)
+{
+	return in;
+}
+
 /* This is the "bzip2 fix". We need the ability to dynamically re-bless memory
  * as a simultaneous combination (union) of a new type and the type it had earlier.
  * PROBLEM: what do we call the union? OK, we can make it anonymous, but we're going
@@ -1595,12 +1603,13 @@ struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 /* Utility code. Suspiciously convenient for bzip2. */
 int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 {
-	struct allocator *a = __liballocs_leaf_allocator_for(block, NULL, NULL);
+	struct big_allocation *maybe_the_allocation = NULL;
+	struct allocator *a = __liballocs_leaf_allocator_for(block, NULL, &maybe_the_allocation);
 	if (!a) return 1;
 	struct uniqtype *old_type = NULL;
 	void *base;
 	size_t sz;
-	liballocs_err_t err = a->get_info(/* a, */ block, NULL, &old_type, &base, &sz, NULL);
+	liballocs_err_t err = a->get_info(/* a, */ block, maybe_the_allocation, &old_type, &base, &sz, NULL);
 	if (!old_type) return 2;
 	if (old_type->make_precise) old_type = old_type->make_precise(old_type,
 		NULL, 0, block, block, sz, __builtin_return_address(0), NULL);

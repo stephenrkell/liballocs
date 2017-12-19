@@ -1041,9 +1041,14 @@ int main(int argc, char **argv)
 				false,
 				min_s.str()
 			);
+			opt<unsigned> prev_offset_plus_size;
 			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
 			{
 				ostringstream comment_s;
+				auto el_type = i_by_off->second->find_type();
+				unsigned offset_after_fixup = i_by_off->first + offset_to_all;
+				opt<Dwarf_Unsigned> el_type_size = el_type ? el_type->calculate_byte_size() :
+					opt<Dwarf_Unsigned>();
 				if (i_by_off->second.name_here())
 				{
 					comment_s << *i_by_off->second.name_here();
@@ -1051,17 +1056,36 @@ int main(int argc, char **argv)
 				else comment_s << "(anonymous)"; 
 				comment_s << " -- " << i_by_off->second.spec_here().tag_lookup(
 						i_by_off->second.tag_here())
-					<< " @" << std::hex << i_by_off->second.offset_here() << std::dec;
+					<< " @" << std::hex << i_by_off->second.offset_here() << std::dec
+					<< "(size ";
+				if (el_type_size) comment_s << *el_type_size;
+				else comment_s << "(no size)";
+				comment_s << ")";
+				if (prev_offset_plus_size)
+				{
+					if (offset_after_fixup > *prev_offset_plus_size)
+					{
+						comment_s << " (HOLE of " << (offset_after_fixup - *prev_offset_plus_size)
+							<< " bytes)";
+					}
+					else if (offset_after_fixup < *prev_offset_plus_size)
+					{
+						comment_s << " (OVERLAP of " << (*prev_offset_plus_size - offset_after_fixup)
+							<< " bytes)";
+					}
+				}
+				// FIXME: also want to report holes at the start or end of the frame
 
-				string mangled_name = mangle_typename(canonical_key_for_type(i_by_off->second->find_type()));
+				string mangled_name = mangle_typename(canonical_key_for_type(el_type));
 				assert(names_emitted.find(mangled_name) != names_emitted.end());
 				
 				write_uniqtype_related_contained_member_type(cout,
 					/* is_first */ i_by_off == i_frame_int->second.begin(),
-					i_by_off->first + offset_to_all,
+					offset_after_fixup,
 					mangled_name,
 					comment_s.str()
 				);
+				prev_offset_plus_size = offset_after_fixup + el_type_size;
 			}
 			write_uniqtype_close(cout, mangled_name);
 		}

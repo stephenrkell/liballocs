@@ -128,6 +128,13 @@ __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
 {
 	return NULL;
 }
+struct uniqtype *
+__liballocs_make_precise_identity(struct uniqtype *in,
+   struct uniqtype *out, unsigned long out_len,
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt)
+{
+	return in;
+}
 
 void __liballocs_report_wild_address(const void *ptr)
 {

@@ -113,18 +113,18 @@ struct uniqtype \
            unsigned is_contiguous:1; /* idea */ \
            unsigned is_log_spaced:1; /* idea (inefficiency: implies not is_contiguous) */ \
            unsigned nenum:26; /* HMM */ \
-       } enumeration; /* related[0] is base type, related[1..nenum] are enumerators -- HMM, t is the *value*? */ \
+       } enumeration; /* related[0] is base type; use related[1..nenum] for enumerators? Or hmm, just use a separate name/value mapping, like member_names? These are like meta_enum, meta_struct, etc.. */ \
        struct { \
            unsigned kind:4; \
            unsigned nmemb:20; /* 1M members should be enough */ \
            unsigned not_simultaneous:1; /* i.e. whether any member may be invalid */ \
-       } composite; /* related[nmemb] is names ptr could also do "refines" i.e. templatey relations? */ \
+       } composite; /* related[nmemb] is names ptr; could also do "refines" i.e. templatey relations? Or does that seem to be a predicate that belongs outside uniqtypes...? */ \
        struct { \
            unsigned kind:4; \
-           unsigned indir_level:5; /* contractually, after how many valid derefs might we get a non-address */ \
-           unsigned genericity:1; /* I wrote "we need this when deciding whether or not to overwrite" -- can't remember what this means*/ \
+           unsigned indir_level:5; /* contractually, after how many valid derefs might we get a non-address? valid only if genericity == 0 */ \
+           unsigned genericity:1; /* I wrote "we need this when deciding whether or not to overwrite" -- talking about libcrunch's treatment of writes through generic ptrs, I think */ \
            unsigned log_min_align:6; /* useful? just an idea */ \
-       } address; /* related[0] is immediate pointee type; could also do ultimate non-pointer type? */ \
+       } address; /* related[0] is immediate pointee type; related[1] is ultimate non-pointer type, if indir_level > 1 */ \
        struct { \
            unsigned kind:4; \
            unsigned narg:10; /* 1023 arguments is quite a lot */ \
@@ -143,13 +143,16 @@ struct uniqtype \
        } array; /* related[0] is element type */ \
        unsigned as_word; /* for funky optimizations, e.g. "== -1" to test for unbounded array */ \
    } un; \
-   make_precise_fn_t *make_precise; /* NULL means identity function */ \
+   make_precise_fn_t *make_precise; /* NULL means identity function AND that we're concrete */ \
    struct uniqtype_rel_info related[]; \
 }; \
 struct mcontext; \
 const char *(__attribute__((pure,weak)) __liballocs_uniqtype_name)(const struct uniqtype *u); \
 const char *(__attribute__((pure,weak)) __liballocs_uniqtype_symbol_name)(const struct uniqtype *u); \
 struct uniqtype *(__attribute__((weak)) __liballocs_make_array_precise_with_memory_bounds)(struct uniqtype *in, \
+   struct uniqtype *out, unsigned long out_len, \
+   void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt); \
+struct uniqtype *(__attribute__((weak)) __liballocs_make_precise_identity)(struct uniqtype *in, \
    struct uniqtype *out, unsigned long out_len, \
    void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt); \
 struct uniqtype *(__attribute__((pure,weak)) __liballocs_get_or_create_array_type)(struct uniqtype *element_t, unsigned array_len);
@@ -303,11 +306,14 @@ UNIQTYPE_DECLS
 #define UNIQTYPE_DECLSTR UNIQTYPE_XSTRINGIFY(UNIQTYPE_DECLS)
 
 extern struct uniqtype __uniqtype__void __attribute__((weak));
+extern struct uniqtype __uniqtype____EXISTS1___PTR__1 __attribute__((weak)); // pointer to 'a
+extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); // byte
 
 #define UNIQTYPE_IS_SUBPROGRAM_TYPE(u)   ((u)->un.info.kind == SUBPROGRAM)
 #define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) ((u)->un.subprogram.narg)
 #define UNIQTYPE_IS_POINTER_TYPE(u)      ((u)->un.info.kind == ADDRESS)
 #define UNIQTYPE_POINTEE_TYPE(u)         (UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->related[0].un.t.ptr : (void*)0)
+#define UNIQTYPE_ULTIMATE_POINTEE_TYPE(u)(UNIQTYPE_IS_POINTER_TYPE(u) ? ((u)->un.info.address.indir_level > 1) ? (u)->related[1].un.t.ptr : (u)->related[0].un.t.ptr : (void*)0)
 #define UNIQTYPE_IS_ARRAY_TYPE(u)        ((u)->un.array.is_array)
 #define UNIQTYPE_IS_COMPOSITE_TYPE(u)    ((u)->un.info.kind == COMPOSITE)
 #define UNIQTYPE_HAS_SUBOBJECTS(u)       (UNIQTYPE_IS_COMPOSITE_TYPE(u) || UNIQTYPE_IS_ARRAY_TYPE(u))
@@ -336,6 +342,7 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 	|| ((u)->un.info.kind == SUBRANGE && 1 /* FIXME */) \
 	|| ((u)->un.info.kind == SUBPROGRAM && (u)->related[0].un.t.ptr != NULL) \
 	)
+#define UNIQTYPE_IS_ABSTRACT(u) ((u)->make_precise)
 #define NAME_FOR_UNIQTYPE(u) UNIQTYPE_NAME(u)
 #define UNIQTYPE_BASE_TYPE_BIT_SIZE(u)         (((u)->un.info.kind != BASE) ? 0 : \
                                                    8*(u)->pos_maxoff - ( \

@@ -75,6 +75,25 @@ opt<vector<allocsite> > read_allocsites_for_binary(const string& s)
 	else return opt<vector<allocsite> >();
 }
 
+iterator_df<type_die>
+get_or_create_uninterpreted_byte_type(root_die& r)
+{
+	auto cu = r.get_or_create_synthetic_cu();
+	auto found = cu->named_child("__uninterpreted_byte");
+	if (found) return found.as_a<type_die>();
+	
+	auto created = r.make_new(cu, DW_TAG_base_type);
+	auto& attrs = dynamic_cast<core::in_memory_abstract_die&>(created.dereference())
+		.attrs();
+	encap::attribute_value v_name(string("__uninterpreted_byte")); // must have a name
+	attrs.insert(make_pair(DW_AT_name, v_name));
+	encap::attribute_value v_encoding((Dwarf_Unsigned)0);
+	attrs.insert(make_pair(DW_AT_encoding, v_encoding));
+	encap::attribute_value v_byte_size((Dwarf_Unsigned)1);
+	attrs.insert(make_pair(DW_AT_byte_size, v_byte_size));
+	return created;
+}
+
 void make_allocsites_relation(
     allocsites_relation_t& allocsites_relation,
     vector<allocsite> const& allocsites_to_add,
@@ -83,6 +102,7 @@ void make_allocsites_relation(
     )
     
 {
+	auto uninterpreted_byte_t = get_or_create_uninterpreted_byte_type(r);
 	for (auto i_alloc = allocsites_to_add.begin(); i_alloc != allocsites_to_add.end(); ++i_alloc)
 	{
 		string type_symname = i_alloc->clean_typename;
@@ -172,8 +192,15 @@ void make_allocsites_relation(
 						// YES this CU embodies the source file, so we can search for the type
 						embodying_cus.push_back(i_cu);
 
-						// HACK: how is void getting in here? I suppose it does come out in the allocsites
-						if (type_symname.size() > 0 && type_symname != "__uniqtype__void")
+						// void comes out in the allocsites
+						if (type_symname.size() > 0 &&
+							(type_symname == "__uniqtype____uninterpreted_byte"
+							|| type_symname == "__uniqtype__void"))
+						{
+							found_type = uninterpreted_byte_t; // i.e. void
+							goto cu_loop_exit;
+						}
+						else if (type_symname.size() > 0)
 						{
 							//auto found_type_entry = named_toplevel_types.find(clean_typename);
 							auto found_types = types_by_codeless_name.equal_range(type_symname);
@@ -389,8 +416,13 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		string name_to_use;
 		if (t.is_a<base_type_die>())
 		{
+			if (t.as_a<base_type_die>()->get_encoding() == 0)
+			{
+				assert(t.as_a<base_type_die>()->get_byte_size() == 1);
+				name_to_use = "__uninterpreted_byte";
+			}
 			/* For base types, we use our own language-independent naming scheme. */
-			name_to_use = t.as_a<base_type_die>()->get_canonical_name();
+			else name_to_use = t.as_a<base_type_die>()->get_canonical_name();
 		} 
 		else
 		{

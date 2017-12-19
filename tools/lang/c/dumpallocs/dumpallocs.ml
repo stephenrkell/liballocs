@@ -672,10 +672,14 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Sizeof V also lets us terminate
                  Mul where an arg is a Sizeof lets us terminate *)
               match (getAllocExpr i maybeFunvar args !sizeEnv functionT) with
-                 Some(Existing(ts, isComplete)) -> printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts) isComplete; SkipChildren
-              |  Some(Synthetic(tss)) -> printAllocFn fileAndLine chan maybeFunvar (dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine))) ) false; SkipChildren
+                 Some(Existing(ts, isComplete)) when isSinglyIndirectGenericPointerTypesig ts -> 
+                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype____EXISTS1___PTR__1" true; SkipChildren
+              |  Some(Existing(ts, isComplete)) -> 
+                    printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts) isComplete; SkipChildren
+              |  Some(Synthetic(tss)) -> 
+                    printAllocFn fileAndLine chan maybeFunvar (dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine))) ) false; SkipChildren
               |  Some(Undet) -> (* it is an allocation function, but... *)
-                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype__void" false; SkipChildren
+                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype____uninterpreted_byte" true; SkipChildren
               |  None -> 
                   (* (debug_print 1 (
                      "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
