@@ -706,6 +706,20 @@ int main(int argc, char **argv)
 					 * one offset per frame, recording the biggest negative offset such 
 					 * that all frame elements start at a nonnegative offset from that. */
 				};
+				auto print_intervals_stats = [&i_subp, &subp_vaddr_intervals, &root]() {
+					cerr << "subp_vaddr_intervals for " << i_subp->summary() 
+						<< " in compilation unit " << i_subp.enclosing_cu().summary()
+						<< " now contains "
+						<< subp_vaddr_intervals.size()
+						<< " intervals, with total set size ";
+					unsigned count = 0;
+					for (auto i_int = subp_vaddr_intervals.begin(); i_int != subp_vaddr_intervals.end(); ++i_int)
+					{
+						count += i_int->second.size();
+					}
+					cerr << count << std::endl;
+				};
+				
 				if (i_locexpr->lopc == 0 && 0 == i_locexpr->hipc
 					|| i_locexpr->lopc == 0 && i_locexpr->hipc == std::numeric_limits<Dwarf_Off>::max())
 				{
@@ -739,6 +753,7 @@ int main(int argc, char **argv)
 						);
 						
 						// print_sp_expr();
+						// print_intervals_stats();
 					}
 					/* There should be only one entry in the location list if so. */
 					assert(i_locexpr == var_loclist.begin());
@@ -764,7 +779,19 @@ int main(int argc, char **argv)
 					);
 					
 					// print_sp_expr();
+					// print_intervals_stats();
 				}
+			}
+			
+			/* We can get unreasonably big. */
+			static const unsigned MAX_INTERVALS = 10000;
+			if (subp_vaddr_intervals.size() > MAX_INTERVALS)
+			{
+				cerr << "Warning: abandoning gathering frame intervals for " << i_subp->summary() 
+						<< " in compilation unit " << i_subp.enclosing_cu().summary()
+						<< " after reaching " << MAX_INTERVALS << std::endl;
+				subp_vaddr_intervals.clear();
+				break;
 			}
 			
 			/* We note that the map is supposed to map file-relative addrs
