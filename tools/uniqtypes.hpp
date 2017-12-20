@@ -118,6 +118,10 @@ void write_uniqtype_related_pointee_type(std::ostream& o,
     opt<const string&> maybe_mangled_typename = opt<const string&>(),
 	opt<const string&> comment_str = opt<const string&>()
     );
+void write_uniqtype_related_ultimate_pointee_type(std::ostream& o,
+    opt<const string&> maybe_mangled_typename = opt<const string&>(),
+	opt<const string&> comment_str = opt<const string&>()
+    );
 void write_uniqtype_related_subprogram_argument_type(std::ostream& o,
     opt<const string&> maybe_mangled_typename = opt<const string&>(),
 	opt<const string&> comment_str = opt<const string&>()

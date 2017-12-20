@@ -403,14 +403,25 @@ let rec ultimatePointeeTs someTs = match someTs with
     TSPtr(TSPtr(subTs, attrs), _) -> ultimatePointeeTs (TSPtr(subTs, attrs))
   | TSPtr(subTs, _) -> subTs
   | _ -> raise Not_found
-  
 
-let isGenericPointerType (t : Cil.typ) = 
-    indirectionLevel (Cil.typeSig t) >= 1 &&
-    let upts = ultimatePointeeTs (getConcreteType(Cil.typeSig t))
+
+let isGenericPointerTypesig ts = 
+    indirectionLevel ts >= 1 &&
+    let upts = ultimatePointeeTs (getConcreteType(ts))
     in
     upts = Cil.typeSig(voidType)
      || upts = Cil.typeSig(charType)
+
+let isGenericPointerType (t : Cil.typ) =
+    isGenericPointerTypesig (Cil.typeSig t)
+    
+let isSinglyIndirectGenericPointerTypesig ts = 
+    indirectionLevel ts = 1 && isGenericPointerTypesig ts
+
+let isSingleIndirectGenericPointerType (t : Cil.typ) =
+    let ts = Cil.typeSig t
+    in
+    indirectionLevel ts = 1 && isGenericPointerTypesig ts
 
 let newGlobalsList globals toAdd insertBeforePred = 
   let (preList, postList) = 
