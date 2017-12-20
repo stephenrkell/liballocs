@@ -568,30 +568,37 @@ int main(int argc, char **argv)
 			}, nullptr /* FIXME: write a symbol resolver -- do we need this? can just pass 0? */
 		);
 
-		core::iterator_df<> start_df(i_subp);
-		unsigned subp_depth = start_df.depth();
-		unsigned initial_depth = subp_depth;
-		++start_df;
-		
 		struct iterator_bf_skipping_types : public core::iterator_bf<>
 		{
 			typedef core::iterator_bf<> super;
 			void increment(unsigned min_depth)
 			{
-				if (spec_here().tag_is_type(tag_here()))
+				/* The idea here is not that we skip types per se.
+				 * It's that we skip the children of types, e.g.
+				 * local vars or formals that actually belong to
+				 * methods. Remember that subprograms are types.
+				 * Also remember that we're allowed to start above
+				 * the minimum depth. */
+				if (*this != END && depth() < min_depth)
 				{
-					increment_skipping_subtree();
+					this->increment_skipping_siblings();
+				}
+				else if (tag_here() != DW_TAG_subprogram &&
+					spec_here().tag_is_type(tag_here()))
+				{
+					this->increment_skipping_subtree();
 				} else this->super::increment();
 				if (*this != END && depth() < min_depth) *this = END;
 			}
 			void increment() { this->increment(0); }
 			// forward constructors
 			using core::iterator_bf<>::iterator_bf;
-		} start_bf(start_df);
-		unsigned start_bf_depth = start_bf.depth();
+		} start_bf(i_subp);
+		unsigned start_depth = i_subp.depth();
 		for (iterator_bf_skipping_types i_bf = start_bf;
 			i_bf != core::iterator_base::END;
-			i_bf.increment(start_bf_depth + 1))
+			/* After the first inc, we should always be at *at least* 1 + start_depth. */
+			i_bf.increment(start_depth + 1))
 		{
 			// skip if not a with_dynamic_location_die
 			if (!i_bf.is_a<with_dynamic_location_die>()) continue;
