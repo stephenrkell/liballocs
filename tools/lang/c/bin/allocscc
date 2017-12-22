@@ -73,11 +73,11 @@ class AllocsCC(AllocsCompilerWrapper):
         # we should generate the .o files individually in that case. FIXME: make that so.
         # FIXME: need --save-temps because otherwise the .i.allocs files are created in /tmp.
         # Should fix this.
+        #"--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpmemacc/dumpmemacc.cmxs"), \
         return [\
         "--save-temps", \
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/cilallocs/cilallocs.cmxs"), \
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"), \
-        "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpmemacc/dumpmemacc.cmxs"), \
            "--dodumpallocs", \
            "--dodumpmemacc", \
             "--keepunused", \
