@@ -347,11 +347,34 @@ let rec decayArrayInTypesig ts = match ts with
    TSArray(tsig, optSz, attrs) -> decayArrayInTypesig tsig (* recurse for multidim arrays *)
  | _ -> ts
 
+(* This will turn "array of [array of...] X" into "(X, maybe numXs)". *)
+let rec accumulateArrayDimensionsInTypesig ts = match ts with
+   TSArray(tsig, Some(sz), attrs) ->  (* recurse for multidim arrays *)
+        (match accumulateArrayDimensionsInTypesig tsig with
+            (ts, Some(subN)) -> (ts, Some(Int64.mul sz subN))
+          | (ts, None) -> (ts, None)
+        )
+ | TSArray(tsig, None, attrs) -> (* recurse for multidim arrays *)
+    (decayArrayInTypesig tsig, None)
+ | _ -> (ts, None)
+
+(* This will turn "array of array of [array of...] X" into "array of X",
+ * tweaking the dimension if we have one. *)
+let rec collapseArrayDimensionsInTypesig ts = match ts with
+   TSArray(tsig, _, attrs) when (match tsig with (TSArray(_, _, _)) -> true | _ -> false)
+     -> (* tsig is also an array, so ... *)
+        let ts, maybeSz = accumulateArrayDimensionsInTypesig ts
+        in
+        TSArray(ts, maybeSz, attrs)
+ | _ -> ts
+
 (* This will make a "pointer to array of X" typesig into a "pointer to X" typesig.
  * And similarly for "pointer to array of pointer to array of X" -- 
- *      it becomes "pointer to pointer to X". *)
+ *      it becomes "pointer to pointer to X".
+ * And similarly for "pointer to array of array of... X" -- it becomes "pointer to X". *)
 let rec decayArrayInPointeeTypesig ts = match ts with
-   TSPtr(TSArray(tsig, optSz, arrAttrs), ptrAttrs) -> TSPtr(decayArrayInPointeeTypesig tsig, ptrAttrs)
+   TSPtr(TSArray(tsig, optSz, arrAttrs), ptrAttrs)
+    -> TSPtr(decayArrayInPointeeTypesig (collapseArrayDimensionsInTypesig tsig), ptrAttrs)
  | TSPtr(tsig, attrs) -> TSPtr(decayArrayInPointeeTypesig tsig, attrs)
  | _ -> ts
 
