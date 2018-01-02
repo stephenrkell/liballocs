@@ -29,6 +29,22 @@
 #endif
 
 void *__liballocs_rt_uniqtypes_obj;
+ElfW(Sym) *__liballocs_rt_uniqtypes_dynsym;
+ElfW(Word) *__liballocs_rt_uniqtypes_gnu_hash;
+unsigned char *__liballocs_rt_uniqtypes_dynstr;
+
+static void update_rt_uniqtypes_obj(void *handle, void *old_base)
+{
+	_Bool unchanged_base = (handle == __liballocs_rt_uniqtypes_obj) &&
+		(void*) ((struct link_map *) handle)->l_addr == old_base;
+	if (!unchanged_base)
+	{
+		__liballocs_rt_uniqtypes_obj = handle;
+		__liballocs_rt_uniqtypes_dynsym = get_dynsym(handle);
+		__liballocs_rt_uniqtypes_dynstr = get_dynstr(handle);
+		__liballocs_rt_uniqtypes_gnu_hash = get_gnu_hash(handle);
+	}
+}
 
 struct uniqtype *
 __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
@@ -43,9 +59,17 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 			"__uniqtype____ARR%d_%s", array_len, element_name);
 	/* FIXME: compute hash code. Should be an easy case. */
 	
-	/* Does such a type exist? */
-	void *found = NULL;
-	if (NULL != (found = dlsym(NULL, precise_uniqtype_name)))
+	/* Does such a type exist?
+	 * On the assumption that we get called many times for the same typename,
+	 * and that usually therefore it *does* exist but in the synthetic libdlbind
+	 * object, we try a GNU hash lookup on that first. */
+	ElfW(Sym) *found_sym = __liballocs_rt_uniqtypes_gnu_hash ?
+		gnu_hash_lookup(__liballocs_rt_uniqtypes_gnu_hash,
+			__liballocs_rt_uniqtypes_dynsym, __liballocs_rt_uniqtypes_dynstr,
+			precise_uniqtype_name)
+		: NULL;
+	void *found = (found_sym ? sym_to_addr(found_sym) : NULL);
+	if (NULL != found || NULL != (found = dlsym(NULL, precise_uniqtype_name)))
 	{
 		return (struct uniqtype *) found;
 	}
@@ -72,10 +96,11 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 				}
 			}
 		};
+		void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
 		void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
 			allocated, sz, STT_OBJECT);
 		assert(reloaded);
-		__liballocs_rt_uniqtypes_obj = reloaded;
+		update_rt_uniqtypes_obj(reloaded, old_base);
 		
 		return allocated_uniqtype;
 	}
@@ -177,9 +202,12 @@ __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_
 			}
 		};
 	}
+	
+	void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
 	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, union_uniqtype_name,
 		allocated, sz, STT_OBJECT);
 	assert(reloaded);
+	update_rt_uniqtypes_obj(reloaded, old_base);
 
 	return allocated_uniqtype;
 }
@@ -1234,6 +1262,8 @@ void __liballocs_post_systrap_init(void)
 		/* Now we can correctly initialize libdlbind. */
 		__libdlbind_do_init();
 		__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+		/* Init the other stuff we happen to cache about the object. */
+		update_rt_uniqtypes_obj(__liballocs_rt_uniqtypes_obj, NULL);
 
 		/* Now we can grab our uniqtype pointers, or create them. */
 		/* Because the Unix linker is broken (see notes below on uniquing),
