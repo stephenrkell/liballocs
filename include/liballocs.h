@@ -631,8 +631,10 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom);
  * Feels like we want an API call that dumps a vector of uniqtype pointers,
  * each with their start offset. */
 
+/* FIXME: this call needs to go away. */
 struct insert *__liballocs_get_insert(struct big_allocation *maybe_the_allocation, const void *mem); // HACK: please remove (see libcrunch)
 
+/* FIXME: use newer/better features in uniqtype definition */
 inline 
 const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
 {
@@ -654,16 +656,12 @@ const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
 	return NULL;
 }
 
-// struct uniqtype * 
-// get_outermost_type(void *obj, struct uniqtype *bound)
-// {
-// 	
-// }
-// 
 void *
 __liballocs_get_alloc_site(void *obj);
+
 unsigned long
 __liballocs_get_alloc_size(void *obj);
+
 struct allocator *
 __liballocs_get_leaf_allocator(void *obj);
 
