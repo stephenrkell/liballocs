@@ -867,7 +867,21 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 	
 	// is it present already?
 	assert(pageindex);
-	if (pageindex[PAGENUM(ent->first)]) return 0;
+	if (pageindex[PAGENUM(ent->first)] || pageindex[PAGENUM((char*)ent->second - 1)])
+	{
+		/* We used to "return 0" here.
+		 * But there's a race condition: suppose a temorary mmap (from malloc, say)
+		 * exists during the first time we add_missing_maps_from_proc,
+		 * and later has gone away... but *another* mapping partially covers where,
+		 * it used to be, including the beginning and/or the end.
+		 * Then we would silentl think we already had it, and bad things would
+		 * ensure.
+		 *
+		 * Since we assume we are looking at the ground truth whenever we pass over
+		 * the maps file, we can delete any 
+		 */
+		__liballocs_delete_all_bigallocs_overlapping_range(ent->first, ent->second);
+	}
 
 	/* If it looks like a stack... */
 	if (0 == strncmp(ent->rest, "[stack", 6))

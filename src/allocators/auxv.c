@@ -158,6 +158,13 @@ void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end)
 	if (!auxv_array_start) __auxv_allocator_init();
 	if (!p_argcount) abort();
 	
+	if (our_bigalloc)
+	{
+		/* We've been here before. Adjust the lower bound of the stack,
+		 * which is the *minimum* of the *begins*. */
+		if ((char*) our_bigalloc->begin > (char*) begin) our_bigalloc->begin = begin;
+		return;
+	}
 	__top_of_initial_stack = end; /* i.e. the highest address */
 	our_bigalloc = __liballocs_new_bigalloc(
 		begin,
