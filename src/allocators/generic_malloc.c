@@ -1380,14 +1380,15 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 		heap_info = &maybe_bigalloc->meta.un.ins_and_bits.ins;
 		if (out_base) *out_base = maybe_bigalloc->begin;
 		if (out_size) *out_size = (char*) maybe_bigalloc->end - (char*) maybe_bigalloc->begin;
-	} 
+	}
 	else
 	{
-		size_t alloc_chunksize;
-		heap_info = lookup_object_info(obj, out_base, &alloc_chunksize, NULL);
+		size_t alloc_usable_chunksize;
+		heap_info = lookup_object_info(obj, out_base, &alloc_usable_chunksize, NULL);
 		if (heap_info)
 		{
-			if (out_size) *out_size = alloc_chunksize - sizeof (struct insert) - EXTRA_INSERT_SPACE;
+			if (out_size) *out_size = alloc_usable_chunksize
+				- sizeof (struct insert) - EXTRA_INSERT_SPACE;
 		}
 	}
 	
@@ -1397,6 +1398,7 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 		return &__liballocs_err_unindexed_heap_object;
 	}
 	
+	if (!out_type && !out_site) return NULL;
 	return extract_and_output_alloc_site_and_type(heap_info, out_type, (void**) out_site);
 }
 
