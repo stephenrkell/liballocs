@@ -140,7 +140,35 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 			parent_end->begin = seq->begin;
 			existing_seq->mappings[0] = seq->mappings[0];
 		}
-		else { sleep(10); abort(); }
+		else
+		{
+			write_string("Saw a mapping sequence conflicting with existing one at end but not beginning\n");
+			write_string("\nNew seq begin address: ");
+			write_ulong((unsigned long) seq->begin);
+			write_string("\nNew seq end address: ");
+			write_ulong((unsigned long) seq->end);
+			write_string("\nExisting bigalloc begin address: ");
+			write_ulong((unsigned long) parent_end->begin);
+			write_string("\nExisting bigalloc end address: ");
+			write_ulong((unsigned long) parent_end->end);
+			write_string("\nExisting seq begin address: ");
+			write_ulong((unsigned long) existing_seq->begin);
+			write_string("\nExisting seq end address: ");
+			write_ulong((unsigned long) existing_seq->end);
+			write_string("\nExisting seq mapping count: ");
+			write_ulong((unsigned long) existing_seq->nused);
+			for (unsigned i = 0; i < existing_seq->nused; ++i)
+			{
+				write_string("\nExisting seq mapping ");
+				write_ulong((unsigned long) i);
+				write_string(": begin ");
+				write_ulong((unsigned long) existing_seq->mappings[i].begin);
+				write_string(" end ");
+				write_ulong((unsigned long) existing_seq->mappings[i].end);
+			}
+			sleep(10);
+			abort();
+		}
 	}
 	if (parent_end && parent_begin != parent_end)
 	{  sleep(10); abort(); } // HACK for debugging
