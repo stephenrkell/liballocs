@@ -114,7 +114,25 @@ static _Bool mapping_sequence_prefix(struct mapping_sequence *s1,
 		&s2->mappings[0],
 		s1->nused * sizeof (struct mapping_entry));
 }
-
+static _Bool mem_range_prefix(struct mapping_sequence *s1,
+	struct mapping_sequence *s2)
+{
+	return s1->begin == s2->begin && s1->end < s2->end;
+}
+static _Bool mapping_sequence_suffix(struct mapping_sequence *s1,
+	struct mapping_sequence *s2)
+{
+	return s1->nused <= s2->nused &&
+		0 == memcmp(
+			&s2->mappings[s2->nused - s1->nused],
+			&s1->mappings[0],
+			s1->nused * sizeof (struct mapping_entry));
+}
+static _Bool mem_range_suffix(struct mapping_sequence *s1,
+	struct mapping_sequence *s2)
+{
+	return s1->end == s2->end && s1->begin > s2->begin;
+}
 // FIXME: temporarily hidden to prevent annoying abort() collapsing after inlining
 void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq) __attribute__((visibility("hidden")));
 void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
@@ -128,52 +146,64 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 	struct big_allocation *parent_end = &big_allocations[pageindex[PAGENUM(((char*)seq->end)-1)]];
 	while (parent_end->parent) parent_end = parent_end->parent;
 	if (parent_end == &big_allocations[0]) parent_end = NULL;
+	struct mapping_sequence *existing_seq = NULL;
 
+	if (!parent_begin && !parent_end) goto go_ahead;
+	
 	if (!parent_begin && parent_end)
 	{
-		struct mapping_sequence *existing_seq = (struct mapping_sequence *)
+		/* This might be a case of a "false sequence": a suffix in the
+		 * sequence is not actually related to the prefix, and already
+		 * existed before the prefix was created. If we identify that
+		 * this is occurring, we simply delete the overlap from the new
+		 * sequence and then continue. */
+		existing_seq = (struct mapping_sequence *)
 			parent_end->meta.un.opaque_data.data_ptr;
-		/* We can handle this if we just have a single mapping.
-		 * The new mapping is bigger, so extend the existing. */
-		if (seq->nused == 1 && existing_seq->nused == 1)
+		if (mem_range_suffix(existing_seq, seq))
 		{
-			parent_end->begin = seq->begin;
-			existing_seq->mappings[0] = seq->mappings[0];
-		}
-		else
-		{
-			write_string("Saw a mapping sequence conflicting with existing one at end but not beginning\n");
-			write_string("\nNew seq begin address: ");
+			if (!mapping_sequence_suffix(existing_seq, seq))
+			{
+				write_string("Registered mapping sequence that is memory suffix of existing, but not splittable\n");
+				goto report_problem;
+			}
+			write_string("Registered seq begin address: ");
 			write_ulong((unsigned long) seq->begin);
-			write_string("\nNew seq end address: ");
+			write_string("\nRegistered seq end address: ");
 			write_ulong((unsigned long) seq->end);
 			write_string("\nExisting bigalloc begin address: ");
 			write_ulong((unsigned long) parent_end->begin);
 			write_string("\nExisting bigalloc end address: ");
 			write_ulong((unsigned long) parent_end->end);
-			write_string("\nExisting seq begin address: ");
-			write_ulong((unsigned long) existing_seq->begin);
-			write_string("\nExisting seq end address: ");
-			write_ulong((unsigned long) existing_seq->end);
-			write_string("\nExisting seq mapping count: ");
-			write_ulong((unsigned long) existing_seq->nused);
-			for (unsigned i = 0; i < existing_seq->nused; ++i)
-			{
-				write_string("\nExisting seq mapping ");
-				write_ulong((unsigned long) i);
-				write_string(": begin ");
-				write_ulong((unsigned long) existing_seq->mappings[i].begin);
-				write_string(" end ");
-				write_ulong((unsigned long) existing_seq->mappings[i].end);
-			}
-			sleep(10);
-			abort();
+			write_string("\n");
+			/* Delete the last existing_seq->nused elements from seq */
+			bzero(&seq->mappings[seq->nused - existing_seq->nused],
+					existing_seq->nused * sizeof (struct mapping_entry));
+			seq->nused -= existing_seq->nused;
+			seq->end = existing_seq->begin;
+			write_string("\nRegistered seq begin address after split: ");
+			write_ulong((unsigned long) seq->begin);
+			write_string("\nRegistered seq end address after split: ");
+			write_ulong((unsigned long) seq->end);
+			write_string("\n");
+			goto go_ahead;
+		}
+		/* We can handle this if we just have a single mapping.
+		 * The new mapping is bigger, so extend the existing. */
+		else if (seq->nused == 1 && existing_seq->nused == 1)
+		{
+			write_string("Warning: single-element mapping sequence was silently extended\n");
+			parent_end->begin = seq->begin;
+			existing_seq->begin = seq->begin;
+			existing_seq->mappings[0] = seq->mappings[0];
+			return;
+		}
+		else
+		{
+			write_string("Hit mapping sequence pre-extend case we can't handle\n");
+			goto report_problem;
 		}
 	}
-	if (parent_end && parent_begin != parent_end)
-	{  sleep(10); abort(); } // HACK for debugging
-
-	if (parent_begin && !parent_end)
+	else if (parent_begin && !parent_end)
 	{
 		/* If we've been given a mapping sequence of which parent_begin's
 		 * is a suffix, then extend parent_begin to cover the new end
@@ -186,13 +216,107 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 				seq, sizeof *seq);
 			return;
 		}
+		else
+		{
+			write_string("Hit mapping sequence post-extend case we can't handle\n");
+			goto report_problem;
+		}
 	}
-	else if (parent_begin)
+	else if (parent_end && parent_begin && parent_begin == parent_end)
 	{
-		return; // FIXME: more checks please / reconcile differences
+		/* A mapping exists and overlaps a unique existing one. If it's an
+		 * exact match, we can simply return. */
+		existing_seq = (struct mapping_sequence *) parent_begin->meta.un.opaque_data.data_ptr;
+		if (mapping_sequence_suffix(existing_seq, seq) && mapping_sequence_suffix(seq, existing_seq))
+		{
+			return;
+		}
+		else if (mapping_sequence_prefix(seq, existing_seq))
+		{
+			/* The new sequence is a prefix of the existing one. In other words,
+			 * something has changed meaning we wouldn't create the last bit
+			 * of the existing sequence now. Simply chop it off. */
+			write_string("Warning: mapping sequence was silently truncated at ");
+			write_ulong((unsigned long) seq->end);
+			write_string(" up to ");
+			write_ulong((unsigned long) existing_seq->end);
+			write_string("\n");
+			memcpy(existing_seq, seq, sizeof *seq);
+			parent_begin->end = seq->end;
+			return;
+		}
+		else if (mapping_sequence_suffix(seq, existing_seq))
+		{
+			/* The new sequence is a suffix of the existing one. */
+		}
+		else
+		{
+			write_string("Hit mapping sequence bounds-matched content-unequal case we can't handle\n");
+			goto report_problem;
+		}
 	}
+	else if (parent_end && parent_begin && parent_begin != parent_end)
+	{
+		/* HM. We cover more than one mapping sequence. Not good. */
+		write_string("Hit mapping sequence multi-overlap case we can't handle\n");
+		goto report_problem;
+	}
+	else abort(); // we should have covered all the cases
 
+go_ahead:
 	add_mapping_sequence_bigalloc(seq);
+	return;
+report_problem:
+	write_string("Saw a mapping sequence conflicting with existing one\n");
+	write_string("\nNew seq begin address: ");
+	write_ulong((unsigned long) seq->begin);
+	write_string("\nNew seq end address: ");
+	write_ulong((unsigned long) seq->end);
+	write_string("\nNew seq mapping count: ");
+	write_ulong((unsigned long) seq->nused);
+	for (unsigned i = 0; i < seq->nused; ++i)
+	{
+		write_string("\nNew seq mapping ");
+		write_ulong((unsigned long) i);
+		write_string(": begin ");
+		write_ulong((unsigned long) seq->mappings[i].begin);
+		write_string(" end ");
+		write_ulong((unsigned long) seq->mappings[i].end);
+	}
+	if (parent_end)
+	{
+		write_string("\nExisting end-bigalloc begin address: ");
+		write_ulong((unsigned long) parent_end->begin);
+		write_string("\nExisting end-bigalloc end address: ");
+		write_ulong((unsigned long) parent_end->end);
+	}
+	if (parent_begin)
+	{
+		write_string("\nExisting begin-bigalloc begin address: ");
+		write_ulong((unsigned long) parent_end->begin);
+		write_string("\nExisting begin-bigalloc end address: ");
+		write_ulong((unsigned long) parent_end->end);
+	}
+	if (existing_seq)
+	{
+		write_string("\nExisting seq begin address: ");
+		write_ulong((unsigned long) existing_seq->begin);
+		write_string("\nExisting seq end address: ");
+		write_ulong((unsigned long) existing_seq->end);
+		write_string("\nExisting seq mapping count: ");
+		write_ulong((unsigned long) existing_seq->nused);
+		for (unsigned i = 0; i < existing_seq->nused; ++i)
+		{
+			write_string("\nExisting seq mapping ");
+			write_ulong((unsigned long) i);
+			write_string(": begin ");
+			write_ulong((unsigned long) existing_seq->mappings[i].begin);
+			write_string(" end ");
+			write_ulong((unsigned long) existing_seq->mappings[i].end);
+		}
+	}
+	write_string("\n");
+	abort();
 }
 
 /* HACK: we have a special link to the auxv allocator. */
