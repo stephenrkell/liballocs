@@ -86,8 +86,7 @@ static struct big_allocation *add_bigalloc(void *begin, size_t size)
 	return b;
 }
 
-static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
-{
+static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq) {
 	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
 	if (!b) abort();
 	
@@ -106,6 +105,66 @@ static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
 			}
 		}
 	};
+}
+
+static _Bool mapping_sequence_prefix(struct mapping_sequence *s1,
+	struct mapping_sequence *s2)
+{
+	return s1->nused <= s2->nused && 0 == memcmp(&s1->mappings[0],
+		&s2->mappings[0],
+		s1->nused * sizeof (struct mapping_entry));
+}
+
+// FIXME: temporarily hidden to prevent annoying abort() collapsing after inlining
+void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq) __attribute__((visibility("hidden")));
+void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
+{
+	/* Test 1. Find the top-level parent of both the beginning
+	 * and end addresses. It should be the same, perhaps zero.
+	 */
+	struct big_allocation *parent_begin = &big_allocations[pageindex[PAGENUM(seq->begin)]];
+	while (parent_begin->parent) parent_begin = parent_begin->parent;
+	if (parent_begin == &big_allocations[0]) parent_begin = NULL;
+	struct big_allocation *parent_end = &big_allocations[pageindex[PAGENUM(((char*)seq->end)-1)]];
+	while (parent_end->parent) parent_end = parent_end->parent;
+	if (parent_end == &big_allocations[0]) parent_end = NULL;
+
+	if (!parent_begin && parent_end)
+	{
+		struct mapping_sequence *existing_seq = (struct mapping_sequence *)
+			parent_end->meta.un.opaque_data.data_ptr;
+		/* We can handle this if we just have a single mapping.
+		 * The new mapping is bigger, so extend the existing. */
+		if (seq->nused == 1 && existing_seq->nused == 1)
+		{
+			parent_end->begin = seq->begin;
+			existing_seq->mappings[0] = seq->mappings[0];
+		}
+		else { sleep(10); abort(); }
+	}
+	if (parent_end && parent_begin != parent_end)
+	{  sleep(10); abort(); } // HACK for debugging
+
+	if (parent_begin && !parent_end)
+	{
+		/* If we've been given a mapping sequence of which parent_begin's
+		 * is a suffix, then extend parent_begin to cover the new end
+		 * and copy the new mapping sequence in. */
+		if (mapping_sequence_prefix((struct mapping_sequence *) parent_begin->meta.un.opaque_data.data_ptr,
+			seq))
+		{
+			parent_begin->end = seq->end;
+			memcpy(parent_begin->meta.un.opaque_data.data_ptr,
+				seq, sizeof *seq);
+			return;
+		}
+	}
+	else if (parent_begin)
+	{
+		return; // FIXME: more checks please / reconcile differences
+	}
+
+	add_mapping_sequence_bigalloc(seq);
 }
 
 /* HACK: we have a special link to the auxv allocator. */
@@ -443,7 +502,7 @@ void add_missing_mappings_from_proc(void)
 	};
 	for_each_maps_entry(fd, get_a_line_from_maps_fd, linebuf, sizeof linebuf, &entry, add_missing_cb, &current);
 	/* Finish off the last mapping. */
-	if (current.nused > 0) add_mapping_sequence_bigalloc(&current);
+	if (current.nused > 0) add_mapping_sequence_bigalloc_if_absent(&current);
 
 	close(fd);
 }
@@ -865,23 +924,17 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 
 	if (size == 0 || (intptr_t) ent->first < 0)  return 0; // don't add kernel pages
 	
-	// is it present already?
 	assert(pageindex);
-	if (pageindex[PAGENUM(ent->first)] || pageindex[PAGENUM((char*)ent->second - 1)])
-	{
-		/* We used to "return 0" here.
-		 * But there's a race condition: suppose a temorary mmap (from malloc, say)
-		 * exists during the first time we add_missing_maps_from_proc,
-		 * and later has gone away... but *another* mapping partially covers where,
-		 * it used to be, including the beginning and/or the end.
-		 * Then we would silentl think we already had it, and bad things would
-		 * ensure.
-		 *
-		 * Since we assume we are looking at the ground truth whenever we pass over
-		 * the maps file, we can delete any 
-		 */
-		__liballocs_delete_all_bigallocs_overlapping_range(ent->first, ent->second);
-	}
+	/* We might already have this mapping [sequence] as a bigalloc.
+	 * But there's a race condition: suppose a temorary mmap (from malloc, say)
+	 * exists during the first time we add_missing_maps_from_proc,
+	 * and later has gone away... but *another* mapping partially covers where
+	 * it used to be, or some of it.
+	 *
+	 * We keep on pretending we're doing a fresh mapping, and let
+	 * add_mapping_sequence_bigalloc_if_absent reconcile any discrepancies
+	 * with what already exists.
+	 */
 
 	/* If it looks like a stack... */
 	if (0 == strncmp(ent->rest, "[stack", 6))
@@ -904,7 +957,7 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 	_Bool extended = extend_current(cur, ent);
 	if (!extended)
 	{
-		add_mapping_sequence_bigalloc(cur);
+		add_mapping_sequence_bigalloc_if_absent(cur);
 		memset(cur, 0, sizeof (struct mapping_sequence));
 		_Bool began_new = extend_current(cur, ent);
 		if (!began_new) abort();

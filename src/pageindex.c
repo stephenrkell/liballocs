@@ -762,24 +762,26 @@ _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, cons
 	while ((char*) deleted_up_to < (char*) end)
 	{
 		/* Find the next nonzero entry in the pageindex. FIXME: faster loop than 16-bit iteration. */
-		bigalloc_num_t initial_num = PAGENUM((unsigned long) deleted_up_to);
+		unsigned long initial_pagenum = PAGENUM((unsigned long) deleted_up_to);
 		size_t max_len = PAGENUM(ROUND_UP((unsigned long) end, PAGE_SIZE))
-					- initial_num;
+					- initial_pagenum;
 		bigalloc_num_t *pos = &pageindex[PAGENUM(deleted_up_to)];
-		while (*pos && pos != &pageindex[initial_num + max_len]) ++pos;
-		size_t actual_len_nonzero = pos - &pageindex[initial_num];
-		deleted_up_to = (char*) deleted_up_to + PAGE_SIZE * actual_len_nonzero;
+		while (!*pos && pos != &pageindex[initial_pagenum + max_len]) ++pos;
+		size_t actual_len_zero = pos - &pageindex[initial_pagenum];
+		deleted_up_to = (char*) deleted_up_to + PAGE_SIZE * actual_len_zero;
 		if ((char*) deleted_up_to >= (char*) end) break;
 		
 		/* Use the pageindex to find a bigalloc overlapping the range.
 		 * By definition, it parent also overlaps the range, so it must go.
-		 * And by definition, any children must go if their parents go. */
+		 * And by definition, any children must go if their parents go.
+		 * Luckily, bigalloc_del does recursive deletion. */
 		bigalloc_num_t n = pageindex[PAGENUM(deleted_up_to)];
 		if (n)
 		{
-			assert(big_allocations[n].begin);
 			struct big_allocation *b = &big_allocations[n];
+			assert(b->begin); if (!b->begin) abort(); if (!b->end) abort();
 			while (b->parent) b = b->parent;
+			assert((char*) b->end > (char*) deleted_up_to); if (!((char*) b->end > (char*) deleted_up_to)) abort();
 			deleted_up_to = b->end;
 			bigalloc_del(b);
 		} else { assert(0 && "should not have found a bigalloc here"); abort(); }
