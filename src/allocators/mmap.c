@@ -224,6 +224,8 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 	}
 	else if (parent_end && parent_begin && parent_begin == parent_end)
 	{
+		/* FIXME: remember that augment_sequence can handle sloppy mappings,
+		 * so delegate to it if possible. */
 		/* A mapping exists and overlaps a unique existing one. If it's an
 		 * exact match, we can simply return. */
 		existing_seq = (struct mapping_sequence *) parent_begin->meta.un.opaque_data.data_ptr;
@@ -248,6 +250,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 		else if (mapping_sequence_suffix(seq, existing_seq))
 		{
 			/* The new sequence is a suffix of the existing one. */
+			goto report_problem;
 		}
 		else
 		{
@@ -268,7 +271,7 @@ go_ahead:
 	return;
 report_problem:
 	write_string("Saw a mapping sequence conflicting with existing one\n");
-	write_string("\nNew seq begin address: ");
+	write_string("New seq begin address: ");
 	write_ulong((unsigned long) seq->begin);
 	write_string("\nNew seq end address: ");
 	write_ulong((unsigned long) seq->end);
@@ -316,6 +319,13 @@ report_problem:
 		}
 	}
 	write_string("\n");
+	if (existing_seq)
+	{
+		write_string("Nuking any overlapping bigallocs and attempting continue...\n");
+		__liballocs_delete_all_bigallocs_overlapping_range(existing_seq->begin,
+			existing_seq->end);
+		goto go_ahead;
+	}
 	abort();
 }
 
