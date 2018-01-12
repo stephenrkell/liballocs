@@ -180,6 +180,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 					existing_seq->nused * sizeof (struct mapping_entry));
 			seq->nused -= existing_seq->nused;
 			seq->end = existing_seq->begin;
+			__liballocs_truncate_bigalloc_at_end(parent_end, existing_seq->begin);
 			write_string("\nRegistered seq begin address after split: ");
 			write_ulong((unsigned long) seq->begin);
 			write_string("\nRegistered seq end address after split: ");
@@ -192,7 +193,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 		else if (seq->nused == 1 && existing_seq->nused == 1)
 		{
 			write_string("Warning: single-element mapping sequence was silently extended\n");
-			parent_end->begin = seq->begin;
+			__liballocs_pre_extend_bigalloc(parent_end, seq->begin);
 			existing_seq->begin = seq->begin;
 			existing_seq->mappings[0] = seq->mappings[0];
 			return;
@@ -211,7 +212,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 		if (mapping_sequence_prefix((struct mapping_sequence *) parent_begin->meta.un.opaque_data.data_ptr,
 			seq))
 		{
-			parent_begin->end = seq->end;
+			__liballocs_extend_bigalloc(parent_begin, seq->end);
 			memcpy(parent_begin->meta.un.opaque_data.data_ptr,
 				seq, sizeof *seq);
 			return;
@@ -244,7 +245,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 			write_ulong((unsigned long) existing_seq->end);
 			write_string("\n");
 			memcpy(existing_seq, seq, sizeof *seq);
-			parent_begin->end = seq->end;
+			__liballocs_truncate_bigalloc_at_end(parent_begin, seq->end);
 			return;
 		}
 		else if (mapping_sequence_suffix(seq, existing_seq))

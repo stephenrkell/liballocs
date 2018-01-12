@@ -352,14 +352,13 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	 * create a bigalloc record including the caller-supplied metadata. We will fish 
 	 * it out in get_alloc_info. */
 	if (!pageindex) init();
-	// write_string("BlahA001\n");
 	int lock_ret;
 	BIG_LOCK
 	
 	char *chunk_lastbyte = (char*) ptr + size - 1;
 	if (size > BIGGEST_SANE_USER_ALLOC) 
 	{
-		// write_string("BlahAEEE!!!!!!!\n");
+		write_string("Internal error: requested insanely big big allocation\n");
 		abort();
 	}
 
@@ -369,32 +368,59 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	else 
 	{
 		// struct big_allocation *possible_parent = get_common_parent_bigalloc(ptr, chunk_lastbyte);
-		// write_string("BlahA002\n");
 		struct big_allocation *deepest_at_start = find_deepest_bigalloc(ptr);
 		struct big_allocation *deepest_at_end = find_deepest_bigalloc(chunk_lastbyte);
-		// write_string("BlahA003\n");
 		
 		/* These should all be equal. */
 		if (deepest_at_start != deepest_at_end)
 		{
-			// write_string("BlahAFFF!!!!!!!\n");
+			write_string("Internal error: requested big allocation not well nested\n");
+			write_string("Created begin: ");
+			write_ulong((unsigned long) ptr);
+			write_string("\nCreated end: ");
+			write_ulong((unsigned long) ((char*)ptr + size));
+			if (deepest_at_start)
+			{
+				write_string("\nStart deepest existing begin: ");
+				write_ulong((unsigned long) deepest_at_start->begin);
+				write_string("\nStart deepest existing end: ");
+				write_ulong((unsigned long) deepest_at_start->end);
+				write_string("\nStart deepest existing allocator: ");
+				write(2, deepest_at_start->allocated_by->name, strlen(deepest_at_start->allocated_by->name));
+				write_string("\n");
+			}
+			if (deepest_at_end)
+			{
+				write_string("\nEnd deepest existing begin: ");
+				write_ulong((unsigned long) deepest_at_end->begin);
+				write_string("\nEnd deepest existing end: ");
+				write_ulong((unsigned long) deepest_at_end->end);
+				write_string("\nEnd deepest existing allocator: ");
+				write(2, deepest_at_end->allocated_by->name, strlen(deepest_at_end->allocated_by->name));
+				write_string("\n");
+			}
 			abort();
 		}
 		// else looks okay -- we'll check for overlaps in the memset thing (but only if not NDEBUG)
 		else { parent = deepest_at_start; } // might still be NULL!
-		// write_string("BlahA004\n");
 		
 		if (!parent)
 		{
-			// write_string("BlahA005\n");
 			/* No parent is okay only if we're page-aligned (mmap or stack). */
-			if (ROUND_UP_PTR(ptr, PAGE_SIZE) != ptr) abort();
-			if (ROUND_UP_PTR(chunk_lastbyte + 1, PAGE_SIZE) != chunk_lastbyte + 1) abort();
+			if (ROUND_UP_PTR(ptr, PAGE_SIZE) != ptr)
+			{
+				write_string("Internal error: requested top-level big allocation not page-aligned at start\n");
+				abort();
+			}
+			if (ROUND_UP_PTR(chunk_lastbyte + 1, PAGE_SIZE) != chunk_lastbyte + 1)
+			{
+				write_string("Internal error: requested top-level big allocation not page-aligned at end\n");
+				abort();
+			}
 		}
 	}
 	
 	/* Grab a new bigalloc. */
-	// write_string("BlahA006\n");
 	struct big_allocation *b = bigalloc_new(ptr, size, parent, meta, allocated_by);
 	SANITY_CHECK_BIGALLOC(b);
 	
@@ -451,22 +477,18 @@ static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size
 	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator,
 		void *suballocator_meta, void (*suballocator_free_func)(void*))
 {
-	// write_string("BlahB001\n");
 	bigalloc_init_nomemset(b, ptr, size, parent, meta, allocated_by, suballocator,
 		suballocator_meta, suballocator_free_func);
 
 	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
 	/* For each page that this alloc spans, memset it in the page index. */
-	// write_string("BlahB002\n");
 	memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) b->begin, PAGE_SIZE)),
 		b - &big_allocations[0], parent_num, 
 			PAGE_DIST(ROUND_UP((unsigned long) b->begin, PAGE_SIZE),
 				      ROUND_DOWN((unsigned long) b->end, PAGE_SIZE))
 	);
-	// write_string("BlahB003\n");
 	
 	SANITY_CHECK_BIGALLOC(b);
-	// write_string("BlahB004\n");
 }
 
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end) __attribute__((visibility("protected")));
