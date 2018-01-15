@@ -286,7 +286,7 @@ static void bigalloc_del(struct big_allocation *b)
 	void *end_to_clear = b->end;
 	clear_bigalloc_nomemset(b);
 	memset_bigalloc(
-		pageindex + PAGENUM(ROUND_UP((unsigned long) end_to_clear, PAGE_SIZE)),
+		pageindex + PAGENUM(ROUND_UP((unsigned long) begin_to_clear, PAGE_SIZE)),
 		parent_num, (bigalloc_num_t) -1, 
 		PAGE_DIST(ROUND_UP((unsigned long) begin_to_clear, PAGE_SIZE),
 		          ROUND_DOWN((unsigned long) end_to_clear, PAGE_SIZE))
@@ -763,18 +763,7 @@ _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
 	struct big_allocation *b = find_bigalloc(begin, a);
 	if (!b) { BIG_UNLOCK; return 0; }
 	
-	// save the info we need for the memset
-	void *old_begin = b->begin;
-	void *old_end = b->end;
-	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
-	
 	bigalloc_del(b);
-	memset_bigalloc(
-		pageindex + PAGENUM(ROUND_UP((unsigned long) old_begin, PAGE_SIZE)),
-		parent_num, (bigalloc_num_t) -1, 
-		PAGE_DIST(ROUND_UP((unsigned long) old_begin, PAGE_SIZE),
-			      ROUND_DOWN((unsigned long) old_end, PAGE_SIZE))
-	);
 	BIG_UNLOCK;
 	return 1;
 }
