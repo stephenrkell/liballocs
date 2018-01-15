@@ -282,12 +282,14 @@ static void bigalloc_del(struct big_allocation *b)
 	SANITY_CHECK_BIGALLOC(b);
 	
 	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
+	void *begin_to_clear = b->begin;
+	void *end_to_clear = b->end;
 	clear_bigalloc_nomemset(b);
 	memset_bigalloc(
-		pageindex + PAGENUM(ROUND_UP((unsigned long) b->begin, PAGE_SIZE)),
+		pageindex + PAGENUM(ROUND_UP((unsigned long) end_to_clear, PAGE_SIZE)),
 		parent_num, (bigalloc_num_t) -1, 
-		PAGE_DIST(ROUND_UP((unsigned long) b->begin, PAGE_SIZE),
-		          ROUND_DOWN((unsigned long) b->end, PAGE_SIZE))
+		PAGE_DIST(ROUND_UP((unsigned long) begin_to_clear, PAGE_SIZE),
+		          ROUND_DOWN((unsigned long) end_to_clear, PAGE_SIZE))
 	);
 	
 	assert(!BIGALLOC_IN_USE(b));
