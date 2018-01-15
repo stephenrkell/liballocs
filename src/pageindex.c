@@ -381,6 +381,8 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 			write_ulong((unsigned long) ((char*)ptr + size));
 			if (deepest_at_start)
 			{
+				write_string("\nStart deepest bigalloc num: ");
+				write_ulong((unsigned long) pageindex[PAGENUM(ptr)]);
 				write_string("\nStart deepest existing begin: ");
 				write_ulong((unsigned long) deepest_at_start->begin);
 				write_string("\nStart deepest existing end: ");
@@ -391,6 +393,8 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 			}
 			if (deepest_at_end)
 			{
+				write_string("\nEnd deepest bigalloc num: ");
+				write_ulong((unsigned long) pageindex[PAGENUM(chunk_lastbyte)]);
 				write_string("\nEnd deepest existing begin: ");
 				write_ulong((unsigned long) deepest_at_end->begin);
 				write_string("\nEnd deepest existing end: ");
