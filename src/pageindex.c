@@ -795,6 +795,9 @@ _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, cons
 		while (!*pos && pos != &pageindex[initial_pagenum + max_len]) ++pos;
 		size_t actual_len_zero = pos - &pageindex[initial_pagenum];
 		deleted_up_to = (char*) deleted_up_to + PAGE_SIZE * actual_len_zero;
+		write_string("Deleted up to address ");
+		write_ulong((unsigned long) deleted_up_to);
+		write_string("\n");
 		if ((char*) deleted_up_to >= (char*) end) break;
 		
 		/* Use the pageindex to find a bigalloc overlapping the range.
@@ -802,14 +805,21 @@ _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, cons
 		 * And by definition, any children must go if their parents go.
 		 * Luckily, bigalloc_del does recursive deletion. */
 		bigalloc_num_t n = pageindex[PAGENUM(deleted_up_to)];
+		write_string("Got bigalloc num: ");
+		write_ulong((unsigned long) n);
+		write_string("\n");
 		if (n)
 		{
 			struct big_allocation *b = &big_allocations[n];
 			assert(b->begin); if (!b->begin) abort(); if (!b->end) abort();
 			while (b->parent) b = b->parent;
 			assert((char*) b->end > (char*) deleted_up_to); if (!((char*) b->end > (char*) deleted_up_to)) abort();
+			const void *old_deleted_up_to = deleted_up_to;
 			deleted_up_to = b->end;
 			bigalloc_del(b);
+			write_string("Pageindex now has bigalloc num: ");
+			write_ulong((unsigned long) pageindex[PAGENUM(old_deleted_up_to)]);
+			write_string("\n");
 		} else { assert(0 && "should not have found a bigalloc here"); abort(); }
 	}
 	
