@@ -1161,12 +1161,6 @@ int __liballocs_global_init(void)
 	// print a summary when the program exits
 	atexit(print_exit_summary);
 	
-	// delay start-up here if the user asked for it
-	if (getenv("LIBALLOCS_DELAY_STARTUP"))
-	{
-		sleep(10);
-	}
-	
 	// figure out where our output goes
 	const char *errvar = getenv("LIBALLOCS_ERR");
 	if (errvar)
