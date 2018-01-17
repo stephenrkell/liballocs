@@ -390,6 +390,17 @@ report_problem:
 	if (existing_seq)
 	{
 		write_string("Nuking any overlapping bigallocs and attempting continue...\n");
+		/* If we're about to nuke the data segment mapping, clear our pointer to it.
+		 * Note that a change in the program break is the big reason for hitting
+		 * this case in the first place. */
+		if (executable_data_segment_mapping_bigalloc
+				&& (char*) executable_data_segment_mapping_bigalloc->end
+					> (char*) existing_seq->begin
+				&& (char*) executable_data_segment_mapping_bigalloc->begin
+					< (char*) existing_seq->end)
+		{
+			executable_data_segment_mapping_bigalloc = NULL; // FIXME: when will it get reinstated?
+		}
 		__liballocs_delete_all_bigallocs_overlapping_range(existing_seq->begin,
 			existing_seq->end);
 		goto go_ahead;
@@ -769,13 +780,56 @@ _Bool __mmap_allocator_notify_unindexed_address(const void *mem)
 		&& (char *) mem < (char *) new_sbrk);
 }
 
+static uintptr_t executable_data_segment_start_addr;
+static void set_executable_data_segment_mapping_bigalloc(void)
+{
+	/* We can be called more than once. */
+	if (executable_data_segment_mapping_bigalloc) return;
+	
+	/* Can't do anything if we haven't seen the data segment yet. */
+	if (!executable_data_segment_start_addr) return;
+	
+	/* Which bigalloc is top-level and spans the executable's data segment
+	 * *start*? */
+	for (int i = 1; BIGALLOC_IN_USE(&big_allocations[i]); ++i)
+	{
+		if (!big_allocations[i].parent)
+		{
+			// write_string("Top-level bigalloc end ");
+			// write_ulong((unsigned long) big_allocations[i].end);
+			// write_string("\n");
+			/* Does this include the data segment? */
+			if ((uintptr_t) big_allocations[i].end >= executable_data_segment_start_addr
+					&& (uintptr_t) big_allocations[i].begin <= executable_data_segment_start_addr)
+			{
+				executable_data_segment_mapping_bigalloc = &big_allocations[i];
+				break;
+			}
+		}
+	}
+	if (!executable_data_segment_mapping_bigalloc) abort();
+	/* We expect the data segment's suballocator to be malloc, so pre-ordain that.
+	 * NOTE that there will also be a nested allocation under it, that is the 
+	 * static allocator's segment bigalloc. We don't consider the sbrk area
+	 * to be a child of that; it's a sibling. FIXME: is this okay? */
+	executable_data_segment_mapping_bigalloc->suballocator = &__generic_malloc_allocator;
+}
+
 void __mmap_allocator_init(void) __attribute__((constructor(101)));
 void __mmap_allocator_init(void)
 {
 	if (!initialized && !trying_to_initialize)
 	{
 		trying_to_initialize = 1;
-		
+
+		/* Delay start-up here if the user asked for it. We do this here
+		 * because we should run earlier than the startup code in
+		 * liballocs.c. */
+		if (getenv("LIBALLOCS_DELAY_STARTUP"))
+		{
+			sleep(10);
+		}
+
 		/* Grab the executable's end address
 		 * We used to try dlsym()'ing "_end", but that doesn't work:
 		 * not all executables have _end and _begin exported as dynamic syms.
@@ -824,7 +878,7 @@ void __mmap_allocator_init(void)
 			}
 		}
 		executable_end_addr = (void*) biggest_end_seen;
-		uintptr_t executable_data_segment_start_addr = biggest_start_seen;
+		executable_data_segment_start_addr = biggest_start_seen;
 		assert(executable_end_addr != 0);
 		// assert((char*) executable_end_addr < (char*) BIGGEST_SANE_EXECUTABLE_VADDR);
 		// write_string("Executable highest phdr end address: ");
@@ -849,35 +903,13 @@ void __mmap_allocator_init(void)
 		 * (in the indexing logic, or in pageindex) to have a second-attempt
 		 * at getting the bigalloc after re-checking the sbrk(). */
 		add_missing_mappings_from_proc();
-		/* Which bigalloc is top-level and spans the executable's data segment
-		 * *start*? */
-		for (int i = 1; BIGALLOC_IN_USE(&big_allocations[i]); ++i)
-		{
-			if (!big_allocations[i].parent)
-			{
-				// write_string("Top-level bigalloc end ");
-				// write_ulong((unsigned long) big_allocations[i].end);
-				// write_string("\n");
-				/* Does this include the data segment? */
-				if ((uintptr_t) big_allocations[i].end >= executable_data_segment_start_addr
-						&& (uintptr_t) big_allocations[i].begin <= executable_data_segment_start_addr)
-				{
-					executable_data_segment_mapping_bigalloc = &big_allocations[i];
-					break;
-				}
-			}
-		}
-		if (!executable_data_segment_mapping_bigalloc) abort();
-		/* We expect the data segment's suballocator to be malloc, so pre-ordain that.
-		 * NOTE that there will also be a nested allocation under it, that is the 
-		 * static allocator's segment bigalloc. We don't consider the sbrk area
-		 * to be a child of that; it's a sibling. FIXME: is this okay? */
-		executable_data_segment_mapping_bigalloc->suballocator = &__generic_malloc_allocator;
 		
 		/* Also extend the data segment to account for the current brk. */
+		set_executable_data_segment_mapping_bigalloc();
 		update_data_segment_end(sbrk(0));
 		__liballocs_global_init(); // will add mappings; may change sbrk
 		add_missing_mappings_from_proc();
+		set_executable_data_segment_mapping_bigalloc();
 
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
@@ -900,6 +932,12 @@ void copy_all_right_from_by(struct mapping_sequence *s, int from, int by)
 	memmove(s->mappings + from + by, s->mappings + from,
 		sizeof (struct mapping_entry) * (s->nused - from));
 	s->nused += by;
+}
+
+static void check_mapping_sequence_sanity(struct mapping_sequence *cur)
+{
+	assert(cur->nused > 0);
+	assert(cur->end == cur->mappings[cur->nused - 1].end);
 }
 
 static _Bool augment_sequence(struct mapping_sequence *cur, 
@@ -1107,8 +1145,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 	
 	abort();
 out:
-	assert(cur->nused > 0);
-	assert(cur->end == cur->mappings[cur->nused - 1].end);
+	check_mapping_sequence_sanity(cur);
 	return ret;
 }
 
@@ -1205,6 +1242,9 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 
 static void update_data_segment_end(void *new_curbrk)
 {
+	/* If we haven't made the bigalloc yet, sbrk needs no action. */
+	if (!executable_data_segment_mapping_bigalloc) return;
+	
 	struct mapping_sequence *seq
 	 = executable_data_segment_mapping_bigalloc->meta.un.opaque_data.data_ptr;
 	char *old_end = executable_data_segment_mapping_bigalloc->end;
@@ -1219,7 +1259,8 @@ static void update_data_segment_end(void *new_curbrk)
 	else if ((char*) new_curbrk > (char*) old_end)
 	{
 		/* We're expanding. */
-		__liballocs_extend_bigalloc(executable_data_segment_mapping_bigalloc, new_curbrk);
+		seq->end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE);
+		__liballocs_extend_bigalloc(executable_data_segment_mapping_bigalloc, seq->end);
 		void *prev_mapping_end = seq->mappings[seq->nused - 1].end;
 		if (!seq->mappings[seq->nused - 1].is_anon)
 		{
@@ -1228,15 +1269,16 @@ static void update_data_segment_end(void *new_curbrk)
 			 * We have to pretend an anonymous mapping is there. */
 			seq->mappings[seq->nused++] = (struct mapping_entry) {
 				.begin = prev_mapping_end,
-				.end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE), 
+				.end = seq->end,
 				.prot = PROT_READ | PROT_WRITE,
 				.flags = 0,
 				.offset = 0,
 				.is_anon = 1,
 			};
 		}
-		else seq->mappings[seq->nused - 1].end = new_curbrk;
+		else seq->mappings[seq->nused - 1].end = seq->end;
 	}
+	check_mapping_sequence_sanity(seq);
 }
 
 void __mmap_allocator_notify_brk(void *new_curbrk)
