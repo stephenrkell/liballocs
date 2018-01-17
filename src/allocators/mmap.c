@@ -92,7 +92,6 @@ static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq) {
 	
 	/* Note that this will use early_malloc if we would otherwise be reentrant. */
 	struct mapping_sequence *copy = __wrap_dlmalloc(sizeof (struct mapping_sequence));
-	/* FIXME: free this somewhere? */
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
 	
@@ -107,12 +106,43 @@ static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq) {
 	};
 }
 
+static _Bool mapping_entry_equal(struct mapping_entry *e1,
+		struct mapping_entry *e2)
+{
+	return e1->begin == e2->begin &&
+		e1->end == e2->end &&
+		e1->prot == e2->prot &&
+		e1->flags == e2->flags &&
+		e1->offset == e2->offset &&
+		e1->is_anon == e2->is_anon &&
+		e1->caller == e2->caller;
+}
+static _Bool mapping_entries_equal(struct mapping_entry *e1,
+		struct mapping_entry *e2,
+		size_t n)
+{
+	for (unsigned i = 0; i < n; ++i)
+	{
+		if (!mapping_entry_equal(e1 + i, e2 + i))
+		{
+			write_string("Mapping entries differ: ");
+			write_ulong((unsigned long) e1 + i);
+			write_string(" ");
+			write_ulong((unsigned long) e2 + i);
+			write_string("\n");
+			
+			return 0;
+		}
+	}
+	return 1;
+}
+
 static _Bool mapping_sequence_prefix(struct mapping_sequence *s1,
 	struct mapping_sequence *s2)
 {
-	return s1->nused <= s2->nused && 0 == memcmp(&s1->mappings[0],
+	return s1->nused <= s2->nused && mapping_entries_equal(&s1->mappings[0],
 		&s2->mappings[0],
-		s1->nused * sizeof (struct mapping_entry));
+		s1->nused);
 }
 static _Bool mem_range_prefix(struct mapping_sequence *s1,
 	struct mapping_sequence *s2)
@@ -123,10 +153,10 @@ static _Bool mapping_sequence_suffix(struct mapping_sequence *s1,
 	struct mapping_sequence *s2)
 {
 	return s1->nused <= s2->nused &&
-		0 == memcmp(
+		mapping_entries_equal(
 			&s2->mappings[s2->nused - s1->nused],
 			&s1->mappings[0],
-			s1->nused * sizeof (struct mapping_entry));
+			s1->nused);
 }
 static _Bool mem_range_suffix(struct mapping_sequence *s1,
 	struct mapping_sequence *s2)
@@ -236,6 +266,43 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 		}
 		else if (mapping_sequence_prefix(seq, existing_seq))
 		{
+			/* The sequences are not equal. But maybe only metadata changed... */
+			if (seq->end == existing_seq->end)
+			{
+				write_string("Warning: mapping metadata changed. This probably shouldn't happen.");
+				for (struct mapping_sequence *i_seq = existing_seq; i_seq; 
+						i_seq = (i_seq == existing_seq) ? seq : NULL)
+				{
+					write_string("\nSequence begin: ");
+					write_ulong((unsigned long) i_seq->begin);
+					write_string("; end: ");
+					write_ulong((unsigned long) i_seq->end);
+					write_string("\nUsed count: ");
+					write_ulong((unsigned long) i_seq->nused);
+					for (unsigned i = 0; i < i_seq->nused; ++i)
+					{
+						write_string("\nMapping ");
+						write_ulong((unsigned long) i);
+						write_string(": begin ");
+						write_ulong((unsigned long) i_seq->mappings[i].begin);
+						write_string(" end ");
+						write_ulong((unsigned long) i_seq->mappings[i].end);
+						write_string(" prot ");
+						write_ulong((unsigned long) i_seq->mappings[i].prot);
+						write_string(" flags ");
+						write_ulong((unsigned long) i_seq->mappings[i].flags);
+						write_string(" caller ");
+						write_ulong((unsigned long) i_seq->mappings[i].caller);
+						write_string(" offset ");
+						write_ulong((unsigned long) i_seq->mappings[i].offset);
+						write_string(" is_anon ");
+						write_ulong((unsigned long) i_seq->mappings[i].is_anon);
+					}
+				}
+				write_string("\n");
+				memcpy(existing_seq, seq, sizeof *seq);
+				return;
+			}
 			/* The new sequence is a prefix of the existing one. In other words,
 			 * something has changed meaning we wouldn't create the last bit
 			 * of the existing sequence now. Simply chop it off. */
@@ -839,7 +906,8 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename,
 	void *caller)
 {
-	if (!cur) return 0;
+	_Bool ret;
+	if (!cur) { ret = 0; goto out; }
 #define OVERLAPS(b1, e1, b2, e2) \
     ((char*) (b1) < (char*) (e2) \
     && (char*) (e1) >= (char*) (b2))
@@ -872,7 +940,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 						  == get_highest_loaded_object_below(cur->mappings[cur->nused - 1].caller)))
 					// ... but if we're not beginning afresh, can't go from anonymous to with-name
 					|| (filename && cur->filename && 0 == strcmp(filename, cur->filename));
-			if (!filename_is_consistent) return 0;
+			if (!filename_is_consistent) { ret = 0; goto out; }
 			
 			if (!cur->begin) cur->begin = begin;
 			cur->end = end;
@@ -887,7 +955,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 				.caller = caller
 			};
 			++(cur->nused);
-			return 1;
+			ret = 1; goto out;
 		}
 		else
 		{
@@ -962,7 +1030,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 						  == get_highest_loaded_object_below(cur->mappings[first_overlapped].caller));
 				}
 			}
-			if (!filename_is_consistent) return 0;
+			if (!filename_is_consistent) { ret = 0; goto out; }
 
 			/* If there's only one affected, *and* it's being cleanly replaced,
 			 * just update it directly. */
@@ -978,7 +1046,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 // 					.is_anon = !filename,
 // 					.caller = caller
 // 				};
-// 				return 1;
+// 				ret = 1; goto out;
 // 			}
 			
 			/* The number of obsolete mappings is the number to be
@@ -1032,10 +1100,16 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 				.is_anon = !filename,
 				.caller = caller
 			};
-			return 1;
+			ret = 1; goto out;
 			
 		}
-	} else return 0;
+	} else { ret = 0; goto out; }
+	
+	abort();
+out:
+	assert(cur->nused > 0);
+	assert(cur->end == cur->mappings[cur->nused - 1].end);
+	return ret;
 }
 
 static _Bool extend_current(struct mapping_sequence *cur, struct maps_entry *ent)
