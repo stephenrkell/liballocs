@@ -210,7 +210,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 					existing_seq->nused * sizeof (struct mapping_entry));
 			seq->nused -= existing_seq->nused;
 			seq->end = existing_seq->begin;
-			__liballocs_truncate_bigalloc_at_end(parent_end, existing_seq->begin);
+			/* Don't touch the parent end bigalloc. We're leaving it as-is. */
 			write_string("\nRegistered seq begin address after split: ");
 			write_ulong((unsigned long) seq->begin);
 			write_string("\nRegistered seq end address after split: ");
