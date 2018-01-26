@@ -28,7 +28,14 @@ static void fix_mapping_metadata(void *ptr)
 		if (b && b->allocated_by == &__mmap_allocator)
 		{
 			b->meta.un.opaque_data.data_ptr = NULL;
-		} else abort();
+		}
+		else
+		{
+			/* dlmalloc might have made a new arena mmap, which we didn't trap
+			 * because... WHY? It should call our mmap wrapper in preload.c,
+			 * which should record the mapping. */
+			abort();
+		}
 	}
 	else
 	{

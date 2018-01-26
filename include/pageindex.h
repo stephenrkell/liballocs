@@ -82,8 +82,8 @@ struct big_allocation
 	struct big_allocation *first_child;
 	struct allocator *allocated_by; // should always be parent->suballocator
 	struct allocator *suballocator; // ... suballocated bigallocs may have only small children
-	struct meta_info meta;
-	void *suballocator_meta;
+	struct meta_info meta;          // metadata for use by the `allocated_by' allocator
+	void *suballocator_meta;        // metadata for use by the suballocator, if any
 	void (*suballocator_free_func)(void*);
 };
 #define BIGALLOC_IN_USE(b) ((b)->begin && (b)->end)
