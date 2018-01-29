@@ -38,7 +38,7 @@ antlr-3.4.tar.gz:
 	wget http://www.antlr3.org/download/antlr-3.4.tar.gz
 
 libantlr3c-3.4/configure: antlr-3.4.tar.gz
-	mkdir -p libantlr3c-3.4 && cd libantlr3c-3.4 && tar --strip-components=3 -k -xvzf "$(CONTRIB_ROOT)/$<" antlr-3.4/runtime/C
+	mkdir -p libantlr3c-3.4 && cd libantlr3c-3.4 && tar --strip-components=3 --keep-newer-files -xvzf "$(CONTRIB_ROOT)/$<" antlr-3.4/runtime/C
 	cd libantlr3c-3.4 && patch -p1 < "$(CONTRIB_ROOT)"/libantlr3c-3.4-getparent-allow-null.patch
 	cd libantlr3c-3.4 && aclocal && \
                 autoconf && \
