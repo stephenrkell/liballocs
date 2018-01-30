@@ -39,7 +39,8 @@ antlr-3.4.tar.gz:
 
 libantlr3c-3.4/configure: antlr-3.4.tar.gz
 	mkdir -p libantlr3c-3.4 && cd libantlr3c-3.4 && tar --strip-components=3 --keep-newer-files -xvzf "$(CONTRIB_ROOT)/$<" antlr-3.4/runtime/C
-	cd libantlr3c-3.4 && patch -p1 < "$(CONTRIB_ROOT)"/libantlr3c-3.4-getparent-allow-null.patch
+	# HACK: if the patch fails, it's probably because we've already applied it in an earlier failed run of these rules
+	cd libantlr3c-3.4 && patch -p1 < "$(CONTRIB_ROOT)"/libantlr3c-3.4-getparent-allow-null.patch </dev/null || true
 	cd libantlr3c-3.4 && aclocal && \
                 autoconf && \
                 autoheader && \
