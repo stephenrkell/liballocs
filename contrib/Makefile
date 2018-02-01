@@ -32,6 +32,7 @@ build-libantlr3c++ build-libantlr3c build-libdlbind build-libsystrap
 .PHONY: clean default
 
 CONFIG_MK += include $$(dir $$(lastword $$(MAKEFILE_LIST)))/libdwarfpp/contrib/config.mk
+config.mk: build-libdwarfpp
 
 # ----------------------------antlr things
 antlr-3.4.tar.gz:
