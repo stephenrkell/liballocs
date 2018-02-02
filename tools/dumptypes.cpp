@@ -28,7 +28,15 @@
 
 #include <elf.h>
 #include <link.h>
-#include "libelf/gelf.h"
+
+#include "config.h"
+#if defined(HAVE_GELF_H)
+#include <gelf.h>
+#elif defined(HAVE_LIBELF_GELF_H)
+#include <libelf/gelf.h>
+#else
+#error "Could not find a gelf.h"
+#endif
 
 using std::cin;
 using std::cout;

@@ -20,7 +20,14 @@
 #include <dwarfpp/frame.hpp>
 #include <dwarfpp/regs.hpp>
 #include <fileno.hpp>
+#include "config.h"
+#if defined(HAVE_GELF_H)
 #include <gelf.h>
+#elif defined(HAVE_LIBELF_GELF_H)
+#include <libelf/gelf.h>
+#else
+#error "Could not find a gelf.h"
+#endif
 
 #include "helpers.hpp"
 #include "uniqtypes.hpp"
