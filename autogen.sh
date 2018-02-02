@@ -1,7 +1,7 @@
 #!/bin/sh
 aclocal && \
 autoconf && \
-libtoolize --ltdl && \
+libtoolize --force --ltdl && \
 (test -f libltdl/ltdl.mk || cd libltdl && ln -s Makefile.inc ltdl.mk) && \
 autoheader && \
 automake --add-missing && \
