@@ -35,6 +35,7 @@ using dwarf::core::iterator_base;
 using dwarf::core::root_die;
 using dwarf::core::abstract_die;
 using dwarf::core::program_element_die;
+using dwarf::core::with_static_location_die;
 using dwarf::core::variable_die;
 using dwarf::core::type_die;
 using dwarf::core::type_set;
@@ -66,38 +67,92 @@ int main(int argc, char **argv)
 	/* populate the subprogram and types lists. */
 	char buf[4096];
 	set<string> element_names;
+	boost::icl::interval_set<Dwarf_Addr> //, Dwarf_Unsigned /*dummy*/> 
+		element_addrs;
 	map<string, iterator_base> named_element_dies;
 	while (in.getline(buf, sizeof buf - 1))
 	{
 		/* Find a toplevel grandchild that is a subprogram of this name. */
-		element_names.insert(buf);
+		Dwarf_Addr maybe_addr = 0;
+		std::istringstream s(buf);
+		s >> std::hex >> maybe_addr;
+		if (maybe_addr != 0)
+		{
+			//std::set<Dwarf_Unsigned> singleton_set;
+			//singleton_set.insert(0ul);
+			element_addrs.insert(
+				//boost::icl::right_open_interval<Dwarf_Addr>
+				boost::icl::interval_set<Dwarf_Addr>::interval_type
+					(maybe_addr, maybe_addr + 1)
+			);
+			// += make_pair(
+				//boost::icl::right_open_interval<Dwarf_Addr>(maybe_addr, maybe_addr + 1),
+				//singleton_set
+				//0ul
+			//);
+		}
+		else element_names.insert(buf);
 	}
 
 	set<iterator_base> dies;
 	type_set types;
-	gather_interface_dies(r, dies, types, [element_names, &named_element_dies](const iterator_base& i){
+	bool match_all = (element_names.size() == 0) && (element_addrs.size() == 0);
+	if (!match_all)
+	{
+		std::cerr << "Looking for names: ";
+		for (auto i_name = element_names.begin(); i_name != element_names.end(); ++i_name)
+		{
+			if (i_name != element_names.begin()) std::cerr << ", ";
+			std::cerr << *i_name;
+		}
+		std::cerr << std::endl << "Looking for addresses: ";
+		for (auto i_addr = element_addrs.begin(); i_addr != element_addrs.end(); ++i_addr)
+		{
+			std::cerr << std::hex << "0x" << i_addr->lower() << " ";
+		}
+		std::cerr << std::endl;
+	}
+	
+	gather_interface_dies(r, dies, types, [element_names, element_addrs, match_all, &r, &named_element_dies](const iterator_base& i){
 		/* This is the basic test for whether an interface element is of 
 		 * interest. For us, it's just whether it's a visible subprogram or variable
 		 * in our list. Or, if our list is empty, it's any subprogram. Variables too!*/
 		auto i_pe = i.as_a<program_element_die>();
+		auto found_element_name = element_names.end();
+		boost::icl::interval_map<Dwarf_Addr, Dwarf_Unsigned /*dummy*/> found_intervals;
+		bool retval;
 		if (i_pe && i_pe.name_here()
 			&& ((i_pe.is_a<variable_die>() && i_pe.as_a<variable_die>()->has_static_storage())
 				|| i_pe.is_a<subprogram_die>())
 			&& (!i_pe->get_visibility() || *i_pe->get_visibility() == DW_VIS_exported)
 			&& (
-				element_names.size() == 0 
-				|| element_names.find(*i_pe.name_here()) != element_names.end()))
+				match_all
+				|| element_names.end() != (found_element_name = element_names.find(*i_pe.name_here()))
+				|| (i_pe.is_a<with_static_location_die>() &&
+					!((found_intervals = i_pe.as_a<with_static_location_die>()->file_relative_intervals(r, nullptr, nullptr))
+						& element_addrs).empty())
+			))
 		{
-			if (element_names.size() == 0)
+			if (match_all)
 			{
-				return true;
+				retval = true;
 			}
-			else if (element_names.find(*i_pe.name_here()) != element_names.end())
+			else if (!found_intervals.empty())
+			{
+				retval = true;
+				if (i_pe.name_here())
+				{
+					named_element_dies[*i_pe.name_here()] = i;
+				}
+			}
+			else if (found_element_name != element_names.end())
 			{
 				named_element_dies[*i_pe.name_here()] = i;
-				return true;
-			} else return false;
-		} else return false;
+				retval = true;
+			} else retval = false;
+		} else retval = false;
+		
+		return retval;
 	});
 	
 	/* Now build a master relation and emit it. */
@@ -120,10 +175,10 @@ int main(int argc, char **argv)
 	
 	/* Also write a mapping from the named elements the user requested 
 	 * to their uniqtypes. */
-	for (auto i_el = element_names.begin(); i_el != element_names.end(); ++i_el)
+	for (auto i_el = named_element_dies.begin(); i_el != named_element_dies.end(); ++i_el)
 	{
-		string name = *i_el;
-		iterator_base i = named_element_dies[name];
+		string name = i_el->first;
+		iterator_base i = i_el->second;
 		if (!i)
 		{
 			cerr << "Warning: did not find an element named " << name << "; skipping." << endl;
