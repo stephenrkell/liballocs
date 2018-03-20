@@ -46,8 +46,15 @@ tools_allocsites_SOURCES = tools/allocsites.cpp $(HELPERS)
 tools_allocsites_LDADD = $(TOOLS_LDADD)
 tools_usedtypes_SOURCES = tools/usedtypes.cpp $(HELPERS)
 tools_usedtypes_LDADD = $(TOOLS_LDADD)
+# massive HACKs for ifacetypes
+tools_ifacetypes_CXXFLAGS = $(AM_CXXFLAGS) -I$(libsystrap)
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
-tools_ifacetypes_LDADD = $(TOOLS_LDADD)
+vpath %.c $(libsystrap)/../contrib/x86_emulate
+x86_emulate.o: CFLAGS += -include $(libsystrap)/x86_defs.h
+x86_emulate.o: .depbase
+.depbase:
+	mkdir -p "$@"
+tools_ifacetypes_LDADD = $(TOOLS_LDADD) x86_emulate.o
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
 
@@ -95,13 +102,17 @@ else
 DWARFIDL_CXXFLAGS = $(DWARFIDL_CFLAGS)
 endif
 
+LIBSYSTRAP = $(libsystrap)
+LIBMALLOCHOOKS = $(libmallochooks)
+LIBDLBIND = $(libdlbind)
+
 export LIBCXXFILENO_CXXFLAGS LIBCXXFILENO_LIBS \
 LIBSRK31CXX_CXXFLAGS LIBSRK31CXX_LIBS \
 LIBDWARFPP_CXXFLAGS LIBDWARFPP_LIBS \
 LIBCXXGEN_CXXFLAGS LIBCXXGEN_LIBS \
 LIBANTLR3CXX_CXXFLAGS LIBANTLR3CXX_LIBS \
 DWARFIDL_CXXFLAGS DWARFIDL_LIBS \
-TRAP_SYSCALLS MALLOC_HOOKS LIBDLBIND \
+LIBSYSTRAP LIBMALLOCHOOKS LIBDLBIND \
 CC CXX CPP CXXFLAGS LDFLAGS LDLIBS
 
 include libltdl/ltdl.mk

@@ -99,6 +99,46 @@ AC_SUBST(LIBDLBIND, $LIBDLBIND)
 AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [Enable debug mode]))
 AC_ARG_ENABLE([real-libunwind], AS_HELP_STRING([--enable-real-libunwind], [Use real libunwind (by default we have our own)]))
 
+AC_ARG_WITH([libsystrap],
+            [AS_HELP_STRING([--with-libsystrap=DIR],
+              [where to find libsystrap (headers and source)])],
+            [
+                if test -d "$withval"
+                then
+                        ac_libsystrap="$withval"
+                else
+                        AC_MSG_ERROR(--with-libsystrap expected directory name)
+                fi
+            ],
+            [ac_libsystrap=$(realpath $srcdir)/contrib/trap-syscalls/libsystrap])
+AC_ARG_WITH([libmallochooks],
+            [AS_HELP_STRING([--with-libmallochooks=DIR],
+              [where to find libmallochooks (headers, source, templates)])],
+            [
+                if test -d "$withval"
+                then
+                        ac_libmallochooks="$withval"
+                else
+                        AC_MSG_ERROR(--with-libmallochooks expected directory name)
+                fi
+            ],
+            [ac_libmallochooks=$(realpath $srcdir)/contrib/libmallochooks])
+AC_ARG_WITH([libdlbind],
+            [AS_HELP_STRING([--with-libdlbind=DIR],
+              [where to find libdlbind (headers, source)])],
+            [
+                if test -d "$withval"
+                then
+                        ac_libdlibnd="$withval"
+                else
+                        AC_MSG_ERROR(--with-libdlbind expected directory name)
+                fi
+            ],
+            [ac_libdlbind=$(realpath $srcdir)/contrib/libdlbind])
+
+AC_SUBST([libmallochooks], [$ac_libmallochooks])
+AC_SUBST([libsystrap], [$ac_libsystrap])
+AC_SUBST([libdlbind], [$ac_libdlbind])
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])
 AM_CONDITIONAL(USE_REAL_LIBUNWIND, [test "x$enable_real-libunwind" = "xyes"])
 

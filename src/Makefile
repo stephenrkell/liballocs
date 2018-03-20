@@ -1,9 +1,6 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 SRCROOT := $(dir $(THIS_MAKEFILE))../
-MALLOC_HOOKS ?= $(SRCROOT)contrib/libmallochooks #./../libmallochooks.hg
-TRAP_SYSCALLS ?= $(SRCROOT)contrib/trap-syscalls
-LIBDLBIND ?= $(SRCROOT)contrib/libdlbind
 
 # HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
 # object. It complains about __next_malloc_hook et al being undefined, even though
@@ -13,8 +10,8 @@ LIBDLBIND ?= $(SRCROOT)contrib/libdlbind
 HOOKS_PRELOAD_OBJS := malloc_hook_stubs_preload_fast.o event_hooks_fast.o
 HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
 
-CFLAGS += -std=gnu11 -Wall -g -I../include -I$(SRCROOT)/include -I$(MALLOC_HOOKS) \
-   -I$(TRAP_SYSCALLS)/libsystrap -I$(LIBDLBIND)/include -I$(SRCROOT)/src -Wno-unused
+CFLAGS += -std=gnu11 -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS) \
+   -I$(LIBSYSTRAP) -I$(LIBDLBIND)/include -I$(SRCROOT)/src -Wno-unused
 
 ifeq ($(DEBUG),1)
     DEFAULT_EXTRA_CFLAGS := -g
@@ -83,14 +80,14 @@ endif
 # GRR. We can't include the Makerules now that we need to build the hooks by 
 # two different methods. Also, we can't get dependency information about these
 # files from the makefiles. So we always want to run these rules. HMM.
-malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o: $(MALLOC_HOOKS)/malloc_hook_stubs_wrap.c
-	CFLAGS="$(CFLAGS) -fPIC" $(MAKE) MALLOC_HOOKS_METHOD=preload -f $(MALLOC_HOOKS)/Makerules malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o
-malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o: $(MALLOC_HOOKS)/malloc_hook_stubs_wrap.c
-	$(MAKE) MALLOC_HOOKS_METHOD=wrap -f $(MALLOC_HOOKS)/Makerules malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o
+malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o: $(LIBMALLOCHOOKS)/malloc_hook_stubs_wrap.c
+	CFLAGS="$(CFLAGS) -fPIC" $(MAKE) MALLOC_HOOKS_METHOD=preload -f $(LIBMALLOCHOOKS)/Makerules malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o
+malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o: $(LIBMALLOCHOOKS)/malloc_hook_stubs_wrap.c
+	$(MAKE) MALLOC_HOOKS_METHOD=wrap -f $(LIBMALLOCHOOKS)/Makerules malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o
 
-vpath %.c $(MALLOC_HOOKS)
+vpath %.c $(LIBMALLOCHOOKS)
 
-vpath dlmalloc.c $(TRAP_SYSCALLS)/src
+vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: move to libsystrap
 # We put dlmalloc in a library so that --exclude-libs=dlmalloc.a will hide its symbols
 # in our output .so, so that they don't override anything in the rest of the program.
 dlmalloc.a: dlmalloc.o
@@ -212,13 +209,13 @@ liballocs_preload.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 liballocs_preload.so: systrap.o liballocs_preload.a dlmalloc.a
 	$(CC) $(CFLAGS) -shared -o "$@" \
 	-Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive \
-	$(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) $(LDLIBS)
+	$(LIBSYSTRAP)/libsystrap.a $(LDFLAGS) $(LDLIBS)
 
 liballocs_test.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 liballocs_test.so: systrap_noop.o liballocs_pic.a dlmalloc.a
 	$(CC) $(CFLAGS) -shared -o "$@" \
 	-Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive \
-	$(TRAP_SYSCALLS)/libsystrap/libsystrap.a $(LDFLAGS) $(LDLIBS)
+	$(LIBSYSTRAP)/libsystrap.a $(LDFLAGS) $(LDLIBS)
 
 liballocs_preload.a: dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
 	$(AR) r "$@" $+
