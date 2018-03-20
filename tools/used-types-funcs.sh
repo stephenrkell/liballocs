@@ -48,9 +48,16 @@ link_defining_aliases () {
 symbol_redefinitions () {
     f="$1"
     # Here we are renaming codeless symnames with codeful ones, for the codeful
-    # ones that are defined in our temporary (usedtypes) object file. 
+    # ones that are defined in our temporary (usedtypes) object file.
+    # PROBLEM: with bitfields, we can get multiple entries with the same trailing name
+    # but different codes. We should *either* avoid defining any alias in those cases,
+    # *or* prevent usedtypes from generating the "__uniqtype_01234567_int" alias.
+    # We take the former approach here. The 21- and 20-character options to sort and
+    # uniq refer to the length of the prefix "__uniqtype_........_".
     nm -fposix --defined-only "$f" | tr -s '[:blank:]' '\t' | cut -f1 | \
-      egrep '__uniqtype_([0-9a-f]{8})_' | \
+      egrep '__uniqtype_([0-9a-f]{8})_' | grep -v '_subobj_names$' | \
+      sort -k1.21 | uniq -s20 -c | while read count sym; do \
+      case "$count" in (1) echo "$sym";; (*);; esac; done | \
       sed -r 's/__uniqtype_([0-9a-f]{8})_(.*)/--redefine-sym __uniqtype__\2=__uniqtype_\1_\2/'
 }
 
