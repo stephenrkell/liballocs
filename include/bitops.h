@@ -48,6 +48,22 @@ INLINE_DECL int INLINE_ATTRS nlz1(unsigned long x)
 	return n;
 }
 
+// same but zero bytes, not bits
+INLINE_DECL int nlzb1(unsigned long x) INLINE_ATTRS;
+INLINE_DECL int INLINE_ATTRS nlzb1(unsigned long x)
+{
+	int n;
+
+	if (x == 0) return 8;
+	n = 0;
+
+	if (x <= 0x00000000FFFFFFFFL) { n += 4; x <<= 32; }
+	if (x <= 0x0000FFFFFFFFFFFFL) { n += 2; x <<= 16; }
+	if (x <= 0x00FFFFFFFFFFFFFFL) { n += 1;  x <<= 8; }
+	
+	return n;
+}
+
 #define BOTTOM_N_BITS_SET(n) \
  ( ( (n)==0 ) ? 0 : ((n) == 8*sizeof(uintptr_t) ) \
  	? (~((uintptr_t)0)) \
