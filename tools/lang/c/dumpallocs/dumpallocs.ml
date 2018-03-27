@@ -83,8 +83,8 @@ let maybeDecayArrayTypesig maybeTs = match maybeTs with
     Existing(ts, isComplete) -> Existing(decayArrayInTypesig ts, isComplete)
   | _ -> Undet
 
-let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz = 
-  debug_print 1 ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ")\n");  flush Pervasives.stderr; 
+let rec getSizeExpr (ex: exp) (env : (int * typsig) list) (gs : Cil.global list) : sz = 
+  debug_print 1 ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ") ... ");  flush Pervasives.stderr; 
   let isTrailingField fi compinfo = 
     let reverseFields = rev compinfo.cfields
     in
@@ -173,10 +173,10 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
    | _ -> None
   end
   in
-  match ex with
+  let res = match ex with
    |  BinOp(Mult, e1, e2, t) -> begin
-         let sz1 = getSizeExpr e1 env in
-         let sz2 = getSizeExpr e2 env in
+         let sz1 = getSizeExpr e1 env gs in
+         let sz2 = getSizeExpr e2 env gs in
          match (sz1, sz2) with
              (Undet, Undet) -> Undet
            | (Undet, _) -> sz2
@@ -187,8 +187,8 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
                     sz1
          end
    |  BinOp(PlusA, e1, e2, t) -> begin
-         let sz1 = getSizeExpr e1 env in
-         let sz2 = getSizeExpr e2 env in
+         let sz1 = getSizeExpr e1 env gs in
+         let sz2 = getSizeExpr e2 env gs in
          match (sz1, sz2) with
              (Undet, Undet) -> Undet
            | (Undet, _) -> sz2 (* a bit weird, pre-padding but okay *) 
@@ -213,9 +213,9 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
         end
    |  BinOp(Div, e1, e2, t) -> begin
          (* We can "divide away" sizeofness e.g. by dividing sizeof (array_of_X) / (sizeof (X)) *)
-         let maybeDecayedS1 = (maybeDecayArrayTypesig (getSizeExpr e1 env))
+         let maybeDecayedS1 = (maybeDecayArrayTypesig (getSizeExpr e1 env gs))
          in 
-         let maybeDecayedS2 = (maybeDecayArrayTypesig (getSizeExpr e2 env))
+         let maybeDecayedS2 = (maybeDecayArrayTypesig (getSizeExpr e2 env gs))
          in
          match (maybeDecayedS1, maybeDecayedS2) with 
              (Existing(decayed1, isc1), Existing(decayed2, isc2)) -> if decayed1 = decayed2 then Undet (* divided away *)
@@ -223,6 +223,57 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
             | (Existing(s, isc1), Undet) -> Existing(s, isc1)
             | _ -> Undet (* this includes the Synthetic cases*)
          
+      end
+   |  BinOp(MinusA, e1, e2, t) -> begin
+         (* Subtracting one sizeof from another is like doing offsetof,
+          * IFF the sizeofness of the second expr matches a trailing field (singular, for now)
+          * in e1. *)
+         let sz1 = getSizeExpr e1 env gs in
+         let sz2 = getSizeExpr e2 env gs in
+         match sz1, sz2 with
+                (Existing(ts1, true), Existing(ts2, true)) ->
+                    (* Is t2 a suffix of t1? This means t1 must be structured,
+                     * and the last field of t1 must "match" t2, where "match"
+                     * is equality modulo equivocating on arrays-of-one.
+                     * FIXME: we should also support "- 2 * sizeof (long)" for an array long[2],
+                     * say, but that gets more complicated. Similarly we should support
+                     * dropping the last field from substructs within a struct, but currently
+                     * we don't. *)
+                    (match ts1 with
+                        TSComp(true, cname, attrs) ->
+                            let ci = (match 
+                                (try findStructTypeByName  gs cname with
+                                    Not_found -> failwith "impossible: did not find typesig struct"
+                                ) with
+                                TComp(ci, attrs) -> ci
+                              | _ -> failwith "impossible: struct type is not a struct"
+                            )
+                            in
+                            if ci.cstruct && List.length ci.cfields > 0 then
+                                let fi = List.nth ci.cfields (List.length ci.cfields - 1)
+                                in
+                                let _ = (debug_print 1 ("Hello from field-subtracting (s - f) case in getSizeExpr (s is " ^ (typsigToString ts1) ^ ", f is " ^ (typToString fi.ftype) ^ " )\n");  flush Pervasives.stderr) in
+                                let subtractingLastField =
+                                    if fi.fbitfield <> None then false
+                                    else
+                                    (let tsf = Cil.typeSig fi.ftype in
+                                     tsf = ts2 ||
+                                     (match tsf with
+                                        TSArray(tsa, Some(bound), _) when bound = Int64.one ->
+                                                tsa = ts2
+                                      | ts -> false)
+                                    )
+                                in
+                                if subtractingLastField then
+                                    (* behave like offsetof -- this means we use t1
+                                     * but say it's incomplete*)
+                                    Existing(ts1, false)
+                                else
+                                    Undet
+                            else Undet
+                      | _ -> Undet
+                      )
+              | _ -> Undet
       end
    |  SizeOf(t) -> Existing(typeSig t, isCompleteType t (* should always be true *)) 
    |  SizeOfE(e) -> Existing(typeSig (typeOf e), isCompleteType (typeOf e) (* should always be true *))
@@ -239,7 +290,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
            end
         |  Mem(_) -> Undet
       end
-   | CastE(t, e) -> (getSizeExpr e env) (* i.e. recurse down e *)
+   | CastE(t, e) -> (getSizeExpr e env gs) (* i.e. recurse down e *)
    | AddrOf(lv) -> begin 
         debug_print 1 ("Hello from AddrOf case in getSizeExpr\n");  flush Pervasives.stderr;
         let ts = containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv 
@@ -253,18 +304,29 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) : sz =
                 Existing(someTs, false)
       end
    | _ -> Undet
+   in
+   (debug_print 1 " yielded ";
+   (match res with
+       Existing(ts, isComplete) -> debug_print 1 (
+            (if not isComplete then "incomplete " else "") ^ (typsigToString ts) ^ "\n")
+         | Synthetic _ ->  debug_print 1 ("something synthetic\n")
+         | Undet -> debug_print 1 "don't know\n"
+   );
+   flush Pervasives.stderr;
+   res
+   )
 
 (* FIXME: split this into a "toplevel" that does the HasNoSizeof check,
    and a recursive part which recurses *without* recursively doing the
    HasNoSizeof check. *)
-let getSizeExprElseDefault (e: exp) (env : (int * typsig) list) : sz = 
+let getSizeExprElseDefault (e: exp) (env : (int * typsig) list) (gs : Cil.global list) : sz = 
   (* debug_print 1 ("Hello from getSizeExprElseDefault\n");  flush Pervasives.stderr;  *)
   (* let explicitSizeExpr = getSizeExpr e env in
   match explicitSizeExpr with
     Undet -> Some(typeSig voidType)
   | Existing(t) -> Some(t)
   | Synthetic(ts) -> (* FIXME *) None *)
-  getSizeExpr e env
+  getSizeExpr e env gs
 
 (*   |  SizeOf(t) -> Some(Pretty.sprint 80 (d_typsig () (typeSig t)))
    |  SizeOfE(e) -> Some(Pretty.sprint 80 (d_typsig () (typeSig (typeOf e))))
@@ -295,7 +357,7 @@ let rec warnIfLikelyAllocFn (i: instr) (maybeFunName: string option) (arglist: e
       (* (debug_print 1 ("call to function " ^ funName ^ " is not an allocation because of empty arglist\n"); (* None *) *) () (* ) *)
 | None -> ()
 
-let matchUserAllocArgs i arglist signature env maybeFunNameToPrint (calledFunctionType : Cil.typ) : sz =
+let matchUserAllocArgs i arglist signature env maybeFunNameToPrint (calledFunctionType : Cil.typ) (gs : Cil.global list) : sz =
  let signatureArgSpec = try (
      let nskip = search_forward (regexp "(.*)") signature 0
      in
@@ -317,7 +379,7 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint (calledFuncti
      if (length arglist) > s then 
        let szEx = 
           (debug_print 1 ("Looking at arg expression number " ^ (string_of_int s) ^ "\n"); flush Pervasives.stderr); 
-          getSizeExpr (nth arglist s) env 
+          getSizeExpr (nth arglist s) env gs
        in 
        match szEx with
          Existing(szType, _) -> (debug_print 1 ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
@@ -388,7 +450,7 @@ let functionArgCountMatchesSignature arglist signature =
     debug_print 1 ("Signature " ^ signature ^ " has argcount " ^ (string_of_int (List.length friendlyArgChars)) ^ "\n"); 
     (List.length arglist) = (List.length friendlyArgChars)
 
-let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env (calledFunctionType : Cil.typ) : sz option = 
+let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env (calledFunctionType : Cil.typ) (gs : Cil.global list) : sz option = 
  (* destruct the signature string *)
  debug_print 1 ("Warning: matching against signature " ^ signature ^ " when argcount is " 
     ^ (string_of_int (List.length arglist)) ^ "\n"); 
@@ -397,11 +459,11 @@ let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env (
    Some(fname) 
     when functionNameMatchesSignature fname signature 
      && functionArgCountMatchesSignature arglist signature
-    -> Some(matchUserAllocArgs i arglist signature env (Some(fname)) calledFunctionType)
+    -> Some(matchUserAllocArgs i arglist signature env (Some(fname)) calledFunctionType gs)
  | Some(_) ->     (* (debug_print 1 ("Warning: extracted function name " ^ signatureFunction ^ " from signature\n"); *) 
                     None 
                   (* ) *)
- | None when functionArgCountMatchesSignature arglist signature -> Some(matchUserAllocArgs i arglist signature env None calledFunctionType)
+ | None when functionArgCountMatchesSignature arglist signature -> Some(matchUserAllocArgs i arglist signature env None calledFunctionType gs)
  | None -> None
  (* ) *)
 
@@ -422,7 +484,7 @@ let userAllocFunctions () : string list =
 
 (* Return 'None' if none of the candidate alloc fun signatures matches the instr, 
  * or Some(sz) if one did and seemed to be allocating sz (which might still be Undet). *)
-let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates (calledFunctionType : Cil.typ) : sz option = 
+let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp list) env candidates (calledFunctionType : Cil.typ) (gs: Cil.global list) : sz option = 
   (* debug_print 1 "Looking for user alloc expr\n"; flush Pervasives.stderr; *)
   try begin
     (* match f.vname with each candidate *) 
@@ -433,7 +495,7 @@ let rec getUserAllocExpr (i: instr) (maybeFunName: string option) (arglist: exp 
       match cands with
         [] -> raise Not_found (* debug_print 1 ("Warning: exhausted candidate signatures in matching function "  ^ funNameString ^ "\n"); None *)
       | s::ss -> begin 
-         let extracted = extractUserAllocMatchingSignature i maybeFunName arglist s env calledFunctionType 
+         let extracted = extractUserAllocMatchingSignature i maybeFunName arglist s env calledFunctionType gs
          in match extracted with
              (* None means it didn't match. 
                 Some(_) might still be Some(Undet), meaning it matched but we couldn't 
@@ -461,12 +523,12 @@ let allAllocFunctions () : string list =
    return Some(sz)
    where sz is the data type we inferred was being allocated (might be Undet)
    else None. *)
-let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) env (calledFunctionType : Cil.typ) : sz option = 
+let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) env (calledFunctionType : Cil.typ) (gs : Cil.global list) : sz option = 
   let maybeFunName = match maybeFun with 
     Some(f) -> Some(f.vname)
   | None -> None
   in 
-  getUserAllocExpr i maybeFunName arglist env (allAllocFunctions ()) calledFunctionType
+  getUserAllocExpr i maybeFunName arglist env (allAllocFunctions ()) calledFunctionType gs
 
 (* I so do not understand Pretty.dprintf *)
 let printAllocFn fileAndLine chan maybeFunvar allocType mightBeArrayOfThis = 
@@ -523,7 +585,7 @@ let rec untilFixedPoint f initialValue = begin
   if newValue = initialValue then initialValue else untilFixedPoint f newValue
 end
 
-let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
+let rec accumulateOverStatements acc (stmts: Cil.stmt list) (gs : Cil.global list) =
 (* Our input is an environment mapping local variables to sizeofness, 
    and a collection of statements. 
    We propagate sizeofness from predecessor statements to successor statements, 
@@ -538,7 +600,7 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
        | Set((host, off), e, l) -> begin 
            match host with
             Var(v) -> if v.vglob then acc else begin
-               match getSizeExpr e acc with
+               match getSizeExpr e acc gs with
                  Existing(t, _) -> (
                  (* debug_print 1 ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofTypsig " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig t)) ^  ")\n")
                  ; flush Pervasives.stderr; *) (v.vid, t) :: (remove_assoc v.vid acc))
@@ -566,21 +628,21 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) =
    |    Break(l : location) ->
    |    Continue (l : location) ->
     *) 
-   |    Block(b) -> (* recurse over the block's stmts *) accumulateOverStatements acc b.bstmts
-   |    If (e, b1, b2, l) -> accumulateOverStatements (accumulateOverStatements acc b2.bstmts) b1.bstmts
-   |    Switch (e, b, ss, l) -> accumulateOverStatements (accumulateOverStatements acc ss) b.bstmts
-   |    Loop (b, l, continueLabel, breakLabel) -> accumulateOverStatements acc b.bstmts
-   |    TryFinally (tryBlock, finallyBlock, l) -> accumulateOverStatements (accumulateOverStatements acc tryBlock.bstmts) finallyBlock.bstmts 
+   |    Block(b) -> (* recurse over the block's stmts *) accumulateOverStatements acc b.bstmts gs
+   |    If (e, b1, b2, l) -> accumulateOverStatements (accumulateOverStatements acc b2.bstmts gs) b1.bstmts gs
+   |    Switch (e, b, ss, l) -> accumulateOverStatements (accumulateOverStatements acc ss gs) b.bstmts gs
+   |    Loop (b, l, continueLabel, breakLabel) -> accumulateOverStatements acc b.bstmts gs
+   |    TryFinally (tryBlock, finallyBlock, l) -> accumulateOverStatements (accumulateOverStatements acc tryBlock.bstmts gs) finallyBlock.bstmts gs
    |    TryExcept (tryBlock, _, exceptBlock, l)
-         -> accumulateOverStatements (accumulateOverStatements acc tryBlock.bstmts) exceptBlock.bstmts (* FIXME: instr list doesn't get handled*) 
+         -> accumulateOverStatements (accumulateOverStatements acc tryBlock.bstmts gs) exceptBlock.bstmts gs (* FIXME: instr list doesn't get handled*) 
    | _ -> acc
    in 
    match stmts with 
      [] -> acc
-  |  s :: ss -> accumulateOverStatements (accumulateOneStatement acc s) ss
+  |  s :: ss -> accumulateOverStatements (accumulateOneStatement acc s) ss gs
 
 
-let rec propagateSizeEnv stmts env = accumulateOverStatements env stmts
+let rec propagateSizeEnv stmts env (gs : Cil.global list) = accumulateOverStatements env stmts gs
 
 class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
   inherit nopCilVisitor
@@ -606,7 +668,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
   method vfunc (f: fundec) : fundec visitAction = 
     Cil.prepareCFG(f);
     Cil.computeCFGInfo f false; 
-    sizeEnv := untilFixedPoint (propagateSizeEnv f.sallstmts) []; 
+    sizeEnv := untilFixedPoint (fun x -> propagateSizeEnv f.sallstmts x fl.globals) []; 
     (* if this is an allocation function, make it noinline -- this avoids 
      * the (rare) case where an allocation call is inlined. NOTE that -ffunction-sections
      * added by crunchcc is handling a different case, that of *out-of-line* call sites 
@@ -671,7 +733,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Sizeof T lets us terminate
                  Sizeof V also lets us terminate
                  Mul where an arg is a Sizeof lets us terminate *)
-              match (getAllocExpr i maybeFunvar args !sizeEnv functionT) with
+              match (getAllocExpr i maybeFunvar args !sizeEnv functionT fl.globals) with
                  Some(Existing(ts, isComplete)) when isSinglyIndirectGenericPointerTypesig ts -> 
                     printAllocFn fileAndLine chan maybeFunvar "__uniqtype____EXISTS1___PTR__1" true; SkipChildren
               |  Some(Existing(ts, isComplete)) -> 
