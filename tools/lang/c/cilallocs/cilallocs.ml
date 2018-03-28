@@ -639,6 +639,30 @@ let tsIsFunctionPointer ts =
         TSPtr(nestedTs, _) when tsIsFunction nestedTs -> true
       | _ -> false
 
+let rec tsMatchModuloSignedness ts1 ts2 =
+    if ts1 = ts2 then true
+    else 
+    let makeUnsigned ik = match ik with
+        IChar -> IUChar
+      | ISChar -> IUChar
+      | IInt -> IUInt
+      | IShort -> IUShort
+      | ILong -> IULong
+      | ILongLong -> IULongLong
+      | _ -> ik
+    in
+    match ts1, ts2 with
+        (TSBase(TInt(tk1, _)), TSBase(TInt(tk2 , _)))
+            when makeUnsigned tk1 = makeUnsigned tk2
+            -> true
+      | (TSPtr(ts1', _), TSPtr(ts2', _)) -> tsMatchModuloSignedness ts1' ts2'
+      | (TSArray(ts1', bound1, _), TSArray(ts2', bound2, _))
+            -> bound1 = bound2 && tsMatchModuloSignedness ts1' ts2'
+        (* functions are a marginal case; omit for now *)
+        (* comps are going too far *)
+      | _ -> false
+    
+
 let rec ultimatePointeeT someT = match someT with
     TPtr(pt, _) when tIsPointer pt -> ultimatePointeeT pt
   | TNamed(ti, _) -> ultimatePointeeT ti.ttype

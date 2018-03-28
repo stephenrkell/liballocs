@@ -257,10 +257,10 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) (gs : Cil.global list)
                                     if fi.fbitfield <> None then false
                                     else
                                     (let tsf = Cil.typeSig fi.ftype in
-                                     tsf = ts2 ||
+                                     tsMatchModuloSignedness tsf ts2 ||
                                      (match tsf with
                                         TSArray(tsa, Some(bound), _) when bound = Int64.one ->
-                                                tsa = ts2
+                                                tsMatchModuloSignedness tsa ts2
                                       | ts -> false)
                                     )
                                 in

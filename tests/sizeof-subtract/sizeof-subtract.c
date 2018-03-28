@@ -6,7 +6,7 @@
 struct s1
 {
 	float blah;
-	int ns[1];
+	unsigned int ns[1]; // mismatch on signedness, just to mess...
 };
 
 
