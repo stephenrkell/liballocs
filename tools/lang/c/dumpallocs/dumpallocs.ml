@@ -83,7 +83,7 @@ let maybeDecayArrayTypesig maybeTs = match maybeTs with
     Existing(ts, isComplete) -> Existing(decayArrayInTypesig ts, isComplete)
   | _ -> Undet
 
-let rec getSizeExpr (ex: exp) (env : (int * typsig) list) (gs : Cil.global list) : sz = 
+let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : sz = 
   debug_print 1 ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ") ... ");  flush Pervasives.stderr; 
   let isTrailingField fi compinfo = 
     let reverseFields = rev compinfo.cfields
@@ -209,6 +209,10 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) (gs : Cil.global list)
                     Synthetic([s1; TSArray(s2, None, [])])
            | (Synthetic(l1), Existing(s2, _)) -> Synthetic(l1 @ [s2])
            | (Existing(s1, _), Synthetic(l2)) -> Synthetic(s1 :: l2)
+            (* HACK: if we have a loop that keeps adding up a size
+             * calculated by some complex expression, we want to make sure
+             * we get a fixed point in the sizeofness. *)
+           | (Synthetic(l1), Synthetic(l2)) when l1 = l2 -> Synthetic(l1)
            | (Synthetic(l1), Synthetic(l2)) -> Synthetic(l1 @ l2)
         end
    |  BinOp(Div, e1, e2, t) -> begin
@@ -283,7 +287,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) (gs : Cil.global list)
         match lhost with 
            Var(v) -> begin
              if v.vglob then Undet else try 
-               let found = Existing(assoc v.vid env, isCompleteType v.vtype) in 
+               let found = assoc v.vid env in 
                (* debug_print 1 ("environment tells us that vid " ^ (string_of_int v.vid) ^ " has a sizeofness\n"); *)
                found 
              with Not_found -> Undet
@@ -319,7 +323,7 @@ let rec getSizeExpr (ex: exp) (env : (int * typsig) list) (gs : Cil.global list)
 (* FIXME: split this into a "toplevel" that does the HasNoSizeof check,
    and a recursive part which recurses *without* recursively doing the
    HasNoSizeof check. *)
-let getSizeExprElseDefault (e: exp) (env : (int * typsig) list) (gs : Cil.global list) : sz = 
+let getSizeExprElseDefault (e: exp) (env : (int * sz) list) (gs : Cil.global list) : sz = 
   (* debug_print 1 ("Hello from getSizeExprElseDefault\n");  flush Pervasives.stderr;  *)
   (* let explicitSizeExpr = getSizeExpr e env in
   match explicitSizeExpr with
@@ -385,7 +389,7 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint (calledFuncti
          Existing(szType, _) -> (debug_print 1 ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
                szEx
        | Undet -> debug_print 1 ("Could not infer what we are allocating\n"); flush Pervasives.stderr; szEx
-       | Synthetic(_) -> debug_print 1 ("We are allocating a composite: FIXME\n"); flush Pervasives.stderr; szEx
+       | Synthetic(_) -> debug_print 1 ("We are allocating a composite: FIXME print this out\n"); flush Pervasives.stderr; szEx
      else (match maybeFunNameToPrint with 
          Some(fnname) -> 
                ((debug_print 1 ("Warning: signature " ^ signature 
@@ -575,8 +579,13 @@ let printAllocFn fileAndLine chan maybeFunvar allocType mightBeArrayOfThis =
    -- okay -- we can identify which functions *output* a sizeof (i.e write it into non-local storage)
 
  *)
+let sizeofnessToString sz = match sz with
+    Existing(ts, isCompl) -> "existing " ^ (Pretty.sprint 80 (d_typsig () ts))
+  | Synthetic(tss) -> "synthetic [" ^ (List.fold_left (fun acc -> fun ts -> acc ^ (if acc = "" then "" else "; ") ^ (Pretty.sprint 80 (d_typsig () ts))) "" tss) ^ "]"
+  | _ -> "undet"
+
 let rec untilFixedPoint f initialValue = begin
-  let printEl (vnum, ts) = "(" ^ string_of_int (vnum) ^ ", " ^ (Pretty.sprint 80 (d_typsig () ts)) ^ ") "
+  let printEl (vnum, sz) = "(" ^ string_of_int (vnum) ^ ", " ^ (sizeofnessToString sz) ^ ") "
   in 
   let listAsString = "[" ^ (fold_left (^) "" (map printEl initialValue)) ^ "]"
   in
@@ -600,10 +609,12 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) (gs : Cil.global lis
        | Set((host, off), e, l) -> begin 
            match host with
             Var(v) -> if v.vglob then acc else begin
-               match getSizeExpr e acc gs with
-                 Existing(t, _) -> (
-                 (* debug_print 1 ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofTypsig " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig t)) ^  ")\n")
-                 ; flush Pervasives.stderr; *) (v.vid, t) :: (remove_assoc v.vid acc))
+               let szness = getSizeExpr e acc gs in
+               match szness with
+                   Undet -> acc
+                 | _ -> (
+                 debug_print 1 ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofness " ^ (sizeofnessToString szness) ^  ")\n")
+                 ; flush Pervasives.stderr; (v.vid, szness) :: (remove_assoc v.vid acc))
               |  _ -> acc
             end
           | Mem(e) -> acc
@@ -642,7 +653,7 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) (gs : Cil.global lis
   |  s :: ss -> accumulateOverStatements (accumulateOneStatement acc s) ss gs
 
 
-let rec propagateSizeEnv stmts env (gs : Cil.global list) = accumulateOverStatements env stmts gs
+let rec propagateSizeEnv stmts (env : (int * sz) list) (gs : Cil.global list) = accumulateOverStatements env stmts gs
 
 class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
   inherit nopCilVisitor
@@ -651,7 +662,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
   val outChannel : out_channel option ref = ref None
   
   (* the mapping of local variables to their sizeofness *)
-  val sizeEnv : (int * typsig) list ref = ref []
+  val sizeEnv : (int * sz) list ref = ref []
   
   (* at construction time, open the output file *)
   initializer 
