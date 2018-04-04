@@ -88,10 +88,10 @@ sed -r 's/([-\+]0x[0-9a-f]*) *$/ \1/' > "$allocsites_tmpfile"
 echo "Written allocsites output to $allocsites_tmpfile" 1>&2
 
 # read the whole objdump to a temporary file, to avoid re-disassembling
-tmpfile="$(mktemp)"
+objdump_tmpfile="$(mktemp)"
 objdump --line-numbers --prefix-addresses --show-raw-insn ${disassembly_opts} -S "$inputfile" | \
-   apply_relocs > "$tmpfile"
-echo "Written objdump output to $tmpfile" 1>&2
+   apply_relocs > "$objdump_tmpfile"
+echo "Written objdump output to $objdump_tmpfile" 1>&2
 
 echo "Found allocation sites: " 1>&2
 cat "$allocsites_tmpfile" 1>&2
@@ -102,7 +102,8 @@ cat "$allocsites_tmpfile" 1>&2
 # with the same-directory path (i.e. plain filename) that was correct when
 # stripping occurred during the build process. 
 
-bytes_consumed=0
+#bytes_consumed=0
+input_up_to_next_instr_line=""
 
 get_raw_addresses () {
     while read address sym offset; do
@@ -142,20 +143,16 @@ generate_output_lines () {
     fi
 
     # Now use the power of objdump -S to get the source line for that alloc.
-    # 1, Build a regexp that will re-locate the current alloc site.
+    # 1, Build a regexp that will let us identify (and stop at) the next alloc site in order
     regexp="^${address}[[:blank:]]*<"
     echo "regexp: $regexp" 1>&2
     # 2. Grab that and some lines of pre-context, 
     # which hopefully will include the allocating source line
-    # FIXME: to optimise, chomp forward from previous match
-    # ... using a temporary file and tail -c+k
-    
-    #context="$( echo "$objdump_output" | egrep -B30 "$regexp" )" #"
-    #echo "context the slow way: $context" 1>&2
     # instead of this, use sed
-    next_chunk="$( tail -c+$(( $bytes_consumed + 1 )) "$tmpfile" 2>/dev/null | sed -r "/$regexp/ q" )"
-    # echo "fast way, next chunk: $next_chunk" 1>&2
-    bytes_consumed=$(( $bytes_consumed + $( echo "$next_chunk" | wc -c ) ))
+    next_chunk="$( tmp="$( sed -r "/${regexp}.*/ q" <<<"$input_up_to_next_instr_line" )"; \
+       if [[ -n "$( tail -n1 <<<"$tmp" | egrep "$regexp" )" ]]; then echo "$tmp"; else sed -r "/${regexp}.*/ q" <&4; fi )"
+    echo "fast way, next chunk: $next_chunk" 1>&2
+    #bytes_consumed=$(( $bytes_consumed + $( echo "$next_chunk" | wc -c ) ))
     #echo "bytes_consumed is now $bytes_consumed" 1>&2
     context="$( echo "$next_chunk" | tail -n31 )"
     #echo "fast way, context: $context" 1>&2
@@ -201,8 +198,10 @@ generate_output_lines () {
     fi
     # 4a. We want the *return address*, not the site of the call per se. Fix this up.
     instr_line_regexp='([0-9a-f]+)[[:blank:]]*<([^-\+]+)([-\+](0x[0-9a-f]+))?>.*'
-    next_line="$( tail -c+$(( $bytes_consumed + 1 )) "$tmpfile" 2>/dev/null | sed -rn "/^${instr_line_regexp}/ { s/$instr_line_regexp/\1\t\2\t\4/ ; p; q }" )"
-    read return_addr return_addr_sym return_addr_offset <<<"$next_line"
+    input_up_to_next_instr_line="$( sed -r "/^${instr_line_regexp}.*/ q" <&4 )"
+    next_instr_line="$( echo "$input_up_to_next_instr_line" | tail -n1 | egrep "$instr_line_regexp" )"
+    next_instr_line_formatted="$( echo "$next_instr_line" | sed -rn "/$instr_line_regexp/ { s/$instr_line_regexp/\1\t\2\t\4/; p }" )"
+    read return_addr return_addr_sym return_addr_offset <<<"$next_instr_line_formatted"
     #return_addr_sym="$sym"
     #return_addr_offset="$offset"
     echo "return_addr is $return_addr" 1>&2
@@ -227,11 +226,11 @@ generate_output_lines () {
     # 6. Print stuff
     #echo "${return_addr_sym}"$'\t'"0x${return_addr}"$'\t'"${return_addr_offset}"$'\t'"0x${address}"$'\t'"${filename}"$'\t'"${line_number}"$'\t'$(( ${line_number:-0} + ${source_lines_count:-0} ))$'\t'"${token:-\$FAILED\$}"$'\t'"${source_oneline}"
     echo "${return_addr_sym}"$'\t'"0x${return_addr}"$'\t'"${return_addr_offset}"$'\t'"0x${address}"$'\t'"${addr2line_filename}"$'\t'"${addr2line_line_number}"$'\t'$(( ${addr2line_line_number:-0} + 1 ))$'\t'"${token:-\$FAILED\$}"$'\t'"${source_oneline}"
-done <"$allocsites_tmpfile" 3<"$addr2line_tmpfile" | \
+done <"$allocsites_tmpfile" 3<"$addr2line_tmpfile" 4<"$objdump_tmpfile" | \
    pad_numbers | LANG=C sort -t$'\t' -k5 -k6
 }
 
 # comment to help debugging
-#rm -f "$tmpfile"
+#rm -f "$objdump_tmpfile"
 #rm -f "$allocsites_tmpfile"
 #rm -f "$addr2line_tmpfile"
