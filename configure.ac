@@ -129,7 +129,7 @@ AC_ARG_WITH([libdlbind],
             [
                 if test -d "$withval"
                 then
-                        ac_libdlibnd="$withval"
+                        ac_libdlbind="$withval"
                 else
                         AC_MSG_ERROR(--with-libdlbind expected directory name)
                 fi
