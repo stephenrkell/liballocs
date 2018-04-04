@@ -75,6 +75,10 @@ opt<vector<allocsite> > read_allocsites_for_binary(const string& s)
 	else return opt<vector<allocsite> >();
 }
 
+/* FIXME: need a generic approach to adding these abstract types.
+ * Probably we don't want to create them in the DWARF at all, just
+ * to be able to assume that they exist. Look at what the clients
+ * of these functions actually need them for. */
 iterator_df<type_die>
 get_or_create_uninterpreted_byte_type(root_die& r)
 {
@@ -93,6 +97,20 @@ get_or_create_uninterpreted_byte_type(root_die& r)
 	attrs.insert(make_pair(DW_AT_byte_size, v_byte_size));
 	return created;
 }
+iterator_df<type_die>
+get_or_create_generic_pointer_type(root_die& r)
+{
+	auto cu = r.get_or_create_synthetic_cu();
+	auto found = cu->named_child("__EXISTS1___PTR__1");
+	if (found) return found.as_a<type_die>();
+	
+	auto created = r.make_new(cu, DW_TAG_pointer_type);
+	auto& attrs = dynamic_cast<core::in_memory_abstract_die&>(created.dereference())
+		.attrs();
+	encap::attribute_value v_name(string("__EXISTS1___PTR__1")); // must have a name
+	attrs.insert(make_pair(DW_AT_name, v_name));
+	return created;
+}
 
 void make_allocsites_relation(
     allocsites_relation_t& allocsites_relation,
@@ -103,6 +121,7 @@ void make_allocsites_relation(
     
 {
 	auto uninterpreted_byte_t = get_or_create_uninterpreted_byte_type(r);
+	auto generic_pointer_t = get_or_create_generic_pointer_type(r);
 	for (auto i_alloc = allocsites_to_add.begin(); i_alloc != allocsites_to_add.end(); ++i_alloc)
 	{
 		string type_symname = i_alloc->clean_typename;
@@ -198,6 +217,12 @@ void make_allocsites_relation(
 							|| type_symname == "__uniqtype__void"))
 						{
 							found_type = uninterpreted_byte_t; // i.e. void
+							goto cu_loop_exit;
+						}
+						else if (type_symname.size() > 0 &&
+							(type_symname == "__uniqtype____EXISTS1___PTR__1"))
+						{
+							found_type = generic_pointer_t;
 							goto cu_loop_exit;
 						}
 						else if (type_symname.size() > 0)
@@ -405,6 +430,8 @@ string canonical_name_for_type(iterator_df<type_die> t)
 	/* This is now reimplemented in libdwarfpp. But test against the old code. */
 	string libdwarfpp_said = abstract_name_for_type(t);
 	if (!t) { assert(libdwarfpp_said == "void"); return "void"; }
+	// FIXME: not the right semantics probably
+	if (t.is_a<unspecified_type_die>()) { assert(libdwarfpp_said == "void"); return "void"; }
 	t = t->get_concrete_type();
 	if (!t) { assert(libdwarfpp_said == "void"); return "void"; }
 	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>()
