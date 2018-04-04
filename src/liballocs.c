@@ -259,6 +259,7 @@ char *get_exe_fullname(void)
 		// grab the executable's basename; if we fail, we won't try again
 		int ret __attribute__((unused))
 		 = readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);
+		errno = 0;
 	}
 	if (exe_fullname[0]) return exe_fullname;
 	else return NULL;
@@ -593,7 +594,9 @@ char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
 char *realpath_quick(const char *arg)
 {
 	static char buf[4096];
+	errno = 0;
 	char *ret = realpath(arg, &buf[0]);
+	if (errno) { errno = 0; return NULL; }
 	return ret;
 }
 
@@ -860,8 +863,10 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	// load with NOLOAD first, so that duplicate loads are harmless
 	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
 	if (meta_handle) return 0;
+	errno = 0;
 	dlerror();
 	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
+	errno = 0;
 	if (!meta_handle)
 	{
 		debug_printf((is_exe || is_libc) ? 0 : 1, "loading meta object: %s\n", dlerror());
