@@ -81,6 +81,46 @@ void __static_allocator_notify_unload(const char *copied_filename)
 	}
 }
 
+/* FIXME: invalidate cache entries on dlclose(). */
+#ifndef DLADDR_CACHE_SIZE
+#define DLADDR_CACHE_SIZE 16
+#endif
+struct dladdr_cache_rec { const void *addr; Dl_info info; };
+static struct dladdr_cache_rec dladdr_cache[DLADDR_CACHE_SIZE];
+static unsigned dladdr_cache_next_free;
+
+Dl_info dladdr_with_cache(const void *addr); // __attribute__((visibility("protected")));
+Dl_info dladdr_with_cache(const void *addr)
+{
+	
+	for (unsigned i = 0; i < DLADDR_CACHE_SIZE; ++i)
+	{
+		if (dladdr_cache[i].addr)
+		{
+			if (dladdr_cache[i].addr == addr)
+			{
+				/* This entry is useful, so maximise #misses before we recycle it. */
+				dladdr_cache_next_free = (i + 1) % DLADDR_CACHE_SIZE;
+				return dladdr_cache[i].info;
+			}
+		}
+	}
+	
+	Dl_info info;
+	int ret = dladdr(addr, &info);
+	assert(ret != 0);
+
+	/* always cache the dladdr result */
+	dladdr_cache[dladdr_cache_next_free++] = (struct dladdr_cache_rec) { addr, info };
+	if (dladdr_cache_next_free == DLADDR_CACHE_SIZE)
+	{
+		debug_printf(5, "dladdr cache wrapped around\n");
+		dladdr_cache_next_free = 0;
+	}
+	
+	return info;
+}
+
 int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 {
 	static _Bool running;

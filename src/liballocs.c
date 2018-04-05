@@ -489,43 +489,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 	
 	return cb_ret;
 }
-/* FIXME: invalidate cache entries on dlclose(). */
-#ifndef DLADDR_CACHE_SIZE
-#define DLADDR_CACHE_SIZE 16
-#endif
-Dl_info dladdr_with_cache(const void *addr); // __attribute__((visibility("protected")));
-Dl_info dladdr_with_cache(const void *addr)
-{
-	struct cache_rec { const void *addr; Dl_info info; };
-	
-	static struct cache_rec cache[DLADDR_CACHE_SIZE];
-	static unsigned next_free;
-	
-	for (unsigned i = 0; i < DLADDR_CACHE_SIZE; ++i)
-	{
-		if (cache[i].addr)
-		{
-			if (cache[i].addr == addr)
-			{
-				return cache[i].info;
-			}
-		}
-	}
-	
-	Dl_info info;
-	int ret = dladdr(addr, &info);
-	assert(ret != 0);
 
-	/* always cache the dladdr result */
-	cache[next_free++] = (struct cache_rec) { addr, info };
-	if (next_free == DLADDR_CACHE_SIZE)
-	{
-		debug_printf(5, "dladdr cache wrapped around\n");
-		next_free = 0;
-	}
-	
-	return info;
-}
 const char *(__attribute__((pure)) __liballocs_uniqtype_symbol_name)(const struct uniqtype *u)
 {
 	if (!u) return NULL;
