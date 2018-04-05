@@ -309,11 +309,17 @@ extern struct uniqtype __uniqtype__void __attribute__((weak));
 extern struct uniqtype __uniqtype____EXISTS1___PTR__1 __attribute__((weak)); // pointer to 'a
 extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); // byte
 
+#ifdef __cplusplus
+#define NULL_UNIQTYPE 0
+#else
+#define NULL_UNIQTYPE (void*)0
+#endif
+
 #define UNIQTYPE_IS_SUBPROGRAM_TYPE(u)   ((u)->un.info.kind == SUBPROGRAM)
 #define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) ((u)->un.subprogram.narg)
 #define UNIQTYPE_IS_POINTER_TYPE(u)      ((u)->un.info.kind == ADDRESS)
-#define UNIQTYPE_POINTEE_TYPE(u)         (UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->related[0].un.t.ptr : (void*)0)
-#define UNIQTYPE_ULTIMATE_POINTEE_TYPE(u)(UNIQTYPE_IS_POINTER_TYPE(u) ? ((u)->un.info.address.indir_level > 1) ? (u)->related[1].un.t.ptr : (u)->related[0].un.t.ptr : (void*)0)
+#define UNIQTYPE_POINTEE_TYPE(u)         (UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
+#define UNIQTYPE_ULTIMATE_POINTEE_TYPE(u)(UNIQTYPE_IS_POINTER_TYPE(u) ? ((u)->un.info.address.indir_level > 1) ? (u)->related[1].un.t.ptr : (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
 #define UNIQTYPE_IS_ARRAY_TYPE(u)        ((u)->un.array.is_array)
 #define UNIQTYPE_IS_COMPOSITE_TYPE(u)    ((u)->un.info.kind == COMPOSITE)
 #define UNIQTYPE_HAS_SUBOBJECTS(u)       (UNIQTYPE_IS_COMPOSITE_TYPE(u) || UNIQTYPE_IS_ARRAY_TYPE(u))
@@ -322,14 +328,14 @@ extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); /
 #define UNIQTYPE_IS_ENUM_TYPE(u)         ((u)->un.info.kind == ENUMERATION)
 #define UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u) (UNIQTYPE_IS_BASE_TYPE(u) || UNIQTYPE_IS_ENUM_TYPE(u))
 #define UNIQTYPE_ARRAY_LENGTH(u)         (UNIQTYPE_IS_ARRAY_TYPE(u) ? (u)->un.array.nelems : -1)
-#define UNIQTYPE_ARRAY_ELEMENT_TYPE(u)   (UNIQTYPE_IS_ARRAY_TYPE(u) ? (u)->related[0].un.t.ptr : (struct uniqtype*)0)
+#define UNIQTYPE_ARRAY_ELEMENT_TYPE(u)   (UNIQTYPE_IS_ARRAY_TYPE(u) ? (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
 #define UNIQTYPE_COMPOSITE_MEMBER_COUNT(u) (UNIQTYPE_IS_COMPOSITE_TYPE(u) ? (u)->un.composite.nmemb : 0)
 #define UNIQTYPE_IS_2S_COMPL_INTEGER_TYPE(u) \
    ((u)->un.info.kind == BASE && (u)->un.base.enc == 0x5 /*DW_ATE_signed */)
 #define UNIQTYPE_BASE_TYPE_SIGNEDNESS_COMPLEMENT(u) \
    (((u)->un.info.kind == BASE && \
        ((u)->un.base.enc == 0x5 /* DW_ATE_signed */ || ((u)->un.base.enc == 0x7 /* DW_ATE_unsigned */))) ? \
-	    (u)->related[0].un.t.ptr : (struct uniqtype *)0)
+	    (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
 #define UNIQTYPE_NAME(u) __liballocs_uniqtype_name(u) /* helper in liballocs.c */
 #define UNIQTYPE_SYMBOL_NAME(u) __liballocs_uniqtype_symbol_name(u) /* helper in liballocs.c */
 #define UNIQTYPE_IS_SANE(u) ( \
