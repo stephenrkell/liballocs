@@ -24,6 +24,14 @@ pad_numbers () {
 
 . $(dirname "$0")/debug-funcs.sh
 
+# objdumpmeta currently: we read from three temporary files:
+# allocsites_tmpfile: 
+# addr2line_tmpfile: 
+# objdump_tmpfile: an interleaving of instructions and headers
+
+# objdumpmeta completely rewritten as a two-pass awk script
+# pass 1: build an address-sorted list of metadata'd instructions
+
 # HACK 1: to make this work for llvm, we just use gold to generate
 # a native file with DWARF info, 
 filetype="$( file -bi "$1" )"
@@ -73,7 +81,7 @@ apply_relocs () {
     # for each disassembly line,
     # if it is followed by one or more relocs,
     # will merge that reloc info into the line. 
-    # We do it in the most stupid way possible: 
+    # We do it in the most stupid wqay possible: 
     # delete newlines preceding reloc info
     tr '\n' '\f' | sed 's/\f\([[:blank:]]*[0-9a-f]\+: R\)/\1/g' | tr '\f' '\n'
 }
@@ -118,6 +126,8 @@ get_raw_addresses () {
 
 raw_addresses="$( get_raw_addresses )"
 
+# we want to make sure we get exactly one line in addr2line_output per line in allocsites_tmpfile
+# FIXME: and delete the "discriminator" stuff
 addr2line_output="$( if test -n "$raw_addresses"; then addr2line -a -e "$1" $raw_addresses; else true; fi | sed -r 's/^0x[0-9a-f]{8,}/\f&\t/' | tr -d '\n' | tr '\f' '\n' | tail -n+2 )"
 echo "addr2line said $addr2line_output" 1>&2
 
@@ -145,13 +155,13 @@ generate_output_lines () {
     # Now use the power of objdump -S to get the source line for that alloc.
     # 1, Build a regexp that will let us identify (and stop at) the next alloc site in order
     regexp="^${address}[[:blank:]]*<"
-    echo "regexp: $regexp" 1>&2
+    #echo "regexp: $regexp" 1>&2
     # 2. Grab that and some lines of pre-context, 
     # which hopefully will include the allocating source line
     # instead of this, use sed
     next_chunk="$( tmp="$( sed -r "/${regexp}.*/ q" <<<"$input_up_to_next_instr_line" )"; \
        if [[ -n "$( tail -n1 <<<"$tmp" | egrep "$regexp" )" ]]; then echo "$tmp"; else sed -r "/${regexp}.*/ q" <&4; fi )"
-    echo "fast way, next chunk: $next_chunk" 1>&2
+    #echo "fast way, next chunk: $next_chunk" 1>&2
     #bytes_consumed=$(( $bytes_consumed + $( echo "$next_chunk" | wc -c ) ))
     #echo "bytes_consumed is now $bytes_consumed" 1>&2
     context="$( echo "$next_chunk" | tail -n31 )"
@@ -160,6 +170,9 @@ generate_output_lines () {
     #echo "context: $context" 1>&2
     # 2a. Narrow that context to the last objdump-printed source line.
     # Remember the file/line pair.
+    # All this "discriminator" stuff is to hack around the fact that
+    # *both* addr2line *and* objdump --line-numbers sometimes output
+    # ' (discriminator [0-9]+)' at the end of a filename.
     with_file_line_header="$( echo "$context" | tac | sed -r '/^\/.*:[0-9]+( \(discriminator [0-9]*\))?$/ q' | tac )"
     # If we didn't hit a source header line,
     # what we read next will be garbage, so grep for something that matches the pattern
@@ -204,9 +217,7 @@ generate_output_lines () {
     read return_addr return_addr_sym return_addr_offset <<<"$next_instr_line_formatted"
     #return_addr_sym="$sym"
     #return_addr_offset="$offset"
-    echo "return_addr is $return_addr" 1>&2
-    echo "return_addr_sym is $return_addr_sym" 1>&2
-    echo "return_addr_offset is ${return_addr_offset:=0}" 1>&2
+    echo "return_addr is $return_addr, sym $return_addr_sym, offset ${return_addr_offset:=0}" 1>&2
     if [[ "$return_addr_sym" != "$sym" ]]; then
         echo "Warning: return address for alloc site ${sym}${offset} does not appear to be in same function, but at ${return_addr_sym}+${return_addr_offset:-??}." 1>&2
         # we continue
