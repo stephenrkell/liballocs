@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include "allocmeta.h"
 #include "fake-libunwind.h"
 #include "uniqtype.h"
@@ -201,5 +202,18 @@ __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_
 int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 {
 	return 0;
+}
+
+struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
+		struct big_allocation **maybe_out_bigalloc)
+{
+	return NULL;
+}
+
+Dl_info dladdr_with_cache(const void *addr)
+{
+	Dl_info dummy;
+	memset(&dummy, 0, sizeof dummy);
+	return dummy;
 }
 
