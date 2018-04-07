@@ -176,6 +176,8 @@ extern struct uniqtype *pointer_to___uniqtype__signed_char __attribute__((visibi
 extern struct uniqtype *pointer_to___uniqtype__unsigned_char __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype____PTR_signed_char __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype__long_unsigned_int __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype__long_int __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype____ARR0_signed_char __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__intptr_t __attribute__((visibility("hidden")));

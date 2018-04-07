@@ -1110,6 +1110,8 @@ struct uniqtype *pointer_to___uniqtype__signed_char;
 struct uniqtype *pointer_to___uniqtype__unsigned_char;
 struct uniqtype *pointer_to___uniqtype____PTR_signed_char;
 struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char;
+struct uniqtype *pointer_to___uniqtype__long_unsigned_int;
+struct uniqtype *pointer_to___uniqtype__long_int;
 struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t;
 struct uniqtype *pointer_to___uniqtype____ARR0_signed_char;
 struct uniqtype *pointer_to___uniqtype__intptr_t;
@@ -1256,7 +1258,7 @@ void __liballocs_post_systrap_init(void)
 		if (!pointer_to___uniqtype__signed_char)
 		{
 			CREATE(__uniqtype__signed_char, __uniqtype__signed_char$8, 1, {
-				.pos_maxoff = 0,
+				.pos_maxoff = 1,
 				.un = { base: { .kind = BASE, .enc = DW_ATE_signed_char } }
 			});
 		}
@@ -1264,7 +1266,7 @@ void __liballocs_post_systrap_init(void)
 		if (!pointer_to___uniqtype__unsigned_char)
 		{
 			CREATE(__uniqtype__unsigned_char, __uniqtype__unsigned_char$8, 1, {
-				.pos_maxoff = 0,
+				.pos_maxoff = 1,
 				.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned_char } }
 			});
 		}
@@ -1273,6 +1275,28 @@ void __liballocs_post_systrap_init(void)
 			(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__signed_char } } };
 		if (!(pointer_to___uniqtype__signed_char->related[0].un.t.ptr)) pointer_to___uniqtype__signed_char->related[0] = 
 			(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__unsigned_char } } };
+		
+		pointer_to___uniqtype__long_unsigned_int = dlsym(RTLD_DEFAULT, "__uniqtype__uint$64");
+		if (!pointer_to___uniqtype__long_unsigned_int)
+		{
+			CREATE(__uniqtype__long_unsigned_int, __uniqtype__uint$64, 1, {
+				.pos_maxoff = 8,
+				.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned } }
+			});
+		}
+		pointer_to___uniqtype__long_int = dlsym(RTLD_DEFAULT, "__uniqtype__int$64");
+		if (!pointer_to___uniqtype__long_int)
+		{
+			CREATE(__uniqtype__long_int, __uniqtype__int$64, 1, {
+				.pos_maxoff = 8,
+				.un = { base: { .kind = BASE, .enc = DW_ATE_signed } }
+			});
+		}
+
+		if (!(pointer_to___uniqtype__long_unsigned_int->related[0].un.t.ptr)) pointer_to___uniqtype__long_unsigned_int->related[0] = 
+			(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__long_int } } };
+		if (!(pointer_to___uniqtype__long_int->related[0].un.t.ptr)) pointer_to___uniqtype__long_int->related[0] = 
+			(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__long_unsigned_int } } };
 
 		pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
 		if (!pointer_to___uniqtype____PTR_signed_char)
@@ -1299,7 +1323,26 @@ void __liballocs_post_systrap_init(void)
 		pointer_to___uniqtype__Elf64_auxv_t = dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_auxv_t");
 		if (!pointer_to___uniqtype__Elf64_auxv_t)
 		{
-			// FIXME: handle this
+			/* typedef struct {
+			  uint64_t a_type;
+			  union { uint64_t a_val; } a_un;
+			} Elf64_auxv_t; */
+			/* This one is tricky because the anonymous union derives its
+			 * summary code, hence its identity, from the header file path
+			 * where it is defined, usually /usr/include/elf.h.
+			 * Since there is only one element in the union, and since we
+			 * (if we reach this line) don't have a unique auxv_t definition
+			 * in the guest program, we pretend it's just a pair of uint64s. */
+			CREATE(__uniqtype__Elf64_auxv_t, __uniqtype__Elf64_auxv_t, 2, {
+				.pos_maxoff = 16,
+				.un = { composite: { .kind = COMPOSITE, .nmemb = 2, .not_simultaneous = 0 } }
+			});
+			pointer_to___uniqtype__Elf64_auxv_t->related[0] = (struct uniqtype_rel_info) {
+				{ t : { pointer_to___uniqtype__long_unsigned_int } }
+			};
+			pointer_to___uniqtype__Elf64_auxv_t->related[1] = (struct uniqtype_rel_info) {
+				{ t : { pointer_to___uniqtype__long_unsigned_int } }
+			};
 		}
 		pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
 		if (!pointer_to___uniqtype____ARR0_signed_char)
