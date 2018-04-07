@@ -1143,7 +1143,8 @@ int main(int argc, char **argv)
 					mangled_name,
 					comment_s.str()
 				);
-				prev_offset_plus_size = offset_after_fixup + el_type_size;
+				if (el_type_size) prev_offset_plus_size = offset_after_fixup + *el_type_size;
+				else prev_offset_plus_size = opt<unsigned>();
 			}
 			write_uniqtype_close(cout, mangled_name);
 		}
