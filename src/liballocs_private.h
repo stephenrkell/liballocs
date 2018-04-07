@@ -110,6 +110,31 @@ static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 _Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l)
 			__attribute__((visibility("hidden")));
 
+/* If we want to look up an alloc site's address by its index,
+ * we get the base index for its object
+ * and then add its offset.
+ * If we want to look up an alloc site's index by its address,
+ * we get  */
+struct allocsites_by_id_entry
+{
+	unsigned short start_id;
+	unsigned short count;
+	struct allocsite_entry *ptr;
+};
+struct allocsites_by_object_base_address_entry
+{
+	const void *object_base_address;
+	unsigned short start_id_plus_one; // so that zero~uninit == max index
+	struct allocsites_by_id_entry *by_id; /* These don't move once created. */
+};
+#define ALLOCSITES_INDEX_SIZE 256
+extern struct allocsites_by_id_entry allocsites_by_id[ALLOCSITES_INDEX_SIZE];
+extern struct allocsites_by_object_base_address_entry allocsites_by_object_base_address[ALLOCSITES_INDEX_SIZE];
+unsigned issue_allocsites_ids(unsigned count, struct allocsite_entry *first_entry,
+	const void *object_base_address) __attribute__((visibility("hidden")));
+struct allocsites_by_object_base_address_entry *__liballocs_find_allocsite_lookup_entry(
+		const void *alloc_site_addr) __attribute__((visibility("hidden")));
+
 /* avoid dependency on libc headers (in this header only) */
 void __assert_fail(const char *assertion, 
 	const char *file, unsigned int line, const char *function);

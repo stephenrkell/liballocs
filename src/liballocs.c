@@ -848,6 +848,7 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(meta_handle, "allocsites");
 	// allocsites cannot be null anyhow
 	assert(first_entry && "symbol 'allocsites' must be present in -allocsites.so"); 
+	unsigned n_allocsites = 0;
 
 	/* We walk through allocsites in this object, chaining together those which
 	 * should be in the same bucket. NOTE that this is the kind of thing we'd
@@ -859,7 +860,10 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	{
 		chain_allocsite_entries(cur_ent, prev_ent, &current_bucket_size, 
 			info->dlpi_addr, 0);
+		++n_allocsites;
 	}
+	
+	issue_allocsites_ids(n_allocsites, first_entry, (const void *) info->dlpi_addr);
 
 	// debugging: check that we can look up the first entry, if we are non-empty
 	assert(!first_entry || !first_entry->allocsite || 
@@ -1407,7 +1411,17 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 	struct uniqtype *alloc_uniqtype;
 	if (__builtin_expect(p_ins->alloc_site_flag, 1))
 	{
-		if (out_site) *out_site = NULL;
+		if (out_site)
+		{
+			//unsigned short id = (unsigned short) p_ins->un.bits;
+			//if (id != (unsigned short) -1)
+			//{
+			//	const void *allocsite = __liballocs_allocsite_by_id(id);
+			//	*out_site = (void*) allocsite;
+			//}
+			//else 
+			*out_site = NULL;
+		}
 		/* Clear the low-order bit, which is available as an extra flag 
 		 * bit. libcrunch uses this to track whether an object is "loose"
 		 * or not. Loose objects have approximate type info that might be 
@@ -1421,7 +1435,8 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		uintptr_t alloc_site_addr = p_ins->alloc_site;
 		void *alloc_site = (void*) alloc_site_addr;
 		if (out_site) *out_site = alloc_site;
-		alloc_uniqtype = allocsite_to_uniqtype(alloc_site/*, p_ins*/);
+		struct allocsite_entry *entry = allocsite_to_entry(alloc_site/*, p_ins*/);
+		alloc_uniqtype = entry ? entry->uniqtype : NULL;
 		/* Remember the unrecog'd alloc sites we see. */
 		if (!alloc_uniqtype && alloc_site && 
 				!__liballocs_addrlist_contains(&__liballocs_unrecognised_heap_alloc_sites, alloc_site))
@@ -1438,6 +1453,21 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		// and is the client's queue to go poking in the insert.
 		p_ins->alloc_site_flag = 1;
 		p_ins->alloc_site = (uintptr_t) alloc_uniqtype /* | 0x0ul */;
+		/* How do we get the id? Doing a binary search on the by-id spine is
+		 * okay because there will be very few of them. We don't want to do
+		 * a binary search on the table proper. But that's okay. We get
+		 * everything we need. */
+		struct allocsites_by_object_base_address_entry *found
+		 = __liballocs_find_allocsite_lookup_entry((const void *) alloc_site_addr);
+		if (found)
+		{
+			unsigned short id = found->by_id->start_id + (entry - found->by_id->ptr);
+			//p_ins->un.bits = id;
+			// what to do with the id?? We have no spare bits...
+			// we could scrounge a few but certainly not 16 of them.
+			// When we're using a bitmap, we will have the space.
+		}
+		
 #endif
 	}
 

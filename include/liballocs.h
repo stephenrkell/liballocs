@@ -78,8 +78,8 @@ extern void *__liballocs_main_bp; // beginning of main's stack frame
 char *get_exe_fullname(void) __attribute__((visibility("hidden")));
 char *get_exe_basename(void) __attribute__((visibility("hidden")));
 
-extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
-extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtype(const void *allocsite)
+extern inline struct allocsite_entry *allocsite_to_entry(const void *allocsite) __attribute__((gnu_inline,always_inline));
+extern inline struct allocsite_entry * __attribute__((gnu_inline)) allocsite_to_entry(const void *allocsite)
 {
 	if (!allocsite) return NULL;
 	assert(__liballocs_allocsmt != NULL);
@@ -89,10 +89,17 @@ extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtyp
 	{
 		if (p->allocsite == allocsite)
 		{
-			return p->uniqtype;
+			return p;
 		}
 	}
 	return NULL;
+}
+extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
+extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtype(const void *allocsite)
+{
+	struct allocsite_entry *e = allocsite_to_entry(allocsite);
+	if (!e) return NULL;
+	return e->uniqtype;
 }
 
 extern inline _Bool 
