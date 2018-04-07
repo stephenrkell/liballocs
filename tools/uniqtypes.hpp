@@ -51,12 +51,16 @@ void write_uniqtype_open_array(std::ostream& o,
     const string& unmangled_typename,
     unsigned pos_maxoff,
     unsigned nelems,
-    opt<const string&> comment_str = opt<const string&>()
+    opt<const string&> comment_str = opt<const string&>(),
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 void write_uniqtype_open_flex_array(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    opt<const string&> comment_str = opt<const string&>()
+    opt<const string&> comment_str = opt<const string&>(),
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 void write_uniqtype_open_address(std::ostream& o,
     const string& mangled_typename,
@@ -65,7 +69,9 @@ void write_uniqtype_open_address(std::ostream& o,
     unsigned indir_level,
     bool is_generic,
     unsigned log_min_align,
-    opt<const string&> comment_str = opt<const string&>()
+    opt<const string&> comment_str = opt<const string&>(),
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 void write_uniqtype_open_base(std::ostream& o,
     const string& mangled_typename,
@@ -75,7 +81,9 @@ void write_uniqtype_open_base(std::ostream& o,
     unsigned one_plus_log_bit_size_delta,
     signed bit_size_delta_delta,
     signed bit_off,
-    opt<const string&> comment_str = opt<const string&>()
+    opt<const string&> comment_str = opt<const string&>(),
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 void write_uniqtype_open_subrange(std::ostream& o,
     const string& mangled_typename,
@@ -83,13 +91,17 @@ void write_uniqtype_open_subrange(std::ostream& o,
     unsigned pos_maxoff,
 	signed min,
 	signed max,
-    opt<const string&> comment_str = opt<const string&>()
+    opt<const string&> comment_str = opt<const string&>(),
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 void write_uniqtype_open_enumeration(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
     unsigned pos_maxoff,
-    opt<const string&> comment_str = opt<const string&>()
+    opt<const string&> comment_str = opt<const string&>(),
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 void write_uniqtype_open_composite(std::ostream& o,
     const string& mangled_typename,
@@ -97,7 +109,9 @@ void write_uniqtype_open_composite(std::ostream& o,
     unsigned pos_maxoff,
     unsigned nmemb,
     bool not_simultaneous,
-    opt<const string&> comment_str = opt<const string&>()
+    opt<const string&> comment_str = opt<const string&>(),
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 void write_uniqtype_open_subprogram(std::ostream& o,
     const string& mangled_typename,
@@ -107,7 +121,9 @@ void write_uniqtype_open_subprogram(std::ostream& o,
     unsigned nret,
     bool is_va,
     unsigned cc,
-    opt<const string&> comment_str = opt<const string&>()
+    opt<const string&> comment_str = opt<const string&>(),
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 
 void write_uniqtype_related_array_element_type(std::ostream& o,

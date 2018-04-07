@@ -76,7 +76,9 @@ using boost::format_all;
 static void write_uniqtype_open_generic(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    const string& pos_maxoff_str
+    const string& pos_maxoff_str,
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	);
 
 uniqued_name add_type(iterator_df<type_die> t, master_relation_t& r)
@@ -568,41 +570,51 @@ void write_master_relation(master_relation_t& r,
 			out << "/* skipped -- incomplete */" << endl;
 			continue;
 		}
+		
+		// we might not be incomplete, but be dependent on an incomplete somehow (e.g. points-to)
+		bool dependent_on_incomplete = (i_vert->first.first == "");
+		
 		/* We can also be *variable-length*. In this case we output a pos_maxoff of -1
 		 * i.e. maximum-unsigned-value. */
 		
 		if (emit_subobject_names)
 		{
-			out << "const char *" << mangled_name << "_subobj_names[] "
-				<< " __attribute__((weak,section (\".data." << mangled_name 
-					<< ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))";
-				if (i_vert->second.is_a<with_data_members_die>())
+			out << "const char *" << mangled_name << "_subobj_names[] ";
+			if (!dependent_on_incomplete)
+			{
+				out << " __attribute__((section (\".data." << mangled_name 
+						<< ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")))";
+			}
+			// we always make the definition weak, whether depending on incomplete or not
+			// FIXME: WHY?
+			out << " __attribute__((weak))";
+			if (i_vert->second.is_a<with_data_members_die>())
+			{
+				out << " = { ";
+				unsigned num = 0;
+				for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++num)
 				{
-					out << " = { ";
-					unsigned num = 0;
-					for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++num)
+					auto i_edge = i_i_edge->as_a<member_die>();
+
+					if (i_edge.name_here())
 					{
-						auto i_edge = i_i_edge->as_a<member_die>();
-						
-						if (i_edge.name_here())
-						{
-							string name = *i_edge.name_here();
-							out << "\"" << name << "\"";
-						}
-						else
-						{
-							/* FIXME: do something nicer */
-							out << "\"_" << num << "\"";
-						}
-						/* always output a comma */
-						out << ", ";
+						string name = *i_edge.name_here();
+						out << "\"" << name << "\"";
 					}
-					out << "(void*)0 };\n";
+					else
+					{
+						/* FIXME: do something nicer */
+						out << "\"_" << num << "\"";
+					}
+					/* always output a comma */
+					out << ", ";
 				}
-				else
-				{
-					out << "= { (void*)0 };\n";
-				}
+				out << "(void*)0 };\n";
+			}
+			else
+			{
+				out << "= { (void*)0 };\n";
+			}
 		}
 		
 		unsigned contained_length = 1;
@@ -654,22 +666,45 @@ void write_master_relation(master_relation_t& r,
 		else if (i_vert->second.is_a<address_holding_type_die>())
 		{
 			auto t = i_vert->second.as_a<address_holding_type_die>();
-			unsigned indir_level = 0;
-			iterator_df<address_holding_type_die> ultimate_pointee = t;
-			while (ultimate_pointee.is_a<address_holding_type_die>())
-			{
-				++indir_level;
-				ultimate_pointee = ultimate_pointee.as_a<address_holding_type_die>()->get_type();
-			}
+			pair<unsigned, iterator_df<type_die> > ultimate_pointee_pair
+			 = t.as_a<address_holding_type_die>()->find_ultimate_reached_type();
+			unsigned indir_level = ultimate_pointee_pair.first;
+			auto ultimate_pointee = ultimate_pointee_pair.second;
 			bool is_generic = t.enclosing_cu()->is_generic_pointee_type(ultimate_pointee);
 			unsigned machine_word_size = t.enclosing_cu()->get_address_size();
+			bool use_section_group = true;
+			bool emit_weak_definition = false;
+			if (i_vert->first.first == "") // empty summary code means we point to incomplete
+			{
+				if (ultimate_pointee.is_a<with_data_members_die>())
+				{
+					assert(ultimate_pointee.as_a<with_data_members_die>()->get_declaration());
+					assert(*ultimate_pointee.as_a<with_data_members_die>()->get_declaration());
+					use_section_group = false;
+					emit_weak_definition = true;
+				}
+				else
+				{
+					assert(ultimate_pointee.is_a<unspecified_type_die>());
+					// what to do now? it's like a pointer to a fresh opaque?
+					use_section_group = false;
+					emit_weak_definition = true;
+				}
+				//{
+				//	/* HMM. Why should we get codeless subprogram types? */
+				//	assert(concrete_ultimate_t.is_a<type_describing_subprogram_die>());
+				//}
+			}
 			write_uniqtype_open_address(out,
 				mangled_name,
 				i_vert->first.second,
 				*t->calculate_byte_size(),
 				is_generic ? 0 : indir_level,
 				is_generic,
-				ceil(log2(machine_word_size)) /* HMM -- may be wrong on some machines */
+				ceil(log2(machine_word_size)), /* HMM -- may be wrong on some machines */
+				opt<const string &>(),
+				use_section_group,
+				emit_weak_definition
 			);
 			// compute and print destination name
 			auto k1 = canonical_key_for_type(t->get_type());
@@ -1050,14 +1085,17 @@ void write_master_relation(master_relation_t& r,
 static void write_uniqtype_open_generic(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    const string& pos_maxoff_str
+    const string& pos_maxoff_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
-	o << "struct uniqtype " << mangled_typename
-		<< " __attribute__((section (\".data." << mangled_typename 
+	o << "struct uniqtype " << mangled_typename;
+	if (use_section_group) o << " __attribute__((section (\".data." << mangled_typename 
 			<< ", \\\"awG\\\", @progbits, " << mangled_typename 
-			<< ", comdat#\")))"
-		<< " = {\n\t" 
+			<< ", comdat#\")))";
+	if (make_weak_definition) o << " __attribute__((weak))";
+	o << " = {\n\t" 
 		<< "{ 0, 0, 0 },\n\t"
 		//<< "\"" << unmangled_typename << "\",\n\t"
 		<< pos_maxoff_str << " /* pos_maxoff */,\n\t";
@@ -1066,11 +1104,14 @@ static void write_uniqtype_open_generic(std::ostream& o,
 static void write_uniqtype_open_generic(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    unsigned pos_maxoff
+    unsigned pos_maxoff,
+	bool use_section_group = true,
+	bool make_weak_definition = false
 	)
 {
 	std::ostringstream s; s << pos_maxoff;
-	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, s.str());
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, s.str(),
+		use_section_group, make_weak_definition);
 }
 
 void write_uniqtype_open_void(std::ostream& o,
@@ -1088,7 +1129,9 @@ void write_uniqtype_open_array(std::ostream& o,
     const string& unmangled_typename,
     unsigned pos_maxoff,
     unsigned nelems,
-    opt<const string&> maxoff_comment_str
+    opt<const string&> maxoff_comment_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
 	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
@@ -1098,7 +1141,9 @@ void write_uniqtype_open_array(std::ostream& o,
 void write_uniqtype_open_flex_array(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    opt<const string&> maxoff_comment_str
+    opt<const string&> maxoff_comment_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
 	std::ostringstream s; s << UNIQTYPE_POS_MAXOFF_UNBOUNDED;
@@ -1113,10 +1158,13 @@ void write_uniqtype_open_address(std::ostream& o,
     unsigned indir_level,
     bool is_generic,
     unsigned log_min_align,
-    opt<const string&> maxoff_comment_str
+    opt<const string&> maxoff_comment_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
-	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff,
+		use_section_group, make_weak_definition);
 	o << "{ address: { ADDRESS, " << indir_level << ", " << is_generic << ", " << log_min_align
 		<< " } },\n\t"
 		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
@@ -1129,10 +1177,12 @@ void write_uniqtype_open_base(std::ostream& o,
     unsigned one_plus_log_bit_size_delta,
     signed bit_size_delta_delta,
     signed bit_off,
-    opt<const string&> maxoff_comment_str
+    opt<const string&> maxoff_comment_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
-	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff, use_section_group, make_weak_definition);
 	o << "{ base: { BASE, " << enc
 		<< ", " << one_plus_log_bit_size_delta
 		<< ", " << bit_size_delta_delta
@@ -1146,10 +1196,12 @@ void write_uniqtype_open_subrange(std::ostream& o,
     unsigned pos_maxoff,
 	signed min,
 	signed max,
-    opt<const string&> comment_str
+    opt<const string&> comment_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
-	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff, use_section_group, make_weak_definition);
 	o << "{ subrange: { SUBRANGE, " << min
 		<< ", " << max
 		<< " } },\n\t"
@@ -1159,10 +1211,12 @@ void write_uniqtype_open_enumeration(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
     unsigned pos_maxoff,
-    opt<const string&> maxoff_comment_str
+    opt<const string&> maxoff_comment_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
-	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff, use_section_group, make_weak_definition);
 	o << "{ enumeration: { ENUMERATION, 0, 0, 0 } },\n\t"
 		<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
 }
@@ -1172,10 +1226,12 @@ void write_uniqtype_open_composite(std::ostream& o,
     unsigned pos_maxoff,
     unsigned nmemb,
     bool not_simultaneous,
-    opt<const string&> maxoff_comment_str
+    opt<const string&> maxoff_comment_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
-	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff, use_section_group, make_weak_definition);
 	o << "{ composite: { COMPOSITE, " << nmemb
 		<< ", " << not_simultaneous 
 		<< " } },\n\t"
@@ -1189,10 +1245,12 @@ void write_uniqtype_open_subprogram(std::ostream& o,
     unsigned nret,
     bool is_va,
     unsigned cc,
-    opt<const string&> maxoff_comment_str
+    opt<const string&> maxoff_comment_str,
+	bool use_section_group,
+	bool make_weak_definition
 	)
 {
-	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff);
+	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, pos_maxoff, use_section_group, make_weak_definition);
 	o << "{ subprogram: { SUBPROGRAM, " << narg 
 		<< ", " << nret 
 		<< ", " << is_va

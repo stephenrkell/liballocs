@@ -646,7 +646,7 @@ opt<uint32_t> signedness_complement_type_summary_code(core::iterator_df<core::ba
 {
 	unsigned encoding = base_t->get_encoding();
 	assert(encoding == DW_ATE_signed || encoding == DW_ATE_unsigned);
-	summary_code_word_t output_word;
+	summary_code_word<uint32_t> output_word;
 	assert(base_t->get_byte_size());
 	unsigned byte_size = *base_t->get_byte_size();
 	pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = base_t->bit_size_and_offset();
