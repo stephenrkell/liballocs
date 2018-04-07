@@ -62,6 +62,7 @@ struct mapping_sequence
 	unsigned nused;
 	struct mapping_entry mappings[MAPPING_SEQUENCE_MAX_LEN];
 };
+static void check_mapping_sequence_sanity(struct mapping_sequence *cur);
 
 /* How are we supposed to allocate the mapping sequence metadata? */
 
@@ -210,6 +211,8 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 					existing_seq->nused * sizeof (struct mapping_entry));
 			seq->nused -= existing_seq->nused;
 			seq->end = existing_seq->begin;
+			check_mapping_sequence_sanity(seq);
+			check_mapping_sequence_sanity(existing_seq);
 			/* Don't touch the parent end bigalloc. We're leaving it as-is. */
 			write_string("\nRegistered seq begin address after split: ");
 			write_ulong((unsigned long) seq->begin);
@@ -226,6 +229,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 			__liballocs_pre_extend_bigalloc(parent_end, seq->begin);
 			existing_seq->begin = seq->begin;
 			existing_seq->mappings[0] = seq->mappings[0];
+			check_mapping_sequence_sanity(existing_seq);
 			return;
 		}
 		else
@@ -414,11 +418,11 @@ void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end);
 static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 	void *addr, size_t length)
 {
-	int new_indices[MAPPING_SEQUENCE_MAX_LEN];
+	check_mapping_sequence_sanity(seq);
 	for (int i = 0; i < MAPPING_SEQUENCE_MAX_LEN; ++i)
 	{
-		if ((char*) seq->mappings[i].begin <= (char*) addr 
-				&&  (char*) addr < (char*) seq->mappings[i].end)
+		if ((char*) seq->mappings[i].begin <= (char*) addr + length
+				&& (char*) seq->mappings[i].end > (char*) addr)
 		{
 			/* We have some overlap. Is it partial or total? */
 
@@ -444,8 +448,20 @@ static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 			}
 			else
 			{
-				seq->mappings[i].begin = (char*) seq->mappings[i].begin + left_at_beginning;
-				seq->mappings[i].end = (char*) seq->mappings[i].end - left_at_end;
+				assert(left_at_beginning == 0 || left_at_end == 0);
+				unsigned long current_length =  seq->mappings[i].end - seq->mappings[i].begin;
+				if (left_at_beginning == 0)
+				{
+					seq->mappings[i].begin = (char*) seq->mappings[i].begin
+						 + (current_length - left_at_end);
+					if (i == 0) seq->begin = seq->mappings[i].begin;
+				}
+				else
+				{
+					seq->mappings[i].end = (char*) seq->mappings[i].end
+						 - (current_length - left_at_beginning);
+					if (i == seq->nused - 1) seq->end = seq->mappings[i].end;
+				}
 			}
 		}
 	}
@@ -478,6 +494,7 @@ static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 	{
 		seq->end = addr;
 	}
+	check_mapping_sequence_sanity(seq);
 }
 
 static void do_munmap(void *addr, size_t length, void *caller)
@@ -685,6 +702,8 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 				_Bool success = __liballocs_extend_bigalloc(bigalloc_before, 
 					(char*) requested_new_end);
 				if (!success) abort();
+				assert(seq->begin == bigalloc_before->begin);
+				assert(seq->end == bigalloc_before->end);
 			}
 			if (success) return;
 			debug_printf(0, "Warning: mapping of %s could not extend preceding bigalloc\n", filename);
@@ -936,8 +955,17 @@ void copy_all_right_from_by(struct mapping_sequence *s, int from, int by)
 
 static void check_mapping_sequence_sanity(struct mapping_sequence *cur)
 {
-	assert(cur->nused > 0);
+	assert(cur->nused >= 0);
+	if (cur->nused == 0) return;
+	assert(cur->begin == cur->mappings[0].begin);
 	assert(cur->end == cur->mappings[cur->nused - 1].end);
+	for (unsigned i = 0; i < cur->nused; ++i)
+	{
+		assert(cur->mappings[i].begin);
+		assert(cur->mappings[i].end);
+		assert((unsigned char *) cur->mappings[i].end > (unsigned char *) cur->mappings[i].begin);
+		if (i > 0) assert(cur->mappings[i-1].end == cur->mappings[i].begin);
+	}
 }
 
 static _Bool augment_sequence(struct mapping_sequence *cur, 
@@ -946,6 +974,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 {
 	_Bool ret;
 	if (!cur) { ret = 0; goto out; }
+	check_mapping_sequence_sanity(cur);
 #define OVERLAPS(b1, e1, b2, e2) \
     ((char*) (b1) < (char*) (e2) \
     && (char*) (e1) >= (char*) (b2))
