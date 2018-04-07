@@ -489,8 +489,8 @@ static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 	{
 		seq->begin = (char*) addr + length;
 	}
-	if ((char*) seq->end >= (char*) addr
-			&& (char*) seq->end < (char*) addr + length)
+	if ((char*) seq->end > (char*) addr
+			&& (char*) seq->end <= (char*) addr + length)
 	{
 		seq->end = addr;
 	}
@@ -1115,10 +1115,20 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 // 				};
 // 				ret = 1; goto out;
 // 			}
-			
+
+			/* First, check we have room to copy right. */
+			unsigned nspare = MAPPING_SEQUENCE_MAX_LEN - cur->nused;
+			if (nspare < 
+					(begin_overlap_is_partial ? 1 : 0)
+				  + (end_overlap_is_partial ? 1 : 0))
+			{
+				ret = 0; goto out;
+			}
+
 			/* The number of obsolete mappings is the number to be
 			 * completely replaced. We want it to equal 1. */
 			/* Eliminate partial overlap at the beginning. */
+
 			if (begin_overlap_is_partial)
 			{
 				copy_all_right_from_by(cur, first_overlapped, 1);
