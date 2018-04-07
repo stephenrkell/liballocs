@@ -111,6 +111,18 @@ AC_ARG_WITH([libsystrap],
                 fi
             ],
             [ac_libsystrap=$(realpath $srcdir)/contrib/trap-syscalls/libsystrap])
+AC_ARG_WITH([librunt],
+            [AS_HELP_STRING([--with-librunt=DIR],
+              [where to find librunt (headers and source)])],
+            [
+                if test -d "$withval"
+                then
+                        ac_librunt="$withval"
+                else
+                        AC_MSG_ERROR(--with-librunt expected directory name)
+                fi
+            ],
+            [ac_librunt=$(realpath $srcdir)/contrib/librunt])
 AC_ARG_WITH([libmallochooks],
             [AS_HELP_STRING([--with-libmallochooks=DIR],
               [where to find libmallochooks (headers, source, templates)])],
@@ -137,6 +149,7 @@ AC_ARG_WITH([libdlbind],
             [ac_libdlbind=$(realpath $srcdir)/contrib/libdlbind])
 
 AC_SUBST([libmallochooks], [$ac_libmallochooks])
+AC_SUBST([librunt], [$ac_librunt])
 AC_SUBST([libsystrap], [$ac_libsystrap])
 AC_SUBST([libdlbind], [$ac_libdlbind])
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])

@@ -11,7 +11,7 @@ HOOKS_PRELOAD_OBJS := malloc_hook_stubs_preload_fast.o event_hooks_fast.o
 HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
 
 CFLAGS += -std=gnu11 -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS) \
-   -I$(LIBSYSTRAP) -I$(LIBDLBIND)/include -I$(SRCROOT)/src -Wno-unused
+   -I$(LIBSYSTRAP) -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(SRCROOT)/src -Wno-unused
 
 ifeq ($(DEBUG),1)
     DEFAULT_EXTRA_CFLAGS := -g

@@ -178,6 +178,7 @@ trap-syscalls/libsystrap/libsystrap.a: trap-syscalls/contrib/config.mk $(wildcar
 build-libsystrap: trap-syscalls/libsystrap/libsystrap.a
 
 CONFIG_MK += \nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls\n
+CONFIG_MK += \nLIBSYSTRAP := $(CONTRIB_ROOT)/trap-syscalls/libsystrap\n
 
 # ----------------------------libdlbind
 
