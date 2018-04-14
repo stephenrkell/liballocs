@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <dlfcn.h>
+#include <limits.h>
 #include <link.h>
 #include "relf.h"
 #include "liballocs_private.h"
@@ -188,8 +189,51 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 	// keep going
 	return 0;
 }
+
+/* Doing better: what we want.
+   Split static into static-segment, static-section, static-symbol.
+   Let's consider static-symbol.
+   We have a bitmap, one bit per byte, with one set bit per start.
+   Starts are symbols with length (spans).
+   We discard symbols that are not spans.
+   If we see multiple spans covering the same address, we discard one
+   of them heuristically.
+   This gives us a list of spans, in address order, with distinct starts.
+   We allocator a vector with one pointer per span.
+   For spans that are in dynsym, it points to their dynsym entry (16 bits probably enough? HMM).
+   Three other cases: 
+   (1) not-in-dynsym symbols that are in an available .symtab ("statsyms")
+   (2) not-in-dynsym symbols that are only as static alloc recs ("extrasyms")
+   (3) rodata covers address ranges but is not marked by any symbol.
+   For (1), we map .symtab if we can and use that.
+   For (2), make static alloc recs look like symtabs, with types on the side
+   For (3), we fall back to the section allocator. Rodata is probably
+     best modelled as uninterpreted bytes, for now.
+     HMM. If we really model all sections, then each section that contains
+     symbols will have to become a bigalloc. Too many?
+   
+   To add type information to syms, we need a uniqtype pointer.
+   We could use a parallel vector. Or save space by combining somehow perhaps.
+      Probably we should borrow the low-order zero bits of the uniqtype pointer,
+      giving us three extra bits, i.e. 44 bits for the uniqtype, 20 for the rest.
+   The static alloc table then becomes this vector + the bitmap.
+   No more need for prev/next.
+   (Also get rid of heap allocsite table's prev/next? MEASURE performance change.)
+   
+   To make the bitmap-based lookup fast, we keep a vector of the initial
+   span index value for the Nth [B-byte-sized] chunk of the bitmap.
+   Then we only have to scan back to a B-byte boundary, count the # of set bits,
+   and add that to the vector's value.
+   So if the bitmap is 1MB say (covering an 8MB segment),
+   and our span index a 16-bit number
+   and we have a max scan of 8 bitmap words (512 bits)
+   then we need 2 bytes of index vector per 512 bytes of segment.
+   Even a single-word scan would give us 2 per 64, which is fine.
+
+ */
+
 #define maximum_static_obj_size (256*1024) // HACK
-struct uniqtype * 
+struct uniqtype *
 static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 {
 	assert(__liballocs_allocsmt != NULL);
@@ -208,8 +252,14 @@ static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 			if (p->allocsite <= static_addr && 
 				(!p->next || ((struct allocsite_entry *) p->next)->allocsite > static_addr)) 
 			{
-				if (out_object_start) *out_object_start = p->allocsite;
-				return p->uniqtype;
+				/* This is the next-lower record, but does it span the address?
+				 * Note that subprograms have length 0, i.e. known length. */
+				if (p->uniqtype && UNIQTYPE_HAS_KNOWN_LENGTH(p->uniqtype) &&
+						p->uniqtype->pos_maxoff >= ((char*) static_addr - (char*) p->allocsite))
+				{
+					if (out_object_start) *out_object_start = p->allocsite;
+					return p->uniqtype;
+				} else return NULL;
 			}
 			might_start_in_lower_bucket &= (p->allocsite > static_addr);
 		}
