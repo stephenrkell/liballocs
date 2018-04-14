@@ -4,9 +4,10 @@ CONTRIB_ROOT := $(realpath $(dir $(THIS_MAKEFILE)))
 NINJA ?= ninja
 CMAKE ?= cmake
 
-# trap-syscalls's contrib needs to be able to find liballocs
 export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
 export LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
+# trap-syscalls's and libdlbind's contribs need to be able to find librunt
+export LIBRUNT_BASE := $(realpath $(dir $(THIS_MAKEFILE))/librunt)
 
 # things we need to build:
 # - libdwarfpp
