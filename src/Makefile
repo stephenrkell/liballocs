@@ -153,9 +153,9 @@ CFLAGS += -I$(SRCROOT)/src
 # Actually it's a bit weird (but nice) that it's happy to expand "$(call dep_fname,%.c)".
 #$(C_DEPS): 
 $(call dep_fname,%.c) : %.c
-	$(CC) -MM $(CFLAGS) "$<" > "$@"
+	$(CC) -MM $(CFLAGS) "$<" > "$@" || (rm -f "$@"; false)
 $(CC_DEPS): $(dir %.cc)$(patsubst %.cc,.%.d,$(notdir %.cc)) : %.cc
-	$(CXX) -MM $(CXXFLAGS) "$<"  > "$@"
+	$(CXX) -MM $(CXXFLAGS) "$<"  > "$@" || (rm -f "$@"; false)
 
 -include $(DEPS)
 
