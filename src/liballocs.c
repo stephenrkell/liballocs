@@ -1657,6 +1657,12 @@ struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 	assert(the_bigalloc->allocated_by == &__mmap_allocator);
 	assert(the_bigalloc->meta.what == DATA_PTR);
 	struct mapping_sequence *seq = the_bigalloc->meta.un.opaque_data.data_ptr;
+	if (!seq)
+	{
+		/* It's a pool belonging to our own dlmalloc. HMM. Do we pretend it
+		 * doesn't exist? */
+		return NULL;
+	}
 	struct mapping_entry *found = __mmap_allocator_find_entry(obj, seq);
 	if (found)
 	{
