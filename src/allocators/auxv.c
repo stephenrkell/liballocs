@@ -55,35 +55,15 @@ void __auxv_allocator_init(void)
 	auxv_array_start = get_auxv((const char **) environ, environ[0]);
 	if (!auxv_array_start) return;
 	
-	auxv_array_terminator = auxv_array_start; 
-	while (auxv_array_terminator->a_type != AT_NULL) ++auxv_array_terminator;
-	
-	/* auxv_array_start[0] is the first word higher than envp's null terminator. */
-	env_vector_terminator = ((const char**) auxv_array_start) - 1;
-	assert(!*env_vector_terminator);
-	env_vector_start = env_vector_terminator;
-	while (*((char**) env_vector_start - 1)) --env_vector_start;
-	
-	/* argv_vector_terminator is the next word lower than envp's first entry. */
-	argv_vector_terminator = ((const char**) env_vector_start) - 1;
-	assert(!*argv_vector_terminator);
-	argv_vector_start = argv_vector_terminator;
-	unsigned nargs = 0;
-	/* To search for the start of the array, we look for an integer that is
-	 * a plausible argument count... which won't look like any pointer we're seeing. */
-	#define MAX_POSSIBLE_ARGS 4194304
-	while (*((uintptr_t*) argv_vector_start - 1) > MAX_POSSIBLE_ARGS)
-	{
-		--argv_vector_start;
-		++nargs;
-	}
-	assert(*((uintptr_t*) argv_vector_start - 1) == nargs);
-	p_argcount = (intptr_t*) argv_vector_start - 1;
-	
-	/* Now for the asciiz. We lump it all in one chunk. */
-	asciiz_start = (char*) (auxv_array_terminator + 1);
-	asciiz_end = asciiz_start;
-	while (*(intptr_t *) asciiz_end != 0) asciiz_end += sizeof (void*);
+	struct auxv_limits lims = get_auxv_limits(auxv_array_start);
+	asciiz_start = lims.asciiz_start;
+	asciiz_end = lims.asciiz_end;
+	env_vector_start = lims.env_vector_start;
+	env_vector_terminator = lims.env_vector_terminator;
+	argv_vector_start = lims.argv_vector_start;
+	argv_vector_terminator = lims.argv_vector_terminator;
+	auxv_array_terminator = lims.auxv_array_terminator;
+	p_argcount = lims.p_argcount;
 	
 	ElfW(auxv_t) *found_at_entry = auxv_lookup(auxv_array_start, AT_ENTRY);
 	if (found_at_entry) program_entry_point = (void*) found_at_entry->a_un.a_val;
@@ -128,7 +108,7 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	
 	if ((char*) obj >= asciiz_start && (char*) obj <= asciiz_end)
 	{
-		if (out_type) *out_type = pointer_to___uniqtype____ARR0_signed_char; // FIXME: actually array
+		if (out_type) *out_type = asciiz_uniqtype;
 		if (out_base) *out_base = (char*) asciiz_start;
 		if (out_size) *out_size = asciiz_end - asciiz_start;
 		if (out_site) *out_site = program_entry_point;
@@ -163,6 +143,29 @@ void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end)
 		/* We've been here before. Adjust the lower bound of the stack,
 		 * which is the *minimum* of the *begins*. */
 		if ((char*) our_bigalloc->begin > (char*) begin) our_bigalloc->begin = begin;
+		/* We also adjust the upper bound of the stack. The reason is a giant
+		 * HACK. After the "[stack]" region which is rwx, there may be a separate rw-
+		 * region which contains the asciiz but is a separate /proc line. When we are
+		 * first called, we are reading from /proc (on Linux anyway)
+		 * and so we haven't seen the /proc line for that yet. So it would be premature
+		 * to expand ourselves into that space. But now that we're being called the second
+		 * time, it's fair game. FIXME: will the next /proc-processing iteration
+		 * clobber this hard work? */
+		
+		if (asciiz_end > (const char *) our_bigalloc->end)
+		{
+			const char *new_end = RELF_ROUND_UP_PTR_(asciiz_end, PAGE_SIZE);
+			unsigned pi = pageindex[PAGENUM(asciiz_end)];
+			_Bool success;
+			if (pi)
+			{
+				_Bool success = __liballocs_truncate_bigalloc_at_beginning(
+					&big_allocations[pi], new_end);
+				assert(success);
+			}
+			success  = __liballocs_extend_bigalloc(our_bigalloc, new_end);
+			assert(success);
+		}
 		return;
 	}
 	__top_of_initial_stack = end; /* i.e. the highest address */
