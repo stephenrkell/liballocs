@@ -177,6 +177,15 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 	struct big_allocation *parent_end = &big_allocations[pageindex[PAGENUM(((char*)seq->end)-1)]];
 	while (parent_end->parent) parent_end = parent_end->parent;
 	if (parent_end == &big_allocations[0]) parent_end = NULL;
+	
+	/* Special case: if we've strayed into the auxv, our work is done. */
+	if (parent_end && parent_begin
+		&& parent_begin == parent_end
+		 && parent_begin->allocated_by == &__auxv_allocator)
+	{
+		return;
+	}
+	
 	struct mapping_sequence *existing_seq = NULL;
 
 	if (!parent_begin && !parent_end) goto go_ahead;
@@ -190,6 +199,10 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 		 * sequence and then continue. */
 		existing_seq = (struct mapping_sequence *)
 			parent_end->meta.un.opaque_data.data_ptr;
+		if (!existing_seq)
+		{
+			/* The parent end has a bigalloc but no mapping sequence. HMM. */
+		}
 		if (mem_range_suffix(existing_seq, seq))
 		{
 			if (!mapping_sequence_suffix(existing_seq, seq))
@@ -619,6 +632,11 @@ void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size
 		&__mmap_allocator, NULL);
 	if (!bigalloc_before) abort();
 	struct mapping_sequence *seq = bigalloc_before->meta.un.opaque_data.data_ptr;
+	if (!seq)
+	{
+		/* It's a chunk malloc'd by our own dlmalloc. HMM. */
+		abort();
+	}
 	struct mapping_entry *maybe_ent = __mmap_allocator_find_entry(old_addr, seq);
 	if (!maybe_ent) abort();
 	remembered_prot = maybe_ent->prot;
