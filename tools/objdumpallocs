@@ -84,7 +84,15 @@ meta_instr_regexp="${line_regexp}.*((call|jmp).*(<($(
 
 echo "meta_instr_regexp is: $meta_instr_regexp" 1>&2
 
-. "$(dirname "$0")"/objdumpmeta
+
+case $(basename "$0") in
+    (*dumpallocs|*dumpmeta|*dumpmemacc)
+        outputstyle="tab"
+        ;;
+    (*)
+        outputstyle="punc"
+        ;;
+esac
 
 format_output () {
     while read return_addr_sym return_addr return_addr_offset address filename line_number line_number_end token source_oneline; do
@@ -102,6 +110,30 @@ format_output () {
     done
 }
 
-output_lines="$( generate_output_lines )"
+# source our shell functions and actions -- nowadays we only use input_file,
+# escaped_meta_instr_regexp and get_objdump
+. "$(dirname "$0")"/objdumpmeta.sh 
 
-echo "$output_lines" | format_output
+#allocsites_tmpfile="$(make_allocsites_tmpfile)"
+#objdump_tmpfile="$(make_objdump_tmpfile)"
+#oldstyle_tmpfile="$(mktemp)"
+#generate_output_lines "$1" > "$oldstyle_tmpfile"
+#
+escaped_meta_instr_regexp="$( echo "$meta_instr_regexp" | sed 's/\\/\\\\/g' )"
+#echo "escaped_meta_instr_regexp is $escaped_meta_instr_regexp" 1>&2
+#
+#gawk_tmpfile="$(mktemp)"
+#cat "$objdump_tmpfile" | "$(dirname "$0")"/objdumpmeta.awk \
+#   -vdebug=1 -vmeta_instr_regexp_cmdline="$escaped_meta_instr_regexp" | \
+#   LANG=C sort -s -t$'\t' -k5 -k6 > "$gawk_tmpfile"
+#
+##diff -u "$oldstyle_tmpfile" "$gawk_tmpfile" 1>&2
+#
+#cat "$oldstyle_tmpfile" | \
+#format_output
+#
+#echo rm -f "$oldstyle_tmpfile" "$gawk_tmpfile"
+
+get_objdump | "$(dirname "$0")"/objdumpmeta.awk \
+   -vdebug=1 -vmeta_instr_regexp_cmdline="$escaped_meta_instr_regexp" | \
+   LANG=C sort -s -t$'\t' -k5 -k6 | format_output
