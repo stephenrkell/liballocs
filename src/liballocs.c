@@ -521,6 +521,12 @@ const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqt
 	return "(unnamed type)";
 }
 
+struct allocsite_entry *__liballocs_allocsite_to_entry(const void *allocsite)
+{ return allocsite_to_entry(allocsite); }
+
+struct uniqtype *__liballocs_allocsite_to_uniqtype(const void *allocsite)
+{ return allocsite_to_uniqtype(allocsite); }
+
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr)
 {
@@ -1468,7 +1474,8 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		/* Clear the low-order bit, which is available as an extra flag 
 		 * bit. libcrunch uses this to track whether an object is "loose"
 		 * or not. Loose objects have approximate type info that might be 
-		 * "refined" later, typically e.g. from __PTR_void to __PTR_T. */
+		 * "refined" later, typically e.g. from __PTR_void to __PTR_T.
+		 * FIXME: this should just be determined by abstractness of the type. */
 		alloc_uniqtype = (struct uniqtype *)((uintptr_t)(p_ins->alloc_site) & ~0x1ul);
 	}
 	else

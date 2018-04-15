@@ -94,6 +94,8 @@ extern inline struct allocsite_entry * __attribute__((gnu_inline)) allocsite_to_
 	}
 	return NULL;
 }
+struct allocsite_entry *__liballocs_allocsite_to_entry(const void *allocsite);
+
 extern inline struct uniqtype *allocsite_to_uniqtype(const void *allocsite) __attribute__((gnu_inline,always_inline));
 extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtype(const void *allocsite)
 {
@@ -101,6 +103,7 @@ extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtyp
 	if (!e) return NULL;
 	return e->uniqtype;
 }
+struct uniqtype *__liballocs_allocsite_to_uniqtype(const void *allocsite);
 
 extern inline _Bool 
 __attribute__((always_inline,gnu_inline))
