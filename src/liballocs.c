@@ -1252,7 +1252,11 @@ void __liballocs_post_systrap_init(void)
 			pointer_to_ ## varname = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE); \
 			if (!pointer_to_ ## varname) abort(); \
 			*(struct uniqtype *) pointer_to_ ## varname = (struct uniqtype) __VA_ARGS__; \
-			dlbind(__liballocs_rt_uniqtypes_obj, #symname, pointer_to_ ## varname, sz, STT_OBJECT);
+			old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;\
+			reloaded = dlbind(__liballocs_rt_uniqtypes_obj, #symname, pointer_to_ ## varname, sz, STT_OBJECT); \
+			update_rt_uniqtypes_obj(reloaded, old_base)
+		void *reloaded;
+		void *old_base;
 		if (!pointer_to___uniqtype__void)
 		{
 			CREATE(__uniqtype__void, __uniqtype__void, 1, {
