@@ -938,19 +938,23 @@ void __mmap_allocator_init(void)
 		 * move the sbrk() arbitrarily far, and by definition we won't see it
 		 * because we're not trapping sbrk() yet. We need the bigalloc lookup
 		 * (in the indexing logic, or in pageindex) to have a second-attempt
-		 * at getting the bigalloc after re-checking the sbrk(). */
+		 * at getting the bigalloc after re-checking the sbrk().
+		 *
+		 * FIXME: I think the real way to fix this is to remove the dependency
+		 * from systrap on meta-objs. That is all just a big hack for __brk
+		 * anyway. */
 		add_missing_mappings_from_proc();
-		
 		/* Also extend the data segment to account for the current brk. */
 		set_executable_data_segment_mapping_bigalloc();
-		update_data_segment_end(sbrk(0));
-		__liballocs_global_init(); // will add mappings; may change sbrk
-		add_missing_mappings_from_proc();
-		set_executable_data_segment_mapping_bigalloc();
-
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
-		__liballocs_post_systrap_init();
+		__liballocs_post_systrap_init(); /* does the libdlbind symbol creation */
+		__liballocs_global_init(); // will add mappings; may change sbrk
+		// we want to trap syscalls in "__brk"; // glibc HACK!
+		// but "__brk" in glibc isn't an exportd symbol.
+		// instead, we need to walk its allocations
+		__systrap_brk_hack();
+		update_data_segment_end(sbrk(0));
 
 		initialized = 1;
 		trying_to_initialize = 0;

@@ -47,6 +47,7 @@ void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute
 void munmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void mremap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void __liballocs_systrap_init(void);
+void __systrap_brk_hack(void);
 int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
