@@ -240,9 +240,7 @@ _Bool __liballocs_systrap_is_initialized; /* globally visible, so that it gets o
 _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 	void **out_addr, size_t *out_len) __attribute__((weak));
 
-static _Bool found_sbrk;
 static _Bool found_a_brk_or_sbrk;
-static struct link_map *sbrk_object;
 
 /* This is logically a constructor, since it's important that it happens before
  * much stuff has been memory-mapped. BUT we have to hand off smoothly from the
@@ -345,8 +343,7 @@ void __liballocs_systrap_init(void)
 			found_an_mmap |= trap_syscalls_in_symbol_named("mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 			trap_syscalls_in_symbol_named("munmap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 			trap_syscalls_in_symbol_named("mremap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-			found_sbrk = trap_syscalls_in_symbol_named("sbrk", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-			if (found_sbrk) sbrk_object = l;
+			found_a_brk_or_sbrk |= trap_syscalls_in_symbol_named("sbrk", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 		}
 	}
 
@@ -365,22 +362,30 @@ void __systrap_brk_hack(void)
 	// we want to trap syscalls in "__brk"; // glibc HACK!
 	// but "__brk" in glibc isn't an exportd symbol.
 	// instead, we need to walk its allocations
-	if (found_sbrk) // glibc HACK!
+	for (struct link_map *l = find_r_debug()->r_map; l; l = l->l_next)
 	{
-		assert(sbrk_object);
-		found_a_brk_or_sbrk = 1;
-		if (&__lookup_static_allocation_by_name)
+		if ((const void *) l->l_ld != &_DYNAMIC && (intptr_t) l->l_addr > 0
+			&& strlen(l->l_name) > 0)
 		{
-			/* We want to trap syscalls in "__brk" but "__brk" in glibc 
-			 * isn't an exported symbol. So consult our allocs data for 
-			 * a definition named "__brk" and trap that. */
-			void *addr;
-			size_t len;
-			_Bool success = __lookup_static_allocation_by_name(sbrk_object, "__brk", &addr, &len);
-			if (success)
+			/* This is a reasonable object that isn't us. Look up "sbrk" in its
+			 * symtab. Then do the more expensive search for "__brk". */
+			Elf64_Sym *found = symbol_lookup_in_object(l, "sbrk"); // HACK
+			if (found)
 			{
-				trap_one_instruction_range((unsigned char*) addr, 
-					(unsigned char*) addr + len, 0, 1);
+				if (&__lookup_static_allocation_by_name)
+				{
+					/* We want to trap syscalls in "__brk" but "__brk" in glibc 
+					 * isn't an exported symbol. So consult our allocs data for 
+					 * a definition named "__brk" and trap that. */
+					void *addr;
+					size_t len;
+					_Bool success = __lookup_static_allocation_by_name(l, "__brk", &addr, &len);
+					if (success)
+					{
+						trap_one_instruction_range((unsigned char*) addr, 
+							(unsigned char*) addr + len, 0, 1);
+					}
+				}
 			}
 		}
 	}
