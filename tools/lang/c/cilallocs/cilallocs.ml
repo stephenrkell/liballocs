@@ -144,6 +144,8 @@ let rec isStaticallyNullPtr e = match (typeSig (typeOf e)) with
         end
   | _ -> false
 
+let rec isStaticallyNull e = isStaticallyZero e || isStaticallyNullPtr e
+
 let constInt64ValueOfExprNoChr (intExp: Cil.exp) : int64 option =
     match (foldConstants intExp) with
         Const(CInt64(intValue, _, _)) -> 
