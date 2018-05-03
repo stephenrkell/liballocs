@@ -207,13 +207,23 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
    (3) rodata covers address ranges but is not marked by any symbol.
    For (1), we map .symtab if we can and use that.
    For (2), make static alloc recs look like symtabs, with types on the side
-   For (3), we fall back to the section allocator. Rodata is probably
-     best modelled as uninterpreted bytes, for now.
+   For (3), we fall back to the section allocator.
+        Rodata is probably best modelled as uninterpreted bytes, for now.
+        -- Doing better: look for references to it from code, and correlate with code's DWARF.
      HMM. If we really model all sections, then each section that contains
      symbols will have to become a bigalloc. Too many?
-   
+         NO, in a finally linked binary there are not that many sections.
+         And this structure is useful for tools, e.g. trap-syscalls. Do it!
+
+   So we have a vector of symbol entries in address order.
+   And we have a scaled index of the bitmap, one entry per
+         smallish interval, holding the index# at that interval start.
+         Aligned 64-byte intervals seem good. One two-byte index entry per such interval.
+         Maximum 64K symbols per segment -- is that okay? Could make it a 4-byte entry even.
+   So we can count set bits in the word, back to the interval start, and add to the index#.
+
    To add type information to syms, we need a uniqtype pointer.
-   We could use a parallel vector. Or save space by combining somehow perhaps.
+   We could use a parallel vector. Or save space by combining vectors somehow perhaps.
       Probably we should borrow the low-order zero bits of the uniqtype pointer,
       giving us three extra bits, i.e. 44 bits for the uniqtype, 20 for the rest.
    The static alloc table then becomes this vector + the bitmap.
@@ -277,8 +287,8 @@ static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 
 
 
-static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc, 
-	struct uniqtype **out_type, void **out_base, 
+static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc,
+	struct uniqtype **out_type, void **out_base,
 	unsigned long *out_size, const void **out_site)
 {
 	++__liballocs_hit_static_case;
@@ -345,9 +355,11 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 	return 0;
 }
 
+DEFAULT_GET_TYPE
 
 struct allocator __static_allocator = {
 	.name = "static",
 	.is_cacheable = 1,
-	.get_info = get_info
+	.get_info = get_info,
+	.get_type = get_type
 };

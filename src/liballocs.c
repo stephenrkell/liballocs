@@ -1563,13 +1563,20 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 struct uniqtype * 
 __liballocs_get_alloc_type(void *obj)
 {
-	const void *object_start;
 	struct uniqtype *out;
 	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
 		NULL, &out, NULL);
-	
 	if (err) return NULL;
-	
+	return out;
+}
+struct uniqtype *
+__liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)
+{
+	struct uniqtype *out;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, out_a, NULL,
+		NULL, &out, NULL);
+	if (err) return NULL;
+	*out_num = pageindex[PAGENUM(obj)]; /* FIXME: should also check it's precise */
 	return out;
 }
 

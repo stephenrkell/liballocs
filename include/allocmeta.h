@@ -128,6 +128,16 @@ fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_al
 #define __allocmeta_fun_ptr(rett, name, ...) \
 	rett (*name)( __VA_ARGS__ );
 
+#define DEFAULT_GET_TYPE \
+static struct uniqtype *get_type(void *obj) \
+{ \
+	struct uniqtype *out; \
+	struct liballocs_err *err = get_info(obj, NULL, &out, \
+		NULL, NULL, NULL); \
+	if (err) return NULL; \
+	return out; \
+}
+
 struct allocator
 {
 	const char *name;

@@ -92,6 +92,11 @@ struct uniqtype * __liballocs_get_alloc_type(const void *obj)
 {
 	return NULL;
 }
+struct uniqtype *
+__liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)
+{
+	return NULL;
+}
 struct allocator * __liballocs_get_leaf_allocator(const void *obj)
 {
 	return NULL;

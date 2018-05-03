@@ -236,9 +236,50 @@ __liballocs_ensure_init(void)
 }
 // inline definition in pageindex.h, instantiated in pageindex.c
 // GAH -- so clients including only this header will complain "used but not defined"
+/* The "leaf allocator" for an address is the allocator
+ * of the most deeply nested allocation covering a particular
+ * address. For example, if a malloc has two live allocations
+ * and a gap in the middle, the leaf allocator for an address
+ * in the gap is that of the malloc *arena*, so probably mmap.  */
 inline struct allocator *__liballocs_leaf_allocator_for(const void *obj, 
 	struct big_allocation **out_containing_bigalloc,
 	struct big_allocation **out_maybe_the_allocation);
+
+/* The "page-leaf allocator" for an address
+ * is the allocator, if any,
+ * of the deepest bigalloc that covers the entire page and is not suballocated,
+ * or the suballocator managing the deepest bigalloc covering the entire page.
+ * Unlike the above, it will not "see through holes": if we query an address
+ * which is not covered by a (sub)allocation of the page-managing allocator,
+ * we will still be returned the page-managing allocator and not one higher.
+ *
+ * These semantics are cacheable via the pageindex, although we don't currently
+ * do this (FIXME): we set a spare bit iff the recorded bigalloc# is the page-leaf
+ * allocator for the whole page. This must not be set if the page contains a
+ * non-page-aligned bigalloc boundary. FIXME: take care of this in pageindex.c.
+ * Bit set means "no deeper bigalloc covers *any part of this page*".
+ */
+
+#ifdef __GNUC__ /* requires statement expression */
+#define __liballocs_get_alloc_type_inlcache(obj) \
+	({ \
+		static struct allocator *cached_allocator; \
+		static /*bigalloc_num_t */ unsigned short cached_num; \
+		(likely(cached_num && pageindex[PAGENUM(obj)] == cached_num)) ? \
+		cached_allocator->get_type(obj) \
+		: __liballocs_get_alloc_type_with_fill(obj, &cached_allocator, &cached_num); \
+	})
+#define __liballocs_get_alloc_base(obj) \
+	({ \
+		static struct allocator *cached_allocator; \
+		static /*bigalloc_num_t*/ unsigned short cached_num; \
+		(likely(cached_num && pageindex[PAGENUM(obj)] == cached_num)) ? \
+		generic_bitmap_get_base(obj, &big_allocations[cached_num]) \
+		: __liballocs_get_alloc_base_with_fill(obj, &cached_allocator, &cached_num); \
+	})
+#endif
+	
+
 // declare some more stuff that our inlines need, but is really liballocs-internal
 _Bool __liballocs_notify_unindexed_address(const void *obj);
 void __liballocs_report_wild_address(const void *ptr);
@@ -624,6 +665,8 @@ __liballocs_get_alloc_info
 
 struct uniqtype * 
 __liballocs_get_alloc_type(void *obj);
+struct uniqtype * 
+__liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num);
 
 struct uniqtype * 
 __liballocs_get_outermost_type(void *obj);
