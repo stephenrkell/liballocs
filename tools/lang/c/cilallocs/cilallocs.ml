@@ -387,8 +387,56 @@ let rec decayArrayToCompatiblePointer ts = match ts with
  | TSPtr(tsig, attrs) -> TSPtr(decayArrayToCompatiblePointer tsig, attrs)
  | _ -> ts
 
-
 let exprConcreteType e = getConcreteType (Cil.typeSig (Cil.typeOf e))
+
+(* This function's name is plural because it simplifies nested expressions too. *)
+let rec simplifyPtrExprs someE =
+  (* Try to see through AddrOf and Mems to get down to a local lval if possible. 
+   * Here we are applying the equivalences from the CIL documentation.
+   * We first simplify any nested pointer expressions
+   * (which may nest inside *non*-pointer expressions!)
+   * then simplify the whole. This is necessary to, say, turn
+   * "*&*&*&*&p" into "p". *)
+  let rec simplifyOffset offs = match offs with
+      NoOffset -> NoOffset
+    | Field(fi, rest) -> Field(fi, simplifyOffset rest)
+    | Index(intExp, rest) -> Index(simplifyPtrExprs intExp, simplifyOffset rest)
+  in
+  let withSubExprsSimplified = match someE with
+    |Lval(Var(vi), offs) -> Lval(Var(vi), simplifyOffset offs)
+    |Lval(Mem(subE), offs) -> Lval(Mem(simplifyPtrExprs subE), simplifyOffset offs)
+    |UnOp(op, subE, subT) -> UnOp(op, simplifyPtrExprs subE, subT)
+    |BinOp(op, subE1, subE2, subT) -> BinOp(op, simplifyPtrExprs subE1, simplifyPtrExprs subE2, subT)
+    |CastE(subT, subE) -> 
+        let simplifiedSubE = simplifyPtrExprs subE
+        in
+        if getConcreteType (Cil.typeSig subT) = getConcreteType (Cil.typeSig (Cil.typeOf simplifiedSubE))
+        then simplifiedSubE else CastE(subT, simplifiedSubE)
+    |AddrOf(Var(vi), offs) -> AddrOf(Var(vi), simplifyOffset offs)
+    |AddrOf(Mem(subE), offs) -> AddrOf(Mem(simplifyPtrExprs subE), simplifyOffset offs)
+    |StartOf(Var(vi), offs) -> StartOf(Var(vi), simplifyOffset offs)
+    |StartOf(Mem(subE), offs) -> StartOf(Mem(simplifyPtrExprs subE), simplifyOffset offs)
+    |_ -> someE
+  in
+  match withSubExprsSimplified with
+     (* e.g.  (&p->foo)->bar           is   p->foo.bar      *)
+     Lval(Mem(AddrOf(Mem a, aoff)), off) -> 
+        Lval(Mem a, offsetFromList((offsetToList aoff) @ (offsetToList off)))
+     (* e.g.  (&v.baz)->bum            is   v.baz.bum       *)
+   | Lval(Mem(AddrOf(Var v, aoff)), off) -> 
+        Lval(Var v, offsetFromList((offsetToList aoff) @ (offsetToList off)))
+     (* e.g.  &*p                      is   p               *)
+   | AddrOf (Mem a, NoOffset)            -> a
+     (* note that unlike &( *p ),
+              &p->f   (i.e. with some offset)  cannot be simplified          *)
+   | StartOf (Mem s, NoOffset) ->
+     (* only NoOffset because unlike *p    (where p is of pointer-to-array type),
+              p->arr  (i.e. some offset) cannot be simplified      *)
+     (* PROBLEM: we want to yield just "s", but this changes the type.
+      * What's simpler: StartOf(Mem x, NoOffset) or CastE(t, x)?
+      * We say the latter. *)
+        CastE(Cil.typeOf withSubExprsSimplified, s)
+   | _ -> withSubExprsSimplified
 
 let matchIgnoringLocation g1 g2 = match g1 with 
     GType(ti, loc) ->        begin match g2 with GType(ti2, _)        -> ti = ti2 | _ -> false end
