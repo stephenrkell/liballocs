@@ -77,6 +77,7 @@ class AllocsCC(AllocsCompilerWrapper):
         #   "--dodumpmemacc", \
         return [\
         "--save-temps", \
+        "--native", \
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/cilallocs/cilallocs.cmxs"), \
         "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"), \
            "--dodumpallocs", \
