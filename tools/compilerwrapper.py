@@ -92,7 +92,7 @@ def guessInputLanguageFromFilename(inputFilename):
         return "assembler-with-cpp"
     if fileExtension in {".o", ".os", ".a", ".so"}:
         return None # no source language -- goes straight to linker
-    os.stderr.write("Could not identify source language for input filename %s\n" % inputFilename)
+    sys.stderr.write("Could not identify source language for input filename %s\n" % inputFilename)
     return None
     
 def phasesForInputLanguage(inputLanguage):
@@ -109,7 +109,7 @@ def phasesForInputLanguage(inputLanguage):
         return set.union({Phase.PREPROCESS}, laterPhases)
     if inputLanguage == None:
         return set({Phase.LINK})
-    os.stderr.write("Could not enumerate phases for input filename %s\n" % inputFilename)
+    sys.stderr.write("Could not enumerate phases for input filename %s\n" % inputFilename)
     return {}
 
 class CompilerWrapper:
