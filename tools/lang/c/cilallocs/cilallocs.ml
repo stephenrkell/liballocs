@@ -45,12 +45,14 @@ open Str
 open Map
 open Pretty
 open Cil
+open Hashtbl
 module NamedTypeMap = Map.Make(String)
 
 let list_empty l = not (List.exists (fun x -> true) l)
 
 let expToString e      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp e))
 let instToString i     = (Pretty.sprint 80 (Pretty.dprintf "%a" d_instr i))
+let instToCilString i  = (Pretty.sprint 80 (printInstr (new plainCilPrinterClass) () i))
 let lvalToString lv    = (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv))
 let offsetToString o   = (Pretty.sprint 80 (Pretty.dprintf "%a" (d_offset (d_formatarg () (Fg("")))) o))
 let typToString t      = (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))
@@ -58,6 +60,41 @@ let typsigToString ts  = (Pretty.sprint 80 (Pretty.dprintf "%a" d_typsig ts))
 let expToCilString e   = (Pretty.sprint 80 (printExp  (new plainCilPrinterClass) () e))
 let lvalToCilString lv = (Pretty.sprint 80 (printLval (new plainCilPrinterClass) () lv))
 let attrsToString atts = (Pretty.sprint 80 (Pretty.dprintf "%a" d_attrlist atts))
+
+(* Bitfield utilities borrowed from logwrites.ml *)
+let rec isBitfieldOffset lo = match lo with
+  | NoOffset -> false
+  | Field(fi,NoOffset) -> not (fi.fbitfield = None)
+  | Field(_,lo) -> isBitfieldOffset lo
+  | Index(_,lo) -> isBitfieldOffset lo
+(* Return an expression that evaluates to the address of the given lvalue.
+ * For most lvalues, this is merely AddrOf(lv). However, for bitfields
+ * we do some offset gymnastics. 
+ *)
+let addrOfLv (lv: lval) = 
+  let lh, lo = lv in 
+  if not (isBitfieldOffset lo) then mkAddrOf lv
+  else begin
+    (* we figure out what the address would be without the final bitfield
+     * access, and then we add in the offset of the bitfield from the
+     * beginning of its enclosing comp *) 
+    let rec splitOffsetAndBitfield lo = match lo with 
+      | NoOffset -> failwith "logwrites: impossible" 
+      | Field(fi,NoOffset) -> (NoOffset,fi)
+      | Field(e,lo) ->  let a,b = splitOffsetAndBitfield lo in 
+                        ((Field(e,a)),b)
+      | Index(e,lo) ->  let a,b = splitOffsetAndBitfield lo in
+                        ((Index(e,a)),b)
+    in 
+    let new_lv_offset, bf = splitOffsetAndBitfield lo in
+    let new_lv = (lh, new_lv_offset) in 
+    let enclosing_type = TComp(bf.fcomp, []) in 
+    let bits_offset, bits_width = 
+      bitsOffset enclosing_type (Field(bf,NoOffset)) in
+    let bytes_offset = bits_offset / 8 in
+    let lvPtr = mkCast ~e:(mkAddrOf (new_lv)) ~newt:(charPtrType) in
+    (BinOp(PlusPI, lvPtr, (integer bytes_offset), ulongType))
+  end
 
 (* Module-ify Cil.typSig *)
 module CilTypeSig = struct
@@ -294,40 +331,6 @@ let voidConstPtrPtrType = TPtr(TPtr(TVoid([Attr("const", [])]),[]), [])
 let ulongPtrType = TPtr(TInt(IULong, []),[])
 let voidPtrPtrType = TPtr(TPtr(TVoid([]),[]),[])
 let boolType = TInt(IBool, [])
-
-(* Returns true if the given lvalue offset ends in a bitfield access. *) 
-let rec is_bitfield lo = match lo with
-  | NoOffset -> false
-  | Field(fi,NoOffset) -> not (fi.fbitfield = None)
-  | Field(_,lo) -> is_bitfield lo
-  | Index(_,lo) -> is_bitfield lo 
-
-(* Return an expression that evaluates to the address of the given lvalue.
- * For most lvalues, this is merely AddrOf(lv). However, for bitfields
- * we do some offset gymnastics. 
- *)
-let addr_of_lv (lh,lo) = 
-  if is_bitfield lo then begin
-    (* we figure out what the address would be without the final bitfield
-     * access, and then we add in the offset of the bitfield from the
-     * beginning of its enclosing comp *) 
-    let rec split_offset_and_bitfield lo = match lo with 
-      | NoOffset -> failwith "trumptr: impossible" 
-      | Field(fi,NoOffset) -> (NoOffset,fi)
-      | Field(e,lo) ->  let a,b = split_offset_and_bitfield lo in 
-                        ((Field(e,a)),b)
-      | Index(e,lo) ->  let a,b = split_offset_and_bitfield lo in
-                        ((Index(e,a)),b)
-    in 
-    let new_lv_offset, bf = split_offset_and_bitfield lo in
-    let new_lv = (lh, new_lv_offset) in 
-    let enclosing_type = TComp(bf.fcomp, []) in 
-    let bits_offset, bits_width = 
-      bitsOffset enclosing_type (Field(bf,NoOffset)) in
-    let bytes_offset = bits_offset / 8 in 
-    let lvPtr = mkCast ~e:(mkAddrOf (new_lv)) ~newt:(charPtrType) in
-    (BinOp(PlusPI, lvPtr, (integer bytes_offset), ulongType))
-  end else (AddrOf (lh,lo))
 
 (* This effectively embodies our "default specification" for C code
  * -- it controls what we assert in "__is_a" tests, and
@@ -612,6 +615,21 @@ let rec findFun nm gs = match gs with
             if dec.svar.vname = nm then Some(dec) else findFun nm gg
       | _ -> findFun nm gg
 
+let rec findFunOrFail nm gs = match findFun nm gs with
+  None -> failwith ("findFun failed: " ^ nm)
+| Some f -> f
+
+let materialiseBuiltin nm =
+    let (retT, argTs, isVa) = Hashtbl.find Cil.builtinFunctions nm
+    in
+    let f = emptyFunction nm
+    in
+    f.svar.vtype <- (TFun(retT, 
+        Some(List.mapi (fun i -> fun t -> ("arg" ^ (string_of_int i), t, [])) argTs),
+        isVa, 
+        []));
+    f
+
 let findOrCreateExternalFunctionInFile fl nm proto : fundec = (* findOrCreateFunc fl nm proto *) (* NO! doesn't let us have the fundec *)
   match findFun nm fl.globals with 
     Some(d) -> d
@@ -728,3 +746,28 @@ let tsIsMultiplyIndirectedGenericPointer ts =
     let upts = ultimatePointeeTs ts
     in (upts = Cil.typeSig(voidType) || upts = Cil.typeSig(charType))
          && (indirectionLevel ts) > 1
+
+(* Do our own scan for AddrOf and StartOf. 
+ * The CIL one is not trustworthy, because any array subexpression
+ * has internally been tripped via a StartOf (perhaps now rewritten? FIXME)
+ * meaning it contains false positives. *)
+class addressTakenVisitor = fun (seenAddressTakenLocalNames : string list ref)
+    -> object(self) 
+    inherit nopCilVisitor
+    method vexpr (e: exp) : exp visitAction = begin
+        match e with
+             AddrOf(Var(vi), _) when not vi.vglob ->
+                seenAddressTakenLocalNames :=
+                    if List.mem vi.vname !seenAddressTakenLocalNames
+                    then !seenAddressTakenLocalNames
+                    else vi.vname :: !seenAddressTakenLocalNames
+                ; DoChildren
+           | StartOf(Var(vi), _) when not vi.vglob -> 
+                seenAddressTakenLocalNames :=
+                    if List.mem vi.vname !seenAddressTakenLocalNames 
+                    then !seenAddressTakenLocalNames
+                    else vi.vname :: !seenAddressTakenLocalNames
+                ; DoChildren
+           | _ -> DoChildren
+    end
+end
