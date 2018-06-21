@@ -173,6 +173,8 @@ struct mapping_sequence;
 struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mapping_sequence *seq)
 	__attribute__((visibility("protected")));
 
+void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *b);
+
 void __static_allocator_init(void);
 void __static_allocator_notify_load(void *handle);
 void __static_allocator_notify_unload(const char *copied_filename);

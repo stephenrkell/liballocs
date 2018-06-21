@@ -87,7 +87,7 @@ static struct big_allocation *add_bigalloc(void *begin, size_t size)
 	return b;
 }
 
-static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq) {
+static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_sequence *seq) {
 	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
 	if (!b) abort();
 	
@@ -105,6 +105,7 @@ static void add_mapping_sequence_bigalloc(struct mapping_sequence *seq) {
 			}
 		}
 	};
+	return b;
 }
 
 static _Bool mapping_entry_equal(struct mapping_entry *e1,
@@ -351,8 +352,13 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 	}
 	else abort(); // we should have covered all the cases
 
-go_ahead:
-	add_mapping_sequence_bigalloc(seq);
+go_ahead: ;
+	/* Extra test: is this the stack sequence? */
+	struct big_allocation *b = add_mapping_sequence_bigalloc(seq);
+	if (seq->filename && 0 == strncmp(seq->filename, "[stack", 6))
+	{
+		__auxv_allocator_notify_init_stack_mapping_sequence(b);
+	}
 	return;
 report_problem:
 	write_string("Saw a mapping sequence conflicting with existing one\n");
@@ -424,9 +430,6 @@ report_problem:
 	}
 	abort();
 }
-
-/* HACK: we have a special link to the auxv allocator. */
-void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end);
 
 static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 	void *addr, size_t length)
@@ -589,7 +592,6 @@ static void do_munmap(void *addr, size_t length, void *caller)
 			}
 		}
 	}
-	
 }
 
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller)
@@ -1226,8 +1228,9 @@ static _Bool extend_current(struct mapping_sequence *cur, struct maps_entry *ent
 			filename = NULL;
 			if (0 == strncmp(ent->rest, "[stack", 6))
 			{
-				/* We should have caught this earlier in add_missing_cb. */
-				abort();
+				/* FIXME: probably don't want '[stack]' hanging around as a filename,
+				 * but we use it to identify this sequence later, so keep it for now. */
+				filename = ent->rest;
 			}
 			else // it might say '[heap]'; treat it as heap
 			{
@@ -1271,15 +1274,7 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 	 * with what already exists.
 	 */
 
-	/* If it looks like a stack... */
-	if (0 == strncmp(ent->rest, "[stack", 6))
-	{
-		__auxv_allocator_notify_init_stack_mapping(
-			(void*) ent->first, (void*) ent->second
-		);
-		return 0;
-	}
-	else if (0 == strncmp(ent->rest, "[heap", 5)) // it might say '[heap]'; treat it as heap
+	if (0 == strncmp(ent->rest, "[heap", 5)) // it might say '[heap]'; treat it as heap
 	{
 		/* We will get this when we do the sbrk. Do nothing for now. */
 		return 0;

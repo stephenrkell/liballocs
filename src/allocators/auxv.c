@@ -49,12 +49,17 @@ static void init_uniqtypes(void)
 			pointer_to___uniqtype__signed_char, asciiz_end - asciiz_start);
 }
 
+static _Bool tried_to_initialize;
 void __auxv_allocator_init(void) __attribute__((constructor(101)));
 void __auxv_allocator_init(void)
 {
+	/* We might get called more than once. */
+	if (tried_to_initialize) return;
+	tried_to_initialize = 1;
+
 	auxv_array_start = get_auxv((const char **) environ, environ[0]);
 	if (!auxv_array_start) return;
-	
+
 	struct auxv_limits lims = get_auxv_limits(auxv_array_start);
 	asciiz_start = lims.asciiz_start;
 	asciiz_end = lims.asciiz_end;
@@ -128,15 +133,19 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	return &__liballocs_err_object_of_unknown_storage;
 }
 
-/* HACK: we have a special link to the stack allocator. */
+/* HACK: we have a special link to the stack allocator. Note that it's
+ * "region" because it need not be an integral number of pages, once
+ * we've carved out the bits holding the auxv data. */
 void __stack_allocator_notify_init_stack_region(void *begin, void *end);
 
 void *__top_of_initial_stack __attribute__((visibility("protected")));
 static struct big_allocation *our_bigalloc;
-void __auxv_allocator_notify_init_stack_mapping(void *begin, void *end)
+void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *b)
 {
 	if (!auxv_array_start) __auxv_allocator_init();
 	if (!p_argcount) abort();
+	void *begin = b->begin;
+	void *end = b->end;
 	
 	if (our_bigalloc)
 	{
