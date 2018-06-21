@@ -1560,6 +1560,32 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 	return NULL;
 }
 
+#ifdef __liballocs_get_alloc_base
+#undef __liballocs_get_alloc_base
+#endif
+void *
+__liballocs_get_alloc_base(void *obj)
+{
+	const void *out;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, &out,
+		NULL, NULL, NULL);
+	if (err) return NULL;
+	return (void*) out;
+}
+void *
+__liballocs_get_alloc_base_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)
+{
+	const void *out;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, out_a, &out,
+		NULL, NULL, NULL);
+	if (err) return NULL;
+	*out_num = pageindex[PAGENUM(obj)]; /* FIXME: should also check it's precise */
+	return (void*) out;
+}
+
+#ifdef __liballocs_get_alloc_type
+#undef __liballocs_get_alloc_type
+#endif
 struct uniqtype * 
 __liballocs_get_alloc_type(void *obj)
 {

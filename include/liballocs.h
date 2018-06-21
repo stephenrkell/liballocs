@@ -260,25 +260,6 @@ inline struct allocator *__liballocs_leaf_allocator_for(const void *obj,
  * Bit set means "no deeper bigalloc covers *any part of this page*".
  */
 
-#ifdef __GNUC__ /* requires statement expression */
-#define __liballocs_get_alloc_type_inlcache(obj) \
-	({ \
-		static struct allocator *cached_allocator; \
-		static /*bigalloc_num_t */ unsigned short cached_num; \
-		(likely(cached_num && pageindex[PAGENUM(obj)] == cached_num)) ? \
-		cached_allocator->get_type(obj) \
-		: __liballocs_get_alloc_type_with_fill(obj, &cached_allocator, &cached_num); \
-	})
-#define __liballocs_get_alloc_base(obj) \
-	({ \
-		static struct allocator *cached_allocator; \
-		static /*bigalloc_num_t*/ unsigned short cached_num; \
-		(likely(cached_num && pageindex[PAGENUM(obj)] == cached_num)) ? \
-		generic_bitmap_get_base(obj, &big_allocations[cached_num]) \
-		: __liballocs_get_alloc_base_with_fill(obj, &cached_allocator, &cached_num); \
-	})
-#endif
-	
 
 // declare some more stuff that our inlines need, but is really liballocs-internal
 _Bool __liballocs_notify_unindexed_address(const void *obj);
@@ -663,10 +644,39 @@ __liballocs_get_alloc_info
  * to the noop library if we wanted this to work. Recall also that linking -lallocs does
  * *not* work! You really need to preload liballocs for it to work. */
 
-struct uniqtype * 
-__liballocs_get_alloc_type(void *obj);
+#if defined(__GNUC__) && !defined(LIBALLOCS_NO_INLCACHE) /* requires statement expression */
+#define __liballocs_get_alloc_type(obj) \
+	({ \
+		static struct allocator *cached_allocator; \
+		static /*bigalloc_num_t */ unsigned short cached_num; \
+		(likely(cached_num && pageindex[PAGENUM(obj)] == cached_num)) ? \
+		cached_allocator->get_type(obj) \
+		: __liballocs_get_alloc_type_with_fill(obj, &cached_allocator, &cached_num); \
+	})
 struct uniqtype * 
 __liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num);
+#else
+struct uniqtype * 
+__liballocs_get_alloc_type(void *obj);
+#endif
+
+#if defined(__GNUC__) && !defined(LIBALLOCS_NO_INLCACHE)
+#define __liballocs_get_alloc_base(obj) \
+	({ \
+		static struct allocator *cached_allocator; \
+		static /*bigalloc_num_t*/ unsigned short cached_num; \
+		(likely(cached_num && pageindex[PAGENUM(obj)] == cached_num)) ? \
+		generic_bitmap_get_base(obj, &big_allocations[cached_num]) \
+		: __liballocs_get_alloc_base_with_fill(obj, &cached_allocator, &cached_num); \
+	})
+void *
+__liballocs_get_alloc_base_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num);
+#else
+void *
+__liballocs_get_alloc_base(void *obj);
+#endif
+
+
 
 struct uniqtype * 
 __liballocs_get_outermost_type(void *obj);

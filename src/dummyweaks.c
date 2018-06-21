@@ -88,6 +88,15 @@ void *__liballocs_get_alloc_site(const void *obj)
 {
 	return 0;
 }
+void *__liballocs_get_alloc_base(const void *obj)
+{
+	return NULL;
+}
+void *
+__liballocs_get_alloc_base_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)
+{
+	return NULL;
+}
 struct uniqtype * __liballocs_get_alloc_type(const void *obj)
 {
 	return NULL;
