@@ -26,18 +26,6 @@
 #include "helpers.hpp"
 #include "uniqtypes.hpp"
 
-#include <elf.h>
-#include <link.h>
-
-#include "config.h"
-#if defined(HAVE_GELF_H)
-#include <gelf.h>
-#elif defined(HAVE_LIBELF_GELF_H)
-#include <libelf/gelf.h>
-#else
-#error "Could not find a gelf.h"
-#endif
-
 using std::cin;
 using std::cout;
 using std::cerr;
@@ -239,81 +227,10 @@ int main(int argc, char **argv)
 	
 	using core::root_die;
 	int fd = fileno(infstream);
-	struct sticky_root_die : public root_die
-	{
-		using root_die::root_die;
-		
-		virtual bool is_sticky(const core::abstract_die& d) 
-		{
-			return this->root_die::is_sticky(d)
-				// || dwarf::spec::DEFAULT_DWARF_SPEC.tag_is_type(d.get_tag())
-				;
-		}
-		
-		// FIXME: support non-host-native size
-	private:
-		opt<ElfW(Sym) *> opt_symtab;
-		char *strtab;
-		unsigned n;
-	public:
-		pair<pair<ElfW(Sym) *, char*>, unsigned> get_symtab()
-		{
-			if (!opt_symtab)
-			{
-				Elf *e = get_elf();
-				Elf_Scn *scn = NULL;
-				GElf_Shdr shdr;
-				size_t shstrndx;
-				if (elf_getshdrstrndx(e, &shstrndx) != 0)
-				{
-					throw lib::No_entry();
-				}
-				// iterate through sections looking for symtab
-				while (NULL != (scn = elf_nextscn(e, scn)))
-				{
-					if (gelf_getshdr(scn, &shdr) != &shdr)
-					{
-						cerr << "Unexpected ELF error" << std::endl;
-						throw lib::No_entry(); 
-					}
-					if (shdr.sh_type == SHT_SYMTAB) break;
-				}
-				if (!scn) throw lib::No_entry();
-				Elf_Data *symtab_rawdata = elf_rawdata(scn, NULL);
-				assert(symtab_rawdata);
-				assert(symtab_rawdata->d_size >= shdr.sh_size);
-				ElfW(Sym) *symtab = reinterpret_cast<ElfW(Sym) *>(symtab_rawdata->d_buf);
-				opt_symtab = symtab;
-				n = shdr.sh_size / shdr.sh_entsize;
-				int strtab_ndx = shdr.sh_link;
-				if (strtab_ndx == 0) throw lib::No_entry();
-				Elf_Scn *strtab_scn = NULL;
-				strtab_scn = elf_getscn(e, strtab_ndx);
-				GElf_Shdr strtab_shdr;
-				if (gelf_getshdr(strtab_scn, &strtab_shdr) != &strtab_shdr) throw lib::No_entry();
-				Elf_Data *strtab_rawdata = elf_rawdata(strtab_scn, NULL);
-				assert(strtab_rawdata);
-				assert(strtab_rawdata->d_size >= strtab_shdr.sh_size);
-				strtab = reinterpret_cast<char *>(strtab_rawdata->d_buf);
-				assert(strtab);
-				assert(symtab);
-				// FIXME: cleanup?
-			}
-			return make_pair(make_pair(*opt_symtab, strtab), n);
-		}
-		~sticky_root_die()
-		{
-			if (opt_symtab)
-			{
-				// anything to free?
-			}
-			
-			// this->root_die::~root_die(); // uncomment this when ~root_die is virtual. OH. it is.
-		}
-		
-	} root(fd);
+	shared_ptr<sticky_root_die> p_root = sticky_root_die::create(fd);
+	if (!p_root) { std::cerr << "Error opening file" << std::endl; return 1; }
+	sticky_root_die& root = *p_root;
 	assert(&root.get_frame_section());
-	opt<core::root_die&> opt_r = root; // for debugging
 	
 	/* Do we have an allocsites file for this object? If so, we incorporate its 
 	 * synthetic data types. */
@@ -1238,12 +1155,28 @@ int main(int argc, char **argv)
 			&& i.has_attribute_here(DW_AT_location))
 			
 		{
-			if (!i.as_a<variable_die>()->has_static_storage())
+			iterator_df<variable_die> i_var = i.as_a<variable_die>();
+			if (!i_var->has_static_storage())
 			{
 				// cerr << "Skipping non-static var " << i.summary() << std::endl;
 				continue;
 			}
-			iterator_df<variable_die> i_var = i.as_a<variable_die>();
+			/* Just because we have a location doesn't mean we have a complete
+			 * type. In general it's buggy DWARF that lacks a complete type in
+			 * such cases, but I've seen it. So guard against it. */
+			auto maybe_t = i_var->find_type();
+			if (!maybe_t)
+			{
+				std::cerr << "Warning: DIE at " << i_var.offset_here() << " has location "
+					<< "but no type" << std::endl;
+				continue;
+			}
+			if (!maybe_t->calculate_byte_size())
+			{
+				std::cerr << "Warning: DIE at " << i_var.offset_here() << " has location "
+					<< "but incomplete type: " << maybe_t << std::endl;
+				continue;
+			}
 			try
 			{
 				intervals = 

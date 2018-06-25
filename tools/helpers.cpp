@@ -10,6 +10,20 @@
 #include <boost/regex.hpp>
 #include <dwarfidl/create.hpp>
 #include <libgen.h>
+#include <cstdio>
+#include <memory>
+
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include <boost/icl/interval_map.hpp>
+
+extern "C" {
+#include <sys/mman.h>
+#include "relf.h"
+}
 
 // regex usings
 using boost::regex;
@@ -746,4 +760,190 @@ void get_types_by_codeless_uniqtype_name(
 			}
 		}
 	}
+}
+pair<pair<ElfW(Sym) *, char*>, unsigned> sticky_root_die::get_symtab()
+{
+	if (!opt_symtab)
+	{
+		Elf *e = get_elf();
+		Elf_Scn *scn = NULL;
+		GElf_Shdr shdr;
+		size_t shstrndx;
+		if (elf_getshdrstrndx(e, &shstrndx) != 0)
+		{
+			throw lib::No_entry();
+		}
+		// iterate through sections looking for symtab
+		while (NULL != (scn = elf_nextscn(e, scn)))
+		{
+			if (gelf_getshdr(scn, &shdr) != &shdr)
+			{
+				cerr << "Unexpected ELF error" << std::endl;
+				throw lib::No_entry(); 
+			}
+			if (shdr.sh_type == SHT_SYMTAB) break;
+		}
+		if (!scn) throw lib::No_entry();
+		Elf_Data *symtab_rawdata = elf_rawdata(scn, NULL);
+		assert(symtab_rawdata);
+		assert(symtab_rawdata->d_size >= shdr.sh_size);
+		ElfW(Sym) *symtab = reinterpret_cast<ElfW(Sym) *>(symtab_rawdata->d_buf);
+		opt_symtab = symtab;
+		n = shdr.sh_size / shdr.sh_entsize;
+		int strtab_ndx = shdr.sh_link;
+		if (strtab_ndx == 0) throw lib::No_entry();
+		Elf_Scn *strtab_scn = NULL;
+		strtab_scn = elf_getscn(e, strtab_ndx);
+		GElf_Shdr strtab_shdr;
+		if (gelf_getshdr(strtab_scn, &strtab_shdr) != &strtab_shdr) throw lib::No_entry();
+		Elf_Data *strtab_rawdata = elf_rawdata(strtab_scn, NULL);
+		assert(strtab_rawdata);
+		assert(strtab_rawdata->d_size >= strtab_shdr.sh_size);
+		strtab = reinterpret_cast<char *>(strtab_rawdata->d_buf);
+		assert(strtab);
+		assert(symtab);
+		// FIXME: cleanup?
+	}
+	return make_pair(make_pair(*opt_symtab, strtab), n);
+}
+
+bool sticky_root_die::is_base_object(int user_fd)
+{
+	bool retval = true;
+	/* This test distinguishes "base" objects, i.e. those
+	 * we might reasonably load and run,
+	 * from "meta" objects containing only debug info
+	 * i.e. those produced by dh_strip or other methods.
+	 * It is quite hard to identify these files because
+	 * they may have all of the usual sections and headers.
+	 * Most of the PROGBITS sections have become NOBITS,
+	 * but ELF allows NOBITS where PROGBITS would do.
+	 * We use an ad-hoc test: whether it has either an
+	 * entry point that points into nobits,
+	 * or a DYNAMIC phdr that point into nobits.
+	 * This covers static and dynamic executables
+	 * and dynamic shared libraries. */
+	struct stat s;
+	int ret = fstat(user_fd, &s);
+	if (ret != 0) throw No_entry();
+	long page_size = sysconf(_SC_PAGESIZE);
+	void *mapping = mmap(NULL, ROUND_UP(s.st_size, page_size),
+		PROT_READ, MAP_PRIVATE, user_fd, 0);
+	if (mapping == MAP_FAILED) throw No_entry();
+	const char magic[] = { '\177', 'E', 'L', 'F' };
+	if (0 != memcmp(magic, mapping, sizeof magic)) throw No_entry();
+	ElfW(Ehdr) *ehdr = reinterpret_cast<ElfW(Ehdr) *>(mapping);
+	if (ehdr->e_ident[EI_CLASS] != ELFCLASS64
+		|| ehdr->e_ident[EI_DATA] != ELFDATA2LSB)
+	{
+		std::cerr << "ELF file is of unsupported class or endianness" << std::endl;
+		throw No_entry();
+	}
+		std::cerr << "ELF file shdrs" << std::endl;
+	if (!ehdr->e_shoff) throw No_entry();
+	ElfW(Shdr) *shdr = reinterpret_cast<ElfW(Shdr) *>((char*) mapping + ehdr->e_shoff);
+		std::cerr << "ELF file phdrs" << std::endl;
+	if (!ehdr->e_phoff) throw No_entry();
+	ElfW(Phdr) *phdr = reinterpret_cast<ElfW(Phdr) *>((char*) mapping + ehdr->e_phoff);
+	/* Walk the section headers remembering their base addresses. */
+	boost::icl::interval_map<ElfW(Addr), std::set<ElfW(Shdr)*> > m;
+	auto& right_open = boost::icl::interval<ElfW(Addr)>::right_open;
+	for (unsigned i = 1; i < ehdr->e_shnum; ++i)
+	{
+		std::set<ElfW(Shdr)*> singleton_set;
+		singleton_set.insert(&shdr[i]);
+		m += make_pair(
+				right_open(shdr[i].sh_addr, shdr[i].sh_addr + shdr[i].sh_size),
+				singleton_set
+			);
+	}
+	auto is_nobits = [m, &right_open](ElfW(Addr) addr, unsigned span_len) -> bool {
+		/* Find the section spanning this address range. */
+		auto found = m.find(right_open(addr, addr + span_len));
+		if (found == m.end()) return false;
+		if (found->second.size() == 0) return false;
+		if (found->second.size() > 1)
+		{
+			/* More than one section spans this range. HMM. */
+			abort();
+		}
+		auto &it = *found->second.begin();
+		if (it->sh_type == SHT_NOBITS) return true;
+		return false;
+	};
+	/* Which section contains the entry point? Is it nobits? */
+	ElfW(Addr) dyn_vaddr = 0;
+	if (ehdr->e_entry && is_nobits(ehdr->e_entry, 1))
+	{
+		retval = false; goto out;
+	}
+	for (unsigned i = 0; i < ehdr->e_phnum; ++i)
+	{
+		if (phdr[i].p_type == PT_DYNAMIC) { dyn_vaddr = phdr[i].p_vaddr; break; }
+	}
+	if (dyn_vaddr && is_nobits(dyn_vaddr, 1))
+	{
+		retval = false; goto out;
+	}
+out:
+	munmap(mapping, ROUND_UP(s.st_size, page_size));
+	return retval;
+}
+
+bool sticky_root_die::has_dwarf(int user_fd)
+{
+	dwarf::lib::Dwarf_Debug d;
+	dwarf::lib::Dwarf_Error e;
+	bool retval;
+	int ret = dwarf::lib::dwarf_init(user_fd, DW_DLC_READ, nullptr, nullptr, &d, &e);
+	if (ret == 0)
+	{
+		retval = true;
+		ret = dwarf_finish(d, &e);
+	} else retval = false;
+	return retval;
+}
+
+int sticky_root_die::open_debuglink(int user_fd)
+{
+	char *cmdstr = NULL;
+	int ret = asprintf(&cmdstr, ". debug-funcs.sh && read_debuglink /dev/fd/%d", user_fd);
+	if (ret <= 0) throw No_entry();
+	assert(cmdstr != NULL);
+	FILE *p = popen(cmdstr, "r");
+	char debuglink_buf[4096];
+	size_t nread = fread(debuglink_buf, sizeof debuglink_buf, 1, p);
+	int ret_fd;
+	if (nread == sizeof debuglink_buf)
+	{
+		// basically we overflowed
+		std::cerr << "Debuglink contained too many characters" << std::endl;
+		ret_fd = -1;
+	}
+	else if (nread > 0)
+	{
+		/* We've successfully slurped a debuglink */
+		std::cerr << "Slurped debuglink: " << debuglink_buf << std::endl;
+		ret_fd = open(debuglink_buf, O_RDONLY);
+	}
+	free(cmdstr);
+	return ret_fd;
+}
+
+shared_ptr<sticky_root_die> sticky_root_die::create(int user_fd)
+{
+	/* This is a helper not a constructor, because we have to
+	 * inspect user_fd before we know what constructor to call. */
+	bool is_base = is_base_object(user_fd);
+	/* Easy case: a base object containing DWARF. */
+	if (is_base && has_dwarf(user_fd))
+	{ return std::make_shared<sticky_root_die>(user_fd, user_fd); }
+	/* If it's not base nothing we can do. */
+	if (!is_base) throw No_entry();
+	/* Else it's base so we can look for a debuglink. */
+	int dbg_fd = open_debuglink(user_fd);
+	if (dbg_fd != -1) return std::make_shared<sticky_root_die>(dbg_fd, user_fd);
+	/* Else it's a base object with no DWARF and
+	 * we couldn't get a dbglink, so give up. */
+	return std::shared_ptr<sticky_root_die>();
 }

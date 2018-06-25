@@ -13,6 +13,20 @@
 #include <deque>
 #include <map>
 #include <locale.h>
+#include <elf.h>
+
+#include "config.h"
+#if defined(HAVE_GELF_H)
+#include <gelf.h>
+#elif defined(HAVE_LIBELF_GELF_H)
+#include <libelf/gelf.h>
+#else
+#error "Could not find a gelf.h"
+#endif
+
+extern "C" {
+#include <link.h>
+}
 
 // FIXME: shouldn't have toplevel "using" in header file
 using std::string;
@@ -30,6 +44,7 @@ using lib::Dwarf_Unsigned;
 using dwarf::core::iterator_df;
 using dwarf::core::type_die;
 using dwarf::core::root_die;
+using dwarf::lib::No_entry;
 
 struct allocsite
 {
@@ -216,6 +231,53 @@ void make_allocsites_relation(
     multimap<string, iterator_df<type_die> >& types_by_codeless_name,
 	root_die& r
     );
+
+/* This is the root_die subclass we use for most type-gathering
+ * metadata processing. Originally it was designed to make type DIEs
+ * sticky, but this seems to hurt rather than help performance.
+ * It provides access to the symtab of the ELF file -- but note
+ * that this might be a separate debuginfo file, not the target
+ * ELF binary proper.*/
+struct sticky_root_die : public root_die
+{
+	using root_die::root_die;
 	
- 
+	const int dwarf_fd;
+	const int base_elf_fd;
+	
+private:
+	static bool is_base_object(int user_fd);
+	static bool has_dwarf(int user_fd);
+	static int open_debuglink(int user_fd);
+	
+public:
+	static shared_ptr<sticky_root_die> create(int user_fd);
+	sticky_root_die(int dwarf_fd, int base_elf_fd) : root_die(dwarf_fd),
+		dwarf_fd(dwarf_fd), base_elf_fd(base_elf_fd) {}
+
+	virtual bool is_sticky(const core::abstract_die& d) 
+	{
+		return this->root_die::is_sticky(d)
+			// || dwarf::spec::DEFAULT_DWARF_SPEC.tag_is_type(d.get_tag())
+			;
+	}
+
+	// FIXME: support non-host-native size
+private:
+	opt<ElfW(Sym) *> opt_symtab;
+	char *strtab;
+	unsigned n;
+public:
+	pair<pair<ElfW(Sym) *, char*>, unsigned> get_symtab();
+	~sticky_root_die()
+	{
+		if (opt_symtab)
+		{
+			// anything to free?
+		}
+
+		// this->root_die::~root_die(); // uncomment this when ~root_die is virtual. OH. it is.
+	}
+
+}; 
 #endif
