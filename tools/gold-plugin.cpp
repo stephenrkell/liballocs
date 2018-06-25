@@ -22,8 +22,6 @@
 #include <elf.h>
 #include <cassert>
 #include "plugin-api.h"
-#define RELF_DEFINE_STRUCTURES 1
-#include "relf.h" /* to get our own binary's realpath -- bit of a HACK */
 #include <unistd.h> /* for sleep() */
 #include <boost/algorithm/string.hpp> /* for split, is_any_of */
 #include <sys/types.h> /* for fstat() */
@@ -33,6 +31,7 @@
 //#include <experimental/optional>
 #include <boost/optional.hpp>
 #include "uniqtypes.hpp"
+#include "relf.h" /* to get our own binary's realpath -- bit of a HACK */
 
 using std::vector;
 using std::string;
