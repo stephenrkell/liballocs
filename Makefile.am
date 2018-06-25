@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = . tools/lang src lib
+SUBDIRS = src . tools/lang lib
 
 # NOTE: being C++, these only affect build of the tools, not the liballocs core.
 AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -DBOOST_OPTIONAL_CONFIG_ALLOW_BINDING_TO_RVALUES
@@ -60,10 +60,10 @@ tools_ifacetypes_LDADD = $(TOOLS_LDADD) #x86_emulate.o
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
 
-#pkglib_LTLIBRARIES = tools/gold-plugin.la
-#tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
-#tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
-#tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
+pkglib_LTLIBRARIES = tools/gold-plugin.la
+tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
+tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
+tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.
