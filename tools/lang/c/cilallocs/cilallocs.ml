@@ -771,3 +771,44 @@ class addressTakenVisitor = fun (seenAddressTakenLocalNames : string list ref)
            | _ -> DoChildren
     end
 end
+
+(* A block is a sequence of statements.
+ * A statement may be an Instrs, which is a sequence of Instrs.
+ * Given a sequence of Instrs
+ * and the stmt that contains it (an Instrs statement),
+ * we create a new stmt
+ * that is itself a Block,
+ * containing many stmts,
+ * each an element of  groupedInstrs. *)
+let restructureInstrsStatement
+  (groupAndLabel : Cil.instr list -> (Cil.instr list * label option) list)
+  (originalStmt : Cil.stmt)
+  : Cil.stmt
+= match originalStmt.skind with
+   Instr(instrs) -> let groupedInstrs = groupAndLabel instrs in
+   {
+      labels = (match groupedInstrs with
+        [(singletonGroup, Some(newLabel))] ->
+            newLabel :: originalStmt.labels 
+         | _ -> originalStmt.labels);
+      skind = (match groupedInstrs with
+        [(singletonGroup, maybeLabel)] ->
+            Instr(singletonGroup)
+         | _ ->
+            Block(
+              let stmts = (List.map (fun (group, maybeLabel) -> (* begin stmt *) {
+                  labels = (match maybeLabel with Some(lbl) -> [lbl] | None -> []);
+                  skind = Instr(group);
+                  sid = 0;
+                  succs = [];
+                  preds = []
+              } (* end stmt *)) groupedInstrs) in
+              let b = mkBlock stmts in
+              (* Cil.dumpBlock (new defaultCilPrinterClass) Pervasives.stderr 0 b; *)
+              b
+          ));
+      sid = originalStmt.sid;
+      succs = originalStmt.succs;
+      preds = originalStmt.preds;
+   }
+| _ -> failwith "not an Instrs statement"
