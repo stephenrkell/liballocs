@@ -31,7 +31,7 @@ void __static_allocator_init(void)
 		trying_to_initialize = 1;
 		/* Initialize what we depend on. */
 		__mmap_allocator_init();
-		dl_iterate_phdr(add_all_loaded_segments, /* any filename */ NULL);
+		dl_iterate_phdr(add_all_loaded_segments, /* any link map ent */ NULL);
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -42,7 +42,7 @@ void __static_allocator_notify_load(void *handle)
 	if (initialized)
 	{
 		int dlpi_ret = dl_iterate_phdr(add_all_loaded_segments, 
-			((struct link_map *) handle)->l_name);
+			(struct link_map *) handle);
 		assert(dlpi_ret != 0);
 	}
 }
@@ -122,23 +122,157 @@ Dl_info dladdr_with_cache(const void *addr)
 	return info;
 }
 
-int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
+struct symbols_bitmap
+{
+	unsigned long *bits;
+	unsigned long *bits_limit;
+	ElfW(Sym) *dynsym;
+};
+
+/* We sort symbols based on address and size.
+ * The idea is that if I search for the next lower symbol, given an address,
+ * will get the symbol that overlaps that address.
+ * So when we break ties, if we put the symbols in order of size,
+ * with bigger sizes later, we get the property we want. */
+static int sym_addr_size_compare(const void *arg1, const void *arg2)
+{
+	if (((ElfW(Sym) *)arg1)->st_value < ((ElfW(Sym) *) arg2)->st_value) return -1;
+	if (((ElfW(Sym) *)arg1)->st_value > ((ElfW(Sym) *) arg2)->st_value) return 1;
+	// else the addresses are equal; what about sizes? bigger sizes sort higher
+	if (((ElfW(Sym) *)arg1)->st_size < ((ElfW(Sym) *) arg2)->st_size) return -1;
+	if (((ElfW(Sym) *)arg1)->st_size > ((ElfW(Sym) *) arg2)->st_size) return 1;
+	return 0;
+}
+static int sym_addr_size_search(const void *key, const void *arr_obj)
+{
+	ElfW(Addr) search_addr = *(ElfW(Addr)*) key;
+	ElfW(Sym) *obj = (ElfW(Sym) *) arr_obj;
+	/* We match a key, i.e. return 0,
+	 * if the symbol (arr_obj) overlaps it. */
+	if (obj->st_value <= search_addr
+		&& obj->st_value + obj->st_size > search_addr) return 0;
+	/* "Key is less" means the object falls on the *bigger* side of the key. */
+	if (obj->st_value > search_addr) return -1;
+	if (obj->st_value + obj->st_size <= search_addr) return 1;
+	assert(0);
+}
+
+int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_lment)
 {
 	static _Bool running;
 	/* HACK: if we have an instance already running, quit early. */
 	if (running) /* return 1; */ abort(); // i.e. debug this
 	running = 1;
+	if (!info) abort();
 	// write_string("Blah9000\n");
-	const char *filename = (const char *) data;
-	if (filename == NULL || 0 == strcmp(filename, info->dlpi_name))
+	struct link_map *found_l = maybe_lment;
+	if (!maybe_lment)
+	{
+		for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
+		{
+			if (l->l_addr == info->dlpi_addr) { found_l = l; break; }
+		}
+	}
+	struct link_map *l = found_l;
+	assert(l);
+	const char *filename = l->l_name;
+	if (!maybe_lment || l->l_addr == info->dlpi_addr)
 	{
 		// write_string("Blah9001\n");
+		assert(!filename || 0 == strcmp(filename, info->dlpi_name));
 		const char *dynobj_name = dynobj_name_from_dlpi_name(info->dlpi_name, 
 			(void*) info->dlpi_addr);
 		if (!dynobj_name) dynobj_name = "(unknown)";
 		// write_string("Blah9002\n");
 
 		// this is the file we care about, so iterate over its phdrs
+		ElfW(Sym) *dynsym = NULL;
+		ElfW(Sym) *all_syms_sorted = NULL;
+		size_t all_syms_sorted_mapping_size = 0;
+		unsigned n_dynsym = 0;
+		unsigned n_symtab = 0;
+		/* Iterate looking for its dynsym. */
+		for (int i = 0; i < info->dlpi_phnum; ++i)
+		{
+			// if this phdr's a LOAD
+			if (info->dlpi_phdr[i].p_type == PT_DYNAMIC)
+			{
+				dynsym = get_dynsym(l);
+				//ElfW(Dyn) *dynamic = info->dlpi_addr + info->dlpi_phdr[i].p_vaddr;
+				//ElfW(Sym) *tmp_symtab = (ElfW(Sym) *) dynamic_xlookup(dynamic DT_SYMTAB)->d_un.d_ptr;
+				//if ((intptr_t) tmp_symtab < 0) break; // HACK: x86-64 vdso workaround
+				//if (tmp_symtab && (uintptr_t) tmp_symtab < info->dlpi_addr) break; // HACK: x86-64 vdso workaround
+				//symtab = tmp_symtab;
+				break;
+			}
+		}
+		/* Try to map the file's sht, so we can pilfer its relocs. */
+		void *file_mapping = MAP_FAILED;
+		ElfW(Shdr) *shdr = NULL;
+		ElfW(Ehdr) *ehdr = NULL;
+		size_t file_mapping_sz;
+		int raw_fd = -1;
+		if (filename)
+		{
+			raw_fd = raw_open(dynobj_name, O_RDONLY);
+			struct stat s;
+			int ret = (raw_fd == -1) ? -1 : raw_fstat(raw_fd, &s);
+			if (raw_fd >= 0 && ret == 0)
+			{
+				file_mapping_sz = ROUND_UP(s.st_size, PAGE_SIZE);
+				file_mapping = raw_mmap(NULL, file_mapping_sz, PROT_READ, MAP_PRIVATE, raw_fd, 0);
+				if (file_mapping != MAP_FAILED)
+				{
+					ehdr = file_mapping;
+					shdr = (ElfW(Shdr) *)(((unsigned char *) file_mapping) + ehdr->e_shoff);
+				}
+			}
+			if (raw_fd != -1) close(raw_fd);
+		}
+		if (dynsym)
+		{
+			/* Copy the contents of dynsym and sort them. */
+			n_dynsym = dynamic_symbol_count(/*dynamic*/ l->l_ld, l);
+			/* Also copy in symtab if we can find it. FIXME: do this even if !dynsym */
+			ElfW(Shdr) *symtab_ent = NULL;
+			for (unsigned i = 0; i < ehdr->e_shnum; ++i)
+			{
+				if (shdr[i].sh_type == SHT_SYMTAB)
+				{
+					symtab_ent = &shdr[i];
+					break;
+				}
+			}
+			if (symtab_ent)
+			{
+				n_symtab = symtab_ent->sh_size / sizeof (ElfW(Sym));
+			}
+			
+			all_syms_sorted_mapping_size = ROUND_UP((n_dynsym + n_symtab) * sizeof (ElfW(Sym)), PAGE_SIZE);
+			all_syms_sorted = raw_mmap(NULL, all_syms_sorted_mapping_size,
+					PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+			if (all_syms_sorted == MAP_FAILED)
+			{
+				all_syms_sorted = NULL;
+				all_syms_sorted_mapping_size = 0;
+			}
+			else
+			{
+				memcpy(all_syms_sorted, dynsym, n_dynsym * sizeof (ElfW(Sym)));
+				if (symtab_ent)
+				{
+					ElfW(Sym) *symtab = (ElfW(Sym) *)((unsigned char *) file_mapping
+						+ symtab_ent->sh_offset);
+					memcpy((unsigned char *) all_syms_sorted  + n_dynsym * sizeof (ElfW(Sym)),
+						symtab,
+						n_symtab * sizeof (ElfW(Sym)));
+				}
+				/* PROBLEM: qsort wants to malloc, which we don't want it
+				 * to do. */
+				qsort(all_syms_sorted, n_dynsym + n_symtab, sizeof (ElfW(Sym)),
+					sym_addr_size_compare);
+			}
+		}
 		for (int i = 0; i < info->dlpi_phnum; ++i)
 		{
 			// if this phdr's a LOAD
@@ -150,6 +284,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 					segment_start_addr, &__mmap_allocator, NULL);
 				if (!containing_mapping) abort();
 				// write_string("Blah9003\n");
+				/* FIXME: get rid of this dlmalloc to avoid reentrancy issues. */
 				struct segment_metadata *m = __wrap_dlmalloc(sizeof (struct segment_metadata));
 				// write_string("Blah9004\n");
 				*m = (struct segment_metadata) {
@@ -160,7 +295,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 				};
 				// write_string("Blah9005\n");
 				
-				const struct big_allocation *b = __liballocs_new_bigalloc(
+				struct big_allocation *b = __liballocs_new_bigalloc(
 					(void*) segment_start_addr,
 					segment_size,
 					(struct meta_info) {
@@ -175,12 +310,131 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *data)
 					containing_mapping,
 					&__static_allocator
 				);
+				/* FIXME: free this somewhere */
+				size_t bitmap_size_bytes = (7 + info->dlpi_phdr[i].p_memsz) / 8;
+				size_t prefix_size = ROUND_UP(sizeof (struct symbols_bitmap), sizeof (unsigned long));
+				size_t alloc_size = prefix_size + bitmap_size_bytes;
+				unsigned char *mapping = raw_mmap(NULL, alloc_size,
+					PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+				if (mapping == MAP_FAILED) abort();
+				b->suballocator_meta = (struct symbols_bitmap *) mapping;
+				struct symbols_bitmap *bm = b->suballocator_meta;
+				bm->bits = (unsigned long *) (mapping + prefix_size);
+				bm->bits_limit = bm->bits + (bitmap_size_bytes / sizeof (unsigned long));
 				// write_string("Blah9006\n");
-			}
-		}
+				/* Look for dynsyms in this address range. */
+				unsigned long segment_base_vaddr = info->dlpi_phdr[i].p_vaddr;
+				unsigned long segment_limit_vaddr = info->dlpi_phdr[i].p_vaddr
+						+ info->dlpi_phdr[i].p_memsz;
+				// linear scan of dynsym
+				// do we really only want to add dynsyms? NO! add any syms?
+				if (dynsym)
+				{
+					bm->dynsym = dynsym;
+					// scan *all* symbols, using the sorted array
+					for (unsigned i = 0; i < n_dynsym + n_symtab; ++i) // FIXME: do even if !dynsym
+					{
+						if (all_syms_sorted[i].st_size > 0) // only add range symbols
+						{
+							unsigned long sym_vaddr = all_syms_sorted[i].st_value;
+							if (sym_vaddr >= segment_base_vaddr
+									&& sym_vaddr < segment_limit_vaddr)
+							{
+								off_t offset_from_segment_base = sym_vaddr - segment_base_vaddr;
+								bitmap_set((unsigned long *) bm->bits,
+									offset_from_segment_base);
+							}
+						}
+					}
+				} // end if dynsym
+				if (shdr)
+				{
+					/* Scan the shdrs for any REL or RELA sections that
+					 * apply to sections within this segment. We will use
+					 * them to mark additional object starts in the bitmap.
+					 * Note that it's the *target* section of the reloc
+					 * that we care about, i.e. whatever section the symtab
+					 * entry points to. The relocated section is not
+					 * interesting to us. */
+					for (unsigned i = 0; i < ehdr->e_shnum; ++i)
+					{
+						if ((shdr[i].sh_type == SHT_REL
+								|| shdr[i].sh_type == SHT_RELA)
+							&& 0 != strcmp(
+									(char*) file_mapping + shdr[ehdr->e_shstrndx].sh_offset
+										+ shdr[i].sh_name,
+									".rela.dyn"
+								)
+							)
+						{
+							_Bool is_rela = (shdr[i].sh_type == SHT_RELA);
+							/* Scan the relocs and find whether their target section
+							 * is within this segment. */
+							unsigned symtab_scn = shdr[i].sh_link;
+							ElfW(Sym) *symtab = (ElfW(Sym) *)(
+								(char*) file_mapping + shdr[symtab_scn].sh_offset);
+							unsigned nrel = shdr[i].sh_size / 
+								(is_rela ? sizeof (ElfW(Rela)) : sizeof (ElfW(Rel)));
+							void *tbl_base = (char*) file_mapping + shdr[i].sh_offset;
+							ElfW(Rela) *rela_base = is_rela ? (ElfW(Rela) *) tbl_base : NULL;
+							ElfW(Rel) *rel_base = is_rela ? NULL : (ElfW(Rel) *) tbl_base;
+							for (unsigned i = 0; i < nrel; ++i)
+							{
+								/* Is this relocation referencing a section symbol?
+								 * FIXME: this is ELF64-specific. */
+								Elf64_Xword info = is_rela ? rela_base[i].r_info : rel_base[i].r_info;
+								unsigned symind = ELF64_R_SYM(info);
+								if (symind
+										&& ELF64_ST_TYPE(symtab[symind].st_info) == STT_SECTION)
+								{
+									/* NOTE that the *referenced vaddr* is *not*
+									 * the r_offset i.e. the relocation site.
+									 * It's the vaddr of the referenced section symbol,
+									 * i.e. of the referenced section,
+									 * plus the addend if any. */
+									unsigned shndx = symtab[symind].st_shndx;
+									Elf64_Sword referenced_vaddr
+										= shdr[shndx].sh_addr + 
+											(is_rela ? rela_base[i].r_addend : 0);
+									if (referenced_vaddr >= segment_base_vaddr
+										&& referenced_vaddr < segment_limit_vaddr)
+									{
+										/* The referenced in-section location 
+										 * is contained in this segment. Consider it
+										 * an object start IFF no symbol overlaps it. */
+										
+										Elf64_Addr addr = referenced_vaddr;
+										void *found = bsearch(&addr,
+											all_syms_sorted, n_dynsym + n_symtab, sizeof (ElfW(Sym)),
+											sym_addr_size_search);
+										if (!found
+											|| ((ElfW(Sym) *)found)->st_value > addr
+											|| ((ElfW(Sym) *)found)->st_value
+												+ ((ElfW(Sym) *)found)->st_size <= addr)
+										{
+											off_t offset_from_segment_base = referenced_vaddr
+												- segment_base_vaddr;
+											bitmap_set((unsigned long *) bm->bits,
+												offset_from_segment_base);
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				
+				
+			} // end if it's a load
+		} // end for each phdr
 		
+		if (all_syms_sorted) raw_munmap(all_syms_sorted, all_syms_sorted_mapping_size);
+		if (file_mapping != MAP_FAILED)
+		{
+			raw_munmap(file_mapping, file_mapping_sz);
+		}
 		// if we were looking for a single file, and got here, then we found it; can stop now
-		if (filename != NULL) { running = 0; return 1; }
+		if (maybe_lment != NULL) { running = 0; return 1; }
 	}
 	// write_string("Blah9050\n");
 
@@ -309,7 +563,48 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	if (!alloc_uniqtype)
 	{
 		++__liballocs_aborted_static;
+		void *segment_base;
+		struct big_allocation *segment_bigalloc = __lookup_bigalloc(obj,
+			&__static_allocator, &segment_base);
+		assert(segment_bigalloc);
+		size_t segment_size_bytes = (char*) segment_bigalloc->end - (char*) segment_bigalloc->begin;
+		struct symbols_bitmap *bm = segment_bigalloc->suballocator_meta;
+		unsigned long found = bitmap_rfind_first_set(
+			bm->bits,
+			bm->bits_limit,
+			(char*) obj - (char*) segment_bigalloc->begin,
+			NULL);
+		if (found != (unsigned long) -1)
+		{
+			/* To know the limit, we need the ELF symbol.
+			 * To know the ELF symbol, we have to find it.
+			 * PROBLEM: ELF dynsyms are not necessarily sorted!
+			 * HACK: for now, scan forward to the next set bit
+			 * and imagine that the object goes up to there.
+			 * BE CAREFUL of the end case. */
+			unsigned long found_end_idx = bitmap_find_first_set1(
+				bm->bits,
+				bm->bits_limit,
+				1 + ((char*) obj - (char*) segment_bigalloc->begin),
+				NULL);
+			if (found_end_idx == (unsigned long) -1)
+			{
+				found_end_idx = segment_size_bytes;
+			}
+			object_start = (char*) segment_bigalloc->begin + found;
+			void *object_end_upper_bound = (char*) segment_bigalloc->begin + found_end_idx;
+			if (out_base) *out_base = object_start;
+			if (out_site) *out_site = object_start;
+			if (out_size) *out_size = (char*) object_end_upper_bound - (char*) object_start;
+			return NULL;
+		}
 //				consider_blacklisting(obj);
+		/* Look for a dynsym spanning this symbol. */
+		//unsigned long idx = bitmap_find_first_set(
+		//	unsigned long *p_bitmap, unsigned long *p_limit, unsigned long *out_test_bit);
+		
+		
+		
 		return &__liballocs_err_unrecognised_static_object;
 	}
 

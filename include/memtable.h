@@ -52,6 +52,69 @@ static inline void bitmap_clear(unsigned long *p_bitmap, unsigned long index)
 {
 	p_bitmap[index / UNSIGNED_LONG_NBITS] &= ~(1ul << (index % UNSIGNED_LONG_NBITS));
 }
+static inline unsigned long bitmap_rfind_first_set(unsigned long *p_bitmap, unsigned long *p_limit, long start_idx, unsigned long *out_test_bit)
+{
+	unsigned long *p_base = p_bitmap;
+	p_bitmap += start_idx / UNSIGNED_LONG_NBITS;
+	start_idx %= UNSIGNED_LONG_NBITS;
+	// FIXME: the following shows why if we're optimising for rfind,
+	// we should use the *most* significant bit as the *lowest*-indexed position in the word.
+// 	if (*p_bitmap < (1ul<<start_idx))
+// 	{
+// 		/* The word has a value less than the query bit pattern, so
+// 		 * it can't have the query bit or any higher bit set. */
+// 	}
+// 	else
+// 	{
+// 		/* The word has a value greater than or equal to the query bit pattern, so
+// 		 * it may or may not have the query bit set. */
+// 		
+// 	}
+	if (p_bitmap > p_limit) return (unsigned long) -1;
+	while (1)
+	{
+		while (start_idx >= 0)
+		{
+			unsigned long test_bit = 1ul << start_idx;
+			if (*p_bitmap & test_bit)
+			{
+				if (out_test_bit) *out_test_bit = test_bit;
+				return start_idx + (p_bitmap - p_base) * UNSIGNED_LONG_NBITS;
+			}
+			--start_idx;
+		}
+		// now start_idx < 0
+		if (p_bitmap == p_base) break;
+		start_idx = UNSIGNED_LONG_NBITS - 1;
+		--p_bitmap;
+	}
+	return (unsigned long) -1;
+}
+static inline unsigned long bitmap_find_first_set1(unsigned long *p_bitmap, unsigned long *p_limit, long start_idx, unsigned long *out_test_bit)
+{
+	unsigned long *p_base = p_bitmap;
+	p_bitmap += start_idx / UNSIGNED_LONG_NBITS;
+	start_idx %= UNSIGNED_LONG_NBITS;
+	if (p_bitmap > p_limit) return (unsigned long) -1;
+	while (1)
+	{
+		while (start_idx < UNSIGNED_LONG_NBITS)
+		{
+			unsigned long test_bit = 1ul << start_idx;
+			if (*p_bitmap & test_bit)
+			{
+				if (out_test_bit) *out_test_bit = test_bit;
+				return start_idx + (p_bitmap - p_base) * UNSIGNED_LONG_NBITS;
+			}
+			++start_idx;
+		}
+		// now start_idx < 0
+		++p_bitmap;
+		if (p_bitmap == p_limit) break;
+		start_idx = 0;
+	}
+	return (unsigned long) -1;
+}
 static inline unsigned long bitmap_find_first_set(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long *out_test_bit)
 {
 	unsigned long *p_initial_bitmap;
