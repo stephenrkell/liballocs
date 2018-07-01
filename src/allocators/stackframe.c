@@ -133,6 +133,15 @@ struct big_allocation *__stackframe_allocator_find_or_create_bigalloc(
 	struct big_allocation *found = __lookup_bigalloc(frame_counter, 
 		&__stackframe_allocator, &existing_frame_start);
 	if (found) return found;
+
+	void *begin = (void*) frame_sp_at_caller;
+	void *end = (void*) frame_bp_at_caller;
+	struct big_allocation *found_begin = __lookup_deepest_bigalloc(begin);
+	/* Our deepest existing bigalloc should be a stack bigalloc. */
+	assert(!found_begin || found_begin->allocated_by == &__stack_allocator);
+	struct big_allocation *found_end = __lookup_deepest_bigalloc((char*) end - 1);
+	assert(found_end);
+	assert(found_end->allocated_by == &__stack_allocator);
 	
 	/* None found, so we have to promote the frame into a bigalloc. 
 	 * So what are its dimensions? The caller has passed them to us.
@@ -148,8 +157,8 @@ struct big_allocation *__stackframe_allocator_find_or_create_bigalloc(
 	 * this bigalloc!
 	 */
 	struct big_allocation *b = __liballocs_new_bigalloc(
-		frame_sp_at_caller,
-		(char*) frame_bp_at_caller - (char*) frame_sp_at_caller,
+		begin,
+		(char*) end - (char*) begin,
 		(struct meta_info) {
 			.what = DATA_PTR,
 			.un = {
@@ -162,6 +171,7 @@ struct big_allocation *__stackframe_allocator_find_or_create_bigalloc(
 		NULL, // filled in for us
 		&__stackframe_allocator
 	);
+	__liballocs_sanity_check_bigalloc(b);
 	if (!b) abort();
 	return b;
 }
