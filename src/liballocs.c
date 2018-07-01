@@ -1660,12 +1660,9 @@ failed:
 void *
 __liballocs_get_alloc_site(void *obj)
 {
-	const void *alloc_site;
+	const void *alloc_site = NULL;
 	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
 		NULL, NULL, &alloc_site);
-	
-	if (err) return NULL;
-	
 	return (void*) alloc_site;
 }
 
@@ -1677,7 +1674,6 @@ __liballocs_get_alloc_size(void *obj)
 		&alloc_size, NULL, NULL);
 	
 	if (err && err != &__liballocs_err_unrecognised_alloc_site) return 0;
-	
 	return alloc_size;
 }
 
