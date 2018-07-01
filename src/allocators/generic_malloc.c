@@ -513,12 +513,26 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 			new_userchunkaddr, caller);
 		goto after_promotion;
 	}
+
 	if (unlikely(!containing_bigalloc->suballocator))
 	{
 		containing_bigalloc->suballocator = &__generic_malloc_allocator;
-	} else assert(containing_bigalloc->suballocator == &__generic_malloc_allocator
-		|| containing_bigalloc->suballocator == &__alloca_allocator);
-	// FIXME: split alloca off into a separate table?
+	} 
+	else
+	{
+		/* We are indexing an allocation inside some bigalloc.
+		 * REMEMBER (see alloca.c) that
+		 * alloca makes the containing stackframe big!
+		 * It can do this because it also takes care of
+		 * deleting the bigalloc when the frame exits (it gets notified). */
+		if (!(containing_bigalloc->suballocator == &__generic_malloc_allocator
+			|| containing_bigalloc->suballocator == &__alloca_allocator))
+		{
+			assert(0 && "generic_malloc indexing inside a bigalloc "
+				"that is not marked for suballocation as expected");
+		}
+		// FIXME: split alloca off into a separate table?
+	}
 	
 	/* Populate our extra in-chunk fields */
 	p_insert->alloc_site_flag = 0U;
