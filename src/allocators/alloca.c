@@ -117,9 +117,13 @@ void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_s
 	
 	/* Extend the frame bigalloc to include this alloca. Note that we're *prepending*
 	 * to the allocation. */
-	__liballocs_pre_extend_bigalloc(b, /*sp_at_caller*/ new_userchunkaddr);
+	__liballocs_pre_extend_bigalloc_recursive(b, /*sp_at_caller*/ new_userchunkaddr);
 	 
 	/* index it */
 	__liballocs_index_insert(new_userchunkaddr, modified_size, caller);
+	
+#undef __liballocs_get_alloc_base /* inlcache HACKaround */
+	assert(__liballocs_get_alloc_base(new_userchunkaddr));
+	assert(((void*(*)(void*))(__liballocs_get_alloc_base))(new_userchunkaddr) == new_userchunkaddr);
 }
 
