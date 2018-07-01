@@ -141,6 +141,7 @@ static struct uniqtype *get_type(void *obj) \
 struct allocator
 {
 	const char *name;
+	unsigned min_alignment;
 	_Bool is_cacheable; /* HACK. FIXME: check libcrunch / is_a_cache really gets invalidated by all allocators. */
 	ALLOC_REFLECTIVE_API(__allocmeta_fun_ptr, __allocmeta_fun_arg)
 	/* Put the base API last, because it's least likely to take non-NULL values. */

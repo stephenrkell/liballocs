@@ -741,9 +741,9 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		{
 			add_mapping_sequence_bigalloc(&new_seq);
 		}
-		else /* HMM */
+		else /* HMM -- probably an mmap from the private malloc. Not sure*/
 		{
-			add_bigalloc(mapped_addr, mapped_length);
+			add_mapping_sequence_bigalloc(&new_seq);
 		}
 	}
 }
@@ -1373,6 +1373,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 
 struct allocator __mmap_allocator = {
 	.name = "mmap",
+	.min_alignment = PAGE_SIZE, /* should be MIN_PAGE_SIZE */
 	.is_cacheable = 1,
 	.get_info = get_info
 	/* FIXME: meta-protocol implementation */

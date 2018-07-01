@@ -104,6 +104,7 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
+_Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
 _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin);
 struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_allocation *b, const void *split_addr);

@@ -23,6 +23,7 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	
 struct allocator __stack_allocator = {
 	.name = "stack",
+	.min_alignment = PAGE_SIZE, /* should be MIN_PAGE_SIZE */
 	.is_cacheable = 0,
 	.get_info = get_info
 };
@@ -145,8 +146,11 @@ _Bool __stack_allocator_notify_unindexed_address(const void *ptr)
 				)
 		)
 		{
-			/* Okay, claim it. */
-			__liballocs_pre_extend_bigalloc(b, ROUND_DOWN_PTR(ptr, PAGE_SIZE));
+			/* Okay, claim it. CHECK if our parent is the auxv (initial stack)
+			 * allocation. If so, then before we pre-extend ourselves, pre-extend
+			 * the auxv bigalloc and its mmap parent. FIXME: should be a bigalloc
+			 * utility call for this. */
+			__liballocs_pre_extend_bigalloc_recursive(b, ROUND_DOWN_PTR(ptr, PAGE_SIZE));
 			return 1;
 		}
 	}

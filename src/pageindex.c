@@ -49,9 +49,15 @@ void sanity_check_bigalloc(struct big_allocation *b)
 #ifndef NDEBUG
 	if (BIGALLOC_IN_USE(b))
 	{
+		/* The pageindex immediately before the beginning should not say
+		 * that it's this bigalloc there. */
 		assert(pageindex[PAGENUM(((char*)(b)->begin)-1)] != ((b) - &big_allocations[0]));
 		assert(pageindex[PAGENUM((b)->end)] != ((b) - &big_allocations[0]));
-		
+
+		assert(!b->allocated_by
+				|| !b->allocated_by->min_alignment
+				|| 0 == (unsigned long) b->begin % b->allocated_by->min_alignment);
+
 		/* Check that our depth is 1 + our parent's depth */
 		if (b->parent)
 		{
@@ -426,6 +432,8 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 		}
 	}
 	
+	if (parent) SANITY_CHECK_BIGALLOC(parent);
+	
 	/* Grab a new bigalloc. */
 	struct big_allocation *b = bigalloc_new(ptr, size, parent, meta, allocated_by);
 	SANITY_CHECK_BIGALLOC(b);
@@ -538,34 +546,51 @@ static _Bool is_one_or_more_levels_under(bigalloc_num_t maybe_lower_n, struct bi
 	return 0;
 }
 
+_Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
+_Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin)
+{
+	_Bool ret;
+	if (b->parent) ret = __liballocs_pre_extend_bigalloc_recursive(b->parent,
+		b->parent->allocated_by->min_alignment ?
+			(ROUND_DOWN_PTR(new_begin, b->parent->allocated_by->min_alignment))
+		: new_begin);
+	else ret = 1;
+	if (ret) ret = __liballocs_pre_extend_bigalloc(b, new_begin);
+	return ret;
+}
+
 _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
 _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin)
 {
 	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
+	SANITY_CHECK_BIGALLOC(b);
 	const void *old_begin = b->begin;
-	b->begin = (void*) new_begin;
-	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+	if ((char*) new_begin < (char*) old_begin)
+	{
+		b->begin = (void*) new_begin;
+		bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+
+		/* For each page that this alloc spans, memset it in the page index. */
+		memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) new_begin, PAGE_SIZE)),
+			b - &big_allocations[0], parent_num,
+				PAGE_DIST(ROUND_UP((unsigned long) new_begin, PAGE_SIZE),
+			              /* GAH. Two cases: either we now cover the whole page that contains
+			               * old_begin (e.g. if b->end is on the *next* page or later), or
+			               * we don't (e.g. if b->end is later on the *same* page as old_begin).
+			               * How do we test for that? Looking at PAGENUM(b->end) is not quite enough,
+			               * because if a child was spanning the whole page, we don't want to
+			               * clobber its presence in the index. */
+			              ((PAGENUM(b->end) > PAGENUM(old_begin)) 
+			                && !is_one_or_more_levels_under(pageindex[PAGENUM(old_begin)], b)) 
+			                  ? ROUND_UP((unsigned long) old_begin, PAGE_SIZE)
+			                  : ROUND_DOWN((unsigned long) old_begin, PAGE_SIZE) )
+		);
+	}
 	
-	/* For each page that this alloc spans, memset it in the page index. */
-	memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) new_begin, PAGE_SIZE)),
-		b - &big_allocations[0], parent_num,
-			PAGE_DIST(ROUND_UP((unsigned long) new_begin, PAGE_SIZE),
-			          /* GAH. Two cases: either we now cover the whole page that contains
-			           * old_begin (e.g. if b->end is on the *next* page or later), or
-			           * we don't (e.g. if b->end is later on the *same* page as old_begin).
-			           * How do we test for that? Looking at PAGENUM(b->end) is not quite enough,
-			           * because if a child was spanning the whole page, we don't want to
-			           * clobber its presence in the index. */
-			          ((PAGENUM(b->end) > PAGENUM(old_begin)) 
-			            && !is_one_or_more_levels_under(pageindex[PAGENUM(old_begin)], b)) 
-			              ? ROUND_UP((unsigned long) old_begin, PAGE_SIZE)
-			              : ROUND_DOWN((unsigned long) old_begin, PAGE_SIZE) )
-	);
 	
 	SANITY_CHECK_BIGALLOC(b);
-	
 	BIG_UNLOCK
 	return 1;
 }
@@ -824,7 +849,7 @@ struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, v
 	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
-	
+	assert(a);
 	struct big_allocation *b = find_bigalloc(mem, a);
 	if (b)
 	{
