@@ -697,6 +697,53 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
     (* now we know which locals are sizes, we can visit calls -- in vinstr *)
     DoChildren
 
+  val instrsToLabel = ref []
+  method vstmt (outerS: stmt) : stmt visitAction =
+      (* We have to be careful. Statements can nest inside other statements,
+       * *but* Instr statements cannot nest inside Instr statements.
+       * So we use the completion of an Instr statement as a trigger to
+       * rewrite the Instr using the labels collected.
+       * The vinst needs to pull the current list out of the ref val. *)
+      match outerS.skind with
+          Instr(outerIs) -> (
+              instrsToLabel := []; ChangeDoChildrenPost(outerS, fun s ->
+                  match s.skind with Instr(_) ->
+                    (* We collected some labels. We need to split the list
+                     * into labelled, attribute'd groups. *)
+                    let restructured =
+                    restructureInstrsStatement (fun is ->
+                      let rec groupInstrs (revGroupsAcc : (instr list * label option * attribute list) list) 
+                                          (curGroup : instr list * label option * attribute list)
+                                          (instrs : instr list) =
+                          match instrs with
+                            (* Okay, no more instrs in this Instr, so return the finished groups *)
+                            [] -> List.rev (curGroup :: revGroupsAcc)
+                          | x :: more ->
+                                (* does "x" need to be made the head of a new group? *)
+                                let foundLabel = List.find_opt (fun (i, attrs) -> i == x) !instrsToLabel
+                                in match foundLabel with
+                                Some(_, attrs) ->
+                                    (* okay, flush curGroup to the acc... *)
+                                    (* then start a new singleton (bypass the group accumulator *)
+                                    let newSingleton = ([x], None, attrs) in
+                                    let newRevGroupsAcc = newSingleton :: curGroup :: revGroupsAcc in
+                                    groupInstrs newRevGroupsAcc ([], None, []) more
+                              | None ->
+                                    let (curInstrs, curLabel, curAttrs) = curGroup in
+                                    (* no new group needed *)
+                                    let newCur = (curInstrs @ [x], curLabel, curAttrs) in
+                                    groupInstrs revGroupsAcc newCur more
+                      in
+                      groupInstrs [] ([], None, []) is
+                    ) s
+                    in
+                    instrsToLabel := [];
+                    restructured
+                  | _ -> failwith "Instr came back as non-Instr"
+              )
+         )
+      | _ -> DoChildren
+
   method vinst (i: instr) : instr list visitAction = 
     ( debug_print 1 ("considering instruction " ^ (
        match i with 
@@ -744,19 +791,22 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Sizeof T lets us terminate
                  Sizeof V also lets us terminate
                  Mul where an arg is a Sizeof lets us terminate *)
-              match (getAllocExpr i maybeFunvar args !sizeEnv functionT fl.globals) with
+              let res = getAllocExpr i maybeFunvar args !sizeEnv functionT fl.globals in
+              if res = None then SkipChildren(* this means it's not an allocation function *)
+              else let allocString, isComplete = match res with
                  Some(Existing(ts, isComplete)) when isSinglyIndirectGenericPointerTypesig ts -> 
-                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype____EXISTS1___PTR__1" true; SkipChildren
+                    ("__uniqtype____EXISTS1___PTR__1", true)
               |  Some(Existing(ts, isComplete)) -> 
-                    printAllocFn fileAndLine chan maybeFunvar (symnameFromSig ts) isComplete; SkipChildren
-              |  Some(Synthetic(tss)) -> 
-                    printAllocFn fileAndLine chan maybeFunvar (dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine))) ) false; SkipChildren
+                    ((symnameFromSig ts), isComplete)
+              |  Some(Synthetic(tss)) ->
+                    let idl = dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine)))
+                    in (idl, false)
               |  Some(Undet) -> (* it is an allocation function, but... *)
-                    printAllocFn fileAndLine chan maybeFunvar "__uniqtype____uninterpreted_byte" true; SkipChildren
-              |  None -> 
-                  (* (debug_print 1 (
-                     "skipping call to function " ^ v.vname ^ " since getAllocExpr returned None\n"
-                  ) ; flush Pervasives.stderr;  *) SkipChildren(* ) *) (* this means it's not an allocation function *)
+                    ("__uniqtype____uninterpreted_byte", true)
+              in
+              instrsToLabel := (i, [Attr("allocstmt", [AStr(allocString)])]) :: !instrsToLabel;
+              printAllocFn fileAndLine chan maybeFunvar allocString isComplete;
+              SkipChildren
             end (* ) *)
           end
         | _ -> raise(Failure "impossible function type")
