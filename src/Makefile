@@ -129,7 +129,7 @@ uniqtypes.o: uniqtypes.c
 	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
 ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard allocators/*.c))
-UTIL_OBJS := allocsites.o pageindex.o addrlist.o uniqtype-bfs.o
+UTIL_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o
 NOPRELOAD_OBJS := uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
 NONSHARED_OBJS := nonshared_hooks.o
 MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ) $(ALLOCATOR_OBJS)

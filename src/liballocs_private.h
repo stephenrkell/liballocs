@@ -27,10 +27,14 @@ typedef bool _Bool;
 
 #include "liballocs.h"
 
+#ifndef likely
 #define likely(cond) \
   __builtin_expect( (cond), 1 )
+#endif
+#ifndef unlikely
 #define unlikely(cond) \
   __builtin_expect( (cond), 0 )
+#endif
 
 const char *
 dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
@@ -171,6 +175,16 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	__attribute__((visibility("hidden")));
 
 void *__notify_copy(void *dest, const void *src, unsigned long n);
+/* Some boilerplate helpers for use by allocators. */
+#define DEFAULT_GET_TYPE \
+static struct uniqtype *get_type(void *obj) \
+{ \
+	struct uniqtype *out; \
+	struct liballocs_err *err = get_info(obj, NULL, &out, \
+		NULL, NULL, NULL); \
+	if (err) return NULL; \
+	return out; \
+}
 
 extern struct uniqtype *pointer_to___uniqtype__void __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__signed_char __attribute__((visibility("hidden")));

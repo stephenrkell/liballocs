@@ -73,9 +73,6 @@ size_t malloc_usable_size(void *ptr);
 #include "liballocs_private.h"
 #include "relf.h"
 
-// HACK for libcrunch -- please remove (similar to malloc_usable_size -> __mallochooks_*)
-void __libcrunch_uncache_all(const void *allocptr, size_t size) __attribute__((weak));
-
 static void *allocptr_to_userptr(void *allocptr);
 static void *userptr_to_allocptr(void *allocptr);
 
@@ -664,15 +661,12 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	 * realloc'd size, where the realloc happens in-place, realloc() would overwrite
 	 * our insert with its own (regular heap metadata) trailer, breaking the list.
 	 */
-	
+
 	if (userptr == NULL) return; // HACK: shouldn't be necessary; a BUG somewhere
-	
-	/* HACK for libcrunch cache invalidation */
-	if (__libcrunch_uncache_all)
-	{
-		void *allocptr = userptr_to_allocptr(userptr);
-		__libcrunch_uncache_all(allocptr, malloc_usable_size(allocptr));
-	}
+
+	// cache invalidation
+	void *allocptr = userptr_to_allocptr(userptr);
+	__liballocs_uncache_all(allocptr, malloc_usable_size(allocptr));
 	
 	int lock_ret;
 	BIG_LOCK

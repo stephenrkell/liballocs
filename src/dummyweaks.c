@@ -6,6 +6,7 @@
 #include "fake-libunwind.h"
 #include "uniqtype.h"
 #include "uniqtype-bfs.h"
+#include "liballocs_cil_inlines.h"
 
 /* NOTE: is linking -R, i.e. "symbols only", the right solution for 
  * getting the weak references to pop out the way we want them?
@@ -41,6 +42,7 @@
  * Can we use -R with a linker script?
  */
 
+struct __liballocs_memrange_cache __liballocs_ool_cache; // all zeroes
 _Bool __liballocs_is_initialized;
 
 uint16_t *pageindex __attribute__((visibility("protected")));

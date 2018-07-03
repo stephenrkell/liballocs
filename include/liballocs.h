@@ -41,6 +41,7 @@ struct allocator; // instead of allocmeta.h
 #endif
 
 #include "allocsmt.h"
+#include "liballocs_cil_inlines.h"
 
 extern unsigned long __liballocs_aborted_stack;
 extern unsigned long __liballocs_aborted_static;
@@ -236,11 +237,16 @@ __liballocs_ensure_init(void)
 }
 // inline definition in pageindex.h, instantiated in pageindex.c
 // GAH -- so clients including only this header will complain "used but not defined"
+// -- we need ordinary headers to be all-inline, but
+// pageindex.c to have one non-inline.
+// How to placate the compiler of the translation unit that doesn't include pageindex.h?
+// I think the answer is "you can't; refactor headers to avoid this"
 /* The "leaf allocator" for an address is the allocator
  * of the most deeply nested allocation covering a particular
  * address. For example, if a malloc has two live allocations
  * and a gap in the middle, the leaf allocator for an address
  * in the gap is that of the malloc *arena*, so probably mmap.  */
+
 inline struct allocator *__liballocs_leaf_allocator_for(const void *obj, 
 	struct big_allocation **out_containing_bigalloc,
 	struct big_allocation **out_maybe_the_allocation);
@@ -719,12 +725,6 @@ const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
 	return NULL;
 }
 
-void *
-__liballocs_get_alloc_site(void *obj);
-
-unsigned long
-__liballocs_get_alloc_size(void *obj);
-
 struct allocator *
 __liballocs_get_leaf_allocator(void *obj);
 
@@ -740,20 +740,6 @@ struct mapping_entry
 };
 struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 		struct big_allocation **maybe_out_bigalloc);
-
-extern inline const void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void);
-extern inline const void *(__attribute__((gnu_inline,always_inline)) __liballocs_get_sp)(void)
-{
-	unw_word_t sp;
-#ifdef __i386__
-	__asm__ ("movl %%esp, %0\n" :"=r"(sp));
-#elif defined(__x86_64__)
-	__asm__("movq %%rsp, %0\n" : "=r"(sp));
-#else
-#error "Unsupported architecture."
-#endif
-	return (const void*) sp;
-}
 
 static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void *), void *arg)
 {
