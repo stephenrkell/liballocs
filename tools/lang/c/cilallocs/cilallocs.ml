@@ -781,28 +781,48 @@ end
  * containing many stmts,
  * each an element of  groupedInstrs. *)
 let restructureInstrsStatement
-  (groupAndLabel : Cil.instr list -> (Cil.instr list * label option) list)
+  (groupAndLabel : Cil.instr list -> (Cil.instr list * label option * attribute list) list)
   (originalStmt : Cil.stmt)
   : Cil.stmt
 = match originalStmt.skind with
    Instr(instrs) -> let groupedInstrs = groupAndLabel instrs in
    {
+      (* We try to avoid creating a deeper structure than necessary.
+       * Each label needs its own bstmt.
+       * Each attribute list needs its own *block*. *)
       labels = (match groupedInstrs with
-        [(singletonGroup, Some(newLabel))] ->
-            newLabel :: originalStmt.labels 
+        (* If we have only a single group and no attrs, we won't create a nested block,
+         * so the labels go here if there are any to add *)
+        [(theGroup, Some(newLabel), [])] ->
+            newLabel :: originalStmt.labels
+        (* ... otherwise we'll put it in the block *)
          | _ -> originalStmt.labels);
       skind = (match groupedInstrs with
-        [(singletonGroup, maybeLabel)] ->
-            Instr(singletonGroup)
+        [(theGroup, maybeLabel, [])] ->
+            Instr(theGroup)
          | _ ->
             Block(
-              let stmts = (List.map (fun (group, maybeLabel) -> (* begin stmt *) {
-                  labels = (match maybeLabel with Some(lbl) -> [lbl] | None -> []);
-                  skind = Instr(group);
-                  sid = 0;
-                  succs = [];
-                  preds = []
-              } (* end stmt *)) groupedInstrs) in
+              let stmts = (List.map (fun (group, maybeLabel, attrs) ->
+                  (* If attrs is nonempty, we can simply make an Instr stmt. *)
+                  let stmtLabels = (match maybeLabel with Some(lbl) -> [lbl] | None -> []) in
+                  let skind = if attrs = [] then Instr(group)
+                    else Block ({ battrs = attrs;
+                                  bstmts = [{ labels = [];
+                                              skind = Instr(group);
+                                              sid = 0;
+                                              succs = [];
+                                              preds = []
+                                           }]
+                                })
+                  in
+                  (* begin stmt *) {
+                    labels = stmtLabels;
+                    skind = skind;
+                    sid = 0;
+                    succs = [];
+                    preds = []
+                  }
+              ) groupedInstrs) in
               let b = mkBlock stmts in
               (* Cil.dumpBlock (new defaultCilPrinterClass) Pervasives.stderr 0 b; *)
               b
