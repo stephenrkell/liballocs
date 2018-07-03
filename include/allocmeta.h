@@ -108,8 +108,18 @@ fun(struct allocated_chunk *,safe_migrate,   arg(struct allocated_chunk *,start)
 fun(struct allocated_chunk *,unsafe_migrate, arg(struct allocated_chunk *,start),arg(struct allocator *,recipient)) /* needn't free existing (stack) */\
 fun(void,                    register_suballoc,arg(struct allocated_chunk *,start),arg(struct allocator *,suballoc))
 
+/* The *process-wide* reflective interface of liballocs.
+ * FIXME: maybe this should always take
+ *     a struct allocator
+ * and a struct big_allocation *maybe_the_allocation
+ * and a struct containing_bigalloc?
+ * Can we compress these into only one or two arguments?
+ * If we pass the "relevant bigalloc", then either
+ * the allocator itself is the suballocator, or
+ * the allocator itself allocated the suballoc. Either way
+ * that's all the information we need. So the FIXME is: do
+ * the refactoring, starting with set_type and set_size. */
 #define ALLOC_REFLECTIVE_API(fun, arg) \
-/* The *process-wide* reflective interface of liballocs */ \
 fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
 fun(void *             ,get_base,      arg(void *, obj))  /* base address? */ \
 fun(unsigned long      ,get_size,      arg(void *, obj))  /* size? */ \
@@ -128,16 +138,6 @@ fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_al
 #define __allocmeta_fun_ptr(rett, name, ...) \
 	rett (*name)( __VA_ARGS__ );
 
-#define DEFAULT_GET_TYPE \
-static struct uniqtype *get_type(void *obj) \
-{ \
-	struct uniqtype *out; \
-	struct liballocs_err *err = get_info(obj, NULL, &out, \
-		NULL, NULL, NULL); \
-	if (err) return NULL; \
-	return out; \
-}
-
 struct allocator
 {
 	const char *name;
@@ -148,16 +148,31 @@ struct allocator
 	ALLOC_BASE_API(__allocmeta_fun_ptr, __allocmeta_fun_arg)
 };
 
+/* Declare the top-level functions. */
+#define __liballocs_toplevel_fun_decl(rett, name, ...) \
+	rett __liballocs_ ## name( __VA_ARGS__ );
+ALLOC_REFLECTIVE_API(__liballocs_toplevel_fun_decl, __allocmeta_fun_arg)
+void *__liballocs_get_alloc_base(const void *); /* alias of __liballocs_get_base */
+
+/* Which allocators do we have? */
 extern struct allocator __stack_allocator;
 extern struct allocator __stackframe_allocator;
 extern struct allocator __mmap_allocator; /* mmaps */
 extern struct allocator __sbrk_allocator; /* sbrk() */
 extern struct allocator __static_allocator; /* ldso; nests under file? */
+// extern struct allocator __static_file_allocator;
+// extern struct allocator __static_segment_allocator;
+// extern struct allocator __static_section_allocator;
+// extern struct allocator __static_symbol_allocator;
 extern struct allocator __auxv_allocator; /* nests under stack? */
 extern struct allocator __alloca_allocator; /* nests under stack? */
+// FIXME: These are indexes, not allocators
 extern struct allocator __generic_malloc_allocator; /* covers all chunks */
 extern struct allocator __generic_small_allocator; /* usual suballoc impl */
 extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
+// extern struct allocator __global_malloc_allocator;
+// extern struct allocator __libc_malloc_allocator; // good idea? probably not
+// extern struct allocator __global_obstack_allocator;
 
 void __mmap_allocator_init(void);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 

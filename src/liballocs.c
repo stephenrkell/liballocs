@@ -1560,8 +1560,8 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 	return NULL;
 }
 
-#ifdef __liballocs_get_alloc_base
-#undef __liballocs_get_alloc_base
+#ifdef __liballocs_get_base
+#undef __liballocs_get_base
 #endif
 void *
 __liballocs_get_alloc_base(void *obj)
@@ -1572,6 +1572,11 @@ __liballocs_get_alloc_base(void *obj)
 	if (err) return NULL;
 	return (void*) out;
 }
+#ifdef __liballocs_get_alloc_base
+#undef __liballocs_get_alloc_base
+#endif
+void *__liballocs_get_alloc_base(void *obj) __attribute__((alias("__liballocs_get_base")));
+
 void *
 __liballocs_get_alloc_base_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)
 {
@@ -1583,11 +1588,11 @@ __liballocs_get_alloc_base_with_fill(void *obj, struct allocator **out_a, /*biga
 	return (void*) out;
 }
 
-#ifdef __liballocs_get_alloc_type
-#undef __liballocs_get_alloc_type
+#ifdef __liballocs_get_type
+#undef __liballocs_get_type
 #endif
 struct uniqtype * 
-__liballocs_get_alloc_type(void *obj)
+__liballocs_get_type(void *obj)
 {
 	struct uniqtype *out;
 	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, NULL, 
@@ -1595,6 +1600,11 @@ __liballocs_get_alloc_type(void *obj)
 	if (err) return NULL;
 	return out;
 }
+#ifdef __liballocs_get_alloc_type
+#undef __liballocs_get_alloc_type
+#endif
+void *__liballocs_get_alloc_type(void *obj) __attribute__((alias("__liballocs_get_type")));
+
 struct uniqtype *
 __liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)
 {
