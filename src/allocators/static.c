@@ -356,26 +356,24 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 					 * that we care about, i.e. whatever section the symtab
 					 * entry points to. The relocated section is not
 					 * interesting to us. */
-					for (unsigned i = 0; i < ehdr->e_shnum; ++i)
+					for (unsigned i_sec = 0; i_sec < ehdr->e_shnum; ++i_sec)
 					{
-						if ((shdr[i].sh_type == SHT_REL
-								|| shdr[i].sh_type == SHT_RELA)
-							&& 0 != strcmp(
-									(char*) file_mapping + shdr[ehdr->e_shstrndx].sh_offset
-										+ shdr[i].sh_name,
-									".rela.dyn"
-								)
-							)
+						if ((shdr[i_sec].sh_type == SHT_REL
+								|| shdr[i_sec].sh_type == SHT_RELA)
+							&& shdr[i_sec].sh_info != 0 /* ignores .rela.dyn */
+							&& 0 != (shdr[shdr[i_sec].sh_info].sh_flags & SHF_ALLOC)
+								/* ignore relocs for non-allocated sections */
+						   )
 						{
-							_Bool is_rela = (shdr[i].sh_type == SHT_RELA);
+							_Bool is_rela = (shdr[i_sec].sh_type == SHT_RELA);
 							/* Scan the relocs and find whether their target section
 							 * is within this segment. */
-							unsigned symtab_scn = shdr[i].sh_link;
+							unsigned symtab_scn = shdr[i_sec].sh_link;
 							ElfW(Sym) *symtab = (ElfW(Sym) *)(
 								(char*) file_mapping + shdr[symtab_scn].sh_offset);
-							unsigned nrel = shdr[i].sh_size / 
+							unsigned nrel = shdr[i_sec].sh_size / 
 								(is_rela ? sizeof (ElfW(Rela)) : sizeof (ElfW(Rel)));
-							void *tbl_base = (char*) file_mapping + shdr[i].sh_offset;
+							void *tbl_base = (char*) file_mapping + shdr[i_sec].sh_offset;
 							ElfW(Rela) *rela_base = is_rela ? (ElfW(Rela) *) tbl_base : NULL;
 							ElfW(Rel) *rel_base = is_rela ? NULL : (ElfW(Rel) *) tbl_base;
 							for (unsigned i = 0; i < nrel; ++i)
