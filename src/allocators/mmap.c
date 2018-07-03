@@ -1208,7 +1208,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 	
 	abort();
 out:
-	check_mapping_sequence_sanity(cur);
+	if (cur) check_mapping_sequence_sanity(cur);
 	return ret;
 }
 
