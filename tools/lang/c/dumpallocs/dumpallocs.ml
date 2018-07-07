@@ -710,7 +710,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                   match s.skind with Instr(_) ->
                     (* We collected some labels. We need to split the list
                      * into labelled, attribute'd groups. *)
-                    let restructured =
+                    instrsToLabel := [];
                     restructureInstrsStatement (fun is ->
                       let rec groupInstrs (revGroupsAcc : (instr list * label option * attribute list) list) 
                                           (curGroup : instr list * label option * attribute list)
@@ -735,10 +735,8 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                                     groupInstrs revGroupsAcc newCur more
                       in
                       groupInstrs [] ([], None, []) is
-                    ) s
-                    in
-                    instrsToLabel := [];
-                    restructured
+                    ) s;
+                    s
                   | _ -> failwith "Instr came back as non-Instr"
               )
          )

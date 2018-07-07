@@ -779,25 +779,23 @@ end
  * we create a new stmt
  * that is itself a Block,
  * containing many stmts,
- * each an element of  groupedInstrs. *)
+ * each an element of  groupedInstrs.
+ * NOTE that CIL represents Gotos by a statement ref,
+ * so we MUST update-in-place rather than return a fresh stmt. *)
 let restructureInstrsStatement
   (groupAndLabel : Cil.instr list -> (Cil.instr list * label option * attribute list) list)
-  (originalStmt : Cil.stmt)
-  : Cil.stmt
-= match originalStmt.skind with
+  (stmt : Cil.stmt)
+  : unit
+= match stmt.skind with
    Instr(instrs) -> let groupedInstrs = groupAndLabel instrs in
-   {
-      (* We try to avoid creating a deeper structure than necessary.
-       * Each label needs its own bstmt.
-       * Each attribute list needs its own *block*. *)
-      labels = (match groupedInstrs with
+   stmt.labels <- (match groupedInstrs with
         (* If we have only a single group and no attrs, we won't create a nested block,
          * so the labels go here if there are any to add *)
         [(theGroup, Some(newLabel), [])] ->
-            newLabel :: originalStmt.labels
+            newLabel :: stmt.labels
         (* ... otherwise we'll put it in the block *)
-         | _ -> originalStmt.labels);
-      skind = (match groupedInstrs with
+         | _ -> stmt.labels);
+   stmt.skind <- (match groupedInstrs with
         [(theGroup, maybeLabel, [])] ->
             Instr(theGroup)
          | _ ->
@@ -827,8 +825,4 @@ let restructureInstrsStatement
               (* Cil.dumpBlock (new defaultCilPrinterClass) Pervasives.stderr 0 b; *)
               b
           ));
-      sid = originalStmt.sid;
-      succs = originalStmt.succs;
-      preds = originalStmt.preds;
-   }
 | _ -> failwith "not an Instrs statement"
