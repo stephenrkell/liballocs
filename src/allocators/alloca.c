@@ -84,6 +84,8 @@ void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, 
 	assert(0);
 	
 out:
+	/* FIXME: be more discriminating in what cache we zap -- only ours or children */
+	__liballocs_uncache_all(frame_addr, total_to_unindex);
 	if (b) __liballocs_delete_bigalloc_at(bytes_counter, &__stackframe_allocator);
 }
 
