@@ -839,10 +839,8 @@ bool sticky_root_die::is_base_object(int user_fd)
 		std::cerr << "ELF file is of unsupported class or endianness" << std::endl;
 		throw No_entry();
 	}
-		std::cerr << "ELF file shdrs" << std::endl;
 	if (!ehdr->e_shoff) throw No_entry();
 	ElfW(Shdr) *shdr = reinterpret_cast<ElfW(Shdr) *>((char*) mapping + ehdr->e_shoff);
-		std::cerr << "ELF file phdrs" << std::endl;
 	if (!ehdr->e_phoff) throw No_entry();
 	ElfW(Phdr) *phdr = reinterpret_cast<ElfW(Phdr) *>((char*) mapping + ehdr->e_phoff);
 	/* Walk the section headers remembering their base addresses. */
@@ -850,6 +848,7 @@ bool sticky_root_die::is_base_object(int user_fd)
 	auto& right_open = boost::icl::interval<ElfW(Addr)>::right_open;
 	for (unsigned i = 1; i < ehdr->e_shnum; ++i)
 	{
+		if (!(shdr[i].sh_flags & SHF_ALLOC)) continue; // skip non-allocated sections
 		std::set<ElfW(Shdr)*> singleton_set;
 		singleton_set.insert(&shdr[i]);
 		m += make_pair(
@@ -857,14 +856,24 @@ bool sticky_root_die::is_base_object(int user_fd)
 				singleton_set
 			);
 	}
-	auto is_nobits = [m, &right_open](ElfW(Addr) addr, unsigned span_len) -> bool {
+	auto is_nobits = [m, &right_open, shdr](ElfW(Addr) addr, unsigned span_len) -> bool {
 		/* Find the section spanning this address range. */
 		auto found = m.find(right_open(addr, addr + span_len));
 		if (found == m.end()) return false;
 		if (found->second.size() == 0) return false;
 		if (found->second.size() > 1)
 		{
-			/* More than one section spans this range. HMM. */
+			std::cerr << "Address 0x" << std::hex << addr << " spanned by more than"
+				" one non-empty section; indices: {";
+				
+			for (auto i_found = found->second.begin();
+				i_found != found->second.end();
+				++i_found)
+			{
+				if (i_found != found->second.begin()) std::cerr << ", ";
+				std::cerr << (*i_found - shdr);
+			}
+			std::cerr << "}" << std::endl;
 			abort();
 		}
 		auto &it = *found->second.begin();
