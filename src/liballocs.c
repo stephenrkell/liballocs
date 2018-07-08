@@ -1112,6 +1112,7 @@ void *__notify_copy(void *dest, const void *src, unsigned long n)
 
 /* These have hidden visibility */
 struct uniqtype *pointer_to___uniqtype__void;
+struct uniqtype *pointer_to___uniqtype____uninterpreted_byte;
 struct uniqtype *pointer_to___uniqtype__signed_char;
 struct uniqtype *pointer_to___uniqtype__unsigned_char;
 struct uniqtype *pointer_to___uniqtype____PTR_signed_char;
@@ -1262,6 +1263,14 @@ void __liballocs_post_systrap_init(void)
 			CREATE(__uniqtype__void, __uniqtype__void, 1, {
 				.pos_maxoff = 0,
 				.un = { _void: { .kind = VOID } }
+			});
+		}
+		pointer_to___uniqtype____uninterpreted_byte = dlsym(RTLD_DEFAULT, "__uniqtype____uninterpreted_byte");
+		if (!pointer_to___uniqtype____uninterpreted_byte)
+		{
+			CREATE(__uniqtype____uninterpreted_byte, __uniqtype____uninterpreted_byte, 1, {
+				.pos_maxoff = 1,
+				.un = { base: { .kind = BASE, .enc = 0 } }
 			});
 		}
 		pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$8");
@@ -1563,18 +1572,32 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 #ifdef __liballocs_get_base
 #undef __liballocs_get_base
 #endif
-void *
-__liballocs_get_alloc_base(void *obj)
-{
-	const void *out;
-	struct liballocs_err *err = __liballocs_get_alloc_info(obj, NULL, &out,
-		NULL, NULL, NULL);
-	if (err) return NULL;
-	return (void*) out;
-}
 #ifdef __liballocs_get_alloc_base
 #undef __liballocs_get_alloc_base
 #endif
+void *
+__liballocs_get_base(void *obj)
+{
+	const void *out;
+	/* Try the cache first. */
+	struct __liballocs_memrange_cache_entry_s *hit =
+		__liballocs_memrange_cache_lookup_notype(&__liballocs_ool_cache,
+			obj, 0);
+	/* We only want depth-0 cached memranges, i.e. leaf-level. */
+	if (hit && hit->depth == 0) return (void*) hit->obj_base;
+	/* No hit, so do the full query. */
+	size_t sz = 0;
+	struct uniqtype *t = NULL;
+	struct allocator *a = NULL;
+	struct liballocs_err *err = __liballocs_get_alloc_info(obj, &a, &out,
+		&sz, NULL, NULL);
+	if (err && err != &__liballocs_err_unrecognised_alloc_site) return NULL;
+	/* We can cache the alloc base and size. */
+	if (a && a->is_cacheable) __liballocs_cache_with_type(&__liballocs_ool_cache,
+		out, (char*) out + sz, t ? t : pointer_to___uniqtype____uninterpreted_byte,
+		0, 1, out);
+	return (void*) out;
+}
 void *__liballocs_get_alloc_base(void *obj) __attribute__((alias("__liballocs_get_base")));
 
 void *
