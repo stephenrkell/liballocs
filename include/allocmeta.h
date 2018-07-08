@@ -152,7 +152,7 @@ struct allocator
 #define __liballocs_toplevel_fun_decl(rett, name, ...) \
 	rett __liballocs_ ## name( __VA_ARGS__ );
 ALLOC_REFLECTIVE_API(__liballocs_toplevel_fun_decl, __allocmeta_fun_arg)
-void *__liballocs_get_alloc_base(const void *); /* alias of __liballocs_get_base */
+void *__liballocs_get_alloc_base(void *); /* alias of __liballocs_get_base */
 
 /* Which allocators do we have? */
 extern struct allocator __stack_allocator;
