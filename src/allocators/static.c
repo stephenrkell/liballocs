@@ -1,6 +1,8 @@
 #define _GNU_SOURCE
 #include <assert.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -14,8 +16,7 @@
 #include "relf.h"
 #include "liballocs_private.h"
 #include "pageindex.h"
-#include "raw-syscalls.h"
-
+int fstat(int fd, struct stat *buf);
 
 static _Bool trying_to_initialize;
 static _Bool initialized;
@@ -155,13 +156,18 @@ static int sym_addr_size_search(const void *key, const void *arr_obj)
 	if (obj->st_value > search_addr) return -1;
 	if (obj->st_value + obj->st_size <= search_addr) return 1;
 	assert(0);
+	abort();
 }
 
 int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_lment)
 {
 	static _Bool running;
 	/* HACK: if we have an instance already running, quit early. */
-	if (running) /* return 1; */ abort(); // i.e. debug this
+	if (running)
+	{
+		warnx("Detected reentrant call to add_all_loaded_segments()");
+		abort();
+	}
 	running = 1;
 	if (!info) abort();
 	// write_string("Blah9000\n");
@@ -211,23 +217,23 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 		ElfW(Shdr) *shdr = NULL;
 		ElfW(Ehdr) *ehdr = NULL;
 		size_t file_mapping_sz;
-		int raw_fd = -1;
+		int fd = -1;
 		if (filename)
 		{
-			raw_fd = raw_open(dynobj_name, O_RDONLY);
+			fd = open(dynobj_name, O_RDONLY);
 			struct stat s;
-			int ret = (raw_fd == -1) ? -1 : raw_fstat(raw_fd, &s);
-			if (raw_fd >= 0 && ret == 0)
+			int ret = (fd == -1) ? -1 : fstat(fd, &s);
+			if (fd >= 0 && ret == 0)
 			{
 				file_mapping_sz = ROUND_UP(s.st_size, PAGE_SIZE);
-				file_mapping = raw_mmap(NULL, file_mapping_sz, PROT_READ, MAP_PRIVATE, raw_fd, 0);
+				file_mapping = mmap(NULL, file_mapping_sz, PROT_READ, MAP_PRIVATE, fd, 0);
 				if (file_mapping != MAP_FAILED)
 				{
 					ehdr = file_mapping;
 					shdr = (ElfW(Shdr) *)(((unsigned char *) file_mapping) + ehdr->e_shoff);
 				}
 			}
-			if (raw_fd != -1) close(raw_fd);
+			if (fd != -1) close(fd);
 		}
 		if (dynsym)
 		{
@@ -249,7 +255,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 			}
 			
 			all_syms_sorted_mapping_size = ROUND_UP((n_dynsym + n_symtab) * sizeof (ElfW(Sym)), PAGE_SIZE);
-			all_syms_sorted = raw_mmap(NULL, all_syms_sorted_mapping_size,
+			all_syms_sorted = mmap(NULL, all_syms_sorted_mapping_size,
 					PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
 			if (all_syms_sorted == MAP_FAILED)
 			{
@@ -314,7 +320,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 				size_t bitmap_size_bytes = (7 + info->dlpi_phdr[i].p_memsz) / 8;
 				size_t prefix_size = ROUND_UP(sizeof (struct symbols_bitmap), sizeof (unsigned long));
 				size_t alloc_size = prefix_size + bitmap_size_bytes;
-				unsigned char *mapping = raw_mmap(NULL, alloc_size,
+				unsigned char *mapping = mmap(NULL, alloc_size,
 					PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
 				if (mapping == MAP_FAILED) abort();
 				b->suballocator_meta = (struct symbols_bitmap *) mapping;
@@ -426,10 +432,10 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 			} // end if it's a load
 		} // end for each phdr
 		
-		if (all_syms_sorted) raw_munmap(all_syms_sorted, all_syms_sorted_mapping_size);
+		if (all_syms_sorted) munmap(all_syms_sorted, all_syms_sorted_mapping_size);
 		if (file_mapping != MAP_FAILED)
 		{
-			raw_munmap(file_mapping, file_mapping_sz);
+			munmap(file_mapping, file_mapping_sz);
 		}
 		// if we were looking for a single file, and got here, then we found it; can stop now
 		if (maybe_lment != NULL) { running = 0; return 1; }
