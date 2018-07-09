@@ -139,7 +139,7 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
              in
              let mkLabel num = ".L__monalloca_alloca_label_" 
                 ^ (identFromString l.file) ^ "_" 
-                ^ (string_of_int l.line) ^ "_"
+                ^ (if l.line >=0 then string_of_int l.line else "NONUMBER") ^ "_"
                 ^ (string_of_int num)
              in
              let labelString1 = mkLabel 1
