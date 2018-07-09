@@ -130,7 +130,6 @@ extern _Bool __liballocs_is_initialized __attribute__((weak));
  * - period    (need not be same as period, i.e. if T is int, alloc is array of stat, say)
  *                 ** ptr arithmetic is only valid if sz == period
  *                 ** entries with sz != period are still useful for checking types 
- * - results   (__is_a, __like_a, __locally_like_a, __is_function_refining, ... others?)
  */
 
 struct __liballocs_memrange_cache_entry_s
@@ -139,7 +138,7 @@ struct __liballocs_memrange_cache_entry_s
 	const void *obj_limit;
 	struct uniqtype *uniqtype;
 	unsigned period;
-	unsigned short result;
+	signed short depth; /* 0 means leaf-level; 1, 2... inside uniqtype; -1, ... bigalloc */
 	unsigned char prev_mru;
 	unsigned char next_mru;
 	/* TODO: do inline uniqtype cache word check? */
@@ -355,7 +354,7 @@ extern inline void
 (__attribute__((always_inline,gnu_inline)) __liballocs_cache_with_type)(
 	struct __liballocs_memrange_cache *c,
 	const void *obj_base, const void *obj_limit, const struct uniqtype *t, 
-	_Bool result, unsigned short period, const void *alloc_base)
+	signed depth, unsigned short period, const void *alloc_base)
 {
 	assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
 #ifdef LIBALLOCS_CACHE_REPLACE_FIFO
@@ -376,7 +375,7 @@ extern inline void
 		.obj_limit = obj_limit,
 		.uniqtype = (void*) t,
 		.period = period,
-		.result = result,
+		.depth = depth,
 		.prev_mru = c->entries[pos].prev_mru,
 		.next_mru = c->entries[pos].next_mru
 	};

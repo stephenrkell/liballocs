@@ -606,6 +606,18 @@ __liballocs_get_alloc_info
 	const void **out_alloc_site)
 {
 	struct liballocs_err *err = 0;
+	
+	/* This function is always asking about the leaf
+	 * allocator. And our cached memranges always
+	 * talk about those? ARGH, no, they could be
+	 * underneath.
+	 *
+	 * Do we want a leaf cache, a memrange cache,
+	 * an any-level cache, or some mixture?
+	 *
+	 * So if we hit the cache,
+	 * there's no need to query the allocator. The
+	 * cache entries should record the allocator. */
 
 	struct big_allocation *containing_bigalloc;
 	struct big_allocation *maybe_the_allocation;
@@ -622,12 +634,21 @@ __liballocs_get_alloc_info
 		{
 			__liballocs_report_wild_address(obj);
 			++__liballocs_aborted_unknown_storage;
-			return &__liballocs_err_object_of_unknown_storage;
+			err = &__liballocs_err_object_of_unknown_storage;
+			goto out_nocache;
 		}
+	/* Can we use our cached memranges somehow?
+	 * Those with depth == 0 reflect leaf allocations. */
 	}
 	if (out_allocator) *out_allocator = a;
-	return a->get_info((void*) obj, maybe_the_allocation, out_alloc_uniqtype, (void**) out_alloc_start,
+	err = a->get_info((void*) obj, maybe_the_allocation, out_alloc_uniqtype, (void**) out_alloc_start,
 			out_alloc_size_bytes, out_alloc_site);
+	if (!err || err == &__liballocs_err_unrecognised_alloc_site)
+	{
+		/* We can cache something. */
+	}
+out_nocache:
+	return err;
 }
 #else
 struct liballocs_err *
