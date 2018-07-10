@@ -907,7 +907,23 @@ bool sticky_root_die::has_dwarf(int user_fd)
 	int ret = dwarf::lib::dwarf_init(user_fd, DW_DLC_READ, nullptr, nullptr, &d, &e);
 	if (ret == 0)
 	{
-		retval = true;
+		Dwarf_Unsigned seen_cu_header_length;
+		Dwarf_Half seen_version_stamp;
+		Dwarf_Unsigned seen_abbrev_offset;
+		Dwarf_Half seen_address_size;
+		Dwarf_Half seen_offset_size;
+		Dwarf_Half seen_extension_size;
+		Dwarf_Unsigned seen_next_cu_header;
+
+		ret = dwarf_next_cu_header_b(d,
+			&seen_cu_header_length, &seen_version_stamp,
+			&seen_abbrev_offset, &seen_address_size,
+			&seen_offset_size, &seen_extension_size,
+			&seen_next_cu_header, &e);
+		if (ret == DW_DLV_OK)
+		{
+			retval = true;
+		} else retval = false;
 		ret = dwarf_finish(d, &e);
 	} else retval = false;
 	return retval;
@@ -915,13 +931,17 @@ bool sticky_root_die::has_dwarf(int user_fd)
 
 int sticky_root_die::open_debuglink(int user_fd)
 {
+	/* FIXME: linux-specific big hacks here. */
 	char *cmdstr = NULL;
-	int ret = asprintf(&cmdstr, ". debug-funcs.sh && read_debuglink /dev/fd/%d", user_fd);
+	char *fdstr = NULL;
+	int ret = asprintf(&fdstr, "/dev/fd/%d", user_fd);
+	if (ret <= 0) throw No_entry();
+	ret = asprintf(&cmdstr, "bash -c \". ${LIBALLOCS}/tools/debug-funcs.sh && read_debuglink %s | tr -d '\\n'\"", fdstr);
 	if (ret <= 0) throw No_entry();
 	assert(cmdstr != NULL);
 	FILE *p = popen(cmdstr, "r");
 	char debuglink_buf[4096];
-	size_t nread = fread(debuglink_buf, sizeof debuglink_buf, 1, p);
+	size_t nread = fread(debuglink_buf, 1, sizeof debuglink_buf, p);
 	int ret_fd;
 	if (nread == sizeof debuglink_buf)
 	{
@@ -933,7 +953,49 @@ int sticky_root_die::open_debuglink(int user_fd)
 	{
 		/* We've successfully slurped a debuglink */
 		std::cerr << "Slurped debuglink: " << debuglink_buf << std::endl;
-		ret_fd = open(debuglink_buf, O_RDONLY);
+		/* How to build the path from the debuglink? GDB docs say we
+		 * have to try:
+		 * the directory of the executable file, then
+		 * in a subdirectory of that directory named .debug, and finally
+		 * under each one of the global debug directories,
+		 *      in a subdirectory whose name is identical to
+		 *      the leading directories of the executable’s absolute file name. */
+		std::vector<std::string> paths_to_try;
+		char *fd_realpath = realpath(fdstr, NULL);
+		if (fd_realpath)
+		{
+			// to save us from strdup'ing, construct a string
+			// only do the first one if debuglink it doesn't match basename
+			if (string(debuglink_buf) !=
+				string(basename((char*) string(fd_realpath).c_str())))
+			{
+				/* Try the debuglink basename on the fd realpath */
+				paths_to_try.push_back(
+					string(dirname((char*) string(fd_realpath).c_str()))
+					+ "/" + debuglink_buf
+				);
+			}
+			// try .debug/
+			paths_to_try.push_back(
+				string(dirname((char*) string(fd_realpath).c_str()))
+				+ "/.debug/" + debuglink_buf
+			);
+			// HACK: try /usr/lib/debug + fd dirname + debuglink
+			paths_to_try.push_back(
+				string("/usr/lib/debug/")
+				+ string(dirname((char*) string(fd_realpath).c_str()))
+				+ "/"
+				+ debuglink_buf
+			);
+
+			free(fd_realpath);
+		}
+		for (auto i_path = paths_to_try.begin(); i_path != paths_to_try.end();
+			++i_path)
+		{
+			ret_fd = open(i_path->c_str(), O_RDONLY);
+			if (ret_fd != -1) break;
+		}
 	}
 	free(cmdstr);
 	return ret_fd;
