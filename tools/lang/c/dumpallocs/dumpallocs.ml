@@ -720,7 +720,8 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                             [] -> List.rev (curGroup :: revGroupsAcc)
                           | x :: more ->
                                 (* does "x" need to be made the head of a new group? *)
-                                let foundLabel = List.find_opt (fun (i, attrs) -> i == x) !instrsToLabel
+                                let foundLabel = try Some(List.find (fun (i, attrs) -> i == x) !instrsToLabel)
+				with Not_found -> None
                                 in match foundLabel with
                                 Some(_, attrs) ->
                                     (* okay, flush curGroup to the acc... *)
