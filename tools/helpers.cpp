@@ -1009,12 +1009,9 @@ shared_ptr<sticky_root_die> sticky_root_die::create(int user_fd)
 	/* Easy case: a base object containing DWARF. */
 	if (is_base && has_dwarf(user_fd))
 	{ return std::make_shared<sticky_root_die>(user_fd, user_fd); }
-	/* If it's not base nothing we can do. */
-	if (!is_base) throw No_entry();
-	/* Else it's base so we can look for a debuglink. */
-	int dbg_fd = open_debuglink(user_fd);
+	int dbg_fd;
+	if (is_base) dbg_fd = open_debuglink(user_fd);
+	else dbg_fd = user_fd;
 	if (dbg_fd != -1) return std::make_shared<sticky_root_die>(dbg_fd, user_fd);
-	/* Else it's a base object with no DWARF and
-	 * we couldn't get a dbglink, so give up. */
 	return std::shared_ptr<sticky_root_die>();
 }
