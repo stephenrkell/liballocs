@@ -249,7 +249,8 @@ private:
 	static bool is_base_object(int user_fd);
 	static bool has_dwarf(int user_fd);
 	static int open_debuglink(int user_fd);
-	
+	static int open_debug_via_build_id(int user_fd);
+
 public:
 	static shared_ptr<sticky_root_die> create(int user_fd);
 	sticky_root_die(int dwarf_fd, int base_elf_fd) : root_die(dwarf_fd),
