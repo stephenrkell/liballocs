@@ -211,7 +211,7 @@ void open_replacement(struct generic_syscall *s, post_handler *post)
 	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
 }
 
-static int trap_ldso_or_libdl_cb(struct maps_entry *ent, char *linebuf, void *interpreter_fname_as_void)
+static int maybe_trap_map_cb(struct maps_entry *ent, char *linebuf, void *interpreter_fname_as_void)
 {
 	const char *interpreter_fname = (const char *) interpreter_fname_as_void;
 	if (ent->x == 'x' && (0 == strcmp(interpreter_fname, ent->rest)
@@ -290,6 +290,16 @@ void __liballocs_systrap_init(void)
 		}
 	}
 	if (!interpreter_fname) abort();
+
+	// we're about to start rewriting syscall instructions, so be ready
+	install_sigill_handler();
+	
+	/* FIXME: instead of reading the maps file, use section headers to
+	 * figure out the instruction ranges. 
+	 * FIXME: trap everything, and use in-fs caching to mitigate the startup
+	 * overhead. Specifically, we cache a bunch of relocation records having
+	 * a vendor-specific reloc kind R_{ARCH}_SYSCALL_2 for a 2-byte call, etc..*/
+
 	struct maps_entry entry;
 	char proc_buf[4096];
 	int ret;
@@ -312,7 +322,7 @@ void __liballocs_systrap_init(void)
 	struct maps_buf m = { filebuf, 0, filebuf_pos - filebuf };
 	char linebuf[8192];
 	for_each_maps_entry((intptr_t) &m, get_a_line_from_maps_buf,
-		linebuf, sizeof linebuf, &entry, trap_ldso_or_libdl_cb, (void*) interpreter_fname);
+		linebuf, sizeof linebuf, &entry, maybe_trap_map_cb, (void*) interpreter_fname);
 	close(fd);
 
 	/* Also trap the mmap and mmap64 calls in the libc so. Again, we use relf
@@ -342,13 +352,47 @@ void __liballocs_systrap_init(void)
 			if (!dynstrsz_ent) continue;
 			unsigned long dynstrsz = dynstrsz_ent->d_un.d_val;
 			ElfW(Sym) *dynsym_end = dynsym + dynamic_symbol_count(l->l_ld, l);
-
-			/* Now we can look up symbols. */
-			found_an_mmap |= trap_syscalls_in_symbol_named("mmap",   l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-			found_an_mmap |= trap_syscalls_in_symbol_named("mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-			trap_syscalls_in_symbol_named("munmap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-			trap_syscalls_in_symbol_named("mremap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-			found_a_brk_or_sbrk |= trap_syscalls_in_symbol_named("sbrk", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			
+			/* GIANT HACK for __mmap64 in ld.so (glibc ~2.27 onwards) */
+			Elf64_Sym *found = symbol_lookup_in_object(l, "__tls_get_addr"); // HACK
+			if (found)
+			{
+				/* It's too soon to use our static object metadata to
+				 * figure out whether  thing is called "__mmap64".
+				 * So just trap the whole range of ld.so's text segment.
+				 * PROBLEM: how to find its text segment?
+				 * for a reasonable approximation, go with
+				 * the min and max addresses
+				 * of its STT_FUNC symbols. */
+				char *min = (void*) -1;
+				char *max = NULL;
+				for (ElfW(Sym) *d = dynsym; d != dynsym_end; ++d)
+				{
+					if (ELF64_ST_TYPE(d->st_info) == STT_FUNC)
+					{
+						char *addr = sym_to_addr(d);
+						if (addr > max) max = addr;
+						if (addr < min) min = addr;
+					}
+				}
+				
+				trap_one_executable_region(
+					min, max, l->l_name, 0, 0);
+			}
+			else
+			{
+				/* Now we can look up symbols. */
+				found_an_mmap |= trap_syscalls_in_symbol_named("mmap",   l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+				found_an_mmap |= trap_syscalls_in_symbol_named("mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+				found_an_mmap |= trap_syscalls_in_symbol_named("__mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+				trap_syscalls_in_symbol_named("munmap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+				trap_syscalls_in_symbol_named("mremap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+				found_a_brk_or_sbrk |= trap_syscalls_in_symbol_named("sbrk", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+				/* PROBLEM: trap-syscalls wants to be able to do open(). 
+				 * Surely it should be doing raw_open? And not instrumenting itself? */
+				//trap_syscalls_in_symbol_named("open", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+				//trap_syscalls_in_symbol_named("__libc_open64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+			}
 		}
 	}
 
@@ -357,7 +401,6 @@ void __liballocs_systrap_init(void)
 	// if (!found_an_mmap) abort();
 	// if (!found_a_brk_or_sbrk) abort();
 
-	install_sigill_handler();
 	__liballocs_systrap_is_initialized = 1;
 }
 
