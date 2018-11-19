@@ -91,8 +91,13 @@ void mmap_replacement(struct generic_syscall *s, post_handler *post)
 	/* Do the call. */
 	long int ret = do_syscall6(s);
 
-	/* If it did something, notify the allocator. */
-	if ((void*) ret != (void*) -1 && &__mmap_allocator_notify_mmap)
+	/* If it did something, notify the allocator.
+	 * HACK: not sure if/where this is documented, but I've seen mmap() return
+	 * a "negative" number that is not -1. So we consider any return value that
+	 * is less than PAGE_SIZE below (void*)-1 to be an error value. */
+#define MMAP_RETURN_IS_ERROR(p) \
+	(((intptr_t)(void*)-1 - (intptr_t)(p)) < PAGE_SIZE)
+	if (!MMAP_RETURN_IS_ERROR(ret) && &__mmap_allocator_notify_mmap)
 	{
 		__mmap_allocator_notify_mmap((void*) ret, addr, length, prot, flags, fd, offset,
 			GUESS_CALLER(s->saved_context->uc.uc_mcontext));
