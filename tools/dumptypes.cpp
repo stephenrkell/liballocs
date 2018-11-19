@@ -1237,10 +1237,10 @@ int main(int argc, char **argv)
 		ostringstream anon_name; anon_name << "0x" << std::hex << i_var.offset_here();
 
 		cout << "\n\t/* static alloc record for object "
-			 << (i_var.name_here() ? *i_var.name_here() : ("anonymous, DIE " + anon_name.str())) 
+			 << (i_var->find_name() ? *i_var->find_name() : ("anonymous, DIE " + anon_name.str())) 
 			 << " at vaddr " << std::hex << "0x" << addr << std::dec << " */";
 		ostringstream name_token;
-		if (i_var.name_here()) name_token << "\"" << cxxgen::escape(*i_var.name_here()) << "\"";
+		if (i_var->find_name()) name_token << "\"" << cxxgen::escape(*i_var->find_name()) << "\"";
 		else name_token << "(void*)0";
 		cout << "\n\t{ " << name_token.str() << ","
 			<< "\n\t  { (void*)0, (void*)0, "
