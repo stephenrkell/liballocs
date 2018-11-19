@@ -828,6 +828,10 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	{
 		return 0;
 	}
+	
+	/* FIXME: do a stat() check on the mtime of our meta-obj
+	 * versus the mtime of the base obj.
+	 * If the base obj is newer, complain. */
 
 	dlerror();
 	// load with NOLOAD first, so that duplicate loads are harmless
@@ -1238,6 +1242,12 @@ void __liballocs_post_systrap_init(void)
 		/* Now we can correctly initialize libdlbind. */
 		__libdlbind_do_init();
 		__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+		if (!__liballocs_rt_uniqtypes_obj)
+		{
+			const char msg[] = "dlcreate() of uniqtypes DSO failed\n";
+			raw_write(2, msg, sizeof msg);
+			abort();
+		}
 		/* Init the other stuff we happen to cache about the object. */
 		update_rt_uniqtypes_obj(__liballocs_rt_uniqtypes_obj, NULL);
 
