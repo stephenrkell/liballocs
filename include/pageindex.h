@@ -122,6 +122,10 @@ _Bool __liballocs_notify_unindexed_address(const void *);
 /* mappings of 4GB or more in size are assumed to be memtables and are ignored */
 #define BIGGEST_BIGALLOC BIGGEST_SANE_USER_ALLOC
 
+/* Convenience for code that does raw mmap. */
+#define MMAP_RETURN_IS_ERROR(p) \
+	(((intptr_t)(void*)-1 - (intptr_t)(p)) < PAGE_SIZE)
+
 /* FIXME: tweak this logic so that important liballocs workloads
  * (e.g. libcrunch benchmarks) go fast. We can be relatively precise, 
  * by calling into the pageindex, or we can be crude,
