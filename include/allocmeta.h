@@ -127,6 +127,7 @@ fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   
 fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct big_allocation *, maybe_alloc), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
 fun(struct big_allocation *,ensure_big,arg(void *, obj)) \
 fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static*/ \
+fun(const char *       ,get_name,      arg(void *, obj)) \
 fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
 fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
 fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \
@@ -134,6 +135,15 @@ fun(size_t             ,raw_metadata,  arg(struct allocated_chunk *,start),arg(s
 fun(liballocs_err_t    ,set_type,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
 fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */
 
+#define DEFAULT_GET_TYPE \
+static struct uniqtype *get_type(void *obj) \
+{ \
+   struct uniqtype *out; \
+   struct uniqtype *out = NULL; \
+   struct liballocs_err *err = get_info(obj, NULL, &out, \
+	   NULL, NULL, NULL); \
+   if (err) return NULL; \
+}
 #define __allocmeta_fun_arg(argt, name) argt
 #define __allocmeta_fun_ptr(rett, name, ...) \
 	rett (*name)( __VA_ARGS__ );
@@ -159,11 +169,10 @@ extern struct allocator __stack_allocator;
 extern struct allocator __stackframe_allocator;
 extern struct allocator __mmap_allocator; /* mmaps */
 extern struct allocator __sbrk_allocator; /* sbrk() */
-extern struct allocator __static_allocator; /* ldso; nests under file? */
-// extern struct allocator __static_file_allocator;
-// extern struct allocator __static_segment_allocator;
-// extern struct allocator __static_section_allocator;
-// extern struct allocator __static_symbol_allocator;
+extern struct allocator __static_file_allocator;
+extern struct allocator __static_segment_allocator;
+extern struct allocator __static_section_allocator;
+extern struct allocator __static_symbol_allocator;
 extern struct allocator __auxv_allocator; /* nests under stack? */
 extern struct allocator __alloca_allocator; /* nests under stack? */
 // FIXME: These are indexes, not allocators
@@ -191,9 +200,67 @@ struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mappi
 
 void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *b);
 
-void __static_allocator_init(void);
-void __static_allocator_notify_load(void *handle);
-void __static_allocator_notify_unload(const char *copied_filename);
+void __static_file_allocator_init(void);
+void __static_file_allocator_notify_load(void *handle, const void *load_site);
+void __static_file_allocator_notify_unload(const char *copied_filename);
+
+/* This is basically our supplement to the stuff we can access
+ * from the struct link_map entries in the ld.so. There is some
+ * duplication, mainly because we don't want to depend on impl-
+ * -specific stuff in there. */
+struct file_metadata
+{
+	const char *filename;
+	const void *load_site;
+	struct link_map *l;
+
+	ElfW(Shdr) *shdrs;
+	unsigned long shdrs_mapped_len; /* 0 if within a segment; >0 if mapped by us */
+
+	ElfW(Sym) *symtab; // NOTE this really is symtab, not dynsym
+	unsigned long symtab_mapped_len; /* 0 if within a segment; >0 if mapped by us */
+
+	unsigned char *strtab; // NOTE this is strtab, not dynstr
+	unsigned long strtab_mapped_len; /* 0 if within a segment; >0 if mapped by us */
+
+	ElfW(Sym) *dynsym; /* always mapped by ld.so */
+	unsigned char *dynstr; /* always mapped by ld.so */
+	ElfW(Phdr) *phdrs; /* always mapped or copied by ld.so */
+	ElfW(Half) phnum;
+
+	void *meta_obj_handle; /* loaded by us */
+	ElfW(Sym) *extrasym;
+	
+	struct sym_or_reloc_rec
+	{
+		enum sym_or_reloc_kind
+		{
+			REC_DYNSYM,
+			REC_SYMTAB,
+			REC_EXTRASYM,
+			REC_RELOC
+		};
+		unsigned kind:2; // an instance of sym_or_reloc_kind
+		unsigned idx:18; /* i.e. at most 256K symbols of each kind, per file */
+		unsigned uniqtype_ptr_bits:44; /* i.e. the low-order 3 bits are 0 */
+	} *sorted_meta_vec; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
+	size_t sorted_meta_vec_mapped_len; /* length of this in bytes -- to be freed later */
+};
+
+void __static_segment_allocator_init(void);
+void __static_segment_allocator_notify_define_segment(
+	struct file_metadata *meta,
+	const ElfW(Phdr) *phdr
+);
+void __static_section_allocator_init(void);
+void __static_section_allocator_notify_define_section(
+	struct file_metadata *meta,
+	const ElfW(Shdr) *shdr
+);
+void __static_symbol_allocator_init(void);
+liballocs_err_t __static_symbol_allocator_get_info(void * obj, struct big_allocation *maybe_bigalloc,
+	struct uniqtype **out_type, void **out_base,
+	unsigned long *out_size, const void **out_site) __attribute__((visibility("protected")));
 
 void __stack_allocator_init(void);
 _Bool __stack_allocator_notify_unindexed_address(const void *ptr);

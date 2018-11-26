@@ -205,9 +205,14 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		return ret;
 	}
 	
-	if (ret != MAP_FAILED)
+	if (!MMAP_RETURN_IS_ERROR(ret))
 	{
 		__mmap_allocator_notify_mmap(ret, addr, length, prot, flags, fd, offset, __builtin_return_address(0));
+	}
+	else
+	{
+		errno = -(intptr_t)ret;
+		ret = -1;
 	}
 	return ret;
 }
@@ -256,17 +261,17 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 		va_end(ap);
 	}
 	
-#define orig_call ((flags & MREMAP_FIXED)  \
+#define DO_ORIG_CALL ((flags & MREMAP_FIXED)  \
 			? orig_mremap(old_addr, old_size, new_size, flags, new_address) \
 			: orig_mremap(old_addr, old_size, new_size, flags))
 	
 	if (!safe_to_use_bigalloc || is_self_call(__builtin_return_address(0))) 
 	{
-		return orig_call;
+		return DO_ORIG_CALL;
 	}
 	else
 	{
-		void *ret = orig_call;
+		void *ret = DO_ORIG_CALL;
 		if (ret != MAP_FAILED)
 		{
 			__mmap_allocator_notify_mremap_after(ret, old_addr, old_size, 
@@ -335,13 +340,7 @@ skip_load:
 	{
 		// write_string("Blah3006\n");
 		if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(ret);
-
-		__static_allocator_notify_load(ret);
-
-		/* Also load the types and allocsites for this object. These callbacks
-		 * also have to be tolerant of already-loadedness. */
-		void *types_handle = NULL;
-		int ret_meta = dl_for_one_object_phdrs(ret, load_and_init_all_metadata_for_one_object, NULL);
+		__static_file_allocator_notify_load(ret, __builtin_return_address(0));
 	}
 	// write_string("Blah3007\n");
 
@@ -377,7 +376,8 @@ int dlclose(void *handle)
 		int ret = orig_dlclose(handle);
 		/* NOTE that a successful dlclose doesn't necessarily unload 
 		 * the library! To see whether it's really unloaded, we use 
-		 * dlopen *again* with RTLD_NOLOAD. */
+		 * dlopen *again* with RTLD_NOLOAD. FIXME: probably better
+		 * to use raw link map traversal somehow to test this. */
 		if (ret == 0)
 		{
 			// was it really unloaded?
@@ -385,7 +385,7 @@ int dlclose(void *handle)
 			if (h == NULL)
 			{
 				// yes, it was unloaded
-				__static_allocator_notify_unload(copied_filename);
+				__static_file_allocator_notify_unload(copied_filename);
 			}
 			else 
 			{
