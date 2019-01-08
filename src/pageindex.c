@@ -103,17 +103,32 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 	
 	// double up the value
 	wchar_t wchar_val     = ((wchar_t) num)     << (8 * sizeof(bigalloc_num_t)) | num;
+	wchar_t wchar_transition_val = ((wchar_t) num); // FIXME: assumes little-endianness
 	wchar_t wchar_old_val = ((wchar_t) old_num) << (8 * sizeof(bigalloc_num_t)) | old_num;
 	
 	// do the memset
 	wchar_t accept[] = { wchar_old_val, '\0' };
 	// PROBLEM: if our accept val is 0, 
 #ifndef NDEBUG
-	ssize_t max_len = (ssize_t) -1;
 	if (old_num != (bigalloc_num_t) -1 && old_num) // FIXME: also check when old_num is zero
 	{
-		max_len = wcsspn((wchar_t *) begin, accept);
-		if (max_len < n/2) abort();
+		wchar_t *pageindex_end = (wchar_t *) (pageindex + PAGENUM(MAXIMUM_USER_ADDRESS + 1));
+		// we should get zero or more of the old value
+		// ... followed by zero or one of the transitional value
+		// ... followed by zero or more of the null value
+		// ... adding up to n/2 or more.
+		// We used to use wcsspn directly, but this overruns
+		// if we start it in the last two pages of user-accessible memory
+		// when either of those is nonzero. Or in fact if there is a contiguous
+		// nonempty sequence of pages at the end of user memory, and we start
+		// within that part of the pageindex.
+		// We could also open-code a wchar_t-based solution, but this breaks
+		// strict aliasing rules. So just do the slower thing... we're debug.
+		bigalloc_num_t *found = begin;
+		while ((found < pageindex_end)
+					&& (!*found || *found == old_num)
+					&& (found-begin) < n) ++found;
+		assert(found - begin == n);
 	}
 #endif
 	if (n != 0) wmemset((wchar_t *) begin, wchar_val, n / 2);

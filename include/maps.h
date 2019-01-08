@@ -246,7 +246,7 @@ static inline int process_one_maps_entry(char *linebuf, struct maps_entry *entry
 	#define NUM_FIELDS 11
 	entry_buf->rest[0] = '\0';
 	int fields_read = sscanf(linebuf, 
-		"%lx-%lx %c%c%c%c %8x %2x:%2x %d %4095[\x01-\x09\x0b-\xff]\n",
+		"%lx-%lx %c%c%c%c %8x %4x:%4x %d %4095[\x01-\x09\x0b-\xff]\n",
 		&entry_buf->first, &entry_buf->second, &entry_buf->r, &entry_buf->w, &entry_buf->x, 
 		&entry_buf->p, &entry_buf->offset, &entry_buf->devmaj, &entry_buf->devmin, 
 		&entry_buf->inode, entry_buf->rest);

@@ -318,15 +318,16 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 				);
 				/* FIXME: free this somewhere */
 				size_t bitmap_size_bytes = (7 + info->dlpi_phdr[i].p_memsz) / 8;
+				size_t bitmap_size_ulongs = ROUND_UP(sizeof (unsigned long), bitmap_size_bytes);
 				size_t prefix_size = ROUND_UP(sizeof (struct symbols_bitmap), sizeof (unsigned long));
-				size_t alloc_size = prefix_size + bitmap_size_bytes;
-				unsigned char *mapping = mmap(NULL, alloc_size,
+				size_t alloc_size = prefix_size + sizeof (unsigned long) * bitmap_size_ulongs;
+				unsigned char *mapping = mmap(NULL, ROUND_UP(PAGE_SIZE, alloc_size),
 					PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
 				if (mapping == MAP_FAILED) abort();
 				b->suballocator_meta = (struct symbols_bitmap *) mapping;
 				struct symbols_bitmap *bm = b->suballocator_meta;
 				bm->bits = (unsigned long *) (mapping + prefix_size);
-				bm->bits_limit = bm->bits + (bitmap_size_bytes / sizeof (unsigned long));
+				bm->bits_limit = bm->bits + bitmap_size_ulongs;
 				// write_string("Blah9006\n");
 				/* Look for dynsyms in this address range. */
 				unsigned long segment_base_vaddr = info->dlpi_phdr[i].p_vaddr;
