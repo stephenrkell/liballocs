@@ -6,8 +6,8 @@ test -n "$objfile" || (echo "Please specify an object file"; false) || exit 1
 
 . $(dirname "$0")/../../../used-types-funcs.sh
 
-usedtypes_src=$( mktemp )
-usedtypes_obj=$( mktemp )
+usedtypes_src=$( mktemp --suffix=.c )
+usedtypes_obj=$( mktemp --suffix=.o )
 
 objcopy_and_redefine_c_names () {
     our_objfile="$1"
@@ -21,8 +21,9 @@ sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype__ )"
     # if it changes, add a --redefine-sym option to the list 
     
     . ${LIBALLOCS_BASE}/tools/lang/c/lib/symname-funcs.sh
-    
+
     # if any substitutions took effect, issue a redefine-sym command
+    first_redefinition_args=""
     while read cand && read canon <&3; do
         if [[ "$cand" != "$canon" ]]; then
             first_redefinition_args="${first_redefinition_args} --redefine-sym ${cand}=${canon}"
