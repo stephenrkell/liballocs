@@ -65,8 +65,7 @@ $ sudo apt-get install libelfg0-dev libdw-dev \
     libboost-{iostreams,regex,serialization,filesystem}-dev
 $ git clone https://github.com/stephenrkell/liballocs.git
 $ cd liballocs
-$ git submodule init
-$ git submodule update
+$ git submodule update --init --recursive
 $ make -C contrib -jn         # for your favourite n
 $ ./autogen.sh
 $ . contrib/env.sh
