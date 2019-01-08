@@ -56,9 +56,9 @@ option --unbind-sym, if you want to check.
 Then on Debian-based systems, proceed like so (tested on jessie and
 stretch)....
 
-$ sudo apt-get install libelfg0-dev \
+$ sudo apt-get install libelfg0-dev libdw-dev \
     autoconf automake libtool pkg-config autoconf-archive \
-    g++ ocaml ocaml-findlib \
+    g++ ocaml ocaml-findlib ocamlbuild \
     default-jre-headless \
     make git gawk gdb \
     libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
@@ -72,6 +72,8 @@ $ ./autogen.sh
 $ . contrib/env.sh
 $ ./configure --prefix=/usr/local
 $ make -jn                    # for your favourite n
+
+(For libdw-dev, any package providing /usr/include/dwarf.h will do.)
 
 You will also want to set up space to hold metadata files.
 

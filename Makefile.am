@@ -1,9 +1,9 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = src . tools/lang lib
+SUBDIRS = tools/lang . src lib
 
 # NOTE: being C++, these only affect build of the tools, not the liballocs core.
-AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -DBOOST_OPTIONAL_CONFIG_ALLOW_BINDING_TO_RVALUES
+AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -DBOOST_OPTIONAL_CONFIG_ALLOW_BINDING_TO_RVALUES -I$(LIBRUNT)/include
 AM_CPPFLAGS =
 AM_CFLAGS = -Wall -std=gnu99 -ggdb -O3 -flto -Iinclude -fPIC -Wp,-w
 AM_LDFLAGS =
@@ -23,7 +23,7 @@ pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = liballocs.pc
 
 liballocs_includedir = $(includedir)/liballocs
-liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsmt.h include/vas.h 
+liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsmt.h include/vas.h
 
 bin_PROGRAMS = tools/dumptypes tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles
 #tools/objdumpallocs-llvm
@@ -36,7 +36,7 @@ export LIBELF
 
 TOOLS_LDADD := tools/liballocstool.a \
  $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(LIBANTLR3CXX_LIBS) $(DWARFIDL_LIBS) \
--lantlr3c -ldwarf $(LIBELF) -lz
+-lantlr3c $(LIBELF) -lz
 
 tools_dumptypes_SOURCES = tools/dumptypes.cpp
 tools_dumptypes_LDADD = $(TOOLS_LDADD)
