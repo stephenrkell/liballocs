@@ -3,7 +3,7 @@ ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = tools/lang . src lib
 
 # NOTE: being C++, these only affect build of the tools, not the liballocs core.
-AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -DBOOST_OPTIONAL_CONFIG_ALLOW_BINDING_TO_RVALUES -I$(LIBRUNT)/include
+AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -I$(LIBRUNT)/include
 AM_CPPFLAGS =
 AM_CFLAGS = -Wall -std=gnu99 -ggdb -O3 -flto -Iinclude -fPIC -Wp,-w
 AM_LDFLAGS =

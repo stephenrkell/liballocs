@@ -45,21 +45,21 @@ void write_master_relation(master_relation_t& r,
 void write_uniqtype_open_void(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    boost::optional<const string&> comment_str = boost::optional<const string&>()
+    boost::optional<string> comment_str = boost::optional<string>()
 	);
 void write_uniqtype_open_array(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
     unsigned pos_maxoff,
     unsigned nelems,
-    boost::optional<const string&> comment_str = boost::optional<const string&>(),
+    boost::optional<string> comment_str = boost::optional<string>(),
 	bool use_section_group = true,
 	bool make_weak_definition = false
 	);
 void write_uniqtype_open_flex_array(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    boost::optional<const string&> comment_str = boost::optional<const string&>(),
+    boost::optional<string> comment_str = boost::optional<string>(),
 	bool use_section_group = true,
 	bool make_weak_definition = false
 	);
@@ -70,7 +70,7 @@ void write_uniqtype_open_address(std::ostream& o,
     unsigned indir_level,
     bool is_generic,
     unsigned log_min_align,
-    boost::optional<const string&> comment_str = boost::optional<const string&>(),
+    boost::optional<string> comment_str = boost::optional<string>(),
 	bool use_section_group = true,
 	bool make_weak_definition = false
 	);
@@ -82,7 +82,7 @@ void write_uniqtype_open_base(std::ostream& o,
     unsigned one_plus_log_bit_size_delta,
     signed bit_size_delta_delta,
     signed bit_off,
-    boost::optional<const string&> comment_str = boost::optional<const string&>(),
+    boost::optional<string> comment_str = boost::optional<string>(),
 	bool use_section_group = true,
 	bool make_weak_definition = false
 	);
@@ -92,7 +92,7 @@ void write_uniqtype_open_subrange(std::ostream& o,
     unsigned pos_maxoff,
 	signed min,
 	signed max,
-    boost::optional<const string&> comment_str = boost::optional<const string&>(),
+    boost::optional<string> comment_str = boost::optional<string>(),
 	bool use_section_group = true,
 	bool make_weak_definition = false
 	);
@@ -100,7 +100,7 @@ void write_uniqtype_open_enumeration(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
     unsigned pos_maxoff,
-    boost::optional<const string&> comment_str = boost::optional<const string&>(),
+    boost::optional<string> comment_str = boost::optional<string>(),
 	bool use_section_group = true,
 	bool make_weak_definition = false
 	);
@@ -110,7 +110,7 @@ void write_uniqtype_open_composite(std::ostream& o,
     unsigned pos_maxoff,
     unsigned nmemb,
     bool not_simultaneous,
-    boost::optional<const string&> comment_str = boost::optional<const string&>(),
+    boost::optional<string> comment_str = boost::optional<string>(),
 	bool use_section_group = true,
 	bool make_weak_definition = false
 	);
@@ -122,44 +122,44 @@ void write_uniqtype_open_subprogram(std::ostream& o,
     unsigned nret,
     bool is_va,
     unsigned cc,
-    boost::optional<const string&> comment_str = boost::optional<const string&>(),
+    boost::optional<string> comment_str = boost::optional<string>(),
 	bool use_section_group = true,
 	bool make_weak_definition = false
 	);
 
 void write_uniqtype_related_array_element_type(std::ostream& o,
-    boost::optional<const string&> maybe_mangled_typename = boost::optional<const string&>(),
-	boost::optional<const string&> comment_str = boost::optional<const string&>()
+    boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
+	boost::optional<string> comment_str = boost::optional<string>()
     );
 void write_uniqtype_related_pointee_type(std::ostream& o,
-    boost::optional<const string&> maybe_mangled_typename = boost::optional<const string&>(),
-	boost::optional<const string&> comment_str = boost::optional<const string&>()
+    boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
+	boost::optional<string> comment_str = boost::optional<string>()
     );
 void write_uniqtype_related_ultimate_pointee_type(std::ostream& o,
-    boost::optional<const string&> maybe_mangled_typename = boost::optional<const string&>(),
-	boost::optional<const string&> comment_str = boost::optional<const string&>()
+    boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
+	boost::optional<string> comment_str = boost::optional<string>()
     );
 void write_uniqtype_related_subprogram_argument_type(std::ostream& o,
-    boost::optional<const string&> maybe_mangled_typename = boost::optional<const string&>(),
-	boost::optional<const string&> comment_str = boost::optional<const string&>()
+    boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
+	boost::optional<string> comment_str = boost::optional<string>()
     );
 void write_uniqtype_related_subprogram_return_type(std::ostream& o,
 	bool is_first,
-    boost::optional<const string&> maybe_mangled_typename = boost::optional<const string&>(),
-	boost::optional<const string&> comment_str = boost::optional<const string&>()
+    boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
+	boost::optional<string> comment_str = boost::optional<string>()
     );
 void write_uniqtype_related_contained_member_type(std::ostream& o,
     bool is_first,
 	unsigned offset,
-    boost::optional<const string&> maybe_mangled_typename = boost::optional<const string&>(),
-	boost::optional<const string&> comment_str = boost::optional<const string&>()
+    boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
+	boost::optional<string> comment_str = boost::optional<string>()
     );
 void write_uniqtype_related_signedness_complement_type(std::ostream& o,
-    boost::optional<const string&> maybe_mangled_typename = boost::optional<const string&>(),
-	boost::optional<const string&> comment_str = boost::optional<const string&>()
+    boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
+	boost::optional<string> comment_str = boost::optional<string>()
     );
 void write_uniqtype_related_dummy(std::ostream& o,
-	boost::optional<const string&> comment_str = boost::optional<const string&>()
+	boost::optional<string> comment_str = boost::optional<string>()
     );
 	
 void write_uniqtype_close(std::ostream& o,

@@ -639,7 +639,7 @@ void write_master_relation(master_relation_t& r,
 				 * arrays. For now, just assume that the memory-bounds flex treatment
 				 * is appropriate.*/
 				write_uniqtype_open_flex_array(out, mangled_name, i_vert->first.second,
-					optional<const string&>());
+					optional<string>());
 			}
 			
 			// compute and print destination name
@@ -702,7 +702,7 @@ void write_master_relation(master_relation_t& r,
 				is_generic ? 0 : indir_level,
 				is_generic,
 				ceil(log2(machine_word_size)), /* HMM -- may be wrong on some machines */
-				optional<const string &>(),
+				optional<string>(),
 				use_section_group,
 				emit_weak_definition
 			);
@@ -1117,7 +1117,7 @@ static void write_uniqtype_open_generic(std::ostream& o,
 void write_uniqtype_open_void(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    optional<const string&> maxoff_comment_str
+    optional<string> maxoff_comment_str
 	)
 {
 	write_uniqtype_open_generic(o, mangled_typename, unmangled_typename, 0);
@@ -1129,7 +1129,7 @@ void write_uniqtype_open_array(std::ostream& o,
     const string& unmangled_typename,
     unsigned pos_maxoff,
     unsigned nelems,
-    optional<const string&> maxoff_comment_str,
+    optional<string> maxoff_comment_str,
 	bool use_section_group,
 	bool make_weak_definition
 	)
@@ -1141,7 +1141,7 @@ void write_uniqtype_open_array(std::ostream& o,
 void write_uniqtype_open_flex_array(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
-    optional<const string&> maxoff_comment_str,
+    optional<string> maxoff_comment_str,
 	bool use_section_group,
 	bool make_weak_definition
 	)
@@ -1158,7 +1158,7 @@ void write_uniqtype_open_address(std::ostream& o,
     unsigned indir_level,
     bool is_generic,
     unsigned log_min_align,
-    optional<const string&> maxoff_comment_str,
+    optional<string> maxoff_comment_str,
 	bool use_section_group,
 	bool make_weak_definition
 	)
@@ -1177,7 +1177,7 @@ void write_uniqtype_open_base(std::ostream& o,
     unsigned one_plus_log_bit_size_delta,
     signed bit_size_delta_delta,
     signed bit_off,
-    optional<const string&> maxoff_comment_str,
+    optional<string> maxoff_comment_str,
 	bool use_section_group,
 	bool make_weak_definition
 	)
@@ -1196,7 +1196,7 @@ void write_uniqtype_open_subrange(std::ostream& o,
     unsigned pos_maxoff,
 	signed min,
 	signed max,
-    optional<const string&> comment_str,
+    optional<string> comment_str,
 	bool use_section_group,
 	bool make_weak_definition
 	)
@@ -1211,7 +1211,7 @@ void write_uniqtype_open_enumeration(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
     unsigned pos_maxoff,
-    optional<const string&> maxoff_comment_str,
+    optional<string> maxoff_comment_str,
 	bool use_section_group,
 	bool make_weak_definition
 	)
@@ -1226,7 +1226,7 @@ void write_uniqtype_open_composite(std::ostream& o,
     unsigned pos_maxoff,
     unsigned nmemb,
     bool not_simultaneous,
-    optional<const string&> maxoff_comment_str,
+    optional<string> maxoff_comment_str,
 	bool use_section_group,
 	bool make_weak_definition
 	)
@@ -1245,7 +1245,7 @@ void write_uniqtype_open_subprogram(std::ostream& o,
     unsigned nret,
     bool is_va,
     unsigned cc,
-    optional<const string&> maxoff_comment_str,
+    optional<string> maxoff_comment_str,
 	bool use_section_group,
 	bool make_weak_definition
 	)
@@ -1260,8 +1260,8 @@ void write_uniqtype_open_subprogram(std::ostream& o,
 	
 }
 void write_uniqtype_related_array_element_type(std::ostream& o,
-    optional<const string&> maybe_mangled_typename,
-	optional<const string&> comment_str
+    optional<string> maybe_mangled_typename,
+	optional<string> comment_str
     )
 {
 	/* begin the struct */
@@ -1272,8 +1272,8 @@ void write_uniqtype_related_array_element_type(std::ostream& o,
 	if (comment_str) o << " /* " << *comment_str << " */ ";
 }
 void write_uniqtype_related_pointee_type(std::ostream& o,
-	optional<const string&> maybe_mangled_typename,
-	optional<const string &> comment_str
+	optional<string> maybe_mangled_typename,
+	optional<string> comment_str
 	)
 {
 	/* begin the struct */
@@ -1284,8 +1284,8 @@ void write_uniqtype_related_pointee_type(std::ostream& o,
 	if (comment_str) o << " /* " << *comment_str << " */ ";
 }
 void write_uniqtype_related_ultimate_pointee_type(std::ostream& o,
-	optional<const string &> maybe_mangled_typename,
-	optional<const string &> comment_str
+	optional<string> maybe_mangled_typename,
+	optional<string> comment_str
 	)
 {
 	o << ",\n\t\t";
@@ -1297,8 +1297,8 @@ void write_uniqtype_related_ultimate_pointee_type(std::ostream& o,
 	if (comment_str) o << " /* " << *comment_str << " */ ";
 }
 void write_uniqtype_related_subprogram_argument_type(std::ostream& o,
-    optional<const string &> maybe_mangled_typename,
-	optional<const string &> comment_str
+    optional<string> maybe_mangled_typename,
+	optional<string> comment_str
     )
 {
 	o << ",\n\t\t";
@@ -1311,8 +1311,8 @@ void write_uniqtype_related_subprogram_argument_type(std::ostream& o,
 }
 void write_uniqtype_related_subprogram_return_type(std::ostream& o,
 	bool is_first,
-    optional<const string &> maybe_mangled_typename,
-	optional<const string &> comment_str
+    optional<string> maybe_mangled_typename,
+	optional<string> comment_str
     )
 {
 	if (!is_first) o << ",\n\t\t";
@@ -1326,8 +1326,8 @@ void write_uniqtype_related_subprogram_return_type(std::ostream& o,
 void write_uniqtype_related_contained_member_type(std::ostream& o,
     bool is_first,
 	unsigned offset,
-    optional<const string &> maybe_mangled_typename,
-	optional<const string &> comment_str
+    optional<string> maybe_mangled_typename,
+	optional<string> comment_str
     )
 {
 	if (!is_first) o << ",\n\t\t";
@@ -1340,8 +1340,8 @@ void write_uniqtype_related_contained_member_type(std::ostream& o,
 	if (comment_str) o << " /* " << *comment_str << " */ ";
 }
 void write_uniqtype_related_signedness_complement_type(std::ostream& o,
-    optional<const string &> maybe_mangled_typename,
-	optional<const string &> comment_str
+    optional<string> maybe_mangled_typename,
+	optional<string> comment_str
     )
 {
 	/* begin the struct */
@@ -1352,7 +1352,7 @@ void write_uniqtype_related_signedness_complement_type(std::ostream& o,
 	if (comment_str) o << " /* " << *comment_str << " */ ";
 }
 void write_uniqtype_related_dummy(std::ostream& o,
-	optional<const string &> comment_str
+	optional<string> comment_str
     )
 {
 	/* begin the struct */
