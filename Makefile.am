@@ -34,7 +34,7 @@ tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
 LIBELF ?= -lelf
 export LIBELF
 
-TOOLS_LDADD := tools/liballocstool.a \
+TOOLS_LDADD = tools/liballocstool.a \
  $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(LIBANTLR3CXX_LIBS) $(DWARFIDL_LIBS) \
 -lantlr3c $(LIBELF) -lz
 
