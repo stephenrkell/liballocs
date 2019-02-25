@@ -283,6 +283,19 @@ string ensure_contained_length(const string& mangled_name, unsigned contained_le
 	
 	return s.str();
 }
+static void emit_weak_alias(std::ostream& out, const string& alias_name, const string& target_name)
+{
+	out << "extern struct uniqtype " << alias_name
+		<< " __attribute__((weak,alias(\"" << target_name << "\")"
+		<< ",section(\".data." << target_name
+		/* To satisfy gcc's "section of alias `...' must match section of its target",
+		 * we rather we even have to match the escape-hatch cruft (although it gets
+		 * discarded after gcc has done the check). */
+		<< ", \\\"awG\\\", @progbits, " << target_name << ", comdat#"
+		<< "\")"
+		<< "));"
+		<< endl;
+}
 void write_master_relation(master_relation_t& r, 
 	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def,
 	std::set< std::string >& names_emitted,
@@ -1004,8 +1017,7 @@ void write_master_relation(master_relation_t& r,
 					// equiv classes are {s, u, s, u, ...}
 					const char **compl_equiv = is_unsigned ? found_equiv[-1]  : found_equiv[+1];
 					auto complement_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
-					out << "extern struct uniqtype " << mangle_typename(complement_name_pair)
-						<< " __attribute__((weak,alias(\"" << mangle_typename(k) << "\")));" << endl;
+					emit_weak_alias(out, mangle_typename(complement_name_pair), /* existing name */ mangle_typename(k));
 					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
 					if (avoid_aliasing_as(compl_equiv[0], complement_name_pair.first,
 						i_vert->second))
@@ -1023,8 +1035,7 @@ void write_master_relation(master_relation_t& r,
 			i_alias != r.aliases[i_vert->second].end();
 			++i_alias)
 		{
-			out << "extern struct uniqtype " << mangle_typename(make_pair(i_vert->first.first, *i_alias)) 
-				<< " __attribute__((weak,alias(\"" << mangle_typename(i_vert->first) << "\")));" << endl;
+			emit_weak_alias(out, mangle_typename(make_pair(i_vert->first.first, *i_alias)), mangle_typename(i_vert->first));
 			types_by_name[*i_alias].insert(i_vert->second);
 			name_pairs_by_name[*i_alias].insert(i_vert->first);
 			if (avoid_aliasing_as(*i_alias, i_vert->first.first, i_vert->second))
@@ -1063,8 +1074,7 @@ void write_master_relation(master_relation_t& r,
 					string full_name = mangle_typename(full_name_pair);
 					pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
 					string abbrev_name = mangle_typename(abbrev_name_pair);
-					out << "extern struct uniqtype " << abbrev_name << " __attribute__((weak, alias(\""
-						<< cxxgen::escape(full_name) << "\")));" << endl;
+					emit_weak_alias(out, mangle_typename(abbrev_name_pair), cxxgen::escape(full_name));
 				}
 			}
 			else
