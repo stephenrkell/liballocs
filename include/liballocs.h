@@ -764,7 +764,6 @@ struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 
 static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void *), void *arg)
 {
-	liballocs_err_t err;
 	unw_cursor_t cursor, saved_cursor;
 	unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0;
 	int unw_ret;
@@ -781,7 +780,6 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 #endif
 	unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
 
-	_Bool at_or_above_main = 0;
 	do
 	{
 		// callee_ip = ip;
@@ -794,7 +792,7 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 		unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(unw_ret == 0);
 		// try to get the bp, but no problem if we don't
 		unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); 
-		_Bool got_higherframe_bp = 0;
+		_Bool got_higherframe_bp __attribute__((unused)) = 0;
 		
 		ret = cb((void*) ip, (void*) sp, (void*) bp, arg);
 		if (ret) return ret;
