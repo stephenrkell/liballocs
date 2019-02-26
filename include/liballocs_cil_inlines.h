@@ -294,7 +294,7 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 	}
 #endif
 	__liballocs_check_cache_sanity(cache);
-	return (void*)0;
+	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
 }
 
 extern inline
@@ -332,7 +332,7 @@ __liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *ca
 	}
 #endif
 	__liballocs_check_cache_sanity(cache);
-	return (void*)0;
+	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
 }
 
 extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr);
@@ -345,7 +345,7 @@ extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) _
 	 * I.e. we know that "addr" is a "found->uniqtype", but we pass over
 	 * cases where some cached allocation spans "addr" at a non-zero offset. */
 	if (found) return found->uniqtype;
-	return (void*)0;
+	return (struct uniqtype *)(void*)0;
 }
 
 void __liballocs_uncache_all(const void *allocptr, unsigned long size);
@@ -354,7 +354,7 @@ extern inline void
 (__attribute__((always_inline,gnu_inline)) __liballocs_cache_with_type)(
 	struct __liballocs_memrange_cache *c,
 	const void *obj_base, const void *obj_limit, const struct uniqtype *t, 
-	signed depth, unsigned short period, const void *alloc_base)
+	short depth, unsigned short period, const void *alloc_base)
 {
 	assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
 #ifdef LIBALLOCS_CACHE_REPLACE_FIFO
@@ -373,7 +373,7 @@ extern inline void
 	c->entries[pos] = (struct __liballocs_memrange_cache_entry_s) {
 		.obj_base = obj_base,
 		.obj_limit = obj_limit,
-		.uniqtype = (void*) t,
+		.uniqtype = (struct uniqtype *) t,
 		.period = period,
 		.depth = depth,
 		.prev_mru = c->entries[pos].prev_mru,
