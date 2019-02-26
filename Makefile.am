@@ -37,19 +37,27 @@ export LIBELF
 TOOLS_LDADD := tools/liballocstool.a \
  $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(LIBANTLR3CXX_LIBS) $(DWARFIDL_LIBS) \
 -lantlr3c -ldwarf $(LIBELF) -lz
+TOOLS_CXXFLAGS := $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)/include
+
+tools_liballocstool_a_CXXFLAGS = $(TOOLS_CXXFLAGS)
 
 tools_dumptypes_SOURCES = tools/dumptypes.cpp
 tools_dumptypes_LDADD = $(TOOLS_LDADD)
+tools_dumptypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_dumpptrs_SOURCES = tools/dumpptrs.cpp
 tools_dumpptrs_LDADD = $(TOOLS_LDADD)
+tools_dumpptrs_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_cufiles_SOURCES = tools/cufiles.cpp
 tools_cufiles_LDADD = $(TOOLS_LDADD)
+tools_cufiles_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_allocsites_SOURCES = tools/allocsites.cpp $(HELPERS)
 tools_allocsites_LDADD = $(TOOLS_LDADD)
+tools_allocsites_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_usedtypes_SOURCES = tools/usedtypes.cpp $(HELPERS)
 tools_usedtypes_LDADD = $(TOOLS_LDADD)
+tools_usedtypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
 # massive HACKs for ifacetypes
-tools_ifacetypes_CXXFLAGS = $(AM_CXXFLAGS) -I$(libsystrap)
+tools_ifacetypes_CXXFLAGS = $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
 vpath %.c $(libsystrap)/../contrib/x86_emulate
 x86_emulate.o: CFLAGS += -include $(libsystrap)/x86_defs.h
@@ -59,9 +67,11 @@ x86_emulate.o: .depbase
 tools_ifacetypes_LDADD = $(TOOLS_LDADD) #x86_emulate.o
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
+tools_find_allocated_type_size_CXXFLAGS = $(TOOLS_CXXFLAGS)
 
 pkglib_LTLIBRARIES = tools/gold-plugin.la
 tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
+tools_gold_plugin_la_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
 tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
 
