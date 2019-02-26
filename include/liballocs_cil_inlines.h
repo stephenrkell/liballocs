@@ -13,7 +13,7 @@
 #define __liballocs_defined_assert
 //#ifdef DEBUG
 #define assert(cond) \
-	if (!cond) abort()
+	if (!(cond)) abort()
 //#else
 //#define assert(cond)
 //#endif

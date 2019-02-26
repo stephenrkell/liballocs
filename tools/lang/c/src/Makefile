@@ -15,13 +15,13 @@ LDFLAGS += $(LIBCXXFILENO_LIBS) $(LIBSRK31CXX_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXG
 CXXFLAGS += -I$(srcroot) # for config.h
 
 LDFLAGS += -L`pwd` -Wl,-R`pwd` -L$(ALLOCSTOOL) -Wl,-R$(realpath $(ALLOCSTOOL))
-LDLIBS += -lallocstool -lantlr3c -ldwarfidl -lcxxgen -ldwarfpp -ldwarf \
+LDLIBS += -lantlr3c -ldwarfidl -lcxxgen -ldwarfpp \
 -lboost_regex -lboost_filesystem -lboost_system -lboost_serialization  \
 -lc++fileno -lsrk31c++ -lelf -lstdc++ -lz
 
 CPP_SRC := $(wildcard *.cpp)
 
-default: base-types-translation #lower-typenames 
+default: base-types-translation #lower-typenames
 
 .PHONY: clean
 clean:
@@ -37,10 +37,10 @@ ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
 
-# GAH... for some reason GNU Make needs this rule to avoid trying 
-# to link the .o using $(CC) instead of $(CXX). 
+# GAH... for some reason GNU Make needs this rule to avoid trying
+# to link the .o using $(CC) instead of $(CXX).
 %: %.cpp
 	$(CXX) $(LDFLAGS) $(CXXFLAGS) -o "$@" "$<" $(LDLIBS)
 
-lower-typenames: lower-typenames.cpp $(ALLOCSTOOL)/liballocstool.a
-base-types-translation: base-types-translation.cpp $(ALLOCSTOOL)/liballocstool.a
+lower-typenames: lower-typenames.cpp #$(ALLOCSTOOL)/liballocstool.a
+base-types-translation: base-types-translation.cpp #$(ALLOCSTOOL)/liballocstool.a
