@@ -123,6 +123,7 @@ fun(void,                    register_suballoc,arg(struct allocated_chunk *,star
 fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
 fun(void *             ,get_base,      arg(void *, obj))  /* base address? */ \
 fun(unsigned long      ,get_size,      arg(void *, obj))  /* size? */ \
+fun(const char *       ,get_name,      arg(void *, obj))  /* name? */ \
 fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
 fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct big_allocation *, maybe_alloc), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
 fun(struct big_allocation *,ensure_big,arg(void *, obj)) \
