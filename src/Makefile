@@ -205,6 +205,11 @@ nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
 # Easiest is just to treat them like exes. They will get their own copy 
 # of the basic uniqtypes, but this will get uniqued as appropriate.
 
+# HACK: this doesn't link using gold right now, so force BFD
+# (that gold bug in full:
+# /usr/local/bin/ld.gold: internal error in relocate, at x86_64.cc:4802
+# ... I should really report it or fix it)
+liballocs_preload.so: LDFLAGS += -fuse-ld=bfd
 liballocs_preload.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 liballocs_preload.so: systrap.o liballocs_preload.a dlmalloc.a
 	$(CC) $(CFLAGS) -shared -o "$@" \
