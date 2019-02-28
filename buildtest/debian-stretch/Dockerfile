@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM debian:stretch
 
 RUN apt-get update && apt-get install -y bison flex texinfo git build-essential
 RUN git clone https://github.com/stephenrkell/binutils-gdb.git
@@ -10,7 +10,7 @@ RUN cd binutils-gdb && \
 RUN apt-get update && \
    apt-get install -y libelf-dev libdw-dev \
        autoconf automake libtool pkg-config autoconf-archive \
-       g++ ocaml ocamlbuild ocaml-findlib \
+       g++ ocaml ocaml-findlib \
        default-jre-headless \
        make git gawk gdb wget \
        libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
