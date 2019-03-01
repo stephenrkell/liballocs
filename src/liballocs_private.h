@@ -74,8 +74,8 @@ extern _Bool __thread __private_malloc_usable_size_active __attribute__((visibil
 /* These make gold crash -- so try something else. */
 // void *__private_malloc(size_t);
 // void __private_free(void *);
-void *__wrap_dlmalloc(size_t);
-void __wrap_dlfree(void *);
+void *__private_malloc(size_t);
+void __private_free(void *);
 
 extern FILE *stream_err;
 #define debug_printf(lvl, fmt, ...) do { \
