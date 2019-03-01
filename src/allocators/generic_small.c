@@ -162,7 +162,7 @@ static struct chunk_rec *make_suballocated_chunk(void *chunk_base, size_t chunk_
 		size_t guessed_average_size)
 {
 	assert(chunk_size != 0);
-	struct chunk_rec *p_chunk_rec = __wrap_dlmalloc(sizeof (struct chunk_rec));
+	struct chunk_rec *p_chunk_rec = __private_malloc(sizeof (struct chunk_rec));
 	/* FIXME: free this somewhere! seems leaky right now */
 	*p_chunk_rec = (struct chunk_rec) {
 		.power_of_two_size = next_power_of_two_ge(chunk_size),

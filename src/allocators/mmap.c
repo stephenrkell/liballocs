@@ -92,7 +92,7 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 	if (!b) abort();
 	
 	/* Note that this will use early_malloc if we would otherwise be reentrant. */
-	struct mapping_sequence *copy = __wrap_dlmalloc(sizeof (struct mapping_sequence));
+	struct mapping_sequence *copy = __private_malloc(sizeof (struct mapping_sequence));
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
 	
@@ -101,7 +101,7 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 		.un = {
 			opaque_data: {
 				.data_ptr = copy,
-				.free_func = __wrap_dlfree
+				.free_func = __private_free
 			}
 		}
 	};
@@ -579,7 +579,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				if (!second_half) abort();
 				__liballocs_truncate_bigalloc_at_end(b, addr);
 				/* Now the bigallocs are in the right place, but their metadata is wrong. */
-				struct mapping_sequence *new_seq = __wrap_dlmalloc(sizeof (struct mapping_sequence));
+				struct mapping_sequence *new_seq = __private_malloc(sizeof (struct mapping_sequence));
 				struct mapping_sequence *orig_seq = b->meta.un.opaque_data.data_ptr;
 				memcpy(new_seq, orig_seq, sizeof (struct mapping_sequence));
 				/* From the first, delete from the hole all the way. */
