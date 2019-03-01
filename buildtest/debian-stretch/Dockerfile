@@ -7,6 +7,7 @@ RUN cd binutils-gdb && \
    CFLAGS="-fPIC -g -O2" ./configure --prefix=/usr/local \
      --enable-gold --enable-plugins --enable-install-libiberty && \
    make -j4 && make install
+RUN cd /usr/local/bin && rm -f ld && ln -s ld.bfd ld
 RUN apt-get update && \
    apt-get install -y libelf-dev libdw-dev \
        autoconf automake libtool pkg-config autoconf-archive \
