@@ -248,10 +248,10 @@ static int maybe_trap_map_cb(struct maps_entry *ent, char *linebuf, void *interp
 			)
 #else
 		/* Just don't trap ourselves. Use this function's address to test */
-		//&& !(
-		//	(unsigned char *) ent->first <= (unsigned char *) maybe_trap_map_cb
-		//	&& (unsigned char *) ent->second > (unsigned char *) maybe_trap_map_cb
-		//	)
+		&& !(
+			(unsigned char *) ent->first <= (unsigned char *) maybe_trap_map_cb
+			&& (unsigned char *) ent->second > (unsigned char *) maybe_trap_map_cb
+			)
 #endif
 		)
 	{

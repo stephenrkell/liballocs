@@ -17,6 +17,7 @@ existing_ocamlpath = os.environ.get("OCAMLPATH")
 if existing_ocamlpath == None:
     existing_ocamlpath = ""
 os.putenv("OCAMLPATH", (liballocs_base + "/tools/lang/c/cil/lib:") + existing_ocamlpath)
+os.putenv("LANG", "C") # Allow allocscc to be called with non-english locales
 
 class AllocsCC(AllocsCompilerWrapper):
 
