@@ -9,7 +9,6 @@ struct __liballocs_memrange_cache /* __thread */ __liballocs_ool_cache = {
 	.next_victim = 1
 };
 
-/* FIXME: rewrite these */
 void __liballocs_uncache_all(const void *allocptr, unsigned long size)
 {
 	assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
@@ -23,8 +22,7 @@ void __liballocs_uncache_all(const void *allocptr, unsigned long size)
 					 && (char*) __liballocs_ool_cache.entries[i].obj_base < (char*) allocptr + size)
 			{
 				// unset validity and make this the next victim
-				__liballocs_cache_unlink(&__liballocs_ool_cache, i);
-				__liballocs_ool_cache.next_victim = i;
+				__liballocs_cache_invalidate(&__liballocs_ool_cache, i);
 			}
 			assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
 		}

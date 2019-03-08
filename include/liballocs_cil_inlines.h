@@ -171,6 +171,7 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 			visited_linear |= (1<<(i-1));
 		}
 	}
+#ifndef LIBALLOCS_CACHE_LINEAR
 	unsigned visited_mru = 0u;
 	for (unsigned char i = cache->head_mru; i != 0; i = cache->entries[i].next_mru)
 	{
@@ -191,15 +192,13 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	}
 	assert(visited_linear == visited_lru);
 #endif
+#endif
 }
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_unlink )(struct __liballocs_memrange_cache *cache, unsigned i);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_unlink )(struct __liballocs_memrange_cache *cache, unsigned i)
+#ifndef LIBALLOCS_CACHE_LINEAR
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_unlink_mru )(struct __liballocs_memrange_cache *cache, unsigned i);
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_unlink_mru )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
-	__liballocs_check_cache_sanity(cache);
-	// unset validity and make this the next victim
-	cache->validity &= ~(1u<<(i-1));
-	cache->next_victim = i;
 	// unhook us from the mru list
 	unsigned char our_next = cache->entries[i].next_mru;
 	unsigned char our_prev = cache->entries[i].prev_mru;
@@ -207,15 +206,11 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	if (our_next) cache->entries[our_next].prev_mru = our_prev;
 	if (cache->head_mru == i) cache->head_mru = our_next;
 	if (cache->tail_mru == i) cache->tail_mru = our_prev;
-	/* We're definitely invalid. */
-	cache->validity &= ~(1u<<(i-1));
-	__liballocs_check_cache_sanity(cache);
 }
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_push_head_mru )(struct __liballocs_memrange_cache *cache, unsigned i);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_push_head_mru )(struct __liballocs_memrange_cache *cache, unsigned i)
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_link_head_mru )(struct __liballocs_memrange_cache *cache, unsigned i);
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_link_head_mru )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
-	__liballocs_check_cache_sanity(cache);
 	/* Put us at the head of the LRU chain. */
 	cache->entries[i].prev_mru = 0;
 	cache->entries[i].next_mru = cache->head_mru;
@@ -224,16 +219,32 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	cache->head_mru = (unsigned char) i;
 	/* Set the tail, if we didn't already have one. */
 	if (cache->tail_mru == 0) cache->tail_mru = i;
-	/* We're definitely valid. */
-	cache->validity |= (1u<<(i-1));
-	/* Should be sane again now. */
-	__liballocs_check_cache_sanity(cache);
-}	
+}
+#endif
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_victim )(struct __liballocs_memrange_cache *cache, unsigned i);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_victim )(struct __liballocs_memrange_cache *cache, unsigned i)
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_invalidate )(struct __liballocs_memrange_cache *cache, unsigned i);
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_invalidate )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
 	__liballocs_check_cache_sanity(cache);
+	// unset validity and make this the next victim
+	cache->validity &= ~(1u<<(i-1));
+	cache->next_victim = i;
+	// unhook us from the mru list
+#ifndef LIBALLOCS_CACHE_LINEAR
+	__liballocs_cache_unlink_mru(cache, i);
+#else
+	cache->next_victim = i;
+#endif
+	/* We're definitely invalid. */
+	cache->validity &= ~(1u<<(i-1));
+	__liballocs_check_cache_sanity(cache);
+}
+
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump )(struct __liballocs_memrange_cache *cache, unsigned i);
+extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump )(struct __liballocs_memrange_cache *cache, unsigned i)
+{
+	__liballocs_check_cache_sanity(cache);
+#ifdef LIBALLOCS_CACHE_LINEAR
 	// make sure we're not the next victim
 	if (unlikely(cache->next_victim == i))
 	{
@@ -242,18 +253,13 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 			cache->next_victim = 1 + ((i + 1 - 1) % (cache->size_plus_one - 1));
 		}
 	}
-	__liballocs_check_cache_sanity(cache);
-}
-
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_mru )(struct __liballocs_memrange_cache *cache, unsigned i);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_mru )(struct __liballocs_memrange_cache *cache, unsigned i)
-{
-	__liballocs_check_cache_sanity(cache);
+#else /* MRU */
 	if (cache->head_mru != i)
 	{
-		if (cache->validity & (1u<<(i-1))) __liballocs_cache_unlink(cache, i);
-		__liballocs_cache_push_head_mru(cache, i);
+		__liballocs_cache_unlink_mru(cache, i);
+		__liballocs_cache_link_head_mru(cache, i);
 	}
+#endif
 	__liballocs_check_cache_sanity(cache);
 }
 
@@ -287,7 +293,7 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 							&& diff % cache->entries[i].period == 0)))
 			{
 				// hit
-				__liballocs_cache_bump_mru(cache, i);
+				__liballocs_cache_bump(cache, i);
 				return &cache->entries[i];
 			}
 		}
@@ -325,7 +331,7 @@ __liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *ca
 							&& diff % cache->entries[i].period == 0)))
 			{
 				// hit
-				__liballocs_cache_bump_mru(cache, i);
+				__liballocs_cache_bump(cache, i);
 				return &cache->entries[i];
 			}
 		}
@@ -379,9 +385,10 @@ extern inline void
 		.prev_mru = c->entries[pos].prev_mru,
 		.next_mru = c->entries[pos].next_mru
 	};
+	// now we're valid
+	c->validity |= (1u<<(pos-1));
 	// bump us to the top
-	__liballocs_cache_bump_mru(c, pos);
-	__liballocs_cache_bump_victim(c, pos);
+	__liballocs_cache_bump(c, pos);
 	assert((__liballocs_check_cache_sanity(c), 1));
 }
 
