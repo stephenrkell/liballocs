@@ -683,7 +683,7 @@ __liballocs_get_alloc_info
 
 // FIXME: do these inline cache things actually help performance?
 // Do a study of this before adding any more.
-#if defined(__GNUC__) && !defined(LIBALLOCS_NO_INLCACHE) /* requires statement expression */
+#if defined(__GNUC__) && defined(LIBALLOCS_INLCACHE) /* requires statement expression */
 #define __liballocs_get_alloc_type(obj) \
 	({ \
 		static struct allocator *cached_allocator; \
@@ -699,7 +699,7 @@ struct uniqtype *
 __liballocs_get_alloc_type(void *obj);
 #endif
 
-#if defined(__GNUC__) && !defined(LIBALLOCS_NO_INLCACHE)
+#if defined(__GNUC__) && defined(LIBALLOCS_INLCACHE)
 #define __liballocs_get_alloc_base(obj) \
 	({ \
 		static struct allocator *cached_allocator; \
