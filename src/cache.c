@@ -5,27 +5,27 @@
 
 // FIXME: this should be thread-local but my gdb can't grok that
 struct __liballocs_memrange_cache /* __thread */ __liballocs_ool_cache = {
-	.size_plus_one = 1 + LIBALLOCS_MEMRANGE_CACHE_MAX_SIZE,
+	.max_pos = 1 + LIBALLOCS_MEMRANGE_CACHE_MAX_SIZE,
 	.next_victim = 1
 };
 
 void __liballocs_uncache_all(const void *allocptr, unsigned long size)
 {
-	assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
-	for (unsigned i = 1; i < __liballocs_ool_cache.size_plus_one; ++i)
+	__liballocs_check_cache_sanity(&__liballocs_ool_cache);
+	for (unsigned i = 1; i < __liballocs_ool_cache.max_pos; ++i)
 	{
 		if (__liballocs_ool_cache.validity & (1u << (i-1)))
 		{
 			assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
 			/* Uncache any object beginning anywhere within the passed-in range. */
-			if ((char*) __liballocs_ool_cache.entries[i].obj_base >= (char*) allocptr
-					 && (char*) __liballocs_ool_cache.entries[i].obj_base < (char*) allocptr + size)
+			if ((char*) __liballocs_ool_cache.entries[i].range_base >= (char*) allocptr
+					 && (char*) __liballocs_ool_cache.entries[i].range_base < (char*) allocptr + size)
 			{
 				// unset validity and make this the next victim
 				__liballocs_cache_invalidate(&__liballocs_ool_cache, i);
 			}
-			assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
+			__liballocs_check_cache_sanity(&__liballocs_ool_cache);
 		}
 	}
-	assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
+	__liballocs_check_cache_sanity(&__liballocs_ool_cache);
 }

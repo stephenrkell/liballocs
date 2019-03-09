@@ -13,7 +13,7 @@
 #define __liballocs_defined_assert
 //#ifdef DEBUG
 #define assert(cond) \
-	if (!cond) abort()
+	if (!(cond)) abort()
 //#else
 //#define assert(cond)
 //#endif
@@ -121,26 +121,35 @@ void __liballocs_unindex_stack_objects_below(void *);
 
 extern _Bool __liballocs_is_initialized __attribute__((weak));
 
-/* tentative cache entry redesign to integrate bounds and types:
- * 
- * - lower
- * - upper     (one-past)
- * - t         (may be null, i.e. bounds only)
- * - sz        (size of t)
- * - period    (need not be same as period, i.e. if T is int, alloc is array of stat, say)
- *                 ** ptr arithmetic is only valid if sz == period
- *                 ** entries with sz != period are still useful for checking types 
+/* Our cache design must integrate bounds and types.
+ * It is a bit non-obvious.
+ * The idea is to remember the regularity of memory, so as to
+ * "cache many type facts at once" in the case of arrays.
+ * But it's not always the array element type that we care about;
+ * it might be a subobject within the element
+ * (say, if the program is repeatedly hitting those subobjects).
+ * A "memrange" is a generalisation of arrays.
+ * For a memrange, we record its start and end, and also its "period"
+ * which is the element type size.
+ * Then, separately, we record the offset from one period-sized
+ * subdivision *to* a t.
+ * In this way, we can cache the same array of structs (say) many times,
+ * each time recording a different element type,
+ * maybe buried deep in a nest of structs.
+ *
+ * Our cache entries are useful for checking bounds, in the case where
+ * period == size of t.
  */
-
 struct __liballocs_memrange_cache_entry_s
 {
-	const void *obj_base;
-	const void *obj_limit;
-	struct uniqtype *uniqtype;
-	unsigned period;
-	signed short depth; /* 0 means leaf-level; 1, 2... inside uniqtype; -1, ... bigalloc */
+	const void *range_base;
+	const void *range_limit;
+	unsigned period; // range_base to range_limit must be a multiple of "period" bytes
+	unsigned offset_to_t; // at this offset within any period, we have a t
+	struct uniqtype *t;
 	unsigned char prev_mru;
 	unsigned char next_mru;
+	unsigned short depth;
 	/* TODO: do inline uniqtype cache word check? */
 } __attribute__((aligned(64)));
 
@@ -150,7 +159,7 @@ struct __liballocs_memrange_cache_entry_s
 struct __liballocs_memrange_cache
 {
 	unsigned int validity; /* does *not* include the null entry */
-	const unsigned short size_plus_one; /* i.e. including the null entry */
+	const unsigned short max_pos; /* was "size_plus_one", i.e. size including the null entry */
 	unsigned short next_victim;
 	unsigned char head_mru;
 	unsigned char tail_mru;
@@ -164,7 +173,7 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 {
 #ifdef DEBUG
 	unsigned visited_linear = 0u;
-	for (int i = 1; i < cache->size_plus_one; ++i)
+	for (int i = 1; i <= cache->max_pos; ++i)
 	{
 		if (cache->validity & (1<<(i-1)))
 		{
@@ -192,6 +201,22 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	}
 	assert(visited_linear == visited_lru);
 #endif
+	/* No two entries should have the same start, end, period, offset and t. */
+	for (int i = 1; i <= cache->max_pos; ++i)
+	{
+		for (int j = i+1; j <= cache->max_pos; ++j)
+		{
+			if ((cache->validity & (1<<(i-1)))
+					&& (cache->validity & (1<<(j-1))))
+			{
+				assert(!((cache->entries[i].range_base == cache->entries[j].range_base)
+				&& (cache->entries[i].range_limit == cache->entries[j].range_limit)
+				&& (cache->entries[i].period == cache->entries[j].period)
+				&& (cache->entries[i].offset_to_t == cache->entries[j].offset_to_t)
+				&& (cache->entries[i].t == cache->entries[j].t)));
+			}
+		}
+	}
 #endif
 }
 
@@ -248,9 +273,9 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	// make sure we're not the next victim
 	if (unlikely(cache->next_victim == i))
 	{
-		if (cache->size_plus_one > 1)
+		if (cache->max_pos > 1)
 		{
-			cache->next_victim = 1 + ((i + 1 - 1) % (cache->size_plus_one - 1));
+			cache->next_victim = 1 + ((i + 1 - 1) % (cache->max_pos - 1));
 		}
 	}
 #else /* MRU */
@@ -273,65 +298,30 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 #ifndef LIBALLOCS_NOOP_INLINES
 	__liballocs_check_cache_sanity(cache);
 #ifdef LIBALLOCS_CACHE_LINEAR
-	for (unsigned char i = 1; i < cache->size_plus_one; ++i)
+	for (unsigned char i = 1; i <= cache->max_pos; ++i)
 #else
 	for (unsigned char i = cache->head_mru; i != 0; i = cache->entries[i].next_mru)
 #endif
 	{
 		if (cache->validity & (1<<(i-1)))
 		{
-			struct uniqtype *cache_uniqtype = cache->entries[i].uniqtype;
+			struct uniqtype *cache_uniqtype = cache->entries[i].t;
 			/* We test whether the difference is divisible by the period and within the bounds */
-			signed long long diff = (char*) obj - (char*) cache->entries[i].obj_base;
-			if (cache_uniqtype == t
-					&& (char*) obj >= (char*)cache->entries[i].obj_base
-					&& (char*) obj < (char*)cache->entries[i].obj_limit
+			signed long long diff = (char*) obj - (char*) cache->entries[i].range_base;
+			if ((!t || cache_uniqtype == t)
+					&& (char*) obj >= (char*)cache->entries[i].range_base
+					&& (char*) obj < (char*)cache->entries[i].range_limit
 					&& 
-					((diff == 0)
+					((diff == cache->entries[i].offset_to_t)
 						|| (cache->entries[i].period != 0
+							/* require_period is passed nonzero for clients doing bounds checks:
+							 * arithmetic is only valid if the period matches the element size */
 							&& (!require_period || cache->entries[i].period == require_period)
-							&& diff % cache->entries[i].period == 0)))
+							&& diff % cache->entries[i].period == cache->entries[i].offset_to_t)))
 			{
 				// hit
 				__liballocs_cache_bump(cache, i);
-				return &cache->entries[i];
-			}
-		}
-	}
-#endif
-	__liballocs_check_cache_sanity(cache);
-	return (void*)0;
-}
-
-extern inline
-struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
-__liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *cache, const void *obj, unsigned long require_period);
-extern inline
-struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
-__liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *cache, const void *obj, unsigned long require_period)
-{
-#ifndef LIBALLOCS_NOOP_INLINES
-	__liballocs_check_cache_sanity(cache);
-#ifdef LIBALLOCS_CACHE_LINEAR
-	for (unsigned char i = 1; i < cache->size_plus_one; ++i)
-#else
-	for (unsigned char i = cache->head_mru; i != 0; i = cache->entries[i].next_mru)
-#endif
-	{
-		if (cache->validity & (1<<(i-1)))
-		{
-			/* We test whether the difference is divisible by the period and within the bounds */
-			signed long long diff = (char*) obj - (char*) cache->entries[i].obj_base;
-			if ((char*) obj >= (char*)cache->entries[i].obj_base
-					&& (char*) obj < (char*)cache->entries[i].obj_limit
-					&& 
-					((diff == 0 && !require_period)
-						|| (cache->entries[i].period != 0
-							&& (!require_period || cache->entries[i].period == require_period)
-							&& diff % cache->entries[i].period == 0)))
-			{
-				// hit
-				__liballocs_cache_bump(cache, i);
+				__liballocs_check_cache_sanity(cache);
 				return &cache->entries[i];
 			}
 		}
@@ -344,13 +334,15 @@ __liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *ca
 extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr);
 extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr)
 {
-	struct __liballocs_memrange_cache_entry_s *found = __liballocs_memrange_cache_lookup_notype(
+	struct __liballocs_memrange_cache_entry_s *found = __liballocs_memrange_cache_lookup(
 		&__liballocs_ool_cache,
-		addr, 0);
+		addr,
+		(void*)0,
+		0);
 	/* This will give us "zero-offset matches", but not contained matches. 
 	 * I.e. we know that "addr" is a "found->uniqtype", but we pass over
 	 * cases where some cached allocation spans "addr" at a non-zero offset. */
-	if (found) return found->uniqtype;
+	if (found) return found->t;
 	return (void*)0;
 }
 
@@ -359,17 +351,18 @@ void __liballocs_uncache_all(const void *allocptr, unsigned long size);
 extern inline void
 (__attribute__((always_inline,gnu_inline)) __liballocs_cache_with_type)(
 	struct __liballocs_memrange_cache *c,
-	const void *obj_base, const void *obj_limit, const struct uniqtype *t, 
-	signed depth, unsigned short period, const void *alloc_base)
+	const void *range_base, const void *range_limit, unsigned period,
+	unsigned offset_to_t, const struct uniqtype *t, unsigned short depth)
 {
-	assert((__liballocs_check_cache_sanity(&__liballocs_ool_cache), 1));
+	__liballocs_check_cache_sanity(c);
+	assert(!period || ((unsigned long) range_limit - (unsigned long) range_base) % period == 0);
 #ifdef LIBALLOCS_CACHE_REPLACE_FIFO
 	unsigned pos = c->next_victim;
 #else
 	// "one plus the index of the least significant 0-bit" of validity
 	unsigned pos = __builtin_ffs(~(c->validity));
-	assert(pos <= c->size_plus_one);
-	if (pos == c->size_plus_one)
+	assert(pos <= c->max_pos);
+	if (pos == c->max_pos)
 	{
 		pos = c->tail_mru;
 		assert(pos != 0);
@@ -377,19 +370,20 @@ extern inline void
 #endif
 	// unsigned pos = __liballocs_ool_cache.next_victim;
 	c->entries[pos] = (struct __liballocs_memrange_cache_entry_s) {
-		.obj_base = obj_base,
-		.obj_limit = obj_limit,
-		.uniqtype = (void*) t,
+		.range_base = range_base,
+		.range_limit = range_limit,
 		.period = period,
-		.depth = depth,
+		.offset_to_t = offset_to_t,
+		.t = (struct uniqtype *) t,
 		.prev_mru = c->entries[pos].prev_mru,
-		.next_mru = c->entries[pos].next_mru
+		.next_mru = c->entries[pos].next_mru,
+		.depth = depth
 	};
 	// now we're valid
 	c->validity |= (1u<<(pos-1));
 	// bump us to the top
 	__liballocs_cache_bump(c, pos);
-	assert((__liballocs_check_cache_sanity(c), 1));
+	__liballocs_check_cache_sanity(c);
 }
 
 #ifdef __liballocs_defined_unlikely

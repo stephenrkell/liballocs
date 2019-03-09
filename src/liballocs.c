@@ -1581,10 +1581,10 @@ __liballocs_get_base(void *obj)
 	const void *out;
 	/* Try the cache first. */
 	struct __liballocs_memrange_cache_entry_s *hit =
-		__liballocs_memrange_cache_lookup_notype(&__liballocs_ool_cache,
-			obj, 0);
+		__liballocs_memrange_cache_lookup(&__liballocs_ool_cache,
+			obj, NULL, 0);
 	/* We only want depth-0 cached memranges, i.e. leaf-level. */
-	if (hit && hit->depth == 0) return (void*) hit->obj_base;
+	if (hit && hit->depth == 0) return (void*) hit->range_base;
 	/* No hit, so do the full query. */
 	size_t sz = 0;
 	struct uniqtype *t = NULL;
@@ -1594,8 +1594,8 @@ __liballocs_get_base(void *obj)
 	if (err && err != &__liballocs_err_unrecognised_alloc_site) return NULL;
 	/* We can cache the alloc base and size. */
 	if (a && a->is_cacheable) __liballocs_cache_with_type(&__liballocs_ool_cache,
-		out, (char*) out + sz, t ? t : pointer_to___uniqtype____uninterpreted_byte,
-		0, 1, out);
+		out, (char*) out + sz, 0, 0, t ? t : pointer_to___uniqtype____uninterpreted_byte,
+		0);
 	return (void*) out;
 }
 void *__liballocs_get_alloc_base(void *obj) __attribute__((alias("__liballocs_get_base")));
@@ -1626,7 +1626,7 @@ __liballocs_get_type(void *obj)
 #ifdef __liballocs_get_alloc_type
 #undef __liballocs_get_alloc_type
 #endif
-void *__liballocs_get_alloc_type(void *obj) __attribute__((alias("__liballocs_get_type")));
+struct uniqtype *__liballocs_get_alloc_type(void *obj) __attribute__((alias("__liballocs_get_type")));
 
 struct uniqtype *
 __liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)
@@ -1660,7 +1660,7 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
 		NULL);
 	
 	if (__builtin_expect(err != NULL, 0)) goto failed;
-	unsigned target_offset_within_uniqtype = (char*) obj - (char*) alloc_start;
+	unsigned target_offset = (char*) obj - (char*) alloc_start;
 	if (u->make_precise)
 	{
 		/* FIXME: should really do a fuller treatment of make_precise, to allow e.g. */
@@ -1674,17 +1674,20 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
 	
 	/* Descend the subobject hierarchy until we can't descend any more. */
 	_Bool success = 1;
-	struct uniqtype *cur_containing_uniqtype = NULL;
-	struct uniqtype_rel_info *cur_contained_pos = NULL;
+	struct uniqtype *containing_type;
 	while (success)
 	{
-		success = __liballocs_first_subobject_spanning(
-				&target_offset_within_uniqtype, &u, &cur_containing_uniqtype,
-				&cur_contained_pos);
+		struct uniqtype_rel_info *contained_pos = NULL;
+		unsigned distance_traversed = 0;
+		containing_type = u;
+		// try to update u to the next lower
+		success = __liballocs_first_subobject_spanning(u, target_offset,
+				&u,
+				&contained_pos, &distance_traversed);
 	}
 	
 	return (skip_at_bottom == 0) ? u
-		 : (skip_at_bottom == 1) ? cur_containing_uniqtype
+		 : (skip_at_bottom == 1) ? containing_type
 		 : NULL; // HACK, horrible, FIXME etc.
 failed:
 	return NULL;
@@ -1771,6 +1774,13 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 	return 0;
 }
 
+struct __liballocs_memrange_cache_entry_s *
+__liballocs_ool_memrange_cache_lookup(struct __liballocs_memrange_cache *cache,
+	const void *obj, struct uniqtype *t, unsigned long require_period)
+{
+	return __liballocs_memrange_cache_lookup(cache, obj, t, require_period);
+}
+
 /* Instantiate inlines from liballocs.h. */
 extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,
@@ -1783,5 +1793,6 @@ __liballocs_find_matching_subobject(unsigned target_offset_within_uniqtype,
 	struct uniqtype **last_attempted_uniqtype, unsigned *last_uniqtype_offset,
 		unsigned *p_cumulative_offset_searched,
 		struct uniqtype **p_cur_containing_uniqtype,
+		unsigned *p_cur_containing_instance_offset,
 		struct uniqtype_rel_info **p_cur_contained_pos);
 
