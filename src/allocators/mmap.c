@@ -423,6 +423,7 @@ report_problem:
 					< (char*) existing_seq->end)
 		{
 			executable_data_segment_mapping_bigalloc = NULL; // FIXME: when will it get reinstated?
+			executable_data_segment_arena_bigalloc = NULL; // FIXME: when will it get reinstated?
 		}
 		__liballocs_delete_all_bigallocs_overlapping_range(existing_seq->begin,
 			existing_seq->end);
@@ -806,12 +807,13 @@ static void *current_sbrk(void)
 void __mmap_allocator_notify_brk(void *new_curbrk);
 
 struct big_allocation *executable_data_segment_mapping_bigalloc __attribute__((visibility("hidden")));
+struct big_allocation *executable_data_segment_arena_bigalloc __attribute__((visibility("hidden")));
 static void update_data_segment_end(void *new_curbrk);
 
 _Bool __mmap_allocator_notify_unindexed_address(const void *mem)
 {
 	if (initialized) return 0;
-	if (!executable_data_segment_mapping_bigalloc) return 0; // can't do anything
+	if (!executable_data_segment_arena_bigalloc) return 0; // can't do anything
 	void *old_sbrk = current_sbrk(); // what we *think* sbrk is
 	void *new_sbrk = sbrk(0);
 	update_data_segment_end(new_sbrk); // ... update it to what it actually is
@@ -822,13 +824,14 @@ _Bool __mmap_allocator_notify_unindexed_address(const void *mem)
 static uintptr_t executable_data_segment_start_addr;
 static void set_executable_data_segment_mapping_bigalloc(void)
 {
-	/* We can be called more than once. */
+	/* We can be called more than once, but we are no-op if we know the segment. */
 	if (executable_data_segment_mapping_bigalloc) return;
-	
+	assert(!executable_data_segment_arena_bigalloc);
+
 	/* Can't do anything if we haven't seen the data segment yet. */
 	if (!executable_data_segment_start_addr) return;
 	
-	/* Which bigalloc is top-level and spans the executable's data segment
+	/* Which mapping bigalloc is top-level and spans the executable's data segment
 	 * *start*? */
 	for (int i = 1; BIGALLOC_IN_USE(&big_allocations[i]); ++i)
 	{
@@ -847,11 +850,57 @@ static void set_executable_data_segment_mapping_bigalloc(void)
 		}
 	}
 	if (!executable_data_segment_mapping_bigalloc) abort();
+
+	// now create the arena bigalloc
+	assert(!executable_data_segment_mapping_bigalloc->first_child);
+	// what is the actual end of the data segment PHDR?
+	struct link_map *exe_lment = get_highest_loaded_object_below(executable_data_segment_mapping_bigalloc->begin);
+	assert(exe_lment);
+	ElfW(auxv_t) *at_phdr = auxv_xlookup(get_auxv((const char **) environ, &at_phdr), AT_PHDR);
+	ElfW(auxv_t) *at_phnum = auxv_xlookup(get_auxv((const char **) environ, &at_phdr), AT_PHNUM);
+	ElfW(Phdr) *phdrs = (ElfW(Phdr) *) at_phdr->a_un.a_val;
+	/* Our "data segment mapping" bigalloc is really a *mapping sequence*.
+	 * It includes all segments of the executable. What is the "data segment"?
+	 * It's really the thing that precedes the "program break"; in other words
+	 * it's the LOAD phdr with the highest virtual address. */
+	// FIXME: I probably mean "... that is contiguous with the program base address"
+	// look for a writable phdr that begins at the data segment base
+	ElfW(Phdr) *highest_vaddr_load_phdr = NULL;
+	for (ElfW(Phdr) *p = phdrs; p < phdrs + at_phnum->a_un.a_val; ++p)
+	{
+		if (p->p_type == PT_LOAD
+				&& p->p_memsz > 0
+				&& (!highest_vaddr_load_phdr || p->p_vaddr > highest_vaddr_load_phdr->p_vaddr))
+		{
+			highest_vaddr_load_phdr = p;
+		}
+	}
+	if (highest_vaddr_load_phdr)
+	{
+		uintptr_t phdr_loaded_addr = exe_lment->l_addr + highest_vaddr_load_phdr->p_vaddr;
+		uintptr_t phdr_end_addr = phdr_loaded_addr + highest_vaddr_load_phdr->p_memsz;
+		// assert that it's contained within the mapping sequence we know about
+		assert(phdr_loaded_addr >= executable_data_segment_mapping_bigalloc->begin);
+		assert(phdr_end_addr <= executable_data_segment_mapping_bigalloc->end);
+		// found it.
+		// so now we know where it ends. create the arena bigalloc where it leaves off
+		uintptr_t arena_begin_addr = phdr_end_addr;
+		executable_data_segment_arena_bigalloc = __liballocs_new_bigalloc(
+			(void*) arena_begin_addr,
+			(uintptr_t) executable_data_segment_mapping_bigalloc->end - arena_begin_addr,
+			(struct meta_info) {
+				.what = INS_AND_BITS
+			},
+			executable_data_segment_mapping_bigalloc,
+			/* allocated_by */ &__static_allocator
+		);
+	}
+	assert(executable_data_segment_arena_bigalloc);
 	/* We expect the data segment's suballocator to be malloc, so pre-ordain that.
 	 * NOTE that there will also be a nested allocation under it, that is the 
 	 * static allocator's segment bigalloc. We don't consider the sbrk area
 	 * to be a child of that; it's a sibling. FIXME: is this okay? */
-	executable_data_segment_mapping_bigalloc->suballocator = &__generic_malloc_allocator;
+	executable_data_segment_arena_bigalloc->suballocator = &__generic_malloc_allocator;
 }
 
 void __mmap_allocator_init(void) __attribute__((constructor(101)));
@@ -1304,11 +1353,13 @@ static void update_data_segment_end(void *new_curbrk)
 	struct mapping_sequence *seq
 	 = executable_data_segment_mapping_bigalloc->meta.un.opaque_data.data_ptr;
 	char *old_end = executable_data_segment_mapping_bigalloc->end;
+	assert(executable_data_segment_arena_bigalloc->end == old_end);
 	
 	/* We also update the metadata. */
 	if ((char*) new_curbrk < (char*) old_end)
 	{
 		/* We're contracting. */
+		__liballocs_truncate_bigalloc_at_end(executable_data_segment_arena_bigalloc, new_curbrk);
 		__liballocs_truncate_bigalloc_at_end(executable_data_segment_mapping_bigalloc, new_curbrk);
 		delete_mapping_sequence_span(seq, new_curbrk, (char*) old_end - (char*) new_curbrk);
 	}
@@ -1317,6 +1368,7 @@ static void update_data_segment_end(void *new_curbrk)
 		/* We're expanding. */
 		seq->end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE);
 		__liballocs_extend_bigalloc(executable_data_segment_mapping_bigalloc, seq->end);
+		__liballocs_extend_bigalloc(executable_data_segment_arena_bigalloc, seq->end);
 		void *prev_mapping_end = seq->mappings[seq->nused - 1].end;
 		if (!seq->mappings[seq->nused - 1].is_anon)
 		{

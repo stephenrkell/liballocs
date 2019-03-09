@@ -46,6 +46,7 @@ const char *format_symbolic_address(const void *addr) __attribute__((visibility(
 #include "pageindex.h"
 
 extern struct big_allocation *executable_data_segment_mapping_bigalloc __attribute__((visibility("hidden")));
+extern struct big_allocation *executable_data_segment_arena_bigalloc __attribute__((visibility("hidden")));
 
 void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void munmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
