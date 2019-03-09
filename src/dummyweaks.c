@@ -237,3 +237,21 @@ Dl_info dladdr_with_cache(const void *addr)
 	return dummy;
 }
 
+_Bool __liballocs_search_subobjects_spanning
+	(struct uniqtype *u,
+	struct uniqtype *u_container, unsigned u_offset_within_container,
+	struct uniqtype_rel_info *u_ctxt,
+	unsigned u_offset_from_search_start,
+	unsigned target_offset_within_u,
+	_Bool (*visit_stop_test)(struct uniqtype *, struct uniqtype_rel_info *, unsigned, unsigned, void*),
+	void *arg, unsigned *out_offset, struct uniqtype_rel_info **out_ctxt)
+{
+	return 0;
+}
+struct uniqtype_rel_info *
+__liballocs_find_span(struct uniqtype *u, unsigned target_offset,
+	struct uniqtype_rel_info *contained_search_start /* typically NULL */)
+{
+	return NULL;
+}
+

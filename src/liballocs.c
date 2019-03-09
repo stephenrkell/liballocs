@@ -1673,21 +1673,18 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
 	}
 	
 	/* Descend the subobject hierarchy until we can't descend any more. */
-	_Bool success = 1;
-	struct uniqtype *containing_type;
-	while (success)
-	{
-		struct uniqtype_rel_info *contained_pos = NULL;
-		unsigned distance_traversed = 0;
-		containing_type = u;
-		// try to update u to the next lower
-		success = __liballocs_first_subobject_spanning(u, target_offset,
-				&u,
-				&contained_pos, &distance_traversed);
-	}
-	
+	struct uniqtype_rel_info *contained_pos = NULL;
+	unsigned distance_traversed = 0;
+	// try to update u to the next lower
+	u = __liballocs_deepest_span(u, target_offset,
+			&distance_traversed, &contained_pos);
+	target_offset -= distance_traversed;
+	// we might not find anything starting at the target offset
+	if (target_offset != 0) goto failed;
+
+	// HACK: to map from the contained_pos to the actual uniqtye, use get_base
 	return (skip_at_bottom == 0) ? u
-		 : (skip_at_bottom == 1) ? containing_type
+		 : (skip_at_bottom == 1) ? (struct uniqtype *) __liballocs_get_base(contained_pos)
 		 : NULL; // HACK, horrible, FIXME etc.
 failed:
 	return NULL;
@@ -1787,12 +1784,11 @@ extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);
 
-extern inline _Bool 
-__liballocs_find_matching_subobject(unsigned target_offset_within_uniqtype,
-	struct uniqtype *cur_obj_uniqtype, struct uniqtype *test_uniqtype, 
-	struct uniqtype **last_attempted_uniqtype, unsigned *last_uniqtype_offset,
-		unsigned *p_cumulative_offset_searched,
-		struct uniqtype **p_cur_containing_uniqtype,
-		unsigned *p_cur_containing_instance_offset,
-		struct uniqtype_rel_info **p_cur_contained_pos);
-
+extern inline _Bool __liballocs_search_subobjects_spanning
+	(struct uniqtype *u,
+	struct uniqtype *u_container, unsigned u_offset_within_container,
+	struct uniqtype_rel_info *u_ctxt,
+	unsigned u_offset_from_search_start,
+	unsigned target_offset_within_u,
+	_Bool (*visit_stop_test)(struct uniqtype *, struct uniqtype_rel_info *, unsigned, unsigned, void*),
+	void *arg, unsigned *out_offset, struct uniqtype_rel_info **out_ctxt);
