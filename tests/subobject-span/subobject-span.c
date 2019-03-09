@@ -20,11 +20,11 @@ struct S
 	} u;
 } s;
 
-_Bool visit_print(struct uniqtype *u, struct uniqtype_rel_info *u_ctxt,
-	unsigned u_offset_within_container, unsigned u_offset_from_search_start, void *ignored)
+_Bool visit_print(struct uniqtype *u, struct uniqtype_containment_ctxt *ucc,
+	unsigned u_offset_from_search_start, void *ignored)
 {
 	fprintf(stderr, "\tSaw a %s at offset %u (%u within its immediate container)\n",
-		NAME_FOR_UNIQTYPE(u), u_offset_from_search_start, u_offset_within_container);
+		NAME_FOR_UNIQTYPE(u), u_offset_from_search_start, ucc->u_offset_within_container);
 	return 0;
 }
 
@@ -40,7 +40,7 @@ int main(void)
 	for (unsigned i = 0; i < sizeof (struct S); ++i)
 	{
 		fprintf(stderr, "Overlapping offset %d within struct S:\n", (int) i);
-		__liballocs_search_subobjects_spanning(s_t, NULL, 0, NULL, 0, i, visit_print, NULL,
+		__liballocs_search_subobjects_spanning(s_t, i, visit_print, NULL,
 			NULL, NULL);
 	}
 	

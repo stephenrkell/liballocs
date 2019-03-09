@@ -395,17 +395,33 @@ __liballocs_find_span(struct uniqtype *u, unsigned target_offset,
 	return &u->related[lower_ind];
 }
 
+/* HMM. I probably should just have coded the descent recursively. */
+struct uniqtype_containment_ctxt
+{
+	struct uniqtype *u_container;
+	unsigned u_offset_within_container;
+	struct uniqtype_rel_info *u_ctxt;
+	struct uniqtype_containment_ctxt *next;
+};
+
 inline _Bool
- __liballocs_search_subobjects_spanning
+ __liballocs_search_subobjects_spanning_with_ctxt
 	(struct uniqtype *u,
-	struct uniqtype *u_container, unsigned u_offset_within_container,
-	struct uniqtype_rel_info *u_ctxt,
+	struct uniqtype_containment_ctxt *ucc,
 	unsigned u_offset_from_search_start,
 	unsigned target_offset_within_u,
-	_Bool (*visit_stop_test)(struct uniqtype *, struct uniqtype_rel_info *, unsigned, unsigned, void*),
+	_Bool (*visit_stop_test)(struct uniqtype *, struct uniqtype_containment_ctxt *, unsigned, void*),
 	void *arg, unsigned *out_offset, struct uniqtype_rel_info **out_ctxt)
 {
-	assert((uintptr_t) u_ctxt - (uintptr_t) u_container < BIGGEST_SANE_UNIQTYPE_STRUCT_SIZE);
+	struct uniqtype_containment_ctxt terminal_ctxt = (struct uniqtype_containment_ctxt) {
+		.u_container = NULL
+	};
+	if (!ucc) ucc = &terminal_ctxt;
+	assert(!ucc->u_ctxt ||
+		(uintptr_t) ucc->u_ctxt - (uintptr_t) ucc->u_container < BIGGEST_SANE_UNIQTYPE_STRUCT_SIZE);
+	struct uniqtype_containment_ctxt local_ctxt = (struct uniqtype_containment_ctxt) {
+		.u_container = NULL
+	};
 	/* Use find_span to walk spans, calling the test
 	 * until it returns true. Return the context where it does so. */
 	do // hmm -- should maybe be a "for" loop
@@ -413,35 +429,35 @@ inline _Bool
 		// 1. process our current position
 		_Bool stop = 0;
 		assert(u->pos_maxoff > target_offset_within_u);
-		stop = visit_stop_test(u, u_ctxt, u_offset_within_container, u_offset_from_search_start, arg);
+		stop = visit_stop_test(u, ucc, u_offset_from_search_start, arg);
 		if (stop)
 		{
 			if (out_offset) *out_offset = u_offset_from_search_start;
-			if (out_ctxt) *out_ctxt = u_ctxt;
+			if (out_ctxt) *out_ctxt = ucc->u_ctxt;
 			return 1;
 		}
 
 		// 2. if we have a sibling context, process it recursively
-		if (u_ctxt && UNIQTYPE_IS_COMPOSITE_TYPE(u_container))
+		if (ucc->u_ctxt && UNIQTYPE_IS_COMPOSITE_TYPE(ucc->u_container))
 		{
-			unsigned target_offset_within_container = target_offset_within_u + u_offset_within_container;
-			struct uniqtype_rel_info *sibling = __liballocs_find_span(u_container,
-				target_offset_within_container, u_ctxt + 1);
+			unsigned target_offset_within_container = target_offset_within_u + ucc->u_offset_within_container;
+			struct uniqtype_rel_info *sibling = __liballocs_find_span(ucc->u_container,
+				target_offset_within_container, ucc->u_ctxt + 1);
 			if (__builtin_expect(sibling != NULL, 0))
 			{
 				unsigned sibling_offset_within_container
-				 = UNIQTYPE_SUBOBJECT_OFFSET(u_container, sibling, target_offset_within_container);
-				assert(sibling_offset_within_container == u_offset_within_container);
+				 = UNIQTYPE_SUBOBJECT_OFFSET(ucc->u_container, sibling, target_offset_within_container);
+				assert(sibling_offset_within_container == ucc->u_offset_within_container);
 
 				// if the sibling doesn't span up to the target offset, skip it
 				// (actually this shouldn't happen, if members are sorted by size
-				struct uniqtype *sibling_type = UNIQTYPE_SUBOBJECT_TYPE(u_container, sibling);
+				struct uniqtype *sibling_type = UNIQTYPE_SUBOBJECT_TYPE(ucc->u_container, sibling);
 				assert(sibling_type->pos_maxoff > target_offset_within_u);
-				stop = __liballocs_search_subobjects_spanning(
+				struct uniqtype_containment_ctxt sibling_ctxt = *ucc;
+				sibling_ctxt.u_ctxt = sibling;
+				stop = __liballocs_search_subobjects_spanning_with_ctxt(
 					sibling_type,
-					u_container,
-					u_offset_within_container,
-					sibling,
+					&sibling_ctxt,
 					u_offset_from_search_start, // sibling must start at same address as us
 					target_offset_within_u,
 					visit_stop_test,
@@ -464,11 +480,13 @@ inline _Bool
 			struct uniqtype *new_u = UNIQTYPE_SUBOBJECT_TYPE(u, new_u_ctxt);
 			unsigned new_u_offset_from_search_start = u_offset_from_search_start + distance_moved;
 			unsigned new_target_offset_within_u = target_offset_within_u - distance_moved;
-			
-			u_container = new_u_container;
-			u_offset_within_container = new_u_offset_within_container;
+			// now push a new ucc
+			local_ctxt.u_container = new_u_container;
+			local_ctxt.u_offset_within_container = new_u_offset_within_container;
+			local_ctxt.u_ctxt = new_u_ctxt;
+			local_ctxt.next = (ucc == &local_ctxt ? &terminal_ctxt : ucc);
+			ucc = &local_ctxt;
 			u = new_u;
-			u_ctxt = new_u_ctxt;
 			u_offset_from_search_start = new_u_offset_from_search_start;
 			target_offset_within_u = new_target_offset_within_u;
 		}
@@ -481,6 +499,28 @@ inline _Bool
 	// if we got here, no visit function said "stop".
 	// so the outputs are not valid.
 	return 0;
+}
+
+extern inline _Bool
+(__attribute__((always_inline,gnu_inline)) __liballocs_search_subobjects_spanning)
+	(struct uniqtype *u,
+	unsigned target_offset_within_u,
+	_Bool (*visit_stop_test)(struct uniqtype *, struct uniqtype_containment_ctxt *, unsigned, void*),
+	void *arg, unsigned *out_offset, struct uniqtype_rel_info **out_ctxt)
+{
+	struct uniqtype_containment_ctxt ctxt = (struct uniqtype_containment_ctxt) {
+		.u_container = NULL
+	};
+	return __liballocs_search_subobjects_spanning_with_ctxt(
+		u,
+		&ctxt,
+		0,
+		target_offset_within_u,
+		visit_stop_test,
+		arg,
+		out_offset,
+		out_ctxt
+	);
 }
 
 extern inline struct uniqtype *
