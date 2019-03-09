@@ -114,7 +114,7 @@ struct uniqtype \
            unsigned is_log_spaced:1; /* idea (inefficiency: implies not is_contiguous) */ \
            unsigned nenum:26; /* HMM */ \
        } enumeration; /* related[0] is base type; use related[1..nenum] for enumerators? Or hmm, just use a separate name/value mapping, like member_names? These are like meta_enum, meta_struct, etc.. */ \
-       struct { \
+       struct { /* same-offset subobjects should be sorted in increasing size (unions, stackframes) */\
            unsigned kind:4; \
            unsigned nmemb:20; /* 1M members should be enough */ \
            unsigned not_simultaneous:1; /* i.e. whether any member may be invalid */ \
@@ -329,6 +329,13 @@ extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); /
 #define UNIQTYPE_IS_BASE_OR_ENUM_TYPE(u) (UNIQTYPE_IS_BASE_TYPE(u) || UNIQTYPE_IS_ENUM_TYPE(u))
 #define UNIQTYPE_ARRAY_LENGTH(u)         (UNIQTYPE_IS_ARRAY_TYPE(u) ? (u)->un.array.nelems : -1)
 #define UNIQTYPE_ARRAY_ELEMENT_TYPE(u)   (UNIQTYPE_IS_ARRAY_TYPE(u) ? (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
+#define UNIQTYPE_SUBOBJECT_TYPE(u, r) \
+   (UNIQTYPE_IS_ARRAY_TYPE(u) ? (r)->un.t.ptr : \
+   UNIQTYPE_IS_COMPOSITE_TYPE(u) ? (r)->un.memb.ptr : NULL_UNIQTYPE)
+#define UNIQTYPE_SUBOBJECT_OFFSET(u, r, spanned_offset) \
+   (UNIQTYPE_IS_ARRAY_TYPE(u) ? /* round down */ \
+       (UNIQTYPE_SUBOBJECT_TYPE(u, r)->pos_maxoff * ((spanned_offset) / UNIQTYPE_SUBOBJECT_TYPE(u, r)->pos_maxoff)) \
+       : UNIQTYPE_IS_COMPOSITE_TYPE(u) ? (r)->un.memb.off : (unsigned)-1 )
 #define UNIQTYPE_COMPOSITE_MEMBER_COUNT(u) (UNIQTYPE_IS_COMPOSITE_TYPE(u) ? (u)->un.composite.nmemb : 0)
 #define UNIQTYPE_IS_2S_COMPL_INTEGER_TYPE(u) \
    ((u)->un.info.kind == BASE && (u)->un.base.enc == 0x5 /*DW_ATE_signed */)
