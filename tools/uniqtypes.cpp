@@ -517,8 +517,7 @@ void write_master_relation(master_relation_t& r,
 		
 		out << "\n/* uniqtype for \"" << i_vert->first.second 
 			<< "\" with summary code " << i_vert->first.first << " */\n";
-		std::vector< iterator_base > real_members;
-		std::vector< Dwarf_Unsigned > real_member_offsets;
+		std::map< pair<unsigned, unsigned>, iterator_base > real_members_by_offset_and_size;
 		std::vector< iterator_base > fp_types;
 		if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
@@ -536,6 +535,7 @@ void write_master_relation(master_relation_t& r,
 				/* if we don't have a byte offset, skip it ( -- it's a static var?) */
 				opt<Dwarf_Unsigned> opt_offset = i_edge->byte_offset_in_enclosing_type(
 					true /* assume packed -- needed for synthetic types' members */);
+				opt<Dwarf_Unsigned> opt_size = i_edge->find_type()->calculate_byte_size();
 				if (!opt_offset)
 				{
 					err << "Warning: member " << i_edge.summary()
@@ -544,12 +544,14 @@ void write_master_relation(master_relation_t& r,
 				}
 				else
 				{ 
-					real_members.push_back(i_edge); 
-					real_member_offsets.push_back(*opt_offset);
+					real_members_by_offset_and_size.insert(make_pair(
+						make_pair(*opt_offset, opt_size ? *opt_size : (unsigned)-1),
+						i_edge
+					));
 				}
 			}
 		}
-		unsigned members_count = real_members.size();
+		unsigned members_count = real_members_by_offset_and_size.size();
 		
 		/* Our last chance to skip things we don't want to emit. 
 		 * NOTE that for incompletes, we distinguish "flexible", "opaque" and "undefined" types
@@ -561,7 +563,7 @@ void write_master_relation(master_relation_t& r,
 		 * "undefined" is structs that are declared but not defined. *Usually* the intention
 		 * here is the same as for "opaque"... HMM.
 		 */
-		if (i_vert->second.is_a<with_data_members_die>() && real_members.size() == 0 && !opt_sz)
+		if (i_vert->second.is_a<with_data_members_die>() && real_members_by_offset_and_size.size() == 0 && !opt_sz)
 		{
 			// we have an incomplete type -- skip it!
 			err << "Warning: with-data-members type " 
@@ -592,9 +594,11 @@ void write_master_relation(master_relation_t& r,
 			{
 				out << " = { ";
 				unsigned num = 0;
-				for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++num)
+				for (auto i_i_edge = real_members_by_offset_and_size.begin();
+					i_i_edge != real_members_by_offset_and_size.end();
+					++i_i_edge, ++num)
 				{
-					auto i_edge = i_i_edge->as_a<member_die>();
+					auto i_edge = i_i_edge->second.as_a<member_die>();
 
 					if (i_edge.name_here())
 					{
@@ -629,7 +633,7 @@ void write_master_relation(master_relation_t& r,
 				write_uniqtype_open_array(out,
 					mangled_name,
 					i_vert->first.second,
-					(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+					(opt_sz ? (int) *opt_sz : (real_members_by_offset_and_size.size() > 0 ? -1 : 0)) /* pos_maxoff */,
 					array_len
 				);
 			}
@@ -657,7 +661,7 @@ void write_master_relation(master_relation_t& r,
 			write_uniqtype_open_array(out,
 				mangled_name,
 				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				(opt_sz ? (int) *opt_sz : (real_members_by_offset_and_size.size() > 0 ? -1 : 0)) /* pos_maxoff */,
 				(opt_fixed_size ? *opt_fixed_size : 0)
 			);
 			/* FIXME */
@@ -719,7 +723,7 @@ void write_master_relation(master_relation_t& r,
 			write_uniqtype_open_subprogram(out,
 				mangled_name,
 				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				(opt_sz ? (int) *opt_sz : (real_members_by_offset_and_size.size() > 0 ? -1 : 0)) /* pos_maxoff */,
 				/* narg */ fp_types.size(),
 				/* nret */ 1,
 				/* is_va */ 0 /* FIXME */,
@@ -746,7 +750,7 @@ void write_master_relation(master_relation_t& r,
 			write_uniqtype_open_subrange(out,
 				mangled_name,
 				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				(opt_sz ? (int) *opt_sz : (real_members_by_offset_and_size.size() > 0 ? -1 : 0)) /* pos_maxoff */,
 				0 /* FIXME */,
 				0 /* FIXME */
 			);
@@ -762,7 +766,7 @@ void write_master_relation(master_relation_t& r,
 			 * we need to handle the case where the byte size
 			 * must be calculated from the bit size, as ceil (bit_size / 8). */
 			
-			unsigned byte_size = opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0);
+			unsigned byte_size = opt_sz ? (int) *opt_sz : (real_members_by_offset_and_size.size() > 0 ? -1 : 0);
 			pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = bt->bit_size_and_offset();
 			unsigned bit_size = bit_size_and_offset.first;
 			unsigned bit_offset = bit_size_and_offset.second;
@@ -859,7 +863,7 @@ void write_master_relation(master_relation_t& r,
 			write_uniqtype_open_enumeration(out,
 				mangled_name,
 				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */
+				(opt_sz ? (int) *opt_sz : (real_members_by_offset_and_size.size() > 0 ? -1 : 0)) /* pos_maxoff */
 			);
 			write_uniqtype_related_dummy(out); /* FIXME */
 		}
@@ -884,41 +888,63 @@ void write_master_relation(master_relation_t& r,
 			write_uniqtype_open_composite(out,
 				mangled_name,
 				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+				(opt_sz ? (int) *opt_sz : (real_members_by_offset_and_size.size() > 0 ? -1 : 0)) /* pos_maxoff */,
 				members_count,
 				false
 			);
-			unsigned i_membernum = 0;
 			std::set<lib::Dwarf_Unsigned> used_offsets;
 			opt<iterator_base> first_with_byte_offset;
-			auto i_off = real_member_offsets.begin();
 			
 			// we *always* output at least one array element
 			contained_length = 0;
-			for (auto i_i_edge = real_members.begin(); i_i_edge != real_members.end(); ++i_i_edge, ++i_membernum, ++i_off)
+			for (auto i_i_edge = real_members_by_offset_and_size.begin();
+				i_i_edge != real_members_by_offset_and_size.end();
+				++i_i_edge)
 			{
 				++contained_length;
-				auto i_edge = i_i_edge->as_a<member_die>();
+				unsigned offset = i_i_edge->first.first;
+				unsigned size = i_i_edge->first.second;
+				auto i_edge = i_i_edge->second.as_a<member_die>();
+				/* Check for left-overlap. */
+				{
+					unsigned lookahead_limit = offset + size;
+					// for all members that start at a >= offset but less than offset+size
+					auto i_test = i_i_edge; ++i_test;
+					for (;
+						i_test != real_members_by_offset_and_size.end()
+						&& i_test->first.first < lookahead_limit;
+						++i_test)
+					{
+						// do we left-overlap? warn if so
+						if (i_test->first.first > offset)
+						{
+							err << "Warning: member at 0x" << std::hex << i_edge.offset_here() << std::dec
+								<< " left-overlaps later member at 0x"
+								<< std::hex << i_test->second.offset_here() << std::dec
+								<< std::endl;
+						}
+					}
+				}
 				auto k = canonical_key_for_type(i_edge->find_or_create_type_handling_bitfields());
 				string mangled_name = mangle_typename(k);
 				if (names_emitted.find(mangled_name) == names_emitted.end())
 				{
-					out << "Type named " << mangled_name << ", " << i_edge->get_type()
+					err << "Type named " << mangled_name << ", " << i_edge->get_type()
 						<< ", concretely " << i_edge->get_type()->get_concrete_type()
 						<< " was not emitted previously." << endl;
 					for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
 					{
 						if (i_name->substr(i_name->length() - k.second.length()) == k.second)
 						{
-							out << "Possible near-miss: " << *i_name << endl;
+							err << "Possible near-miss: " << *i_name << endl;
 						}
 					}
 					assert(false);
 				}
 
 				write_uniqtype_related_contained_member_type(out,
-					i_i_edge == real_members.begin(),
-					*i_off,
+					i_i_edge == real_members_by_offset_and_size.begin(),
+					offset,
 					mangled_name);
 			}
 		}

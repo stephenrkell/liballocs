@@ -1019,6 +1019,8 @@ int main(int argc, char **argv)
 			opt<unsigned> prev_offset_plus_size;
 			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
 			{
+				// FIXME: sort by size at a given offset
+				// we already check for left-overlap
 				ostringstream comment_s;
 				auto el_type = i_by_off->second->find_type();
 				unsigned offset_after_fixup = i_by_off->first + offset_to_all;
