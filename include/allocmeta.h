@@ -182,12 +182,17 @@ void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size,
 void __mmap_allocator_notify_mremap_after(void *ret_addr, void *old_addr, size_t old_size, 
 	size_t new_size, int flags, void *new_address, void *caller);
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller);
+void __mmap_allocator_notify_brk(void *addr);
 _Bool __mmap_allocator_is_initialized(void) __attribute__((visibility("hidden")));
 _Bool __mmap_allocator_notify_unindexed_address(const void *ptr);
 struct mapping_entry;
 struct mapping_sequence;
 struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mapping_sequence *seq)
 	__attribute__((visibility("protected")));
+extern struct big_allocation *executable_mapping_sequence_bigalloc __attribute__((visibility("hidden")));
+extern struct big_allocation *__brk_bigalloc __attribute__((visibility("hidden")));
+void __brk_allocator_notify_brk(void *, const void *) __attribute__((visibility("hidden")));
+void __brk_allocator_init(void) __attribute__((visibility("hidden")));
 
 void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *b);
 

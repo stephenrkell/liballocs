@@ -1779,7 +1779,7 @@ __liballocs_ool_memrange_cache_lookup(struct __liballocs_memrange_cache *cache,
 }
 
 /* Instantiate inlines from liballocs.h. */
-extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
+struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	struct allocator **out_allocator, const void **out_alloc_start,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);
@@ -1792,3 +1792,7 @@ _Bool
 	unsigned target_offset_within_u,
 	_Bool (*visit_stop_test)(struct uniqtype *, struct uniqtype_containment_ctxt *, unsigned, void*),
 	void *arg, unsigned *out_offset, struct uniqtype_rel_info **out_ctxt);
+
+struct uniqtype_rel_info *
+__liballocs_find_span(struct uniqtype *u, unsigned target_offset,
+	struct uniqtype_rel_info *contained_search_start /* typically NULL */);

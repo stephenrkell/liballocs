@@ -577,7 +577,7 @@ extern inline struct uniqtype *
 		t_reached = subobj_type;
 		// FIXME: backtracking search: use "contained" to check for sibling possibilities
 	}
-	if (!contained)
+	if (target_offset != 0)
 	{
 		// we failed
 		return NULL;
