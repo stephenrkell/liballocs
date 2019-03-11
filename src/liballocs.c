@@ -212,20 +212,6 @@ __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_
 	return allocated_uniqtype;
 }
 
-/* Force a definition of this inline function to be emitted.
- * Debug builds use this, since they won't inline the call to it
- * from the wrapper function. */
-int 
-__liballocs_walk_subobjects_spanning_rec(
-	unsigned accum_offset, unsigned accum_depth,
-	const unsigned target_offset_within_u,
-	struct uniqtype *u, 
-	int (*cb)(struct uniqtype *spans, unsigned span_start_offset, unsigned depth,
-		struct uniqtype *containing, struct uniqtype_rel_info *contained_pos, 
-		unsigned containing_span_start_offset, void *arg),
-	void *arg
-	);
-
 #ifndef USE_REAL_LIBUNWIND
 #include "fake-libunwind.h"
 int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp) __attribute__((visibility("hidden")));

@@ -261,20 +261,6 @@ inline struct allocator *__liballocs_leaf_allocator_for(const void *obj,
 _Bool __liballocs_notify_unindexed_address(const void *obj);
 void __liballocs_report_wild_address(const void *ptr);
 
-extern inline int 
-__attribute__((always_inline,gnu_inline))
-__liballocs_walk_subobjects_spanning(
-	const unsigned target_offset_within_u,
-	struct uniqtype *u, 
-	int (*cb)(struct uniqtype *spans, unsigned span_start_offset, unsigned depth,
-		struct uniqtype *containing, struct uniqtype_rel_info *contained_pos, 
-		unsigned containing_span_start_offset, void *arg),
-	void *arg
-	)
-{
-	return 0; // FIXME: reinstate
-}
-
 /* Find the first-level subobject spanning a given offset.
  *
  * The caller knows whether
