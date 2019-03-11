@@ -517,7 +517,7 @@ void write_master_relation(master_relation_t& r,
 		
 		out << "\n/* uniqtype for \"" << i_vert->first.second 
 			<< "\" with summary code " << i_vert->first.first << " */\n";
-		std::map< pair<unsigned, unsigned>, iterator_base > real_members_by_offset_and_size;
+		std::multimap< pair<unsigned, unsigned>, iterator_base > real_members_by_offset_and_size;
 		std::vector< iterator_base > fp_types;
 		if (i_vert->second.is_a<type_describing_subprogram_die>())
 		{
