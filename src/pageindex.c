@@ -33,7 +33,8 @@ extern struct big_allocation *__liballocs_get_bigalloc_containing(const void *ob
 /* How many big allocs? 256 is a bit stingy. 
  * Each bigalloc record is 48--64 bytes, so 4096 of them would take 256KB.
  * Maybe stick to 1024? */
-struct big_allocation big_allocations[NBIGALLOCS]; // NOTE: we *don't* use big_allocations[0]; the 0 byte means "empty"
+struct big_allocation big_allocations[NBIGALLOCS] __attribute__((visibility("protected"))); // NOTE: we *don't* use big_allocations[0]; the 0 byte means "empty"
+extern struct big_allocation __liballocs_big_allocations[NBIGALLOCS] __attribute__((alias("big_allocations"))); // NOTE: we *don't* use big_allocations[0]; the 0 byte means "empty"
 
 static unsigned bigalloc_depth(struct big_allocation *b)
 {
@@ -49,6 +50,8 @@ void sanity_check_bigalloc(struct big_allocation *b)
 #ifndef NDEBUG
 	if (BIGALLOC_IN_USE(b))
 	{
+		/* Must be non-zero-size. */
+		assert(b->end != b->begin);
 		/* The pageindex immediately before the beginning should not say
 		 * that it's this bigalloc there. */
 		assert(pageindex[PAGENUM(((char*)(b)->begin)-1)] != ((b) - &big_allocations[0]));
@@ -83,6 +86,7 @@ void sanity_check_bigalloc(struct big_allocation *b)
 #define SANITY_CHECK_BIGALLOC(b) sanity_check_bigalloc((b)) 
 
 bigalloc_num_t *pageindex __attribute__((visibility("protected")));
+extern bigalloc_num_t *__liballocs_pageindex __attribute__((alias("pageindex")));
 
 static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num, 
 	bigalloc_num_t old_num, size_t n)
@@ -94,6 +98,7 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 	if (n > 0 && (uintptr_t) begin % sizeof (wchar_t) != 0)
 	{
 #ifndef NDEBUG
+		/* If we were told to expect an old_num, check that we see it. */
 		if (old_num != (bigalloc_num_t) -1 && *begin != old_num) abort();
 #endif
 		*begin++ = num;
@@ -110,6 +115,7 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 	wchar_t accept[] = { wchar_old_val, '\0' };
 	// PROBLEM: if our accept val is 0, 
 #ifndef NDEBUG
+	/* If we were told to expect an old_num, check that we see it. */
 	if (old_num != (bigalloc_num_t) -1 && old_num) // FIXME: also check when old_num is zero
 	{
 		wchar_t *pageindex_end = (wchar_t *) (pageindex + PAGENUM(MAXIMUM_USER_ADDRESS + 1));
@@ -137,6 +143,7 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 	if (n % 2 == 1)
 	{
 #ifndef NDEBUG
+		/* If we were told to expect an old_num, check that we see it. */
 		if (old_num != (bigalloc_num_t) -1 && *(begin + (n-1)) != old_num) abort();
 #endif
 		*(begin + (n-1)) = num;
@@ -530,7 +537,7 @@ _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end)
 	b->end = (void*) new_end;
 	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
 	
-	/* For each page that this alloc spans, memset it in the page index. */
+	/* For each page that this alloc newly spans, memset it in the page index. */
 	memset_bigalloc(pageindex + PAGENUM(ROUND_DOWN((unsigned long) old_end, PAGE_SIZE)),
 		b - &big_allocations[0], parent_num,
 			PAGE_DIST(ROUND_DOWN((unsigned long) old_end, PAGE_SIZE),

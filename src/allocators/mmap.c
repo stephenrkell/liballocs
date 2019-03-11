@@ -806,7 +806,7 @@ _Bool __mmap_allocator_notify_unindexed_address(const void *mem)
 	return __brk_allocator_notify_unindexed_address(mem);
 }
 
-static void set_executable_mapping_sequence_bigalloc(void)
+static void set_executable_mapping_sequence_bigalloc(void *real_end)
 {
 	assert(executable_data_segment_start_addr);
 	/* We can be called more than once, but we are no-op if we know the segment. */
@@ -830,6 +830,10 @@ static void set_executable_mapping_sequence_bigalloc(void)
 					&& (uintptr_t) big_allocations[i].begin <= executable_data_segment_start_addr)
 			{
 				executable_mapping_sequence_bigalloc = &big_allocations[i];
+				if ((char*) executable_mapping_sequence_bigalloc->end < real_end)
+				{
+					__liballocs_extend_bigalloc(executable_mapping_sequence_bigalloc, real_end);
+				}
 				break;
 			}
 		}
@@ -930,7 +934,7 @@ void __mmap_allocator_init(void)
 		 * anyway. */
 		add_missing_mappings_from_proc();
 		/* Also extend the data segment to account for the current brk. */
-		set_executable_mapping_sequence_bigalloc();
+		set_executable_mapping_sequence_bigalloc(biggest_end_seen);
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
 		__liballocs_post_systrap_init(); /* does the libdlbind symbol creation */
@@ -1283,17 +1287,19 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 {
 	/* If we haven't made the bigalloc yet, sbrk needs no action. */
 	if (!executable_mapping_sequence_bigalloc) return;
-	
+
 	struct mapping_sequence *seq
 	 = executable_mapping_sequence_bigalloc->meta.un.opaque_data.data_ptr;
 	char *old_end = executable_mapping_sequence_bigalloc->end;
-	assert(__brk_bigalloc->end == old_end);
+	/* We may be called before the brk alloc exists. We may be called
+	 * just after shrinking the brk bigalloc. So we can't assert
+	 * as much as we'd like here. */
+	assert(!__brk_bigalloc || (char*) __brk_bigalloc->end <= (char*) old_end);
 	
 	/* We also update the metadata. */
 	if ((char*) new_curbrk < (char*) old_end)
 	{
 		/* We're contracting. */
-		__liballocs_truncate_bigalloc_at_end(__brk_bigalloc, new_curbrk);
 		__liballocs_truncate_bigalloc_at_end(executable_mapping_sequence_bigalloc, new_curbrk);
 		delete_mapping_sequence_span(seq, new_curbrk, (char*) old_end - (char*) new_curbrk);
 	}

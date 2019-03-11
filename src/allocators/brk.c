@@ -46,16 +46,15 @@ struct allocator __brk_allocator = {
 	/* FIXME: meta-protocol implementation */
 };
 
-static void set_brk_bigalloc(void)
+static void set_brk_bigalloc(void *curbrk)
 {
-	assert(executable_mapping_sequence_bigalloc);
-	// now create the brk bigalloc
 	assert(!executable_mapping_sequence_bigalloc->first_child);
 	// what is the actual end of the data segment PHDR?
 	struct link_map *exe_lment = get_highest_loaded_object_below(executable_mapping_sequence_bigalloc->begin);
 	assert(exe_lment);
 	ElfW(auxv_t) *at_phdr = auxv_xlookup(get_auxv((const char **) environ, &at_phdr), AT_PHDR);
 	ElfW(auxv_t) *at_phnum = auxv_xlookup(get_auxv((const char **) environ, &at_phdr), AT_PHNUM);
+	assert(at_phnum > 0);
 	ElfW(Phdr) *phdrs = (ElfW(Phdr) *) at_phdr->a_un.a_val;
 	/* Our "data segment mapping" bigalloc is really a *mapping sequence*.
 	 * It includes all segments of the executable. What is the "data segment"?
@@ -77,15 +76,20 @@ static void set_brk_bigalloc(void)
 	{
 		uintptr_t phdr_loaded_addr = exe_lment->l_addr + highest_vaddr_load_phdr->p_vaddr;
 		uintptr_t phdr_end_addr = phdr_loaded_addr + highest_vaddr_load_phdr->p_memsz;
+		debug_printf(1, "think we have a data segment phdr %lx-%lx (vs %p-%p)\n",
+			(unsigned long) phdr_loaded_addr,
+			phdr_end_addr,
+			executable_mapping_sequence_bigalloc->begin,
+			executable_mapping_sequence_bigalloc->end);
 		// assert that it's contained within the mapping sequence we know about
-		assert(phdr_loaded_addr >= executable_mapping_sequence_bigalloc->begin);
-		assert(phdr_end_addr <= executable_mapping_sequence_bigalloc->end);
+		// the mapping sequence might have been rounded up to end at the next page boundary
+		assert(phdr_end_addr <= (uintptr_t) executable_mapping_sequence_bigalloc->end);
+		assert(phdr_loaded_addr >= (uintptr_t) executable_mapping_sequence_bigalloc->begin);
 		// found it.
 		// so now we know where it ends. create the brk bigalloc where it leaves off
-		uintptr_t brk_area_begin_addr = phdr_end_addr;
 		__brk_bigalloc = __liballocs_new_bigalloc(
-			(void*) brk_area_begin_addr,
-			(uintptr_t) executable_mapping_sequence_bigalloc->end - brk_area_begin_addr,
+			(void*) phdr_end_addr,
+			(uintptr_t) executable_mapping_sequence_bigalloc->end - phdr_end_addr,
 			(struct meta_info) {
 				.what = INS_AND_BITS
 			},
@@ -104,9 +108,6 @@ static void set_brk_bigalloc(void)
 static void update_brk(void *new_curbrk)
 {
 	/* If we haven't made the bigalloc yet, sbrk needs no action. */
-	if (!executable_mapping_sequence_bigalloc) return;
-	/* Tell the mmap allocator to ensure we extend up to the new brk. */
-	__mmap_allocator_notify_brk(new_curbrk);
 	assert(executable_mapping_sequence_bigalloc);
 	assert((char*) executable_mapping_sequence_bigalloc->end >= (char*) new_curbrk);
 	assert(__brk_bigalloc);
@@ -135,8 +136,11 @@ void __brk_allocator_init(void)
 	if (!initialized && !trying_to_initialize)
 	{
 		trying_to_initialize = 1;
-		set_brk_bigalloc();
-		update_brk(sbrk(0));
+		void *curbrk = sbrk(0);
+		/* Make sure the mmap allocator has created a big-enough mapping bigalloc. */
+		__mmap_allocator_notify_brk(curbrk);
+		/* Do our init. */
+		set_brk_bigalloc(curbrk);
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -154,7 +158,18 @@ void __brk_allocator_notify_brk(void *new_curbrk, const void *caller)
 		return;
 	}
 	last_caller = caller;
-	update_brk(new_curbrk);
+	/* If the brk is growing, we need to first grow the mmap and
+	 * then grow brk. If it's contracting, do it the other way around. */
+	if ((char*) __curbrk < (char*) new_curbrk)
+	{
+		__mmap_allocator_notify_brk(new_curbrk);
+		update_brk(new_curbrk);
+	}
+	else
+	{
+		update_brk(new_curbrk);
+		__mmap_allocator_notify_brk(new_curbrk);
+	}
 }
 
 _Bool __brk_allocator_notify_unindexed_address(void *mem)
