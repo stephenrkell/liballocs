@@ -306,7 +306,10 @@ UNIQTYPE_DECLS
 #define UNIQTYPE_XSTRINGIFY(...) UNIQTYPE_STRINGIFY( __VA_ARGS__ )
 #define UNIQTYPE_DECLSTR UNIQTYPE_XSTRINGIFY(UNIQTYPE_DECLS)
 
+/* At present, these are created in each dumptypes run. Probably
+ * they should simply be dynamically created by liballocs. */
 extern struct uniqtype __uniqtype__void __attribute__((weak));
+extern struct uniqtype __uniqtype____EXISTS1__1 __attribute__((weak)); // 'a, the arbitrary abstract type
 extern struct uniqtype __uniqtype____EXISTS1___PTR__1 __attribute__((weak)); // pointer to 'a
 extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); // byte
 

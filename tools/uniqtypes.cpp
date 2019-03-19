@@ -334,8 +334,19 @@ void write_master_relation(master_relation_t& r,
 		write_uniqtype_related_dummy(out);
 		write_uniqtype_close(out, mangled_name);
 		
-		/* We also now emit two further "special" types: the type of
+		/* We also now emit some further "special" types: an arbitrary
+		 * existentially quantified type ('a for any 'a), the type of
 		 * generic pointers, and the type of uninterpreted bytes. */
+		out << "\n/* uniqtype for 'a */\n";
+		if (emit_subobject_names) emit_empty_subobject_names("__EXISTS1__1");
+		string mangled_name_a = mangle_typename(make_pair(string(""), string("__EXISTS1__1")));
+		write_uniqtype_open_void(out,
+			mangled_name_a,
+			"__EXISTS1__1",
+			string("__EXISTS1__1")
+		);
+		write_uniqtype_related_dummy(out);
+		write_uniqtype_close(out, mangled_name_a);
 		out << "\n/* uniqtype for generic pointers */\n";
 		if (emit_subobject_names) emit_empty_subobject_names("__EXISTS1___PTR__1");
 		mangled_name = mangle_typename(make_pair(string(""), string("__EXISTS1___PTR__1")));
@@ -347,7 +358,7 @@ void write_master_relation(master_relation_t& r,
 		);
 		out << "{ address: { .kind = ADDRESS, .genericity = 1, .indir_level = 1 } },\n\t"
 			<< "/* make_precise */ __liballocs_make_precise_identity, /* related */ {\n\t\t";
-		write_uniqtype_related_dummy(out);
+		write_uniqtype_related_pointee_type(out, mangled_name_a);
 		write_uniqtype_close(out, mangled_name);
 		
 		out << "\n/* uniqtype for uninterpreted bytes */\n";
