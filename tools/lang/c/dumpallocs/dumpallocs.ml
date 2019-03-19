@@ -743,7 +743,34 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
          )
       | _ -> DoChildren
 
-  method vinst (i: instr) : instr list visitAction = 
+  (* In C, some types often "stand in" for an abstract type that the language
+   * doesn't have. For example, void* often stands in for an existential "pointer to 'a"
+   * for some 'a. These abstract types are only used for (1) sizeof, or (2) degenerate
+   * cases where it has not yet been determined what 'a is, such as immediately after
+   * allocating an array of pointer-to-'a (but not using it for anything).
+   *
+   * We give some of these abstract types their own identity as uniqtypes. This allows
+   * us to distinguish, say, a "real" void* -- the points-to-anything type -- and an
+   * abstract use of void* where "void" will eventually be instantiated with some 'a.
+   *
+   * By default, when sizeof is being done on these types, we emit the symbol for the
+   * abstract type. We should (FIXME) also allow the user to ask to generate abstract
+   * versions of other types. For example, sockaddr often stands in for "the abstract
+   * socket address". As another example, in perlbench there is an abstract view of
+   * "any Perl value" (struct XPV is the usual stand-in, if I remember).
+   *
+   * We exploit this in libcrunch: the rules for pointers to abstract types are a bit
+   * different. They may be created more freely, but their uses are checked more tightly
+   * so that we can assign a concrete type once a concrete "used-as" type appears. *)
+  method isAbstractedType (ts: typsig) =
+    isSinglyIndirectGenericPointerTypesig ts
+
+  method symnameForAbstractedType (ts: typsig) =
+    if isSinglyIndirectGenericPointerTypesig ts
+      then "__uniqtype____EXISTS1___PTR__1"
+      else raise Not_found
+
+  method vinst (i: instr) : instr list visitAction =
     ( debug_print 1 ("considering instruction " ^ (
        match i with 
           Call(_, _, _, l) -> "(call) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
@@ -793,8 +820,8 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
               let res = getAllocExpr i maybeFunvar args !sizeEnv functionT fl.globals in
               if res = None then SkipChildren(* this means it's not an allocation function *)
               else let allocString, isComplete = match res with
-                 Some(Existing(ts, isComplete)) when isSinglyIndirectGenericPointerTypesig ts -> 
-                    ("__uniqtype____EXISTS1___PTR__1", true)
+                 Some(Existing(ts, isComplete)) when self#isAbstractedType ts ->
+                    (self#symnameForAbstractedType ts, true)
               |  Some(Existing(ts, isComplete)) -> 
                     ((symnameFromSig ts), isComplete)
               |  Some(Synthetic(tss)) ->
@@ -844,7 +871,7 @@ let feature : Feature.t =
       let daVisitor = new dumpAllocsVisitor f in
       (* Cfg.computeFileCFG f;
       computeAEs f; *)
-      visitCilFileSameGlobals daVisitor f);
+      visitCilFileSameGlobals (daVisitor :> cilVisitor) f);
     fd_post_check = true;
   } 
 
