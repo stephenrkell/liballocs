@@ -237,47 +237,47 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 		}
 		if (dynsym)
 		{
-			/* Copy the contents of dynsym and sort them. */
-			n_dynsym = dynamic_symbol_count(/*dynamic*/ l->l_ld, l);
-			/* Also copy in symtab if we can find it. FIXME: do this even if !dynsym */
-			ElfW(Shdr) *symtab_ent = NULL;
-			for (unsigned i = 0; i < ehdr->e_shnum; ++i)
-			{
-				if (shdr[i].sh_type == SHT_SYMTAB)
-				{
-					symtab_ent = &shdr[i];
-					break;
-				}
-			}
-			if (symtab_ent)
-			{
-				n_symtab = symtab_ent->sh_size / sizeof (ElfW(Sym));
-			}
-			
-			all_syms_sorted_mapping_size = ROUND_UP((n_dynsym + n_symtab) * sizeof (ElfW(Sym)), PAGE_SIZE);
-			all_syms_sorted = mmap(NULL, all_syms_sorted_mapping_size,
-					PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
-			if (all_syms_sorted == MAP_FAILED)
-			{
-				all_syms_sorted = NULL;
-				all_syms_sorted_mapping_size = 0;
-			}
-			else
-			{
-				memcpy(all_syms_sorted, dynsym, n_dynsym * sizeof (ElfW(Sym)));
-				if (symtab_ent)
-				{
-					ElfW(Sym) *symtab = (ElfW(Sym) *)((unsigned char *) file_mapping
-						+ symtab_ent->sh_offset);
-					memcpy((unsigned char *) all_syms_sorted  + n_dynsym * sizeof (ElfW(Sym)),
-						symtab,
-						n_symtab * sizeof (ElfW(Sym)));
-				}
-				/* PROBLEM: qsort wants to malloc, which we don't want it
-				 * to do. */
-				qsort(all_syms_sorted, n_dynsym + n_symtab, sizeof (ElfW(Sym)),
-					sym_addr_size_compare);
-			}
+// 			/* Copy the contents of dynsym and sort them. */
+// 			n_dynsym = dynamic_symbol_count(/*dynamic*/ l->l_ld, l);
+// 			/* Also copy in symtab if we can find it. FIXME: do this even if !dynsym */
+// 			ElfW(Shdr) *symtab_ent = NULL;
+// 			for (unsigned i = 0; i < ehdr->e_shnum; ++i)
+// 			{
+// 				if (shdr[i].sh_type == SHT_SYMTAB)
+// 				{
+// 					symtab_ent = &shdr[i];
+// 					break;
+// 				}
+// 			}
+// 			if (symtab_ent)
+// 			{
+// 				n_symtab = symtab_ent->sh_size / sizeof (ElfW(Sym));
+// 			}
+// 			
+// 			all_syms_sorted_mapping_size = ROUND_UP((n_dynsym + n_symtab) * sizeof (ElfW(Sym)), PAGE_SIZE);
+// 			all_syms_sorted = mmap(NULL, all_syms_sorted_mapping_size,
+// 					PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+// 			if (all_syms_sorted == MAP_FAILED)
+// 			{
+// 				all_syms_sorted = NULL;
+// 				all_syms_sorted_mapping_size = 0;
+// 			}
+// 			else
+// 			{
+// 				memcpy(all_syms_sorted, dynsym, n_dynsym * sizeof (ElfW(Sym)));
+// 				if (symtab_ent)
+// 				{
+// 					ElfW(Sym) *symtab = (ElfW(Sym) *)((unsigned char *) file_mapping
+// 						+ symtab_ent->sh_offset);
+// 					memcpy((unsigned char *) all_syms_sorted  + n_dynsym * sizeof (ElfW(Sym)),
+// 						symtab,
+// 						n_symtab * sizeof (ElfW(Sym)));
+// 				}
+// 				/* PROBLEM: qsort wants to malloc, which we don't want it
+// 				 * to do. */
+// 				qsort(all_syms_sorted, n_dynsym + n_symtab, sizeof (ElfW(Sym)),
+// 					sym_addr_size_compare);
+// 			}
 		}
 		for (int i = 0; i < info->dlpi_phnum; ++i)
 		{
@@ -335,99 +335,99 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 						+ info->dlpi_phdr[i].p_memsz;
 				// linear scan of dynsym
 				// do we really only want to add dynsyms? NO! add any syms?
-				if (dynsym)
-				{
-					bm->dynsym = dynsym;
-					// scan *all* symbols, using the sorted array
-					for (unsigned i = 0; i < n_dynsym + n_symtab; ++i) // FIXME: do even if !dynsym
-					{
-						if (all_syms_sorted[i].st_size > 0) // only add range symbols
-						{
-							unsigned long sym_vaddr = all_syms_sorted[i].st_value;
-							if (sym_vaddr >= segment_base_vaddr
-									&& sym_vaddr < segment_limit_vaddr)
-							{
-								off_t offset_from_segment_base = sym_vaddr - segment_base_vaddr;
-								bitmap_set((unsigned long *) bm->bits,
-									offset_from_segment_base);
-							}
-						}
-					}
-				} // end if dynsym
-				if (shdr)
-				{
-					/* Scan the shdrs for any REL or RELA sections that
-					 * apply to sections within this segment. We will use
-					 * them to mark additional object starts in the bitmap.
-					 * Note that it's the *target* section of the reloc
-					 * that we care about, i.e. whatever section the symtab
-					 * entry points to. The relocated section is not
-					 * interesting to us. */
-					for (unsigned i_sec = 0; i_sec < ehdr->e_shnum; ++i_sec)
-					{
-						if ((shdr[i_sec].sh_type == SHT_REL
-								|| shdr[i_sec].sh_type == SHT_RELA)
-							&& shdr[i_sec].sh_info != 0 /* ignores .rela.dyn */
-							&& 0 != (shdr[shdr[i_sec].sh_info].sh_flags & SHF_ALLOC)
-								/* ignore relocs for non-allocated sections */
-						   )
-						{
-							_Bool is_rela = (shdr[i_sec].sh_type == SHT_RELA);
-							/* Scan the relocs and find whether their target section
-							 * is within this segment. */
-							unsigned symtab_scn = shdr[i_sec].sh_link;
-							ElfW(Sym) *symtab = (ElfW(Sym) *)(
-								(char*) file_mapping + shdr[symtab_scn].sh_offset);
-							unsigned nrel = shdr[i_sec].sh_size / 
-								(is_rela ? sizeof (ElfW(Rela)) : sizeof (ElfW(Rel)));
-							void *tbl_base = (char*) file_mapping + shdr[i_sec].sh_offset;
-							ElfW(Rela) *rela_base = is_rela ? (ElfW(Rela) *) tbl_base : NULL;
-							ElfW(Rel) *rel_base = is_rela ? NULL : (ElfW(Rel) *) tbl_base;
-							for (unsigned i = 0; i < nrel; ++i)
-							{
-								/* Is this relocation referencing a section symbol?
-								 * FIXME: this is ELF64-specific. */
-								Elf64_Xword info = is_rela ? rela_base[i].r_info : rel_base[i].r_info;
-								unsigned symind = ELF64_R_SYM(info);
-								if (symind
-										&& ELF64_ST_TYPE(symtab[symind].st_info) == STT_SECTION)
-								{
-									/* NOTE that the *referenced vaddr* is *not*
-									 * the r_offset i.e. the relocation site.
-									 * It's the vaddr of the referenced section symbol,
-									 * i.e. of the referenced section,
-									 * plus the addend if any. */
-									unsigned shndx = symtab[symind].st_shndx;
-									Elf64_Sword referenced_vaddr
-										= shdr[shndx].sh_addr + 
-											(is_rela ? rela_base[i].r_addend : 0);
-									if (referenced_vaddr >= segment_base_vaddr
-										&& referenced_vaddr < segment_limit_vaddr)
-									{
-										/* The referenced in-section location 
-										 * is contained in this segment. Consider it
-										 * an object start IFF no symbol overlaps it. */
-										
-										Elf64_Addr addr = referenced_vaddr;
-										void *found = bsearch(&addr,
-											all_syms_sorted, n_dynsym + n_symtab, sizeof (ElfW(Sym)),
-											sym_addr_size_search);
-										if (!found
-											|| ((ElfW(Sym) *)found)->st_value > addr
-											|| ((ElfW(Sym) *)found)->st_value
-												+ ((ElfW(Sym) *)found)->st_size <= addr)
-										{
-											off_t offset_from_segment_base = referenced_vaddr
-												- segment_base_vaddr;
-											bitmap_set((unsigned long *) bm->bits,
-												offset_from_segment_base);
-										}
-									}
-								}
-							}
-						}
-					}
-				}
+// 				if (dynsym)
+// 				{
+// 					bm->dynsym = dynsym;
+// 					// scan *all* symbols, using the sorted array
+// 					for (unsigned i = 0; i < n_dynsym + n_symtab; ++i) // FIXME: do even if !dynsym
+// 					{
+// 						if (all_syms_sorted[i].st_size > 0) // only add range symbols
+// 						{
+// 							unsigned long sym_vaddr = all_syms_sorted[i].st_value;
+// 							if (sym_vaddr >= segment_base_vaddr
+// 									&& sym_vaddr < segment_limit_vaddr)
+// 							{
+// 								off_t offset_from_segment_base = sym_vaddr - segment_base_vaddr;
+// 								bitmap_set((unsigned long *) bm->bits,
+// 									offset_from_segment_base);
+// 							}
+// 						}
+// 					}
+// 				} // end if dynsym
+// 				if (shdr)
+// 				{
+// 					/* Scan the shdrs for any REL or RELA sections that
+// 					 * apply to sections within this segment. We will use
+// 					 * them to mark additional object starts in the bitmap.
+// 					 * Note that it's the *target* section of the reloc
+// 					 * that we care about, i.e. whatever section the symtab
+// 					 * entry points to. The relocated section is not
+// 					 * interesting to us. */
+// 					for (unsigned i_sec = 0; i_sec < ehdr->e_shnum; ++i_sec)
+// 					{
+// 						if ((shdr[i_sec].sh_type == SHT_REL
+// 								|| shdr[i_sec].sh_type == SHT_RELA)
+// 							&& shdr[i_sec].sh_info != 0 /* ignores .rela.dyn */
+// 							&& 0 != (shdr[shdr[i_sec].sh_info].sh_flags & SHF_ALLOC)
+// 								/* ignore relocs for non-allocated sections */
+// 						   )
+// 						{
+// 							_Bool is_rela = (shdr[i_sec].sh_type == SHT_RELA);
+// 							/* Scan the relocs and find whether their target section
+// 							 * is within this segment. */
+// 							unsigned symtab_scn = shdr[i_sec].sh_link;
+// 							ElfW(Sym) *symtab = (ElfW(Sym) *)(
+// 								(char*) file_mapping + shdr[symtab_scn].sh_offset);
+// 							unsigned nrel = shdr[i_sec].sh_size / 
+// 								(is_rela ? sizeof (ElfW(Rela)) : sizeof (ElfW(Rel)));
+// 							void *tbl_base = (char*) file_mapping + shdr[i_sec].sh_offset;
+// 							ElfW(Rela) *rela_base = is_rela ? (ElfW(Rela) *) tbl_base : NULL;
+// 							ElfW(Rel) *rel_base = is_rela ? NULL : (ElfW(Rel) *) tbl_base;
+// 							for (unsigned i = 0; i < nrel; ++i)
+// 							{
+// 								/* Is this relocation referencing a section symbol?
+// 								 * FIXME: this is ELF64-specific. */
+// 								Elf64_Xword info = is_rela ? rela_base[i].r_info : rel_base[i].r_info;
+// 								unsigned symind = ELF64_R_SYM(info);
+// 								if (symind
+// 										&& ELF64_ST_TYPE(symtab[symind].st_info) == STT_SECTION)
+// 								{
+// 									/* NOTE that the *referenced vaddr* is *not*
+// 									 * the r_offset i.e. the relocation site.
+// 									 * It's the vaddr of the referenced section symbol,
+// 									 * i.e. of the referenced section,
+// 									 * plus the addend if any. */
+// 									unsigned shndx = symtab[symind].st_shndx;
+// 									Elf64_Sword referenced_vaddr
+// 										= shdr[shndx].sh_addr + 
+// 											(is_rela ? rela_base[i].r_addend : 0);
+// 									if (referenced_vaddr >= segment_base_vaddr
+// 										&& referenced_vaddr < segment_limit_vaddr)
+// 									{
+// 										/* The referenced in-section location 
+// 										 * is contained in this segment. Consider it
+// 										 * an object start IFF no symbol overlaps it. */
+// 										
+// 										Elf64_Addr addr = referenced_vaddr;
+// 										void *found = bsearch(&addr,
+// 											all_syms_sorted, n_dynsym + n_symtab, sizeof (ElfW(Sym)),
+// 											sym_addr_size_search);
+// 										if (!found
+// 											|| ((ElfW(Sym) *)found)->st_value > addr
+// 											|| ((ElfW(Sym) *)found)->st_value
+// 												+ ((ElfW(Sym) *)found)->st_size <= addr)
+// 										{
+// 											off_t offset_from_segment_base = referenced_vaddr
+// 												- segment_base_vaddr;
+// 											bitmap_set((unsigned long *) bm->bits,
+// 												offset_from_segment_base);
+// 										}
+// 									}
+// 								}
+// 							}
+// 						}
+// 					}
+// 				}
 				
 				
 			} // end if it's a load
