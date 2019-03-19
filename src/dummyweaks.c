@@ -261,3 +261,11 @@ void __liballocs_trace_cache_eviction(struct __liballocs_memrange_cache_entry_s 
 {
 }
 
+liballocs_err_t __generic_malloc_set_site(struct big_allocation *maybe_the_allocation, void *obj, const void *new_site)
+{
+	return NULL;
+}
+liballocs_err_t __generic_malloc_set_type(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type)
+{
+	return NULL;
+}

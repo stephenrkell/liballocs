@@ -21,6 +21,15 @@ int __currently_allocating __attribute__((weak)); // defined by heap_index_hooks
 int  __index_small_alloc(void *ptr, int level, unsigned size_bytes); // defined by heap_index_hooks
 void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 
+struct liballocs_err;
+typedef struct liballocs_err *liballocs_err_t;
+extern struct liballocs_err __liballocs_err_unindexed_heap_object;
+struct big_allocation;
+struct uniqtype;
+liballocs_err_t __generic_malloc_set_type(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type);
+liballocs_err_t __generic_malloc_set_site(struct big_allocation *maybe_the_allocation, void *obj, const void *new_site);
+extern struct uniqtype __uniqtype____EXISTS1__1;
+
 /* these are our per-allocfn caller wrappers */
 
 #define type_for_argchar_z size_t
@@ -146,6 +155,12 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 #define do_arginit(num, c) do_arginit_ ## c ( arg ## num )
 #endif
 
+#ifdef TRACE_ALLOC_WRAPPERS
+#define _ALLOC_WRAPPERS_TRACE( x... ) warnx(##args)
+#else
+#define _ALLOC_WRAPPERS_TRACE( x... )
+#endif
+
 #define make_caller_wrapper(name, retchar) \
 	type_for_argchar_ ## retchar __real_ ## name ( arglist_ ## name (make_argdecl) ); \
 	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
@@ -153,40 +168,44 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 		do_caller_wrapper_init(name) \
 		arglist_nocomma_ ## name (do_arginit) \
 		type_for_argchar_ ## retchar real_retval; \
-		if (&__current_allocfn && !__current_allocfn) \
-		{ \
-			_Bool set_currently_allocating = 0; \
-			if (&__currently_allocating && !__currently_allocating) { \
-				__currently_allocating = 1; \
-				set_currently_allocating = 1; \
-			} \
-			/* only set the site if we don't have one already */ \
-			if (!__current_allocsite) __current_allocsite = __builtin_return_address(0); \
-			__current_allocfn = &__real_ ## name; \
-			__current_allocsz = size_arg_ ## name; \
-			rev_arglist_nocomma_ ## name (pre_realarg) \
-			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-			void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-			arglist_nocomma_ ## name (post_realarg) \
-			/* __current_alloclevel = 0; */ \
-			/* zero the site now the alloc action is completed, even if it was already set */ \
+		_Bool set_currently_allocating = 0; \
+		if (&__currently_allocating && !__currently_allocating) { \
+			__currently_allocating = 1; \
+			set_currently_allocating = 1; \
+		} \
+		/* only set the site if we don't have one already */ \
+		if (!__current_allocsite) { \
+			__current_allocsite = __builtin_return_address(0); \
+			_ALLOC_WRAPPERS_TRACE("In caller-side wrapper of %s, latched __current_allocsite %p since we didn't have one", #name, __current_allocsite); \
+		} else { \
+			_ALLOC_WRAPPERS_TRACE("In caller-side wrapper of %s, did not latch __current_allocsite as we had one already", #name); \
+		} \
+		void *saved_allocfn = __current_allocfn; \
+		size_t saved_allocsz = __current_allocsz; \
+		__current_allocfn = &__real_ ## name; \
+		__current_allocsz = size_arg_ ## name; \
+		rev_arglist_nocomma_ ## name (pre_realarg) \
+		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
+		void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+		post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
+		arglist_nocomma_ ## name (post_realarg) \
+		/* __current_alloclevel = 0; */ \
+		/* zero the site now the alloc action is completed, even if it was already set */ \
+		if (__current_allocsite) { \
+			/* This is our hint that the real allocator didn't get called */ \
+			/* (e.g. a chunk-caching wrapper) or didn't heed our metadata */ \
+			/* (e.g. if uninstrumented). We make another call to push */ \
+			/* the metadata at liballocs more directly. FIXME: we should */ \
+			/* really know which allocator we are stubbing for, rather than */ \
+			/* hard-code the generic malloc here. */ \
+			__generic_malloc_set_site(NULL, retval, __current_allocsite); \
+			_ALLOC_WRAPPERS_TRACE("In caller-side wrapper of #s, zeroing __current_allocsite (was %p) consumed by %s", #name, __current_allocsite); \
 			__current_allocsite = (void*)0; \
-			__current_allocfn = (void*)0; \
-			__current_allocsz = 0; \
-			if (set_currently_allocating) __currently_allocating = 0; \
-			real_retval = retval; \
 		} \
-		else \
-		{ \
-			/* printf("&__current_allocfn: %p    ", &__current_allocfn); */ \
-			/* if (&__current_allocfn) printf("__current_allocfn: %d", __current_allocfn); */ \
-			rev_arglist_nocomma_ ## name (pre_realarg) \
-			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-			real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-			arglist_nocomma_ ## name (post_realarg) \
-		} \
+		__current_allocfn = saved_allocfn; \
+		__current_allocsz = saved_allocsz; \
+		if (set_currently_allocating) __currently_allocating = 0; \
+		real_retval = retval; \
 		do_caller_wrapper_fini(name) \
 		do_ret_ ## retchar (name) \
 		return real_retval; \
@@ -243,21 +262,18 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 	{ \
 		do_caller_wrapper_init(name) \
 		arglist_nocomma_ ## name (do_arginit) \
-		_Bool have_caller_allocfn; \
+		void *saved_allocfn = __current_allocfn; \
+		unsigned long saved_allocsz = __current_allocsz; \
 		_Bool set_currently_allocating = 0; \
-		if (&__current_allocfn && !__current_allocfn) /* This means we're not in any kind of alloc function yet */ \
-		{ \
-			set_currently_allocating = 0; \
-			if (&__currently_allocating && !__currently_allocating) { \
-				__currently_allocating = 1; \
-				set_currently_allocating = 1; \
-			} \
-			/* only set the site if we don't have one already */ \
-			if (!__current_allocsite) __current_allocsite = __builtin_return_address(0); \
-			__current_allocfn = &__real_ ## name; \
-			__current_allocsz = size_arg_ ## name; \
-			have_caller_allocfn = 0; \
-		}  else have_caller_allocfn = 1; \
+		set_currently_allocating = 0; \
+		if (&__currently_allocating && !__currently_allocating) { \
+			__currently_allocating = 1; \
+			set_currently_allocating = 1; \
+		} \
+		/* only set the site if we don't have one already */ \
+		if (!__current_allocsite) __current_allocsite = __builtin_return_address(0); \
+		__current_allocfn = &__real_ ## name; \
+		__current_allocsz = size_arg_ ## name; \
 		/* __current_alloclevel = 1; */ /* We're at least at level 1, i.e. below sbrk()/mmap(). pre_alloc increments this too */ \
 		rev_arglist_nocomma_ ## name (pre_realarg) \
 		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
@@ -280,14 +296,14 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 			assert(name ## _alloclevel == 0 || seen_alloclevel == name ## _alloclevel); \
 			if (name ## _alloclevel == 0) name ## _alloclevel = seen_alloclevel; \
 		} \
-		if (!have_caller_allocfn) \
+		if (saved_caller_allocfn) \
 		{ \
 			/* __current_alloclevel = 0; */ \
 			/* zero the site now the alloc action is completed, even if it was already set */ \
 			__current_allocsite = (void*)0; \
-			__current_allocfn = (void*)0; \
-			__current_allocsz = 0; \
 		} \
+		__current_allocfn = current_allocfn; \
+		__current_allocsz = current_allocsz; \
 		if (set_currently_allocating) __currently_allocating = 0; \
 		do_caller_wrapper_fini(name) \
 		do_ret_ ## retchar (name) \
@@ -304,6 +320,10 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 		if (&__currently_freeing && !__currently_freeing) we_are_toplevel_free = 1; \
 		else we_are_toplevel_free = 0; \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 1; \
+		/* FIXME: do something about clearing the metadata, in the chunk-caching case. */ \
+		/* We can do this before the real free, so that we know the chunk is valid. */ \
+		/* For now, perhaps as simple as a set_type(NULL) call on __generic_malloc? */ \
+		__generic_malloc_set_type((void*)0, &__uniqtype____EXISTS1__1, /* HACK arglist_ ## name (make_argname)*/ arg0 ); \
 		rev_arglist_nocomma_ ## name (pre_realarg) \
 		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
 		__real_ ## name( arglist_ ## name (make_argname) ); \

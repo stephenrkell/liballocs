@@ -846,6 +846,7 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 struct uniqtype *
 __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_t, */...);
 int __liballocs_add_type_to_block(void *block, struct uniqtype *t);
+liballocs_err_t __generic_heap_set_site(struct big_allocation *maybe_the_allocation, void *obj, const void *new_site);
 
 #ifdef __cplusplus
 } // end extern "C"

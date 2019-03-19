@@ -1757,6 +1757,11 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 	return 0;
 }
 
+void **__liballocs_get_current_allocsite_tls_addr(void)
+{
+	return &__current_allocsite;
+}
+
 struct __liballocs_memrange_cache_entry_s *
 __liballocs_ool_memrange_cache_lookup(struct __liballocs_memrange_cache *cache,
 	const void *obj, struct uniqtype *t, unsigned long require_period)

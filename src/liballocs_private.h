@@ -186,6 +186,10 @@ static struct uniqtype *get_type(void *obj) \
 	return out; \
 }
 
+// perf debugging help
+void __liballocs_trace_cache_eviction(struct __liballocs_memrange_cache_entry_s *old,
+	struct __liballocs_memrange_cache_entry_s *new);
+
 extern struct uniqtype *pointer_to___uniqtype__void __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__signed_char __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__unsigned_char __attribute__((visibility("hidden")));

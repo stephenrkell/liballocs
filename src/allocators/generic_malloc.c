@@ -477,6 +477,7 @@ static void
 index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 {
 	int lock_ret;
+	assert(caller != NULL); // we never have to insert with a null site
 	BIG_LOCK
 	
 	/* We *must* have been initialized to continue. So initialize now.
@@ -618,7 +619,21 @@ void
 post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
 		size_t requested_size, size_t requested_alignment, const void *caller)
 {
-	index_insert(allocptr /* == userptr */, modified_size, __current_allocsite ? __current_allocsite : caller);
+	const void *ultimate_caller = __current_allocsite ? __current_allocsite : caller;
+	/* We "consume" the __current_allocsite value. This is for cases where a wrapped
+	 * malloc makes a *second* -- e.g. __ckd_calloc_2d__ in sphinx3 from SPEC CPU2006
+	 * allocates a "spine" vector of pointers. We want that call to be treated as
+	 * a separate allocation site. This is a bit of a HACK because it only handles
+	 * this case if the spine is allocated second. What we really want is to walk
+	 * up the stack "seeing through" untyped call sites, until we hit a typed one.
+	 * Even then, it is not quite foolproof to assume that that type applies to the
+	 * present allocation, not (say) some sibling call. */
+	if (__current_allocsite)
+	{
+		// warnx("Heap index zeroing __current_allocsite (%p) as it has now been consumed", __current_allocsite);
+		__current_allocsite = NULL;
+	}
+	index_insert(allocptr /* == userptr */, modified_size, ultimate_caller);
 	safe_to_call_malloc = 1; // if somebody succeeded, anyone should succeed
 }
 
@@ -858,6 +873,9 @@ void post_nonnull_nonzero_realloc(void *userptr,
 	/* Are we a bigalloc? */
 	struct big_allocation *b = __lookup_bigalloc(userptr, 
 			&__generic_malloc_allocator, NULL);
+	/* See note about ultimate_caller post_succsesful_alloc. */
+	const void *ultimate_caller = __current_allocsite ? __current_allocsite : caller;
+	if (__current_allocsite) __current_allocsite = NULL;
 	if (__new_allocptr && __new_allocptr != userptr)
 	{
 		/* Create a new bin entry. This will also take care of becoming a bigalloc, etc..
@@ -865,7 +883,7 @@ void post_nonnull_nonzero_realloc(void *userptr,
 		 * in a way that's uniform with memcpy... the new chunk will take its type
 		 * from the realloc site, and we then check compatibility on the copy. */
 		index_insert(allocptr_to_userptr(__new_allocptr), 
-				modified_size, __current_allocsite ? __current_allocsite : caller);
+				modified_size, ultimate_caller);
 		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
 		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
 		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
@@ -878,7 +896,7 @@ void post_nonnull_nonzero_realloc(void *userptr,
 		 * allocating it, so we pass it as the modified_size to
 		 * index_insert. */
 		// FIXME: is this right? what if __new_allocptr is null?
-		index_insert(userptr, old_usable_size, __current_allocsite ? __current_allocsite : caller);
+		index_insert(userptr, old_usable_size, ultimate_caller);
 	}
 	
 	if (__new_allocptr == userptr && modified_size < old_usable_size)
@@ -1412,6 +1430,14 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 
 liballocs_err_t __generic_heap_set_type(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type)
 {
+	if (!maybe_the_allocation)
+	{
+		struct big_allocation *b = __lookup_deepest_bigalloc(obj);
+		if (b->allocated_by == &__generic_malloc_allocator)
+		{
+			maybe_the_allocation = b;
+		}
+	}
 	struct insert *ins = __liballocs_get_insert(maybe_the_allocation, obj);
 	struct insert *heap_info = lookup_object_info(obj, NULL, NULL, NULL);
 	if (!ins) return &__liballocs_err_unindexed_heap_object;
@@ -1420,10 +1446,29 @@ liballocs_err_t __generic_heap_set_type(struct big_allocation *maybe_the_allocat
 	return NULL;
 }
 
+liballocs_err_t __generic_heap_set_site(struct big_allocation *maybe_the_allocation, void *obj, const void *new_site)
+{
+	if (!maybe_the_allocation)
+	{
+		struct big_allocation *b = __lookup_deepest_bigalloc(obj);
+		if (b->allocated_by == &__generic_malloc_allocator)
+		{
+			maybe_the_allocation = b;
+		}
+	}
+	struct insert *ins = __liballocs_get_insert(maybe_the_allocation, obj);
+	struct insert *heap_info = lookup_object_info(obj, NULL, NULL, NULL);
+	if (!ins) return &__liballocs_err_unindexed_heap_object;
+	ins->alloc_site = (uintptr_t) new_site;
+	ins->alloc_site_flag = 0; // meaning it's a site, not a type
+	return NULL;
+}
+
 struct allocator __generic_malloc_allocator = {
 	.name = "generic malloc",
 	.get_info = __generic_heap_get_info,
 	.is_cacheable = 1,
 	.ensure_big = ensure_big,
-	.set_type = __generic_heap_set_type
+	.set_type = __generic_heap_set_type,
+	.set_site = __generic_heap_set_site
 };
