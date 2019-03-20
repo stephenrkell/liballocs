@@ -27,6 +27,19 @@
 /tools/lang/c/src/base-types-translation
 /tools/usedtypes
 /tools/lang/c/*/*.d
+/tools/cufiles
+/tools/dumpptrs
+
+/contrib/antlr-3.4-complete.jar
+/contrib/antlr-3.4.tar.gz
+/contrib/config.mk
+/contrib/env.sh
+/contrib/libantlr3c-3.4/
+/libltdl/
+
+/config.h
+/config.h.in
+
 
 /Makefile
 
