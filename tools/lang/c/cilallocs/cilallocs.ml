@@ -737,6 +737,11 @@ let rec ultimatePointeeT someT = match someT with
   | TPtr(pt, _) -> pt
   | _ -> raise Not_found
 
+let rec pointeeT someT = match someT with
+    TPtr(pt, _) -> pt
+  | TNamed(ti, _) -> pointeeT ti.ttype
+  | _ -> raise Not_found
+
 let instrLoc (maybeInst : Cil.instr option) =
    match maybeInst with 
    Some(i) -> Cil.get_instrLoc i
