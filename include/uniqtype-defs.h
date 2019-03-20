@@ -131,7 +131,7 @@ struct uniqtype \
            unsigned nret:10; /* sim. return values */ \
            unsigned is_va:1; /* is variadic */ \
            unsigned cc:7;    /* calling convention */ \
-       } subprogram; /* related[0..nret] are return types; contained[nret..nret+narg] are args */ \
+       } subprogram; /* related[0..nret] are return types; related[nret..nret+narg] are args */ \
        struct { \
            unsigned kind:4; \
            unsigned min:14; \
