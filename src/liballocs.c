@@ -1599,11 +1599,11 @@ __liballocs_get_base(void *obj)
 {
 	const void *out;
 	/* Try the cache first. */
-	struct __liballocs_memrange_cache_entry_s *hit =
-		__liballocs_memrange_cache_lookup(&__liballocs_ool_cache,
-			obj, NULL, 0);
-	/* We only want depth-0 cached memranges, i.e. leaf-level. */
-	if (hit && hit->depth == 0) return (void*) hit->range_base;
+// 	struct __liballocs_memrange_cache_entry_s *hit =
+// 		__liballocs_memrange_cache_lookup(&__liballocs_ool_cache,
+// 			obj, NULL, 0);
+// 	/* We only want depth-0 cached memranges, i.e. leaf-level. */
+// 	if (hit && hit->depth == 0) return (void*) hit->range_base;
 	/* No hit, so do the full query. */
 	size_t sz = 0;
 	struct uniqtype *t = NULL;

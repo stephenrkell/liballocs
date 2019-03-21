@@ -256,7 +256,7 @@ __liballocs_find_span(struct uniqtype *u, unsigned target_offset,
 	return NULL;
 }
 
-void __liballocs_trace_cache_eviction(struct __liballocs_memrange_cache_entry_s *old,
+void __liballocs_trace_cache_eviction_ool(struct __liballocs_memrange_cache_entry_s *old,
 	struct __liballocs_memrange_cache_entry_s *new)
 {
 }

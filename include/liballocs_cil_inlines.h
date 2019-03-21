@@ -146,10 +146,9 @@ struct __liballocs_memrange_cache_entry_s
 	const void *range_limit;
 	unsigned period; // range_base to range_limit must be a multiple of "period" bytes
 	unsigned offset_to_t; // at this offset within any period, we have a t
-	struct uniqtype *t;
+	/*struct uniqtype * */ unsigned long t:48;
 	unsigned char prev_mru;
 	unsigned char next_mru;
-	unsigned short depth;
 	/* TODO: do inline uniqtype cache word check? */
 } __attribute__((aligned(64)));
 
@@ -158,14 +157,15 @@ struct __liballocs_memrange_cache_entry_s
 #endif
 struct __liballocs_memrange_cache
 {
-	unsigned int validity; /* does *not* include the null entry */
-	const unsigned short max_pos; /* was "size_plus_one", i.e. size including the null entry */
-	unsigned short next_victim;
+	const unsigned char max_pos; /* was "size_plus_one", i.e. size including the null entry */
+	unsigned char next_victim;
 	unsigned char head_mru;
 	unsigned char tail_mru;
+	unsigned short validity; /* does *not* include the null entry */
+	char padding[58];
 	/* We use index 0 to mean "unused" / "null". */
 	struct __liballocs_memrange_cache_entry_s entries[1 + LIBALLOCS_MEMRANGE_CACHE_MAX_SIZE];
-};
+} __attribute__((aligned(64)));
 extern struct __liballocs_memrange_cache /* __thread */ __liballocs_ool_cache;
 
 extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_check_cache_sanity )(struct __liballocs_memrange_cache *cache __attribute__((unused)));
@@ -244,6 +244,9 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	cache->head_mru = (unsigned char) i;
 	/* Set the tail, if we didn't already have one. */
 	if (cache->tail_mru == 0) cache->tail_mru = i;
+	/* Sanity: assert we're not trivially circular. */
+	assert(cache->entries[i].next_mru != i);
+	assert(cache->entries[i].prev_mru != i);
 }
 #endif
 
@@ -305,7 +308,7 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 	{
 		if (cache->validity & (1<<(i-1)))
 		{
-			struct uniqtype *cache_uniqtype = cache->entries[i].t;
+			struct uniqtype *cache_uniqtype = (struct uniqtype *) (unsigned long) cache->entries[i].t;
 			/* We test whether the difference is divisible by the period and within the bounds */
 			signed long long diff = (char*) obj - (char*) cache->entries[i].range_base;
 			if ((!t || cache_uniqtype == t)
@@ -342,11 +345,21 @@ extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) _
 	/* This will give us "zero-offset matches", but not contained matches. 
 	 * I.e. we know that "addr" is a "found->uniqtype", but we pass over
 	 * cases where some cached allocation spans "addr" at a non-zero offset. */
-	if (found) return found->t;
+	if (found) return (struct uniqtype *) (unsigned long) found->t;
 	return (void*)0;
 }
 
 void __liballocs_uncache_all(const void *allocptr, unsigned long size);
+
+extern inline void
+(__attribute__((always_inline,gnu_inline))  __liballocs_trace_cache_eviction)
+	(struct __liballocs_memrange_cache_entry_s *old,
+	struct __liballocs_memrange_cache_entry_s *new)
+{
+#ifdef LIBALLOCS_TRACE_CACHE_EVICTION
+	__liballocs_trace_cache_eviction_ool(old, new);
+#endif
+}
 
 extern inline void
 (__attribute__((always_inline,gnu_inline)) __liballocs_cache_with_type)(
@@ -356,33 +369,57 @@ extern inline void
 {
 	__liballocs_check_cache_sanity(c);
 	assert(!period || ((unsigned long) range_limit - (unsigned long) range_base) % period == 0);
+	_Bool evicting = 0;
 #ifdef LIBALLOCS_CACHE_REPLACE_FIFO
 	unsigned pos = c->next_victim;
-#else
-	// "one plus the index of the least significant 0-bit" of validity
+	evicting = (c->validity & (1u<<(pos-1)));
+	c->validity |= (1u<<(pos-1));
+#else /* replace MRUwise */
+	// First try to find an unused slot.
+	// __builtin_ffs returns "one plus the index of the least significant 1-bit"
+	// ... which is almost exactly what we want. But we want 0-bit, not 1-bit.
 	unsigned pos = __builtin_ffs(~(c->validity));
 	assert(pos <= c->max_pos);
-	if (pos == c->max_pos)
+	if (pos != c->max_pos)
 	{
+		// we found a free slot
+		assert(!(c->validity & (1u<<(pos-1))));
+		// chain it into the MRU list at the head, so that
+		// we can assume from now on that we're somewhere in the list
+		c->validity |= (1u<<(pos-1));
+		__liballocs_cache_link_head_mru(c, pos);
+		//c->entries[pos].prev_mru = 0;
+		//c->entries[pos].next_mru = c->head_mru;
+		//c->head_mru = pos;
+		//if (!c->tail_mru) c->tail_mru = pos;
+	}
+	else
+	{
+		// we pick the tail slot, but preemptively bump it to the top
+		// so that our "same position" is always the right one
 		pos = c->tail_mru;
+		evicting = 1;
 		assert(pos != 0);
+		__liballocs_cache_bump(c, pos);
 	}
 #endif
-	// unsigned pos = __liballocs_ool_cache.next_victim;
-	c->entries[pos] = (struct __liballocs_memrange_cache_entry_s) {
+	struct __liballocs_memrange_cache_entry_s new_c = (struct __liballocs_memrange_cache_entry_s) {
 		.range_base = range_base,
 		.range_limit = range_limit,
 		.period = period,
 		.offset_to_t = offset_to_t,
-		.t = (struct uniqtype *) t,
-		.prev_mru = c->entries[pos].prev_mru,
-		.next_mru = c->entries[pos].next_mru,
-		.depth = depth
+		.t = (unsigned long) (struct uniqtype *) t,
+		.prev_mru = c->entries[pos].prev_mru, // insert in the same position in the MRU chain...
+		.next_mru = c->entries[pos].next_mru//,
+		//.depth = depth
 	};
-	// now we're valid
-	c->validity |= (1u<<(pos-1));
-	// bump us to the top
+	// install it
+	if (evicting) __liballocs_trace_cache_eviction(&c->entries[pos], &new_c);
+	c->entries[pos] = new_c;
+#ifdef LIBALLOCS_CACHE_REPLACE_FIFO
+	// bump us to the top -- if we're MRU, we did this earlier
 	__liballocs_cache_bump(c, pos);
+#endif
 	__liballocs_check_cache_sanity(c);
 }
 
