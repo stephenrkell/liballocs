@@ -365,7 +365,9 @@ abort_stack:
 	++__liballocs_aborted_stack;
 	return err;
 }
-#define maximum_vaddr_range_size (4*1024) // HACK
+/* Large unoptimised (-O0) functions can easily extend to several kilobytes
+ * of same-stack-layout code. */
+#define maximum_vaddr_range_size (16*1024) // HACK
 
 struct frame_uniqtype_and_offset
 vaddr_to_stack_uniqtype(const void *vaddr)
