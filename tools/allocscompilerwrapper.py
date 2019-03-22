@@ -666,3 +666,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             return ret
         return self.doPostLinkMetadataBuild(finalLinkOutput)
 
+if __name__ == '__main__':
+    wrapper = AllocsCompilerWrapper()
+    ret = wrapper.main()
+    exit(ret)
