@@ -436,9 +436,15 @@ let rec simplifyPtrExprs someE =
      (* only NoOffset because unlike *p    (where p is of pointer-to-array type),
               p->arr  (i.e. some offset) cannot be simplified      *)
      (* PROBLEM: we want to yield just "s", but this changes the type.
+      * This is because s is a pointer to an array, but the StartOf
+      * will give us a pointer to the array's element type.
       * What's simpler: StartOf(Mem x, NoOffset) or CastE(t, x)?
-      * We say the latter. *)
-        CastE(Cil.typeOf withSubExprsSimplified, s)
+      * Probably the latter. But inserting a cast is ugly and messes with
+      * crunchbound's boundsDescrForExpr -- we don't want to have to see through
+      * casts in that. So leave it as StartOf(Mem), i.e. an explicit decay
+      * of a pointer-to-array to its pointer-to-element. *)
+        (*CastE(Cil.typeOf withSubExprsSimplified, s)*)
+        withSubExprsSimplified
    | _ -> withSubExprsSimplified
 
 let matchIgnoringLocation g1 g2 = match g1 with 
@@ -486,7 +492,7 @@ let isGenericPointerTypesig ts =
     let upts = ultimatePointeeTs (getConcreteType(ts))
     in
     upts = Cil.typeSig(voidType)
-     || upts = Cil.typeSig(charType)
+     (*|| upts = Cil.typeSig(charType)*)
 
 let isGenericPointerType (t : Cil.typ) =
     isGenericPointerTypesig (Cil.typeSig t)
