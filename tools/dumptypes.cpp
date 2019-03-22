@@ -709,7 +709,7 @@ int main(int argc, char **argv)
 			}
 			
 			/* We can get unreasonably big. */
-			static const unsigned MAX_INTERVALS = 10000;
+			static const unsigned MAX_INTERVALS = 50000;
 			if (subp_vaddr_intervals.size() > MAX_INTERVALS)
 			{
 				cerr << "Warning: abandoning gathering frame intervals for " << i_subp->summary() 
