@@ -157,14 +157,13 @@ struct __liballocs_memrange_cache_entry_s
 #endif
 struct __liballocs_memrange_cache
 {
+	/* We use index 0 to mean "unused" / "null". */
+	struct __liballocs_memrange_cache_entry_s entries[1 + LIBALLOCS_MEMRANGE_CACHE_MAX_SIZE];
 	const unsigned char max_pos; /* was "size_plus_one", i.e. size including the null entry */
 	unsigned char next_victim;
 	unsigned char head_mru;
 	unsigned char tail_mru;
 	unsigned short validity; /* does *not* include the null entry */
-	char padding[58];
-	/* We use index 0 to mean "unused" / "null". */
-	struct __liballocs_memrange_cache_entry_s entries[1 + LIBALLOCS_MEMRANGE_CACHE_MAX_SIZE];
 } __attribute__((aligned(64)));
 extern struct __liballocs_memrange_cache /* __thread */ __liballocs_ool_cache;
 
@@ -314,13 +313,10 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 			if ((!t || cache_uniqtype == t)
 					&& (char*) obj >= (char*)cache->entries[i].range_base
 					&& (char*) obj < (char*)cache->entries[i].range_limit
-					&& 
-					((diff == cache->entries[i].offset_to_t)
-						|| (cache->entries[i].period != 0
-							/* require_period is passed nonzero for clients doing bounds checks:
-							 * arithmetic is only valid if the period matches the element size */
-							&& (!require_period || cache->entries[i].period == require_period)
-							&& diff % cache->entries[i].period == cache->entries[i].offset_to_t)))
+					&& (diff % cache->entries[i].period == cache->entries[i].offset_to_t)
+					&& /* require_period is passed nonzero for clients doing bounds checks:
+						* arithmetic is only valid if the period matches the element size */
+						(!require_period || cache->entries[i].period == require_period))
 			{
 				// hit
 				__liballocs_cache_bump(cache, i);
