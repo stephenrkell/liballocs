@@ -423,18 +423,13 @@ int __index_small_alloc(void *ptr, int level, unsigned size_bytes)
 	/* Find the deepest bigalloc that spans this address *and* the end
 	 * address, and *isn't* a generic_small allocation. FIXME: this is
 	 * a bit unsound. */
-	struct big_allocation *container;
-	//		 = 
-	//		__liballocs_find_common_parent_bigalloc(ptr, (char*) ptr + size_bytes - 1);
-	//while (container && container->allocated_by != &__generic_small_allocator)
-	//	container = container->parent;
-	//if (!container) abort();
-	
 	/* Find the allocator that liballocs thinks is the one containing "ptr". */
-	struct big_allocation *maybe_the_allocation;
-	struct allocator *a = __liballocs_leaf_allocator_for(ptr, &container, 
-		&maybe_the_allocation);
+	struct big_allocation *b = NULL;
+	struct allocator *a = __liballocs_leaf_allocator_for(ptr, &b);
 	if (!a) abort();
+	// if one of our allocations somehow got promoted to bigalloc, look at *its* container
+	struct big_allocation *container = (b->allocated_by == &__generic_small_allocator) ?
+		b->parent : b;
 	if (!container) abort();
 	if (a == &__generic_small_allocator)
 	{
@@ -444,21 +439,18 @@ int __index_small_alloc(void *ptr, int level, unsigned size_bytes)
 		// HACK: do the unindexing
 		unindex_all_overlapping(ptr, (char*) ptr + size_bytes, chunk_rec, container);
 	}
-	else if (/* a !=  &__generic_small_allocator && */ !maybe_the_allocation)
+	else if (container->suballocator != &__generic_small_allocator)
 	{
-		/* We hit the parent allocation, but it's not a bigalloc. 
-		 * So we need to promote it. We need to get its info first. */
+		/* We hit the parent bigalloc, but it's not a bigalloc that we are managing.
+		 * So we need to promote that underlying alloc. We need to get its info first. */
 		void *bigalloc_base;
 		liballocs_err_t err = a->get_info(ptr, NULL, NULL, &bigalloc_base, NULL, NULL);
 		if (err && err != &__liballocs_err_unrecognised_alloc_site) abort();
 		
 		container = a->ensure_big(bigalloc_base);
+		container->suballocator = &__generic_small_allocator;
 	}
-	else /* a != &__generic_small_allocator && maybe_the_allocation */
-	{
-		/* We hit the parent allocation, and it's already a bigalloc. */
-		container = maybe_the_allocation;
-	}
+	/* Else we hit the parent allocation, and it's already a bigalloc. */
 
 	/* Are we already registered as the suballocator of the parent?
 	 * It's an error if another allocator is.
@@ -768,15 +760,17 @@ void __unindex_small_alloc(void *ptr)
 	BIG_UNLOCK
 }
 
-static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc, 
+static liballocs_err_t get_info(void *obj, struct big_allocation *b, 
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site)
 {
-	struct big_allocation *parent = maybe_bigalloc ? maybe_bigalloc->parent
+	struct big_allocation *container =
+		(b->allocated_by == &__generic_small_allocator)
+		? b->parent
 		 : __lookup_deepest_bigalloc(obj);
 	
-	struct insert *heap_info = lookup_small_alloc(obj, parent->suballocator_meta,
-		parent, out_base, out_size);
+	struct insert *heap_info = lookup_small_alloc(obj, container->suballocator_meta,
+		container, out_base, out_size);
 	if (!heap_info)
 	{
 		++__liballocs_aborted_unindexed_heap;

@@ -28,7 +28,6 @@ void __static_symbol_allocator_init(void)
 		__mmap_allocator_init();
 		__static_segment_allocator_init();
 		__static_section_allocator_init();
-		
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -45,7 +44,6 @@ static unsigned dladdr_cache_next_free;
 Dl_info dladdr_with_cache(const void *addr); // __attribute__((visibility("protected")));
 Dl_info dladdr_with_cache(const void *addr)
 {
-	
 	for (unsigned i = 0; i < DLADDR_CACHE_SIZE; ++i)
 	{
 		if (dladdr_cache[i].addr)
@@ -58,7 +56,6 @@ Dl_info dladdr_with_cache(const void *addr)
 			}
 		}
 	}
-	
 	Dl_info info;
 	int ret = dladdr(addr, &info);
 	assert(ret != 0);
@@ -70,30 +67,8 @@ Dl_info dladdr_with_cache(const void *addr)
 		debug_printf(5, "dladdr cache wrapped around\n");
 		dladdr_cache_next_free = 0;
 	}
-	
 	return info;
 }
-
-/* Doing better: what we want.
-   Split static into static-segment, static-section, static-symbol.
-   Let's consider static-symbol.
-   We have a bitmap, one bit per byte, with one set bit per start.
-   Starts are symbols with length (spans).
-   We discard symbols that are not spans.
-   If we see multiple spans covering the same address, we discard one
-   of them heuristically.
-   This gives us a list of spans, in address order, with distinct starts.
-   We allocate a vector with one pointer per span.
-   For spans that are in dynsym, it points to their dynsym entry.
-*/
-enum sym_container { SYMTAB, DYNSYM, EXTRASYM };
-struct sym_span
-{
-	unsigned container:2; /* which symbol table? */
-	unsigned idx:18;      /* offset in the relevant symbol table */
-	unsigned long t:44;        /* uniqtype ptr */
-};
-#define UNIQTYPE_OF_SPAN(s) (struct uniqtype*)(((unsigned long) ((s).t))<<3)
 
 /* Three other cases: 
    (1) not-in-dynsym symbols that are in an available .symtab ("statsyms")
@@ -162,15 +137,23 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 					return 1;
 				}
 			}
-
 			// didn't find the symbol we were looking for -- oh well
 			return 0;
 		}
-	}
-	
+	}	
 	return 0;
 }
 
+// FIXME: we're getting rid of the memtable, in favour of
+// -- per-segment symbol/reloc sorted vectors
+//           *** OR were they per-file? CHECK. per-segment seems to make more sense
+// -- the allocation sites table we've already implemented (another sorted array)
+// -- something for stack frames
+/*          WHAT?  we could do an abstract type for each stack frame
+               and a make-precise function that compiles the interval switch/test
+            That's a bit elaborate. What else?
+            Also how would it be keyed onto the function address?
+ */
 #define maximum_static_obj_size (256*1024) // HACK
 struct uniqtype *
 static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
@@ -213,7 +196,7 @@ static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 }
 #undef maximum_vaddr_range_size
 
-liballocs_err_t __static_symbol_allocator_get_info(void * obj, struct big_allocation *maybe_bigalloc,
+static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc,
 	struct uniqtype **out_type, void **out_base,
 	unsigned long *out_size, const void **out_site)
 {
@@ -232,6 +215,13 @@ liballocs_err_t __static_symbol_allocator_get_info(void * obj, struct big_alloca
 	if (out_site) *out_site = object_start;
 	if (out_size) *out_size = alloc_uniqtype->pos_maxoff;
 	return NULL;
+}
+
+liballocs_err_t __static_symbol_allocator_get_info(void *obj, struct big_allocation *maybe_bigalloc,
+	struct uniqtype **out_type, void **out_base,
+	unsigned long *out_size, const void **out_site)
+{
+	return get_info(obj, maybe_bigalloc, out_type, out_base, out_size, out_site);
 }
 
 DEFAULT_GET_TYPE

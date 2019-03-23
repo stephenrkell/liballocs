@@ -1365,7 +1365,7 @@ fail:
 	/* FIXME: use the actual biggest allocated object, not a guess. */
 }
 
-liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe_bigalloc, 
+liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *b, 
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site)
 {
@@ -1382,12 +1382,12 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 	struct insert *heap_info = NULL;
 	
 	/* NOTE: bigallocs already have the size adjusted by the insert. */
-	if (maybe_bigalloc)
+	if (b->allocated_by == &__generic_malloc_allocator)
 	{
 		/* We already have the metadata. */
-		heap_info = &maybe_bigalloc->meta.un.ins_and_bits.ins;
-		if (out_base) *out_base = maybe_bigalloc->begin;
-		if (out_size) *out_size = (char*) maybe_bigalloc->end - (char*) maybe_bigalloc->begin;
+		heap_info = &b->meta.un.ins_and_bits.ins;
+		if (out_base) *out_base = b->begin;
+		if (out_size) *out_size = (char*) b->end - (char*) b->begin;
 	}
 	else
 	{

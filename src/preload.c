@@ -212,7 +212,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	else
 	{
 		errno = -(intptr_t)ret;
-		ret = -1;
+		ret = (void*) -1;
 	}
 	return ret;
 }

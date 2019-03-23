@@ -248,8 +248,7 @@ __liballocs_ensure_init(void)
  * in the gap is that of the malloc *arena*, so probably mmap.  */
 
 inline struct allocator *__liballocs_leaf_allocator_for(const void *obj, 
-	struct big_allocation **out_containing_bigalloc,
-	struct big_allocation **out_maybe_the_allocation);
+	struct big_allocation **out_bigalloc);
 
 /* The "page-leaf allocator" for an address
  * is the allocator, if any,
@@ -619,15 +618,14 @@ __liballocs_get_alloc_info
 	 * there's no need to query the allocator. The
 	 * cache entries should record the allocator. */
 
-	struct big_allocation *containing_bigalloc;
-	struct big_allocation *maybe_the_allocation;
-	struct allocator *a = __liballocs_leaf_allocator_for(obj, &containing_bigalloc, &maybe_the_allocation);
+	struct big_allocation *out_bigalloc;
+	struct allocator *a = __liballocs_leaf_allocator_for(obj, &out_bigalloc);
 	if (__builtin_expect(!a, 0))
 	{
 		_Bool fixed = __liballocs_notify_unindexed_address(obj);
 		if (fixed)
 		{
-			a = __liballocs_leaf_allocator_for(obj, &containing_bigalloc, &maybe_the_allocation);
+			a = __liballocs_leaf_allocator_for(obj, &out_bigalloc);
 			if (!a) abort();
 		}
 		else
@@ -641,7 +639,7 @@ __liballocs_get_alloc_info
 	 * Those with depth == 0 reflect leaf allocations. */
 	}
 	if (out_allocator) *out_allocator = a;
-	err = a->get_info((void*) obj, maybe_the_allocation, out_alloc_uniqtype, (void**) out_alloc_start,
+	err = a->get_info((void*) obj, out_bigalloc, out_alloc_uniqtype, (void**) out_alloc_start,
 			out_alloc_size_bytes, out_alloc_site);
 	if (!err || err == &__liballocs_err_unrecognised_alloc_site)
 	{

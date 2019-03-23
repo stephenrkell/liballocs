@@ -17,7 +17,7 @@
 #include "liballocs_private.h"
 #include "pageindex.h"
 
-static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc,
+static liballocs_err_t get_info(void * obj, struct big_allocation *b,
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site);
 	
@@ -89,7 +89,7 @@ void __stack_allocator_notify_init_stack_region(void *begin, void *end)
 	initial_stack_bigalloc->suballocator = &__stackframe_allocator;
 }
 
-static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc,
+static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void** out_site)
 {

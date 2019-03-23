@@ -26,8 +26,7 @@ static pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 /* Instantiate some inlines. */
 extern struct allocator *__liballocs_leaf_allocator_for(const void *obj, 
-	struct big_allocation **out_containing_bigalloc,
-	struct big_allocation **out_maybe_the_allocation);
+	struct big_allocation **out_bigalloc);
 extern struct big_allocation *__liballocs_get_bigalloc_containing(const void *obj);
 
 /* How many big allocs? 256 is a bit stingy. 
@@ -312,7 +311,7 @@ struct allocator *__liballocs_get_allocator_upper_bound(const void *obj)
 struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));
 struct allocator *__liballocs_ool_get_allocator(const void *obj)
 {
-	return __liballocs_leaf_allocator_for(obj, NULL, NULL);
+	return __liballocs_leaf_allocator_for(obj, NULL);
 }
 
 void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));

@@ -24,7 +24,7 @@
 /* This is the allocator that knows about ABI-defined *stack frames*,
  * as distinct from the (machine/OS-defined) *stack mappings*. */
 
-static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc,
+static liballocs_err_t get_info(void * obj, struct big_allocation *b,
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site);
 	
@@ -176,7 +176,7 @@ struct big_allocation *__stackframe_allocator_find_or_create_bigalloc(
 	return b;
 }
 
-static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc,
+static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void** out_site)
 {		

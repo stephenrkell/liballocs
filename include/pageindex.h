@@ -123,8 +123,10 @@ _Bool __liballocs_notify_unindexed_address(const void *);
 #define BIGGEST_BIGALLOC BIGGEST_SANE_USER_ALLOC
 
 /* Convenience for code that does raw mmap. */
+#ifndef MMAP_RETURN_IS_ERROR
 #define MMAP_RETURN_IS_ERROR(p) \
 	(((intptr_t)(void*)-1 - (intptr_t)(p)) < PAGE_SIZE)
+#endif
 
 /* FIXME: tweak this logic so that important liballocs workloads
  * (e.g. libcrunch benchmarks) go fast. We can be relatively precise, 
@@ -144,8 +146,7 @@ inline struct big_allocation *__liballocs_get_bigalloc_containing(const void *ob
 
 inline
 struct allocator *__liballocs_leaf_allocator_for(const void *obj,
-	struct big_allocation **out_containing_bigalloc,
-	struct big_allocation **out_maybe_the_allocation)
+	struct big_allocation **out_bigalloc)
 {
 	struct big_allocation *deepest = NULL;
 	for (struct big_allocation *cur = __liballocs_get_bigalloc_containing(obj);
@@ -183,20 +184,14 @@ struct allocator *__liballocs_leaf_allocator_for(const void *obj,
 	 * we want. So we should add a slower call for this. */
 	
 	if (__builtin_expect(!deepest, 0)) return NULL;
-	else if (__builtin_expect(deepest->suballocator != NULL, 1))
+	if (out_bigalloc) *out_bigalloc = deepest;
+	if (__builtin_expect(deepest->suballocator != NULL, 1))
 	{
 		/* The allocator is the suballocator, and the containing bigalloc
 		 * is deepest. */
-		if (out_containing_bigalloc) *out_containing_bigalloc = deepest;
-		if (out_maybe_the_allocation) *out_maybe_the_allocation = NULL;
 		return deepest->suballocator;
 	}
-	else
-	{
-		if (out_containing_bigalloc) *out_containing_bigalloc = deepest->parent;
-		if (out_maybe_the_allocation) *out_maybe_the_allocation = deepest;
-		return deepest->allocated_by;
-	}
+	return deepest->allocated_by;
 }
 
 #endif

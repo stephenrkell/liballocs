@@ -1351,16 +1351,18 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 	update_data_segment_end(new_curbrk);
 }
 
-static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc, 
+static liballocs_err_t get_info(void *obj, struct big_allocation *b, 
 	struct uniqtype **out_type, void **out_base, 
 	unsigned long *out_size, const void **out_site)
 {
 	/* The info is simply the top-level bigalloc for that address. */
-	struct big_allocation *b = maybe_bigalloc;
-	if (!b) b = &big_allocations[pageindex[PAGENUM(obj)]];
-	while (b && b->parent) b = b->parent;
-	if (!b) return &__liballocs_err_object_of_unknown_storage;
-	
+	// Why do we support the b == NULL case? None of the other allocators do.
+	// The caller should grab the bigalloc number from the pageindex if they want.
+	//if (!b) b = &big_allocations[pageindex[PAGENUM(obj)]];
+	//while (b && b->parent) b = b->parent;
+	//if (!b) return &__liballocs_err_object_of_unknown_storage;
+	assert(b);
+
 	if (out_type) *out_type = NULL;
 	if (out_base) *out_base = b->begin;
 	if (out_size) *out_size = (char*) b->end - (char*) b->begin;

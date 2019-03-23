@@ -113,8 +113,7 @@ struct allocator * __liballocs_get_leaf_allocator(const void *obj)
 	return NULL;
 }
 struct allocator * __liballocs_leaf_allocator_for(const void *obj,
-	struct big_allocation **out_containing_bigalloc,
-	struct big_allocation **out_maybe_the_allocation)
+	struct big_allocation **out_bigalloc)
 {
 	return NULL;
 }

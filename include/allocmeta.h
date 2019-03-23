@@ -135,15 +135,6 @@ fun(size_t             ,raw_metadata,  arg(struct allocated_chunk *,start),arg(s
 fun(liballocs_err_t    ,set_type,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
 fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */
 
-#define DEFAULT_GET_TYPE \
-static struct uniqtype *get_type(void *obj) \
-{ \
-   struct uniqtype *out; \
-   struct uniqtype *out = NULL; \
-   struct liballocs_err *err = get_info(obj, NULL, &out, \
-	   NULL, NULL, NULL); \
-   if (err) return NULL; \
-}
 #define __allocmeta_fun_arg(argt, name) argt
 #define __allocmeta_fun_ptr(rett, name, ...) \
 	rett (*name)( __VA_ARGS__ );
@@ -208,49 +199,89 @@ void __static_file_allocator_notify_unload(const char *copied_filename);
  * from the struct link_map entries in the ld.so. There is some
  * duplication, mainly because we don't want to depend on impl-
  * -specific stuff in there. */
+enum sym_or_reloc_kind
+{
+	REC_DYNSYM,
+	REC_SYMTAB,
+	REC_EXTRASYM,
+	REC_RELOC
+};
+/* We don't actually use these constants, at least not at present,
+ * but they're here to enumerate the parts of the file we care
+ * about that are not necessarily mapped already. We then use MAPPING_MAX
+ * to size an array in file_metadata. */
+enum mapped_extra { MAPPING_EHDR, MAPPING_SHDRS, MAPPING_SHSTRTAB, MAPPING_SYMTAB,
+	MAPPING_STRTAB, MAPPING_MAX };
+
 struct file_metadata
 {
 	const char *filename;
 	const void *load_site;
 	struct link_map *l;
 
-	ElfW(Shdr) *shdrs;
-	unsigned long shdrs_mapped_len; /* 0 if within a segment; >0 if mapped by us */
+	void *meta_obj_handle; /* loaded by us */
+	ElfW(Sym) *extrasym;
 
-	ElfW(Sym) *symtab; // NOTE this really is symtab, not dynsym
-	unsigned long symtab_mapped_len; /* 0 if within a segment; >0 if mapped by us */
-
-	unsigned char *strtab; // NOTE this is strtab, not dynstr
-	unsigned long strtab_mapped_len; /* 0 if within a segment; >0 if mapped by us */
-
-	ElfW(Sym) *dynsym; /* always mapped by ld.so */
-	unsigned char *dynstr; /* always mapped by ld.so */
 	ElfW(Phdr) *phdrs; /* always mapped or copied by ld.so */
 	ElfW(Half) phnum;
 
-	void *meta_obj_handle; /* loaded by us */
-	ElfW(Sym) *extrasym;
-	
+	ElfW(Sym) *dynsym; /* always mapped by ld.so */
+	unsigned char *dynstr; /* always mapped by ld.so */
+	unsigned char *dynstr_end;
+
+	ElfW(Half) dynsymndx; // section header idx of dynsym, or 0 if none such
+	ElfW(Half) dynstrndx;
+
+	struct extra_mapping
+	{
+		void *mapping_pagealigned;
+		off_t fileoff_pagealigned;
+		size_t size;
+	} extra_mappings[MAPPING_MAX];
+
+	ElfW(Ehdr) *ehdr;
+	ElfW(Shdr) *shdrs;
+	unsigned char *shstrtab;
+	ElfW(Sym) *symtab; // NOTE this really is symtab, not dynsym
+	ElfW(Half) symtabndx;
+	unsigned char *strtab; // NOTE this is strtab, not dynstr
+	ElfW(Half) strtabndx;
+
+	/* We record "starts". Starts are what appear in per-segment bitmaps
+	   as the start of an object.
+	   
+	   Starts are symbols with length (spans).
+	   We don't index symbols that are not spans.
+	   If we see multiple spans covering the same address, we discard one
+	   of them heuristically.
+	   The end result is a list of spans, in address order, with distinct starts.
+	   Our sorted_meta_vec has one record per indexed span.
+	   Logically the content is a pointer to its ELF metadata *and* its type.
+	   For spans that are in dynsym, it points to their dynsym entry.
+	*/
 	struct sym_or_reloc_rec
 	{
-		enum sym_or_reloc_kind
-		{
-			REC_DYNSYM,
-			REC_SYMTAB,
-			REC_EXTRASYM,
-			REC_RELOC
-		};
 		unsigned kind:2; // an instance of sym_or_reloc_kind
 		unsigned idx:18; /* i.e. at most 256K symbols of each kind, per file */
-		unsigned uniqtype_ptr_bits:44; /* i.e. the low-order 3 bits are 0 */
+		unsigned long uniqtype_ptr_bits:44; /* i.e. the low-order 3 bits are 0 */
 	} *sorted_meta_vec; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
-	size_t sorted_meta_vec_mapped_len; /* length of this in bytes -- to be freed later */
+#define UNIQTYPE_OF_SPAN(s) (struct uniqtype*)(((unsigned long) ((s).t))<<3)
+	unsigned long (*starts_bitmaps)[];
 };
+#define STARTS_BITMAP_NWORDS_FOR_PHDR(ph) \
+    (ROUND_UP((ph)->p_vaddr + (ph)->p_memsz, sizeof (void*)) - ROUND_DOWN((ph)->p_vaddr, sizeof (void*)) \
+    / (sizeof (void*)))
 
+inline 
+ElfW(Sym) *__static_file_allocator_get_symtab_by_idx(struct file_metadata *meta, ElfW(Half) i)
+{
+	if (meta->symtab && meta->symtabndx == i) return meta->symtab;
+	else if (meta->dynsym && meta->dynsymndx == i) return meta->dynsym;
+}
 void __static_segment_allocator_init(void);
 void __static_segment_allocator_notify_define_segment(
 	struct file_metadata *meta,
-	const ElfW(Phdr) *phdr
+	int i
 );
 void __static_section_allocator_init(void);
 void __static_section_allocator_notify_define_section(
