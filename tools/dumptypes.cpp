@@ -875,7 +875,8 @@ int main(int argc, char **argv)
 							// evaluate the next piece
 							//  FIXME: we don't keep track of our byte offset, so
 							// this will generate bogus entries
-							e.eval_next();
+							// FIXME: this will crash unless we also push a new value, for us 0, onto the stack
+							// e.eval_next();
 						}
 					} while (/*!e.finished()*/ 0); // reinstate when bogus problem above is fixed
 				} 
