@@ -82,7 +82,7 @@ libdwarfpp/config.status:
 
 .PHONY: build-libdwarfpp
 build-libdwarfpp: libdwarfpp/config.status
-	$(MAKE) -C libdwarfpp
+	$(MAKE) -C libdwarfpp -j8
 
 clean::
 	if test -f libdwarfpp/Makefile; then $(MAKE) -C libdwarfpp clean; fi
