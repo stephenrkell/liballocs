@@ -355,13 +355,19 @@ __liballocs_find_span(struct uniqtype *u, unsigned target_offset,
 		assert(lower_ind == 0);
 		return NULL;
 	}
-	/* We found one subobject whose offset is <= the target offset.
-	 * The next subobject, if it exists, is definitely at an offset that is >. */
+	/* We found the highest-indexed subobject whose offset is <= the target offset.
+	 * The next subobject, if it exists, is definitely at an offset that is >.
+	 * And since the subobjects at a given offset are ordered in increasing size,
+	 * we have the one whose end offset is greatest. If it still does not exceed
+	 * the target offset, we fail now. */
 	unsigned cur_off = u->related[lower_ind].un.memb.off;
 	assert(cur_off <= target_offset && "offset underapproximates");
 	assert((lower_ind+1 == num_contained
 		|| u->related[lower_ind+1].un.memb.off > target_offset) &&
 		"found offset is the greatest");
+	unsigned span_end_offset = u->related[lower_ind].un.memb.off
+		+ u->related[lower_ind].un.memb.ptr->pos_maxoff;
+	if (span_end_offset <= target_offset) return NULL;
 	/* ... but we might not have found the *first* contained object
 	 * spanning the target offset -- in the case of a union or stack
 	 * frame. We require that same-offset subobjects are sorted in
@@ -376,7 +382,6 @@ __liballocs_find_span(struct uniqtype *u, unsigned target_offset,
 			&& u->related[lower_ind-1].un.memb.off + u->related[lower_ind-1].un.memb.ptr->pos_maxoff
 				> target_offset
 	) --lower_ind;
-
 	return &u->related[lower_ind];
 }
 
