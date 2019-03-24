@@ -804,6 +804,7 @@ int main(int argc, char **argv)
 				}
 				
 				bool saw_register = false;
+				Dwarf_Signed frame_offset = 0;
 				auto& spec = i_el_pair->first.spec_here();
 				for (auto i_instr = i_el_pair->second.begin(); i_instr != i_el_pair->second.end();
 					++i_instr)
@@ -839,16 +840,44 @@ int main(int argc, char **argv)
 				}
 				else try
 				{
-					std::stack<Dwarf_Unsigned> initial_stack; 
+					std::stack<Dwarf_Unsigned> stack;
 					// call the evaluator directly
 					// -- push zero (a.k.a. the frame base) onto the initial stack
-					initial_stack.push(0); 
+					stack.push(0);
 					// FIXME: really want to push the offset of the stack pointer from the frame base
 					dwarf::expr::evaluator e(i_el_pair->second,
 						i_el_pair->first.spec_here(),
 						/* fb */ 0, 
-						initial_stack);
-					addr_from_zero = e.tos(false); // may *not* be value; must be loc
+						stack);
+					do
+					{
+						// avoid exceptions for this fairly common case
+						auto maybe_addr_from_zero = e.tos_address(); // may *not* be value; must be address
+						if (maybe_addr_from_zero) addr_from_zero = *maybe_addr_from_zero;
+						else
+						{
+							// this is the "non-manifest" case -- no need to warn, I guess?
+							//discarded.push_back(make_pair(*i_el, "register-located"));
+							iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
+								compare_first_iter_offset<string> */ singleton_set;
+							singleton_set.insert(make_pair(*i_el, string("unknown")));
+#ifdef DEBUG
+							discarded_intervals += make_pair(i_int->first, singleton_set);
+							cerr << "Saw non-manifest: vaddr range "
+								<< std::hex << i_int->first << std::dec
+								<< ": "
+								<< *i_el;
+#endif
+							goto next_pair;
+						}
+						if (!e.finished())
+						{
+							// evaluate the next piece
+							//  FIXME: we don't keep track of our byte offset, so
+							// this will generate bogus entries
+							e.eval_next();
+						}
+					} while (/*!e.finished()*/ 0); // reinstate when bogus problem above is fixed
 				} 
 				catch (dwarf::lib::No_entry)
 				{
@@ -883,7 +912,7 @@ int main(int argc, char **argv)
 #endif
 					continue;
 				}
-				Dwarf_Signed frame_offset = static_cast<Dwarf_Signed>(addr_from_zero);
+				frame_offset = static_cast<Dwarf_Signed>(addr_from_zero);
 				// cerr << "Found on-stack location (fb + " << frame_offset << ") for fp/var " << *i_el 
 				// 		<< "in the vaddr range " 
 				// 		<< std::hex << i_int->first << std::dec << endl;
@@ -906,7 +935,8 @@ int main(int argc, char **argv)
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 #endif
 				}
-			}
+		next_pair: ;
+			} /* end for i_el_pair */
 		} /* end for i_int */
 		
 		intervals_by_subprogram[i_subp] = frame_intervals;
@@ -1017,25 +1047,37 @@ int main(int argc, char **argv)
 				min_s.str()
 			);
 			opt<unsigned> prev_offset_plus_size;
+			std::multimap< pair<unsigned, unsigned>, iterator_df<with_dynamic_location_die> > sorted_by_offset_and_size;
 			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
 			{
-				// FIXME: sort by size at a given offset
-				// we already check for left-overlap
-				ostringstream comment_s;
-				auto el_type = i_by_off->second->find_type();
 				unsigned offset_after_fixup = i_by_off->first + offset_to_all;
+				auto el_type = i_by_off->second->find_type();
 				opt<Dwarf_Unsigned> el_type_size = el_type ? el_type->calculate_byte_size() :
 					opt<Dwarf_Unsigned>();
-				if (i_by_off->second.name_here())
+				unsigned size = el_type_size ? *el_type_size : (unsigned) -1;
+				sorted_by_offset_and_size.insert(make_pair(make_pair(offset_after_fixup, size), i_by_off->second));
+			}
+			for (auto i_by_off_and_size = sorted_by_offset_and_size.begin();
+				i_by_off_and_size != sorted_by_offset_and_size.end();
+				++i_by_off_and_size)
+			{
+				// we already check for left-overlap
+				ostringstream comment_s;
+				unsigned offset_after_fixup = i_by_off_and_size->first.first;
+				auto el_type = i_by_off_and_size->second->find_type();
+				opt<Dwarf_Unsigned> el_type_size = el_type ? el_type->calculate_byte_size() :
+					opt<Dwarf_Unsigned>();
+				if (i_by_off_and_size->second.name_here())
 				{
-					comment_s << *i_by_off->second.name_here();
+					comment_s << *i_by_off_and_size->second.name_here();
 				}
 				else comment_s << "(anonymous)"; 
-				comment_s << " -- " << i_by_off->second.spec_here().tag_lookup(
-						i_by_off->second.tag_here())
-					<< " @" << std::hex << i_by_off->second.offset_here() << std::dec
+				comment_s << " -- " << i_by_off_and_size->second.spec_here().tag_lookup(
+						i_by_off_and_size->second.tag_here())
+					<< " @" << std::hex << i_by_off_and_size->second.offset_here() << std::dec
 					<< "(size ";
-				if (el_type_size) comment_s << *el_type_size;
+				unsigned size = i_by_off_and_size->first.second;
+				if (size != (unsigned) -1) comment_s << size;
 				else comment_s << "(no size)";
 				comment_s << ")";
 				if (prev_offset_plus_size)
@@ -1057,12 +1099,12 @@ int main(int argc, char **argv)
 				assert(names_emitted.find(mangled_name) != names_emitted.end());
 				
 				write_uniqtype_related_contained_member_type(cout,
-					/* is_first */ i_by_off == i_frame_int->second.begin(),
+					/* is_first */ i_by_off_and_size == sorted_by_offset_and_size.begin(),
 					offset_after_fixup,
 					mangled_name,
 					comment_s.str()
 				);
-				if (el_type_size) prev_offset_plus_size = offset_after_fixup + *el_type_size;
+				if (size != (unsigned)-1) prev_offset_plus_size = offset_after_fixup + size;
 				else prev_offset_plus_size = opt<unsigned>();
 			}
 			write_uniqtype_close(cout, mangled_name);
