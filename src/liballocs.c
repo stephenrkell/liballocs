@@ -313,17 +313,6 @@ const char *__liballocs_errstring(struct liballocs_err *err)
 	return err->message;
 }
 
-#define BLACKLIST_SIZE 8
-struct blacklist_ent 
-{
-	uintptr_t bits; 
-	uintptr_t mask; 
-	void *actual_start;
-	size_t actual_length;
-} blacklist[BLACKLIST_SIZE];
-static _Bool check_blacklist(const void *obj);
-static void consider_blacklisting(const void *obj);
-
 struct dl_for_one_phdr_cb_args
 {
 	struct link_map *link_map_to_match;
@@ -814,6 +803,10 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	{
 		return 0;
 	}
+	
+	/* FIXME: do a stat() check on the mtime of our meta-obj
+	 * versus the mtime of the base obj.
+	 * If the base obj is newer, complain. */
 
 	dlerror();
 	// load with NOLOAD first, so that duplicate loads are harmless
@@ -867,115 +860,6 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	return link_said_stop;
 #else
 	return 0;
-#endif
-}
-
-static _Bool check_blacklist(const void *obj)
-{
-#ifndef NO_BLACKLIST
-	for (struct blacklist_ent *ent = &blacklist[0];
-		ent < &blacklist[BLACKLIST_SIZE]; ++ent)
-	{
-		if (!ent->mask) continue;
-		if ((((uintptr_t) obj) & ent->mask) == ent->bits) return 1;
-	}
-#endif
-	return 0;
-}
-static void consider_blacklisting(const void *obj)
-{
-#ifndef NO_BLACKLIST
-	assert(!check_blacklist(obj));
-	// is the addr in any mapped dynamic obj?
-	Dl_info info = { NULL /* don't care about other fields */ };
-	struct link_map *link_map;
-	int ret = dladdr1(obj, &info, (void**) &link_map, RTLD_DL_LINKMAP);
-	if (ret != 0 && info.dli_fname != NULL) /* zero means error, i.e. not a dynamic obj */ 
-	{
-		return; // couldn't be sure it's *not* in a mapped object
-	}
-	
-	// PROBLEM: how do we find out its size?
-	// HACK: just blacklist a page at a time?
-	
-	// if it's not in any shared obj, then we might want to blacklist it
-	// can we extend an existing blacklist slot?
-	struct blacklist_ent *slot = NULL;
-	for (struct blacklist_ent *slot_to_extend = &blacklist[0];
-		slot_to_extend < &blacklist[BLACKLIST_SIZE]; ++slot_to_extend)
-	{
-		if ((uintptr_t) slot_to_extend->actual_start + slot_to_extend->actual_length
-			 == (((uintptr_t) obj) & PAGE_MASK))
-		{
-			// post-extend this one
-			slot_to_extend->actual_length += PAGE_SIZE;
-			slot = slot_to_extend;
-			break;
-		}
-		else if ((uintptr_t) slot_to_extend->actual_start - PAGE_SIZE == (((uintptr_t) obj) & PAGE_MASK))
-		{
-			// pre-extend this one
-			slot_to_extend->actual_start -= PAGE_SIZE;
-			slot_to_extend->actual_length += PAGE_SIZE;
-			slot = slot_to_extend;
-			break;
-		}
-	}
-	if (slot == NULL)
-	{
-		// look for a free slot
-		struct blacklist_ent *free_slot = &blacklist[0];
-		while (free_slot < &blacklist[BLACKLIST_SIZE]
-		 && free_slot->mask != 0) ++free_slot;
-		if (free_slot == &blacklist[BLACKLIST_SIZE]) 
-		{
-			return; // full
-		}
-		else 
-		{
-			slot = free_slot;
-			slot->actual_start = (void *)(((uintptr_t) obj) & PAGE_MASK);
-			slot->actual_length = PAGE_SIZE;
-		}
-	}
-	
-	// we just added or created a slot; update its bits
-	uintptr_t bits_in_common = ~((uintptr_t) slot->actual_start ^ ((uintptr_t) slot->actual_start + slot->actual_length - 1));
-	// which bits are common *throughout* the range of values?
-	// we need to find the highest-bit-unset
-	uintptr_t highest_bit_not_in_common = sizeof (uintptr_t) * 8 - 1;
-	while ((bits_in_common & (1ul << highest_bit_not_in_common))) 
-	{
-		assert(highest_bit_not_in_common != 0);
-		--highest_bit_not_in_common;
-	}
-
-	const uintptr_t minimum_mask = ~((1ul << highest_bit_not_in_common) - 1);
-	const uintptr_t minimum_bits = ((uintptr_t) slot->actual_start) & minimum_mask;
-	
-	uintptr_t bits = minimum_bits;
-	uintptr_t mask = minimum_mask;
-	
-	// grow the mask until 
-	//   the bits/mask-defined blacklisted region starts no earlier than the actual region
-	// AND the region ends no later than the actual region
-	// WHERE the smallest mask we want is one page
-	while (((bits & mask) < (uintptr_t) slot->actual_start
-			|| (bits & mask) + (~mask + 1) > (uintptr_t) slot->actual_start + slot->actual_length)
-		&& ~mask + 1 > PAGE_SIZE)
-	{
-		mask >>= 1;                            // shift the mask right
-		mask |= 1ul<<(sizeof (uintptr_t) * 8 - 1); // set the top bit of the mask
-		bits = ((uintptr_t) slot->actual_start) & mask;
-		
-	}
-	
-	// if we got a zero-length entry, give up and zero the whole lot
-	assert((bits | mask) >= (uintptr_t) slot->actual_start);
-	assert((bits | ~mask) <= (uintptr_t) slot->actual_start + slot->actual_length);
-	
-	slot->mask = mask;
-	slot->bits = bits;
 #endif
 }
 
@@ -1101,6 +985,7 @@ struct uniqtype *pointer_to___uniqtype__void;
 struct uniqtype *pointer_to___uniqtype____uninterpreted_byte;
 struct uniqtype *pointer_to___uniqtype__signed_char;
 struct uniqtype *pointer_to___uniqtype__unsigned_char;
+struct uniqtype *pointer_to___uniqtype____uninterpreted_byte;
 struct uniqtype *pointer_to___uniqtype____PTR_signed_char;
 struct uniqtype *pointer_to___uniqtype____PTR_void;
 struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char;
@@ -1226,6 +1111,12 @@ void __liballocs_post_systrap_init(void)
 		/* Now we can correctly initialize libdlbind. */
 		__libdlbind_do_init();
 		__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
+		if (!__liballocs_rt_uniqtypes_obj)
+		{
+			const char msg[] = "dlcreate() of uniqtypes DSO failed\n";
+			raw_write(2, msg, sizeof msg);
+			abort();
+		}
 		/* Init the other stuff we happen to cache about the object. */
 		update_rt_uniqtypes_obj(__liballocs_rt_uniqtypes_obj, NULL);
 		/* FIXME: really want to define the type summary code computation
@@ -1284,6 +1175,14 @@ void __liballocs_post_systrap_init(void)
 			CREATE(__uniqtype__unsigned_char, 08010824, unsigned_char$8, 1, {
 				.pos_maxoff = 1,
 				.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned_char } }
+			});
+		}
+		pointer_to___uniqtype____uninterpreted_byte = dlsym(RTLD_DEFAULT, "__uniqtype____uninterpreted_byte");
+		if (!pointer_to___uniqtype____uninterpreted_byte)
+		{
+			CREATE_NOCODE(__uniqtype____uninterpreted_byte, __uniqtype____uninterpreted_byte, 1, {
+				.pos_maxoff = 1,
+				.un = { base: { .kind = BASE, .enc = 0 } }
 			});
 		}
 

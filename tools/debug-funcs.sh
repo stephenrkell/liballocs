@@ -68,6 +68,30 @@ read_debuglink () {
     fi
     return 1
 }
+read_build_id () {
+    build_id_info="$( objdump -h "$1" | grep '\.note.gnu.build-id' )"
+    if [[ -z "$build_id_info" ]]; then
+        echo "no build ID in $1" 1>&2
+        return 1
+    fi
+    build_id_note_off="$( echo "$build_id_info" | sed 's/^[[:blank:]]*//' | tr -s '[:blank:]' '\t' | cut -f6 )"
+    echo "read build-ID note off: $build_id_note_off" 1>&2
+    if [[ -n "$build_id_note_off" ]]; then
+        build_id_off_nbytes=$(( 0x$build_id_note_off + 0 ))
+        if [[ -z "$build_id_off_nbytes" ]]; then
+            echo "bad build-ID header" 1>&2 
+            return 1
+        else
+            name_size="$( od --skip-bytes=${build_id_off_nbytes} -t d4 -N4 "$1" | tr -s '[:space:]' '\t' | cut -f2 )"
+            echo "name_size: $name_size" 1>&2
+            desc_size="$( od --skip-bytes=$(( 4 + ${build_id_off_nbytes} )) -t d4 -N4 "$1" | tr -s '[:space:]' '\t'| cut -f2 )"
+            echo "desc_size: $desc_size" 1>&2
+            od --skip-bytes=$(( $build_id_off_nbytes + 4 + 4 + 4 + $name_size )) -t x1 -w20 -N20 "$1"  | tr -s '[:space:]' '\t'| cut -f2-21 | tr -d '\t'
+            return 0
+        fi
+    fi
+    return 1
+}
 
 find_debug_file_for () {
     file="$1"

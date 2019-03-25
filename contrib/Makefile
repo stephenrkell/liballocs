@@ -171,9 +171,8 @@ CONFIG_MK += \nDWARFIDL_LIBS += -L$(CONTRIB_ROOT)/dwarfidl/lib -Wl,-rpath,$(CONT
 trap-syscalls/contrib/config.mk:
 	$(MAKE) -C trap-syscalls/contrib
 
-# HACK: need to add liballocs include dir to CFLAGS, for relf.h
 trap-syscalls/libsystrap/libsystrap.a: trap-syscalls/contrib/config.mk $(wildcard trap-syscalls/libsystrap/*.[ch])
-	CFLAGS=-I$(CONTRIB_ROOT)/../include $(MAKE) -C trap-syscalls/libsystrap
+	$(MAKE) -C trap-syscalls/libsystrap
 
 .PHONY: build-libsystrap
 build-libsystrap: trap-syscalls/libsystrap/libsystrap.a

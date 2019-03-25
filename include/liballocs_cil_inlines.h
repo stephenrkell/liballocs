@@ -288,6 +288,7 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	}
 #endif
 	__liballocs_check_cache_sanity(cache);
+	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
 }
 
 extern inline
@@ -327,7 +328,7 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 	}
 #endif
 	__liballocs_check_cache_sanity(cache);
-	return (void*)0;
+	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
 }
 
 extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr);
@@ -342,7 +343,7 @@ extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) _
 	 * I.e. we know that "addr" is a "found->uniqtype", but we pass over
 	 * cases where some cached allocation spans "addr" at a non-zero offset. */
 	if (found) return (struct uniqtype *) (unsigned long) found->t;
-	return (void*)0;
+	return (struct uniqtype *)(void*)0;
 }
 
 void __liballocs_uncache_all(const void *allocptr, unsigned long size);

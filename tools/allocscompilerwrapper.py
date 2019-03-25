@@ -111,7 +111,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         for cmd in [l for l in whichOutput.split("\n") if l != '']:
             # HACK: avoid things in the same directory, to avoid crunchbcc using "cc" a.k.a. crunchcc
             if os.path.dirname(os.path.realpath(cmd)) != os.path.dirname(ourPath):
-                sys.stderr.write("Using basic C compiler: %s (we are: %s)\n" % (str(cmd), str(ourPath)))
+                #sys.stderr.write("Using basic C compiler: %s (we are: %s)\n" % (str(cmd), str(ourPath)))
                 return [cmd]
         sys.stderr.write("abort: could not find a C compiler which is not us.\n")
         exit(2)

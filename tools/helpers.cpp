@@ -853,6 +853,7 @@ int sticky_root_die::open_debuglink(int user_fd)
 	char *fdstr = NULL;
 	int ret = asprintf(&fdstr, "/dev/fd/%d", user_fd);
 	if (ret <= 0) throw No_entry();
+	/* HACK HACK HACK */
 	ret = asprintf(&cmdstr, "bash -c \". ${LIBALLOCS}/tools/debug-funcs.sh && read_debuglink %s | tr -d '\\n'\"", fdstr);
 	if (ret <= 0) throw No_entry();
 	assert(cmdstr != NULL);
@@ -917,6 +918,53 @@ int sticky_root_die::open_debuglink(int user_fd)
 	free(cmdstr);
 	return ret_fd;
 }
+int sticky_root_die::open_debug_via_build_id(int user_fd)
+{
+	/* FIXME: linux-specific big hacks here. */
+	char *cmdstr = NULL;
+	char *fdstr = NULL;
+	int ret = asprintf(&fdstr, "/dev/fd/%d", user_fd);
+	if (ret <= 0) throw No_entry();
+	/* HACK HACK HACK */
+	ret = asprintf(&cmdstr, "bash -c \". ${LIBALLOCS}/tools/debug-funcs.sh && read_build_id %s | tr -d '\\n'\"", fdstr);
+	if (ret <= 0) throw No_entry();
+	assert(cmdstr != NULL);
+	FILE *p = popen(cmdstr, "r");
+	char build_id_buf[41];
+	size_t nread = fread(build_id_buf, 1, sizeof build_id_buf - 1, p);
+	build_id_buf[40] = '\0';
+	int ret_fd;
+	if (nread > 0)
+	{
+		/* We've successfully slurped a build_id */
+		std::cerr << "Slurped build ID: " << build_id_buf << std::endl;
+		/* How to build the path from the build ID? GDB docs say we
+		 * have to try:
+		 * the directory of the executable file, then
+		 * in a subdirectory of that directory named .debug, and finally
+		 * under each one of the global debug directories,
+		 *      in a subdirectory whose name is identical to
+		 *      the leading directories of the executable’s absolute file name. */
+		std::vector<std::string> paths_to_try;
+		paths_to_try.push_back(
+				string("/usr/lib/debug/.build-id/")
+				+ build_id_buf[0]
+				+ build_id_buf[1]
+				+ "/"
+				+ (build_id_buf + 2)
+				+ ".debug"
+			);
+		std::cerr << "Trying: " << *paths_to_try.begin() << std::endl;
+		for (auto i_path = paths_to_try.begin(); i_path != paths_to_try.end();
+			++i_path)
+		{
+			ret_fd = open(i_path->c_str(), O_RDONLY);
+			if (ret_fd != -1) break;
+		}
+	} else ret_fd = -1;
+	free(cmdstr);
+	return ret_fd;
+}
 
 shared_ptr<sticky_root_die> sticky_root_die::create(int user_fd)
 {
@@ -926,12 +974,13 @@ shared_ptr<sticky_root_die> sticky_root_die::create(int user_fd)
 	/* Easy case: a base object containing DWARF. */
 	if (is_base && has_dwarf(user_fd))
 	{ return std::make_shared<sticky_root_die>(user_fd, user_fd); }
-	/* If it's not base nothing we can do. */
-	if (!is_base) throw No_entry();
-	/* Else it's base so we can look for a debuglink. */
-	int dbg_fd = open_debuglink(user_fd);
+	int dbg_fd;
+	if (is_base)
+	{
+		dbg_fd = open_debuglink(user_fd);
+		if (dbg_fd == -1) dbg_fd = open_debug_via_build_id(user_fd);
+	}
+	else dbg_fd = user_fd;
 	if (dbg_fd != -1) return std::make_shared<sticky_root_die>(dbg_fd, user_fd);
-	/* Else it's a base object with no DWARF and
-	 * we couldn't get a dbglink, so give up. */
 	return std::shared_ptr<sticky_root_die>();
 }

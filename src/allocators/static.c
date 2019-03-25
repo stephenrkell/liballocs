@@ -57,8 +57,8 @@ struct segment_metadata
 static void free_segment_metadata(void *sm)
 {
 	struct segment_metadata *s = (struct segment_metadata *) sm;
-	__wrap_dlfree((void*) s->filename);
-	__wrap_dlfree(sm);
+	__private_free((void*) s->filename);
+	__private_free(sm);
 }
 
 void __static_allocator_notify_unload(const char *copied_filename)
@@ -290,6 +290,7 @@ int add_all_loaded_segments(struct dl_phdr_info *info, size_t size, void *maybe_
 					segment_start_addr, &__mmap_allocator, NULL);
 				if (!containing_mapping) abort();
 				// write_string("Blah9003\n");
+				/* FIXME: get rid of this dlmalloc to avoid reentrancy issues. */
 				struct segment_metadata *m = __private_malloc(sizeof (struct segment_metadata));
 				// write_string("Blah9004\n");
 				*m = (struct segment_metadata) {

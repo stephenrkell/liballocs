@@ -101,7 +101,7 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 		.un = {
 			opaque_data: {
 				.data_ptr = copy,
-				.free_func = __wrap_dlfree
+				.free_func = __private_free
 			}
 		}
 	};

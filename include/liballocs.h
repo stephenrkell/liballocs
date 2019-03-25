@@ -30,6 +30,7 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 struct insert; // instead of heap_index.h
 struct allocator; // instead of allocmeta.h
 
+// FIXME: please, please get rid of this
 #define ALLOC_IS_DYNAMICALLY_SIZED(all, as) \
 	((all) != (as))
 
@@ -72,7 +73,9 @@ int __liballocs_addrlist_contains(struct addrlist *l, void *addr);
 void __liballocs_addrlist_add(struct addrlist *l, void *addr);
 extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
 
+#ifdef _GNU_SOURCE
 Dl_info dladdr_with_cache(const void *addr);
+#endif
 
 extern void *__liballocs_main_bp; // beginning of main's stack frame
 char *get_exe_fullname(void) __attribute__((visibility("hidden")));
@@ -691,12 +694,21 @@ __liballocs_get_alloc_info
  * to the noop library if we wanted this to work. Recall also that linking -lallocs does
  * *not* work! You really need to preload liballocs for it to work. */
 
+/* FIXME: probably should just have a single public header. */
+#include "pageindex.h"
+/* PROBLEM: our inline cache thingies want to emit references to likely()
+ * in the middle of user code. But liballocs_cil_inlines.h very thoughtfully
+ * uses #undef to remove likely() and unlikely() if it itself define them.
+ * The simple fix seems to be longhand use of __builtin_expect(). */
+
+// FIXME: do these inline cache things actually help performance?
+// Do a study of this before adding any more.
 #if defined(__GNUC__) && defined(LIBALLOCS_USE_INLCACHE) /* requires statement expression */
 #define __liballocs_get_alloc_type(obj) \
 	({ \
 		static struct allocator *cached_allocator; \
 		static /*bigalloc_num_t */ unsigned short cached_num; \
-		(likely(cached_num && pageindex[PAGENUM(obj)] == cached_num)) ? \
+		(__builtin_expect(cached_num && __liballocs_pageindex[PAGENUM(obj)] == cached_num, 1)) ? \
 		cached_allocator->get_type(obj) \
 		: __liballocs_get_alloc_type_with_fill(obj, &cached_allocator, &cached_num); \
 	})
@@ -712,8 +724,8 @@ __liballocs_get_alloc_type(void *obj);
 	({ \
 		static struct allocator *cached_allocator; \
 		static /*bigalloc_num_t*/ unsigned short cached_num; \
-		(likely(cached_num && pageindex[PAGENUM(obj)] == cached_num)) ? \
-		generic_bitmap_get_base(obj, &big_allocations[cached_num]) \
+		(__builtin_expect(cached_num && __liballocs_pageindex[PAGENUM(obj)] == cached_num, 1)) ? \
+		generic_bitmap_get_base(obj, &__liballocs_big_allocations[cached_num]) \
 		: __liballocs_get_alloc_base_with_fill(obj, &cached_allocator, &cached_num); \
 	})
 void *
@@ -784,7 +796,6 @@ struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 
 static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void *), void *arg)
 {
-	liballocs_err_t err;
 	unw_cursor_t cursor, saved_cursor;
 	unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0;
 	int unw_ret;
@@ -801,7 +812,6 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 #endif
 	unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip);
 
-	_Bool at_or_above_main = 0;
 	do
 	{
 		// callee_ip = ip;
@@ -814,7 +824,7 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 		unw_ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(unw_ret == 0);
 		// try to get the bp, but no problem if we don't
 		unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &bp); 
-		_Bool got_higherframe_bp = 0;
+		_Bool got_higherframe_bp __attribute__((unused)) = 0;
 		
 		ret = cb((void*) ip, (void*) sp, (void*) bp, arg);
 		if (ret) return ret;

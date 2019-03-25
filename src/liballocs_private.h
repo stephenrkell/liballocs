@@ -71,7 +71,6 @@ extern _Bool __thread __private_realloc_active __attribute__((visibility("hidden
 extern _Bool __thread __private_memalign_active __attribute__((visibility("hidden")));
 extern _Bool __thread __private_posix_memalign_active __attribute__((visibility("hidden")));
 extern _Bool __thread __private_malloc_usable_size_active __attribute__((visibility("hidden")));
-/* These make gold crash -- so try something else. */
 void *__private_malloc(size_t);
 void __private_free(void *);
 
@@ -191,6 +190,7 @@ void __liballocs_trace_cache_eviction(struct __liballocs_memrange_cache_entry_s 
 extern struct uniqtype *pointer_to___uniqtype__void __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__signed_char __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__unsigned_char __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype____uninterpreted_byte __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype____PTR_signed_char __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype____PTR_void __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char __attribute__((visibility("hidden")));
