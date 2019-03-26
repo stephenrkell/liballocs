@@ -331,6 +331,8 @@ let voidConstPtrPtrType = TPtr(TPtr(TVoid([Attr("const", [])]),[]), [])
 let ulongPtrType = TPtr(TInt(IULong, []),[])
 let voidPtrPtrType = TPtr(TPtr(TVoid([]),[]),[])
 let boolType = TInt(IBool, [])
+let ucharType = TInt(IUChar, [])
+let scharType = TInt(ISChar, [])
 
 (* This effectively embodies our "default specification" for C code
  * -- it controls what we assert in "__is_a" tests, and
