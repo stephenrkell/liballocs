@@ -1352,10 +1352,11 @@ struct insert *lookup_l01_object_info_nocache(const void *mem, void **out_object
 				|| (char*) cur_insert - (char*) cur_userchunk > biggest_unpromoted_object)
 			{
 				fprintf(stderr, "Saw insane insert address %p for chunk beginning %p "
-					"(usable size %zu, allocptr %p); memory corruption?\n", 
+					"(usable size %zu, allocptr %p, biggest unpromoted %ld); memory corruption?\n",
 					cur_insert, cur_userchunk, 
 					malloc_usable_size(userptr_to_allocptr(cur_userchunk)), 
-					userptr_to_allocptr(cur_userchunk));
+					userptr_to_allocptr(cur_userchunk),
+					(long) biggest_unpromoted_object);
 			}	
 #endif
 			if (mem >= cur_userchunk
