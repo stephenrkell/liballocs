@@ -100,13 +100,63 @@ int unw_step(unw_cursor_t *cp)
 	
 	// the next-higher ip is the return addr of the frame, i.e. 4(%eip)
 	void *return_addr = *(((void**)ctxt.frame_bp) + 1);
-	
 	void *sp = (((void**)ctxt.frame_bp) + 2);
 	void *candidate_bp = *((void**)ctxt.frame_bp);
-	
+	void *sane_bp_or_null = (void*) SANE_BP_OR_NULL(candidate_bp, sp);
+
+#if 0
+	/* It would be useful to be able to walk the stack through gdb's
+	 * "called from gdb" frames. We can recognise gdb frames by
+	 * (1) the new rbp is sane, but
+	 * (2) the return address is a short distance above it on the stack, and
+	 * (3) the *next* rbp equals that return address.*/
+	if (unlikely(sane_bp_or_null &&
+			(intptr_t) return_addr - (intptr_t) sane_bp_or_null < 0x20 &&
+			*((void**) sane_bp_or_null) == (void*) return_addr)
+	{
+		/* How do we unwind past a gdb frame?
+		 * gdb says that
+		 * (gdb) up
+		   #1  <function called from gdb>
+		   (gdb) print $rsp
+		   $79 = (void *) 0x7fffffff82d0       this is one word higher than the callee's saved rbp slot 0x7fffffff82c8
+		   (gdb) print $rbp
+		   $80 = (void *) 0x7fffffff82c8       this is the address of the saved rbp slot
+		
+		 * i.e. rsp and rbp are inverted! rsp is higher!
+		 * Where is the pre-call frame's rsp stored?
+		 
+		 * 0x7fffffff8300: 0x7fffffff8350  0x7ffff6bddb88 <__fetch_bounds_ool+360>
+		                       ^-- it's here      ^-- this is not related to any current frame
+		 * because although $rsp is showing as
+		                   0x7fffffff8360   in the pre-call frame,
+		   by the time the call has happened we've pushed two words (sp and ip).
+		 * So how can I infer the address 0x7fffffff8300
+		 * from the previous context? Not sure, but
+		   (gdb) x /20ga $rbp
+		   0x7fffffff82c0: 0x7fffffff82c8  0x7fffffff82df
+		   0x7fffffff82d0: 0x41    0xcc00000000000001
+		   0x7fffffff82e0: 0x1032488       0x0
+		   0x7fffffff82f0: 0x20    0x7
+		   0x7fffffff8300: 0x7fffffff8350  0x7ffff6bddb88 <__fetch_bounds_ool+360>
+		   0x7fffffff8310: 0xdf7c80 <__uniqtype__owl_move_data>    0x7fffffffc6b0
+		   0x7fffffff8320: 0x700000e6d800  0xffffffffffffff08
+		   0x7fffffff8330: 0xc68e00 <owl_vital_apat+1472>  0x0
+		   0x7fffffff8340: 0x7fffffffc6b0  0xc68840 <owl_vital_apat>
+		   0x7fffffff8350: 0x7fffffff8400  0x786e7a <owl_shapes_callback+106>
+
+		 * ... perhaps 0x41 is an offset that will help us get there?
+		 * If I add it to 0x7fffffff82df  I get 0x7fffffff8320
+		 * but that looks to be pointing into the middle of user code data.
+		 * GIVE UP for now; it's a private gdb detail anyhow.
+
+		 * rsp is one word higher than the saved rbp slot
+		 * rbp some distance higher */
+	}
+#endif
 	unw_context_t new_ctxt = (unw_context_t) { 
 		/* context sp = */ (unw_word_t) sp,
-		/* context bp = */ SANE_BP_OR_NULL(candidate_bp, sp),
+		/* context bp = */ (unw_word_t) sane_bp_or_null,
 		/* context ip = */ (unw_word_t) return_addr
 	};
 	
