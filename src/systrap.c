@@ -243,16 +243,18 @@ static int maybe_trap_map_cb(struct maps_entry *ent, char *linebuf, void *interp
 	const char *interpreter_fname = (const char *) interpreter_fname_as_void;
 	if (ent->x == 'x'
 #ifdef GUESS_RELEVANT_SYSCALL_SITES
+			/* If we're "guessing", it means trapping the whole ld.so and libdl
+			 * and trapping selected sites only in libc. */
 			&& (
 				0 == strcmp(interpreter_fname, ent->rest)
 				|| 0 == strcmp(basename(ent->rest), "libdl.so.2")
 			)
 #else
 		/* Just don't trap ourselves. Use this function's address to test */
-		//&& !(
-		//	(unsigned char *) ent->first <= (unsigned char *) maybe_trap_map_cb
-		//	&& (unsigned char *) ent->second > (unsigned char *) maybe_trap_map_cb
-		//	)
+		&& !(
+			(unsigned char *) ent->first <= (unsigned char *) maybe_trap_map_cb
+			&& (unsigned char *) ent->second > (unsigned char *) maybe_trap_map_cb
+			)
 #endif
 		)
 	{
@@ -374,6 +376,7 @@ void __liballocs_systrap_init(void)
 	unsigned char *libc_base = NULL; /* MONSTER HACK */
 	for (struct link_map *l = find_r_debug()->r_map; l; l = l->l_next)
 	{
+		/* Rather obscurely, we avoid trapping ourselves by testing l_ld against &_DYNAMIC. */
 		if ((const void *) l->l_ld != &_DYNAMIC && (intptr_t) l->l_addr > 0
 			&& strlen(l->l_name) > 0)
 		{
@@ -431,7 +434,7 @@ void __liballocs_systrap_init(void)
 				found_a_brk_or_sbrk |= trap_syscalls_in_symbol_named("sbrk", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 				/* PROBLEM: trap-syscalls wants to be able to do open(). 
 				 * Surely it should be doing raw_open? And not instrumenting itself? */
-				//trap_syscalls_in_symbol_named("open", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
+				trap_syscalls_in_symbol_named("open", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 				//trap_syscalls_in_symbol_named("__libc_open64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
 			}
 		}
@@ -443,11 +446,11 @@ void __liballocs_systrap_init(void)
 	} // end for all loaded objects
 	/* MONSTER HACK TEMPORARY FIXME */
 	assert(libc_base);
-	const off_t OPEN64_START = 953744;
-	const size_t OPEN64_LEN = 302;
-	trap_one_instruction_range(
-		(unsigned char *) libc_base + OPEN64_START, (unsigned char *) libc_base + OPEN64_START + OPEN64_LEN,
-		0, 1);
+// 	const off_t OPEN64_START = 953744;
+// 	const size_t OPEN64_LEN = 302;
+// 	trap_one_instruction_range(
+// 		(unsigned char *) libc_base + OPEN64_START, (unsigned char *) libc_base + OPEN64_START + OPEN64_LEN,
+// 		0, 1);
 
 	/* There's no hope of us working if we didn't find these. ACTUALLY don't abort
 	 * though, because aborting during startup stops gdb from taking control. */
