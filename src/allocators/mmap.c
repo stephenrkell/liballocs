@@ -91,7 +91,6 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
 	if (!b) abort();
 	
-	/* Note that this will use early_malloc if we would otherwise be reentrant. */
 	struct mapping_sequence *copy = __private_malloc(sizeof (struct mapping_sequence));
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
@@ -102,6 +101,20 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 			opaque_data: {
 				.data_ptr = copy,
 				.free_func = __private_free
+			}
+		}
+	};
+	return b;
+}
+static struct big_allocation *add_mapping_sequence_bigalloc_nomalloc(struct mapping_sequence *seq) {
+	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
+	if (!b) abort();
+	b->meta = (struct meta_info) {
+		.what = DATA_PTR,
+		.un = {
+			opaque_data: {
+				.data_ptr = NULL,
+				.free_func = NULL
 			}
 		}
 	};
@@ -744,7 +757,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		}
 		else /* HMM -- probably an mmap from the private malloc. Not sure*/
 		{
-			add_mapping_sequence_bigalloc(&new_seq);
+			add_mapping_sequence_bigalloc_nomalloc(&new_seq);
 		}
 	}
 }
