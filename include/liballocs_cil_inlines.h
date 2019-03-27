@@ -288,7 +288,6 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	}
 #endif
 	__liballocs_check_cache_sanity(cache);
-	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
 }
 
 extern inline
