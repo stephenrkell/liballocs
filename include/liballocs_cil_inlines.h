@@ -292,10 +292,10 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 
 extern inline
 struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
-__liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *t, unsigned long require_period);
+__liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *query_t, unsigned long query_period);
 extern inline
 struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
-__liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *t, unsigned long require_period)
+__liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *query_t, unsigned long query_period)
 {
 #ifndef LIBALLOCS_NOOP_INLINES
 	__liballocs_check_cache_sanity(cache);
@@ -307,16 +307,21 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 	{
 		if (cache->validity & (1<<(i-1)))
 		{
-			struct uniqtype *cache_uniqtype = (struct uniqtype *) (unsigned long) cache->entries[i].t;
-			/* We test whether the difference is divisible by the period and within the bounds */
+			/* We test whether the object is in-bounds, at an offset
+			 * that is congruent to the offset-to-a-t (modulo the entry period)
+			 * and, if a query period is passed, that the period matches exactly
+			 * (or ditto for the type)... this is for bounds checks, since we
+			 * can only do indexing in an array if the element size matches
+			 * the pointer's target size.
+			 *
+			 * Since division is probably the slowest part of the test, we
+			 * save it until last. */
 			signed long long diff = (char*) obj - (char*) cache->entries[i].range_base;
-			if ((!t || cache_uniqtype == t)
-					&& (char*) obj >= (char*)cache->entries[i].range_base
+			if ((char*) obj >= (char*)cache->entries[i].range_base
 					&& (char*) obj < (char*)cache->entries[i].range_limit
-					&& (diff % cache->entries[i].period == cache->entries[i].offset_to_t)
-					&& /* require_period is passed nonzero for clients doing bounds checks:
-						* arithmetic is only valid if the period matches the element size */
-						(!require_period || cache->entries[i].period == require_period))
+					&& (!query_t || ((struct uniqtype *) (unsigned long) cache->entries[i].t) == query_t)
+					&& (!query_period || cache->entries[i].period == query_period)
+					&& (diff % cache->entries[i].period == cache->entries[i].offset_to_t))
 			{
 				// hit
 				__liballocs_cache_bump(cache, i);
