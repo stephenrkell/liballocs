@@ -331,6 +331,38 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
 }
 
+extern inline
+struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
+__liballocs_memrange_cache_lookup_range )(struct __liballocs_memrange_cache *cache, const void *obj);
+extern inline
+struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
+__liballocs_memrange_cache_lookup_range )(struct __liballocs_memrange_cache *cache, const void *obj)
+{
+#ifndef LIBALLOCS_NOOP_INLINES
+	__liballocs_check_cache_sanity(cache);
+#ifdef LIBALLOCS_CACHE_LINEAR
+	for (unsigned char i = 1; i <= cache->max_pos; ++i)
+#else
+	for (unsigned char i = cache->head_mru; i != 0; i = cache->entries[i].next_mru)
+#endif
+	{
+		if (cache->validity & (1<<(i-1)))
+		{
+			if ((char*) obj >= (char*)cache->entries[i].range_base
+					&& (char*) obj < (char*)cache->entries[i].range_limit)
+			{
+				// hit
+				__liballocs_cache_bump(cache, i);
+				__liballocs_check_cache_sanity(cache);
+				return &cache->entries[i];
+			}
+		}
+	}
+#endif
+	__liballocs_check_cache_sanity(cache);
+	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
+}
+
 extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr);
 extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr)
 {
