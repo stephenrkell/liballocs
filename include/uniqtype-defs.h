@@ -37,6 +37,13 @@ extern "C" {
 struct uniqtype;
 const char *(__attribute__((pure,weak)) __liballocs_uniqtype_name)(const struct uniqtype *u);
 
+/* The uniqtype cache word is basically representing the same thing
+ * as a memrange cache entry.
+	unsigned offset_to_t; // at this offset within any period, we have a t
+	struct uniqtype *t:48;
+ * ... but where "offset_to_t" is in "bits" and "t" is in "addr" (fields
+ * of the alloc_addr_info struct, which we are repurposing here).
+ */
 #define UNIQTYPE_DECLS \
 /* CARE with bit allocation: we want the first bit (is_array) to be set only in */ \
 /* the ARRAY value. The placement of bitfields is ABI-determined, but on x86-64 */ \
