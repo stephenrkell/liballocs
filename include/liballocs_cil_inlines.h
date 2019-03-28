@@ -145,7 +145,7 @@ struct __liballocs_memrange_cache_entry_s
 	const void *range_base;
 	const void *range_limit;
 	unsigned period; // range_base to range_limit must be a multiple of "period" bytes
-	unsigned offset_to_t; // at this offset within any period, we have a t
+	unsigned _unused; // at this offset within any period, we have a t
 	/*struct uniqtype * */ unsigned long t:48;
 	unsigned char prev_mru;
 	unsigned char next_mru;
@@ -211,7 +211,7 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 				assert(!((cache->entries[i].range_base == cache->entries[j].range_base)
 				&& (cache->entries[i].range_limit == cache->entries[j].range_limit)
 				&& (cache->entries[i].period == cache->entries[j].period)
-				&& (cache->entries[i].offset_to_t == cache->entries[j].offset_to_t)
+				//&& (cache->entries[i].offset_to_t == cache->entries[j].offset_to_t)
 				&& (cache->entries[i].t == cache->entries[j].t)));
 			}
 		}
@@ -290,6 +290,34 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	__liballocs_check_cache_sanity(cache);
 }
 
+/* HMM. This will cause problems if someone includes uniqtype-defs.h
+ * *after* they include liballocs_cil_inlines.h. */
+#ifndef UNIQTYPE_DECLS
+struct alloc_addr_info
+{
+	unsigned long addr:47;
+	unsigned flag:1;
+	unsigned bits:16;
+};
+#endif
+
+#define UNIQTYPE_QD_KIND(t) \
+(*((char*)(unsigned long)(t) + 0xc) & 0xf)
+#define UNIQTYPE_QD_CACHE_WORD(t) \
+(*(struct alloc_addr_info *)(unsigned long)(t))
+#define UNIQTYPE_QD_RELATED0_T(t) \
+({ struct uniqtype *related; \
+	__builtin_memcpy((char*) &related, (char*)(unsigned long)(t) + 0x18, 8); \
+	related; })
+#define UNIQTYPE_QD_SIZE(t) \
+({ unsigned pos_maxoff; \
+	__builtin_memcpy((char*) &pos_maxoff, (char*)(unsigned long)(t) + 0x8, 4); \
+	pos_maxoff; })
+#define UNIQTYPE_QD_IS_ARRAY(t) \
+	(((UNIQTYPE_QD_KIND(t)) & 0x1) == 1)
+#define UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(t) \
+	(UNIQTYPE_QD_SIZE(UNIQTYPE_QD_RELATED0_T(t)))
+
 extern inline
 struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
 __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *query_t, unsigned long query_period);
@@ -316,12 +344,40 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 			 *
 			 * Since division is probably the slowest part of the test, we
 			 * save it until last. */
+
+#define UNPACK_TYPE(__t) ((struct uniqtype *) (unsigned long) (__t))
+#define ENTRY_TYPE (UNPACK_TYPE(cache->entries[i].t))
+#define MODULUS (diff % cache->entries[i].period)
+#define ENTRY_TYPE_MATCHES ( \
+	(ENTRY_TYPE == query_t) && \
+	(MODULUS == 0))
+/* This is almost right. "Bits" gives us the offset to the start of the
+ * contained range. What about the end of the contained range?
+ * We handle this by allowing the contained range to be an array type. */
+#define CACHED_CONTAINED_RANGE_TYPE_MATCHES ( \
+	(ENTRY_TYPE) && \
+	( \
+		( \
+			(query_t == UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) ) && \
+			(MODULUS == UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits /* modulus matches offset */) \
+		) || \
+		( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) && \
+			UNIQTYPE_QD_IS_ARRAY( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) ) && \
+			((MODULUS - UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits) % \
+				UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr)) == 0 \
+				/* (modulus - offset) is a multiple of element size */) \
+		) \
+	))
+/* At present, we never use the cache word's addr field.
+ * So to test the above, we should see behaviour as usual
+ * but worse cache hit rate on things like milc which used
+ * the offset-to-t thing heavily. */
+
 			signed long long diff = (char*) obj - (char*) cache->entries[i].range_base;
 			if ((char*) obj >= (char*)cache->entries[i].range_base
 					&& (char*) obj < (char*)cache->entries[i].range_limit
-					&& (!query_t || ((struct uniqtype *) (unsigned long) cache->entries[i].t) == query_t)
 					&& (!query_period || cache->entries[i].period == query_period)
-					&& (diff % cache->entries[i].period == cache->entries[i].offset_to_t))
+					&& (!query_t || ENTRY_TYPE_MATCHES || CACHED_CONTAINED_RANGE_TYPE_MATCHES))
 			{
 				// hit
 				__liballocs_cache_bump(cache, i);
@@ -400,6 +456,13 @@ extern inline void
 	const void *range_base, const void *range_limit, unsigned period,
 	unsigned offset_to_t, const struct uniqtype *t, unsigned short depth)
 {
+	/* Experiment: we no longer use cache entries to cache containment facts. */
+	// *****************
+	if (offset_to_t != 0) return;
+	// *****************
+
+
+
 	__liballocs_check_cache_sanity(c);
 	assert(!period || ((unsigned long) range_limit - (unsigned long) range_base) % period == 0);
 	_Bool evicting = 0;
@@ -440,7 +503,7 @@ extern inline void
 		.range_base = range_base,
 		.range_limit = range_limit,
 		.period = period,
-		.offset_to_t = offset_to_t,
+		//.offset_to_t = offset_to_t,
 		.t = (unsigned long) (struct uniqtype *) t,
 		.prev_mru = c->entries[pos].prev_mru, // insert in the same position in the MRU chain...
 		.next_mru = c->entries[pos].next_mru//,
