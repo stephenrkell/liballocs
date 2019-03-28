@@ -145,7 +145,7 @@ struct __liballocs_memrange_cache_entry_s
 	const void *range_base;
 	const void *range_limit;
 	unsigned period; // range_base to range_limit must be a multiple of "period" bytes
-	unsigned _unused; // at this offset within any period, we have a t
+	unsigned offset_to_t; // at this offset within any period, we have a t
 	/*struct uniqtype * */ unsigned long t:48;
 	unsigned char prev_mru;
 	unsigned char next_mru;
@@ -211,7 +211,7 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 				assert(!((cache->entries[i].range_base == cache->entries[j].range_base)
 				&& (cache->entries[i].range_limit == cache->entries[j].range_limit)
 				&& (cache->entries[i].period == cache->entries[j].period)
-				//&& (cache->entries[i].offset_to_t == cache->entries[j].offset_to_t)
+				&& (cache->entries[i].offset_to_t == cache->entries[j].offset_to_t)
 				&& (cache->entries[i].t == cache->entries[j].t)));
 			}
 		}
@@ -345,39 +345,63 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 			 * Since division is probably the slowest part of the test, we
 			 * save it until last. */
 
+/* There are many memranges we can match against.
+ * (1) the top-level range of the cache entry
+ * (2a) the "offset range" described by the offset-to-t and t fields,
+ *          which may or may not be the same as the top-level range
+ *       (it is the same iff offset == 0 and period == t->pos_maxoff).
+ * (2b) the "offset range" described by offset-to-t and t fields,
+ *          if t is an array type
+ *       (sanity suggests we should only do this if offset is nonzero)
+ *       (FIXME: include this in the sanity checks)
+ *       (for types-only libcrunch we never use array types in cache entries,
+ *        but this will change for bounds checking)
+ * (3a) the "cached contained range" described by the uniqtype cache word,
+ *        in the case where the cached type is a singleton
+ * (3b) the "cached contained range"... where it's an array. */
 #define UNPACK_TYPE(__t) ((struct uniqtype *) (unsigned long) (__t))
 #define ENTRY_TYPE (UNPACK_TYPE(cache->entries[i].t))
 #define MODULUS (diff % cache->entries[i].period)
-#define ENTRY_TYPE_MATCHES ( \
+#define ENTRY_TYPE_MATCHES_TOPLEVEL_RANGE ( \
 	(ENTRY_TYPE == query_t) && \
 	(MODULUS == 0))
-/* This is almost right. "Bits" gives us the offset to the start of the
- * contained range. What about the end of the contained range?
- * We handle this by allowing the contained range to be an array type. */
-#define CACHED_CONTAINED_RANGE_TYPE_MATCHES ( \
+#define ENTRY_TYPE_MATCHES_OFFSET_RANGE_SINGLETON ( \
+	(ENTRY_TYPE == query_t) && \
+	(MODULUS == cache->entries[i].offset_to_t))
+#define ENTRY_TYPE_MATCHES_OFFSET_RANGE_ARRAY ( \
+		( (ENTRY_TYPE) && \
+			UNIQTYPE_QD_IS_ARRAY( ENTRY_TYPE ) && \
+			((MODULUS - cache->entries[i].offset_to_t) % \
+				UNIQTYPE_QD_ARRAY_ELEMENT_SIZE( ENTRY_TYPE ) == 0 \
+				/* (modulus - offset) is a multiple of element size */) \
+		) \
+	)
+#define CACHED_CONTAINED_RANGE_TYPE_MATCHES_SINGLETON ( \
 	(ENTRY_TYPE) && \
 	( \
 		( \
 			(query_t == UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) ) && \
-			(MODULUS == UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits /* modulus matches offset */) \
-		) || \
+			(MODULUS - cache->entries[i].offset_to_t == UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits /* modulus matches offset */) \
+		) \
+	))
+#define CACHED_CONTAINED_RANGE_TYPE_MATCHES_ARRAY ( \
+	(ENTRY_TYPE) && \
 		( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) && \
 			UNIQTYPE_QD_IS_ARRAY( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) ) && \
-			((MODULUS - UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits) % \
+			((MODULUS - cache->entries[i].offset_to_t - UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits) % \
 				UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr)) == 0 \
 				/* (modulus - offset) is a multiple of element size */) \
 		) \
-	))
-/* At present, we never use the cache word's addr field.
- * So to test the above, we should see behaviour as usual
- * but worse cache hit rate on things like milc which used
- * the offset-to-t thing heavily. */
-
+	)
 			signed long long diff = (char*) obj - (char*) cache->entries[i].range_base;
 			if ((char*) obj >= (char*)cache->entries[i].range_base
 					&& (char*) obj < (char*)cache->entries[i].range_limit
 					&& (!query_period || cache->entries[i].period == query_period)
-					&& (!query_t || ENTRY_TYPE_MATCHES || CACHED_CONTAINED_RANGE_TYPE_MATCHES))
+					&& (!query_t || ENTRY_TYPE_MATCHES_TOPLEVEL_RANGE
+						|| ENTRY_TYPE_MATCHES_OFFSET_RANGE_SINGLETON
+						|| ENTRY_TYPE_MATCHES_OFFSET_RANGE_ARRAY
+						|| CACHED_CONTAINED_RANGE_TYPE_MATCHES_SINGLETON
+						|| CACHED_CONTAINED_RANGE_TYPE_MATCHES_ARRAY))
 			{
 				// hit
 				__liballocs_cache_bump(cache, i);
@@ -456,13 +480,6 @@ extern inline void
 	const void *range_base, const void *range_limit, unsigned period,
 	unsigned offset_to_t, const struct uniqtype *t, unsigned short depth)
 {
-	/* Experiment: we no longer use cache entries to cache containment facts. */
-	// *****************
-	if (offset_to_t != 0) return;
-	// *****************
-
-
-
 	__liballocs_check_cache_sanity(c);
 	assert(!period || ((unsigned long) range_limit - (unsigned long) range_base) % period == 0);
 	_Bool evicting = 0;
@@ -503,7 +520,7 @@ extern inline void
 		.range_base = range_base,
 		.range_limit = range_limit,
 		.period = period,
-		//.offset_to_t = offset_to_t,
+		.offset_to_t = offset_to_t,
 		.t = (unsigned long) (struct uniqtype *) t,
 		.prev_mru = c->entries[pos].prev_mru, // insert in the same position in the MRU chain...
 		.next_mru = c->entries[pos].next_mru//,
