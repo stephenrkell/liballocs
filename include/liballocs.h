@@ -737,16 +737,16 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom);
 struct insert *__liballocs_get_insert(struct big_allocation *maybe_the_allocation, const void *mem); // HACK: please remove (see libcrunch)
 
 /* FIXME: use newer/better features in uniqtype definition */
-inline 
-const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
+static inline
+const char **__liballocs_uniqtype_subobject_names(const struct uniqtype *t)
 {
 	/* HACK: this all needs to go away, once we overhaul uniqtype's layout. */
 	Dl_info i = dladdr_with_cache(t);
 	if (i.dli_sname)
 	{
-		char *names_name = (char*) alloca(strlen(i.dli_sname) + sizeof "_subobj_names" + 1); /* HACK: necessary? */
-		strncpy(names_name, i.dli_sname, strlen(i.dli_sname));
-		strcat(names_name, "_subobj_names");
+		char names_name[strlen(i.dli_sname) + sizeof "_subobj_names"];
+		memcpy(names_name, i.dli_sname, strlen(i.dli_sname));
+		memcpy(names_name+strlen(i.dli_sname), "_subobj_names", sizeof "_subobj_names");
 		void *handle = dlopen(i.dli_fname, RTLD_NOW | RTLD_NOLOAD);
 		if (handle)
 		{
