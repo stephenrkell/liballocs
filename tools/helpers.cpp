@@ -874,7 +874,6 @@ bool sticky_root_die::is_base_object(int user_fd)
 				std::cerr << (*i_found - shdr);
 			}
 			std::cerr << "}" << std::endl;
-			abort();
 		}
 		auto &it = *found->second.begin();
 		if (it->sh_type == SHT_NOBITS) return true;

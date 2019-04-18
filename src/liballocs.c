@@ -1525,7 +1525,7 @@ __liballocs_get_type(void *obj)
 #ifdef __liballocs_get_alloc_type
 #undef __liballocs_get_alloc_type
 #endif
-void *__liballocs_get_alloc_type(void *obj) __attribute__((alias("__liballocs_get_type")));
+struct uniqtype *__liballocs_get_alloc_type(void *obj) __attribute__((alias("__liballocs_get_type")));
 
 struct uniqtype *
 __liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)

@@ -183,7 +183,13 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		__liballocs_nudge_mmap(&addr, &length, &prot, &flags, &fd, &offset, __builtin_return_address(0));
 	}
 
-	void *ret = (void*) (uintptr_t) syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
+	void *ret = raw_mmap(addr, length, prot, flags, fd, offset);
+	if (MMAP_RETURN_IS_ERROR(ret))
+	{
+		errno = -(int) (size_t) ret;
+		ret = MAP_FAILED;
+	}
+
 	/* We only start hooking mmap after we read /proc, which is also when we 
 	 * enable the systrap stuff. */
 	if (!__liballocs_systrap_is_initialized || length > BIGGEST_BIGALLOC

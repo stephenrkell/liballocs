@@ -131,7 +131,7 @@ class CompilerWrapper:
         # AND in the case where it can't be created, so...
         try:
             os.makedirs(os.path.dirname(name))
-        except os.error, e:
+        except os.error:
             pass
         # ... we let it pass, because "can't be created" => the open will fail
         return open(name, mode)
@@ -444,7 +444,7 @@ class CompilerWrapper:
     # echo the option back on stderr with some spacing/quoting stuff around it.
     def recognisesOption(self, opt):
         errOutput = subprocess.Popen(self.getCompilerCommand([], {}) + [opt], \
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[1] 
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()[1].decode() 
         m = re.match(".*[^-a-z0-9]" + opt + "([^-a-z0-9].*|$)", errOutput) # FIXME: escaping
         if m:
             return False

@@ -683,7 +683,7 @@ __liballocs_get_alloc_info
 
 // FIXME: do these inline cache things actually help performance?
 // Do a study of this before adding any more.
-#if defined(__GNUC__) && !defined(LIBALLOCS_NO_INLCACHE) /* requires statement expression */
+#if defined(__GNUC__) && defined(LIBALLOCS_INLCACHE) /* requires statement expression */
 #define __liballocs_get_alloc_type(obj) \
 	({ \
 		static struct allocator *cached_allocator; \
@@ -699,7 +699,7 @@ struct uniqtype *
 __liballocs_get_alloc_type(void *obj);
 #endif
 
-#if defined(__GNUC__) && !defined(LIBALLOCS_NO_INLCACHE)
+#if defined(__GNUC__) && defined(LIBALLOCS_INLCACHE)
 #define __liballocs_get_alloc_base(obj) \
 	({ \
 		static struct allocator *cached_allocator; \
@@ -737,16 +737,16 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom);
 struct insert *__liballocs_get_insert(struct big_allocation *maybe_the_allocation, const void *mem); // HACK: please remove (see libcrunch)
 
 /* FIXME: use newer/better features in uniqtype definition */
-inline 
-const char **__liballocs_uniqtype_subobject_names(struct uniqtype *t)
+static inline
+const char **__liballocs_uniqtype_subobject_names(const struct uniqtype *t)
 {
 	/* HACK: this all needs to go away, once we overhaul uniqtype's layout. */
 	Dl_info i = dladdr_with_cache(t);
 	if (i.dli_sname)
 	{
-		char *names_name = (char*) alloca(strlen(i.dli_sname) + sizeof "_subobj_names" + 1); /* HACK: necessary? */
-		strncpy(names_name, i.dli_sname, strlen(i.dli_sname));
-		strcat(names_name, "_subobj_names");
+		char names_name[strlen(i.dli_sname) + sizeof "_subobj_names"];
+		memcpy(names_name, i.dli_sname, strlen(i.dli_sname));
+		memcpy(names_name+strlen(i.dli_sname), "_subobj_names", sizeof "_subobj_names");
 		void *handle = dlopen(i.dli_fname, RTLD_NOW | RTLD_NOLOAD);
 		if (handle)
 		{
@@ -776,7 +776,7 @@ struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 
 static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void *), void *arg)
 {
-	unw_cursor_t cursor, saved_cursor;
+	unw_cursor_t cursor;
 	unw_word_t higherframe_sp = 0, sp, higherframe_bp = 0, bp = 0, ip = 0, higherframe_ip = 0;
 	int unw_ret;
 	int ret = 0;
@@ -797,7 +797,7 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 		// callee_ip = ip;
 		// prev_saved_cursor is the cursor into the callee's frame 
 		// prev_saved_cursor = saved_cursor; // FIXME: will be garbage if callee_ip == 0
-		saved_cursor = cursor; // saved_cursor is the *current* frame's cursor
+		// saved_cursor = cursor; // saved_cursor is the *current* frame's cursor
 
 		/* First get the ip, sp and symname of the current stack frame. */
 		unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(unw_ret == 0);
