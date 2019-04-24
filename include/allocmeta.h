@@ -5,6 +5,7 @@
 #include <sys/time.h>
 #include <elf.h>
 #include <dlfcn.h>
+#include <link.h> /* for ElfW() */
 
 struct liballocs_err;
 typedef struct liballocs_err *liballocs_err_t;
@@ -128,7 +129,6 @@ fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   
 fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct big_allocation *, maybe_alloc), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
 fun(struct big_allocation *,ensure_big,arg(void *, obj)) \
 fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static*/ \
-fun(const char *       ,get_name,      arg(void *, obj)) \
 fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
 fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
 fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \
