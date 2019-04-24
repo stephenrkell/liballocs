@@ -57,7 +57,7 @@ struct segment_metadata
 static void free_segment_metadata(void *sm)
 {
 	struct segment_metadata *s = (struct segment_metadata *) sm;
-	__wrap_dlfree(sm);
+	__private_free(sm);
 }
 
 void __static_segment_allocator_notify_define_segment(
@@ -72,7 +72,7 @@ void __static_segment_allocator_notify_define_segment(
 	struct big_allocation *containing_file = __lookup_bigalloc(
 		segment_start_addr, &__static_file_allocator, NULL);
 	if (!containing_file) abort();
-	struct segment_metadata *m = __wrap_dlmalloc(sizeof (struct segment_metadata));
+	struct segment_metadata *m = __private_malloc(sizeof (struct segment_metadata));
 	*m = (struct segment_metadata) {
 		.phdr = phdr,
 		.bits = &(*file->starts_bitmaps)[i],

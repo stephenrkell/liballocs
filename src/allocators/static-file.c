@@ -195,7 +195,7 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 		- (char*) containing_mapping_bigalloc->begin;
 	const char *dynobj_name = dynobj_name_from_dlpi_name(l->l_name,
 		(void*) l->l_addr);
-	struct file_metadata *meta = __wrap_dlmalloc(sizeof (struct file_metadata));
+	struct file_metadata *meta = __private_malloc(sizeof (struct file_metadata));
 	if (!meta) abort();
 	*meta = (struct file_metadata) {
 		.load_site = load_site,
@@ -290,7 +290,7 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 static void free_file_metadata(void *fm)
 {
 	struct file_metadata *meta = (struct file_metadata *) fm;
-	__wrap_dlfree((void*) meta->filename);
+	__private_free((void*) meta->filename);
 	for (unsigned i = 0; i < MAPPING_MAX; ++i)
 	{
 		if (meta->extra_mappings[i].mapping_pagealigned)
@@ -299,7 +299,7 @@ static void free_file_metadata(void *fm)
 				meta->extra_mappings[i].size);
 		}
 	}
-	__wrap_dlfree(meta);
+	__private_free(meta);
 }
 
 static int add_all_loaded_segments_for_one_file_only_cb(struct dl_phdr_info *info, size_t size, void *file_metadata)
