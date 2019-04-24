@@ -404,20 +404,21 @@ class CompilerWrapper:
     # FIXME: ideally get rid of these
     
     def getSourceInputFiles(self):
-        return self.allSourceFiles.values()
+        return list(self.allSourceFiles.values())
 
     def getOutputFilename(self, phase=Phase.DRIVER):
-        maybeGiven = self.phaseOptions[phase].get("-o")
-        if maybeGiven == None:
-            if phase == Phase.LINK and not "-shared" in self.phaseOptions[Phase.LINK].keys() \
+        fn = self.phaseOptions[phase].get("-o")
+        if fn == None:
+            if self.doingFinalLink() \
+                and not "-shared" in self.phaseOptions[Phase.LINK].keys() \
                 and not "-Wl,-r" in self.phaseOptions[Phase.LINK].keys():
-                return "a.out"
+                fn = "a.out"
                 # there are no defaults for shared lib outputs (or other linker outputs)
             elif not phase == Phase.LINK:
                 # if we have a unique source input (FIXME: should be input to the last phase...)
                 if len(self.getSourceInputFiles()) == 1:
-                     return self.getSourceInputFiles()[0].nameAfterPhase(phase)
-        return maybeGiven
+                     fn = self.getSourceInputFiles()[0].nameAfterPhase(phase)
+        return fn
     
     def parseInputAndOutputFiles(self):
         args = sys.argv
