@@ -90,6 +90,10 @@ void *__liballocs_get_alloc_site(const void *obj)
 {
 	return 0;
 }
+void *__liballocs_get_base(void *obj)
+{
+	return NULL;
+}
 void *__liballocs_get_alloc_base(void *obj)
 {
 	return NULL;

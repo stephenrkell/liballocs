@@ -974,7 +974,7 @@ void *biggest_vaddr_in_obj(void *handle)
 char *__liballocs_private_strdup(const char *s)
 {
 	size_t len = strlen(s);
-	char *mem = __wrap_dlmalloc(len + 1);
+	char *mem = __private_malloc(len + 1);
 	strncpy(mem, s, len);
 	mem[len] = '\0';
 	return mem;
@@ -983,7 +983,7 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 {
 	size_t maxlen = strlen(s);
 	size_t len = (n > maxlen) ? maxlen : n;
-	char *mem = __wrap_dlmalloc(len + 1);
+	char *mem = __private_malloc(len + 1);
 	strncpy(mem, s, len);
 	mem[len] = '\0';
 	return mem;
@@ -1525,7 +1525,7 @@ __liballocs_get_type(void *obj)
 #ifdef __liballocs_get_alloc_type
 #undef __liballocs_get_alloc_type
 #endif
-void *__liballocs_get_alloc_type(void *obj) __attribute__((alias("__liballocs_get_type")));
+struct uniqtype *__liballocs_get_alloc_type(void *obj) __attribute__((alias("__liballocs_get_type")));
 
 struct uniqtype *
 __liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)

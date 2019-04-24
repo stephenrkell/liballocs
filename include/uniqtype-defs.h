@@ -131,7 +131,7 @@ struct uniqtype \
            unsigned nret:10; /* sim. return values */ \
            unsigned is_va:1; /* is variadic */ \
            unsigned cc:7;    /* calling convention */ \
-       } subprogram; /* related[0..nret] are return types; contained[nret..nret+narg] are args */ \
+       } subprogram; /* related[0..nret] are return types; related[nret..nret+narg] are args */ \
        struct { \
            unsigned kind:4; \
            unsigned min:14; \
@@ -315,6 +315,7 @@ extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); /
 #define NULL_UNIQTYPE (void*)0
 #endif
 
+#define UNIQTYPE_SIZE_IN_BYTES(u)        ((u)->pos_maxoff)
 #define UNIQTYPE_IS_SUBPROGRAM_TYPE(u)   ((u)->un.info.kind == SUBPROGRAM)
 #define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) ((u)->un.subprogram.narg)
 #define UNIQTYPE_IS_POINTER_TYPE(u)      ((u)->un.info.kind == ADDRESS)

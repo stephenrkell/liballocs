@@ -20,6 +20,13 @@ size_t __real_dlmalloc_usable_size(void *userptr);
 static char *lowest_early_seen = (char*) -1;
 static char *highest_early_seen;
 
+/* FIXME: we currently don't keep metadata for the chunks we allocate
+ * ourselves. Why not? We should add the trailer and set the bitmap
+ * just like we would for an ordinary malloc. This is necessary for
+ * the nice node/v8+liballocs demo, in which we do a dlopen() and
+ * can see the full link_map structure (including ld.so-private fields)
+ * as its pointed-to return value. Part of the problem here is that
+ * the ld.so's allocations are seen as "by ourselves". */
 static void fix_mapping_metadata(void *ptr)
 {
 	if (__liballocs_systrap_is_initialized)
@@ -27,6 +34,12 @@ static void fix_mapping_metadata(void *ptr)
 		struct big_allocation *b = __lookup_bigalloc_top_level(ptr);
 		if (b && b->allocated_by == &__mmap_allocator)
 		{
+			/* HACK: the way we signify that this is an arena of our private
+			 * malloc is to zero out its mapping_sequence pointer. WHY?
+			 * It would be far better to use suballocated_by, where private_malloc
+			 * suballocates from a different arena than the ordinary malloc.
+			 * This will be easy to do once each allocator (e.g. malloc instance)
+			 * has its own struct allocator identity. */
 			b->meta.un.opaque_data.data_ptr = NULL;
 		}
 		else

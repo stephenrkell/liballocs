@@ -205,6 +205,12 @@ nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
 # Easiest is just to treat them like exes. They will get their own copy 
 # of the basic uniqtypes, but this will get uniqued as appropriate.
 
+# NOTE that our use of __private_malloc, a defsym'd symbol,
+# used to provoke a gold bug when we were generating protected-visibility
+# undefineds that were bound to it. That bug has been reported (#24286) and
+# I've removed the protected undefineds (which came from libmallochooks
+# template code). So we are still committed to using gold to link liballocs
+# owing to binutils issue 13600 is fixed (see elsewhere in this file).
 liballocs_preload.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 liballocs_preload.so: systrap.o liballocs_preload.a dlmalloc.a
 	$(CC) $(CFLAGS) -shared -o "$@" \

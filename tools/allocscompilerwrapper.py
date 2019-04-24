@@ -107,11 +107,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
     # we're doing, we need to get one that *is not us*. 
     def getBasicCCompilerCommand(self):
         ourPath = os.path.realpath(sys.argv[0])
-        whichOutput = subprocess.Popen(["which", "-a", "cc"], stdout=subprocess.PIPE, stderr=sys.stderr).communicate()[0]
+        whichOutput = subprocess.Popen(["which", "-a", "cc"], stdout=subprocess.PIPE, stderr=sys.stderr).communicate()[0].decode()
         for cmd in [l for l in whichOutput.split("\n") if l != '']:
             # HACK: avoid things in the same directory, to avoid crunchbcc using "cc" a.k.a. crunchcc
             if os.path.dirname(os.path.realpath(cmd)) != os.path.dirname(ourPath):
-                sys.stderr.write("Using basic C compiler: %s (we are: %s)\n" % (str(cmd), str(ourPath)))
+                #sys.stderr.write("Using basic C compiler: %s (we are: %s)\n" % (str(cmd), str(ourPath)))
                 return [cmd]
         sys.stderr.write("abort: could not find a C compiler which is not us.\n")
         exit(2)
@@ -137,7 +137,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             cmdstring = "nm -fbsd \"%s\" | grep -v '^[0-9a-f ]\+ U ' | egrep \"^[0-9a-f ]+ . (%s)$\" | sed 's/^[0-9a-f ]\+ . //'" \
                 % (filename, regex)
             self.debugMsg("cmdstring for objdump is " + cmdstring + "\n")
-            grep_output = subprocess.Popen(["sh", "-c", cmdstring], stdout=subprocess.PIPE, stderr=errfile).communicate()[0]
+            grep_output = subprocess.Popen(["sh", "-c", cmdstring], stdout=subprocess.PIPE, stderr=errfile).communicate()[0].decode()
             return [l for l in grep_output.split("\n") if l != '']
     
     def fixupPostAssemblyDotO(self, filename, errfile):
@@ -386,7 +386,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         + "/tools/find-allocated-type-size", fnName] + [ \
                         objfile for objfile in passedThroughArgs if objfile.endswith(".o")]
                     self.debugMsg("Calling " + " ".join(size_find_command) + "\n")
-                    outp = subprocess.Popen(size_find_command, stdout=subprocess.PIPE).communicate()[0]
+                    outp = subprocess.Popen(size_find_command, stdout=subprocess.PIPE).communicate()[0].decode()
                     self.debugMsg("Got output: " + outp + "\n")
                     # we get lines of the form <number> \t <explanation>
                     # so just chomp the first number
@@ -486,7 +486,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             stubs_output = None
             try:
                 stubs_output = subprocess.check_output(stubs_cc_cmd, stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError, e:
+            except subprocess.CalledProcessError as e:
                 self.debugMsg("Could not compile stubs file %s: compiler returned %d and said %s\n" \
                     % (stubs_pp, e.returncode, str(e.output)))
                 exit(1)

@@ -71,6 +71,9 @@ type sz =
     Undet
   | Existing of typsig * bool (* complete? *)
   | Synthetic of typsig list
+  | TooComplex (* used to ensure termination on seemingly unbounded types due to absence of flow control checks *)
+
+let complexity_threshold = 100
 
 let dwarfIdlExprFromSynthetic tss ident : string = 
     (* we want to output a dwarfidl expression 
@@ -193,6 +196,8 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
              (Undet, Undet) -> Undet
            | (Undet, _) -> sz2 (* a bit weird, pre-padding but okay *) 
            | (_, Undet) -> sz1 (* character padding *)
+           | (TooComplex, _) -> TooComplex
+           | (_, TooComplex) -> TooComplex
            | (Existing(s1, isComplete1), Existing(s2, isComplete2)) ->
                  (* If we're adding Xs to Xs, OR array of Xs to some more sizeof X, the whole
                     expr has sizeofness X *)
@@ -207,12 +212,19 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
                        in which case our last element is a variable-length thing.
                      *)
                     Synthetic([s1; TSArray(s2, None, [])])
+           | (Synthetic(l1), Existing(_, _))
+               when List.length l1 >= complexity_threshold -> TooComplex
            | (Synthetic(l1), Existing(s2, _)) -> Synthetic(l1 @ [s2])
+           | (Existing(_, _), Synthetic(l2))
+               when List.length l2 >= complexity_threshold -> TooComplex
            | (Existing(s1, _), Synthetic(l2)) -> Synthetic(s1 :: l2)
             (* HACK: if we have a loop that keeps adding up a size
              * calculated by some complex expression, we want to make sure
              * we get a fixed point in the sizeofness. *)
            | (Synthetic(l1), Synthetic(l2)) when l1 = l2 -> Synthetic(l1)
+           | (Synthetic(l1), Synthetic(l2))
+               when List.length l1 + List.length l2 > complexity_threshold ->
+                   TooComplex
            | (Synthetic(l1), Synthetic(l2)) -> Synthetic(l1 @ l2)
         end
    |  BinOp(Div, e1, e2, t) -> begin
@@ -315,6 +327,7 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
             (if not isComplete then "incomplete " else "") ^ (typsigToString ts) ^ "\n")
          | Synthetic _ ->  debug_print 1 ("something synthetic\n")
          | Undet -> debug_print 1 "don't know\n"
+         | TooComplex -> debug_print 1 "something too complex\n"
    );
    flush Pervasives.stderr;
    res
@@ -388,7 +401,7 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint (calledFuncti
        match szEx with
          Existing(szType, _) -> (debug_print 1 ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
                szEx
-       | Undet -> debug_print 1 ("Could not infer what we are allocating\n"); flush Pervasives.stderr; szEx
+       | Undet | TooComplex -> debug_print 1 ("Could not infer what we are allocating\n"); flush Pervasives.stderr; szEx
        | Synthetic(_) -> debug_print 1 ("We are allocating a composite: FIXME print this out\n"); flush Pervasives.stderr; szEx
      else (match maybeFunNameToPrint with 
          Some(fnname) -> 
@@ -582,9 +595,11 @@ let printAllocFn fileAndLine chan maybeFunvar allocType mightBeArrayOfThis =
 let sizeofnessToString sz = match sz with
     Existing(ts, isCompl) -> "existing " ^ (Pretty.sprint 80 (d_typsig () ts))
   | Synthetic(tss) -> "synthetic [" ^ (List.fold_left (fun acc -> fun ts -> acc ^ (if acc = "" then "" else "; ") ^ (Pretty.sprint 80 (d_typsig () ts))) "" tss) ^ "]"
-  | _ -> "undet"
+  | TooComplex -> "too complex"
+  | Undet -> "undet"
 
 let rec untilFixedPoint f initialValue = begin
+(* TODO: Not compute the string representation of initialValue when debug printing is off *)
   let printEl (vnum, sz) = "(" ^ string_of_int (vnum) ^ ", " ^ (sizeofnessToString sz) ^ ") "
   in 
   let listAsString = "[" ^ (fold_left (^) "" (map printEl initialValue)) ^ "]"
@@ -613,9 +628,9 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) (gs : Cil.global lis
                match szness with
                    Undet -> acc
                  | _ -> (
-                 debug_print 1 ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofness " ^ (sizeofnessToString szness) ^  ")\n")
-                 ; flush Pervasives.stderr; (v.vid, szness) :: (remove_assoc v.vid acc))
-              |  _ -> acc
+                 debug_print 1 ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofness " ^ (sizeofnessToString szness) ^  ")\n");
+                 flush Pervasives.stderr;
+                 (v.vid, szness) :: (remove_assoc v.vid acc))
             end
           | Mem(e) -> acc
          end 
@@ -791,21 +806,24 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                  Sizeof V also lets us terminate
                  Mul where an arg is a Sizeof lets us terminate *)
               let res = getAllocExpr i maybeFunvar args !sizeEnv functionT fl.globals in
-              if res = None then SkipChildren(* this means it's not an allocation function *)
-              else let allocString, isComplete = match res with
-                 Some(Existing(ts, isComplete)) when isSinglyIndirectGenericPointerTypesig ts -> 
+              match res with
+              | None -> SkipChildren (*this means it's not an allocation function *)
+              | Some sz -> begin
+                let allocString, isComplete = match sz with
+                  Existing(ts, isComplete) when isSinglyIndirectGenericPointerTypesig ts ->
                     ("__uniqtype____EXISTS1___PTR__1", true)
-              |  Some(Existing(ts, isComplete)) -> 
+                | Existing(ts, isComplete) ->
                     ((symnameFromSig ts), isComplete)
-              |  Some(Synthetic(tss)) ->
+                | Synthetic(tss) ->
                     let idl = dwarfIdlExprFromSynthetic tss (identFromString ("dumpallocs_synthetic_" ^ (trim fileAndLine)))
                     in (idl, false)
-              |  Some(Undet) -> (* it is an allocation function, but... *)
+                | Undet | TooComplex -> (* it is an allocation function, but... *)
                     ("__uniqtype____uninterpreted_byte", true)
               in
               instrsToLabel := (i, [Attr("allocstmt", [AStr(allocString)])]) :: !instrsToLabel;
               printAllocFn fileAndLine chan maybeFunvar allocString isComplete;
               SkipChildren
+              end
             end (* ) *)
           end
         | _ -> raise(Failure "impossible function type")

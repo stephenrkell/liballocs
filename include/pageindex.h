@@ -88,11 +88,15 @@ struct big_allocation
 };
 #define BIGALLOC_IN_USE(b) ((b)->begin && (b)->end)
 #define NBIGALLOCS 1024
-extern struct big_allocation big_allocations[];
+extern struct big_allocation big_allocations[] __attribute__((weak,visibility("protected")));
+extern struct big_allocation __liballocs_big_allocations[] __attribute__((weak));
 
 typedef uint16_t bigalloc_num_t;
 
+// FIXME: protected stuff should be in private header only. This is now a public header.
+// If I didn't want that (good arguments for a single <allocs.h>), then some refactoring to do.
 extern bigalloc_num_t *pageindex __attribute__((weak,visibility("protected")));
+extern bigalloc_num_t *__liballocs_pageindex __attribute__((weak));
 
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
@@ -125,7 +129,7 @@ _Bool __liballocs_notify_unindexed_address(const void *);
 /* Convenience for code that does raw mmap. */
 #ifndef MMAP_RETURN_IS_ERROR
 #define MMAP_RETURN_IS_ERROR(p) \
-	(((intptr_t)(void*)-1 - (intptr_t)(p)) < PAGE_SIZE)
+	(((uintptr_t)(void*)-1 - (uintptr_t)(p)) < PAGE_SIZE)
 #endif
 
 /* FIXME: tweak this logic so that important liballocs workloads

@@ -7,8 +7,83 @@ To understand what that means, you probably have to read the paper
 brief introduction you could watch the talk from Strange Loop 2014.
 <http://www.youtube.com/watch?v=LwicN2u6Dro>
 
-Here are some things you'll need in order to build this software. Most
-of them are standard, but note the caveats about compiler versions.
+To build this software on a Debian-based GNU/Linux distribution,
+please see the buildtest/ directory. This has a number of
+Dockerfiles which do testable and (mostly) reproducible builds,
+from a bare-bones start. If you're running one of the given
+distributions, you should be able to adapt the RUN commands
+trivially to do your build. If you find any problems doing these
+builds ("docker build buildtest/xxx") please report them.
+
+If there is no buildtest Dockerfile for your distribution, it
+means you'll have to pick the "closest" one and then figure out
+any necessary changes for yourself. Ideally, please contribute a
+Dockerfile once you've done this. Thanks to Manuel Rigger for
+contributing the initial Ubuntu 18.04 one.
+
+Note also there are submodules at many levels in this git repo,
+including nested submodules. Please make sure you pull them all.
+Generic download-and-build instructions for Debian platforms
+look something like the following.
+
+0. optionally build my binutils-gdb repo (see below)
+1. sudo apt-get install libelfg0-dev libdw-dev \
+    autoconf automake libtool pkg-config autoconf-archive \
+    g++ ocaml ocaml-findlib \
+    default-jre-headless \
+    make git gawk gdb wget \
+    libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
+    libboost-{iostreams,regex,serialization,filesystem}-dev && \
+git clone https://github.com/stephenrkell/liballocs.git && \
+cd liballocs && \
+git submodule update --init --recursive && \
+make -C contrib -j4 && \
+./autogen.sh && \
+. contrib/env.sh && \
+./configure --prefix=/usr/local && \
+make -j4
+
+... where you should tune "-j4" according to your needs. After
+building, you will also want to set up space to hold metadata
+files, and build the metadata for your C library binary.
+
+$ cd ..
+$ export LIBALLOCS=`pwd`/liballocs
+$ sudo mkdir /usr/lib/meta # metadata will live here
+$ sudo chown root:staff /usr/lib/meta
+$ sudo chmod g+w /usr/lib/meta
+$ make -f "$LIBALLOCS"/tools/Makefile.meta \
+  /usr/lib/meta$( readlink -f /lib/x86_64-linux-gnu/libc.so.6 )-meta.so
+
+If you've got this far, you may as well run the tests.
+
+$ cd liballocs/tests
+$ make                        # please report failures
+
+That's almost all. But notice step 0 above: for a
+fully-functioning liballocs toolchain, you'll also want my
+*patched* binutils. You can get a long way without it, so this
+step is optional, but in some awkward cases, liballocs's
+compilers wrappers need to invoke my hacked objcopy. Also,
+Debian jessie's binutils 2.25 is too old to build the liballocs
+linker plugin (also optional), adding extra motivation to do
+this step. (I will remove this requirement eventually.) For now,
+assuming you're grabbing my code from my GitHub page:
+
+$ sudo apt-get install bison flex texinfo
+$ git clone https://github.com/stephenrkell/binutils-gdb.git
+$ cd binutils-gdb
+$ CFLAGS="-fPIC -g -O2" ./configure --prefix=/usr/local \
+      --enable-gold --enable-plugins --enable-install-libiberty \
+# a PIC libbfd.a and co-lo'd libiberty helps e.g. build OProfile
+$ make -jn                    # for your favourite n
+$ sudo make install
+
+Now you should have my patched objcopy on your PATH... it defines an
+option --unbind-sym, if you want to check.
+
+Trying to be even more generic, here are some Debian-agnostic 
+notes about the dependencies I'm aware of.
 
 * C and C++ compilers supporting GNU C extensions
 ** gcc 4.9.x are known good
@@ -27,59 +102,7 @@ of them are standard, but note the caveats about compiler versions.
 * OCaml 4.01.0 or newer
 * a Java 6 (or newer) runtime 
 * libunwind
-
-There are also a lot of dependencies on my other codebases. These are
-now included as git submodules under contrib/, so should be handled
-automatically by the build process.
-
-First, you must have GNU binutils 2.26 or later. (In fact, for a
-fully-functioning liballocs toolchain, you'll also want my *patched*
-binutils. However, you can get a long way without it. it's necessary
-only to instrument some code making awkward uses of malloc wrappers,
-which involves help from my souped-up objcopy. See instructions at the
-bottom.)
-
-On Debian-based systems, proceed like so (tested on jessie and
-stretch)....
-
-$ sudo apt-get install libelfg0-dev \
-    autoconf automake libtool pkg-config autoconf-archive \
-    g++ ocaml ocaml-findlib \
-    default-jre-headless \
-    make git gawk gdb \
-    libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
-    libboost-{iostreams,regex,serialization,filesystem}-dev
-$ git clone https://github.com/stephenrkell/liballocs.git
-$ cd liballocs
-$ git submodule init
-$ git submodule update
-$ make -C contrib -jn         # for your favourite n
-
-If you get errors in the "contrib" build step, please report them on the
-relevant repository (e.g. libdwarfpp, dwarfidl, etc) rather than
-liballocs.
-
-If it worked, you're ready to build liballocs proper...
-
-$ ./autogen.sh
-$ . contrib/env.sh
-$ ./configure --prefix=/usr/local
-$ make -jn                    # for your favourite n
-
-Then you will also want to set up space to hold metadata files.
-
-$ cd ..
-$ export LIBALLOCS=`pwd`/liballocs
-$ sudo mkdir /usr/lib/meta # metadata will live here
-$ sudo chown root:staff /usr/lib/meta
-$ sudo chmod g+w /usr/lib/meta
-$ make -f "$LIBALLOCS"/tools/Makefile.meta \
-  /usr/lib/meta$( readlink -f /lib/x86_64-linux-gnu/libc.so.6 )-meta.so
-
-If you've got this far, you may as well run the tests.
-
-$ cd liballocs/tests
-$ make                        # please report any failures to me
+* libdw-dev or any other package providing /usr/include/dwarf.h
 
 That's it! Enjoy liballocs and do fun things with it. I'd appreciate an
 e-mail if you're using it for anything substantial.
@@ -111,4 +134,3 @@ $ make llvm
 ... but be aware that they're a work in progress! In fact they are now
 rather bit-rotted. I'd be delighted if someone wanted to forward-port
 them....
-

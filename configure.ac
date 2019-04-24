@@ -46,9 +46,13 @@ CFLAGS="$my_save_cflags"
 OLD_CPPFLAGS=$CPPFLAGS
 CPPFLAGS="-std=c++11 $CPPFLAGS"
 
-AC_CHECK_HEADERS([assert.h cassert cctype cmath cstddef cstdint cstdio cstdlib deque dlfcn.h elf.h err.h errno.h fstream iomanip iostream libunwind.h link.h map memory pthread.h search.h set sstream stdarg.h stdbool.h stddef.h stdint.h stdio.h stdlib.h string string.h strings.h sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h sys/types.h unistd.h vector wchar.h], [], [AC_MSG_FAILURE([required standard headers: alloca.h assert.h cassert cctype cmath cstddef cstdint cstdio cstdlib deque dlfcn.h elf.h err.h errno.h fstream gelf.h iomanip iostream libunwind.h link.h map memory pthread.h search.h set sstream stdarg.h stdbool.h stddef.h stdint.h stdio.h stdlib.h string string.h strings.h sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h sys/types.h unistd.h vector wchar.h])])
-AC_CHECK_HEADERS([alloca.h], [], [])
+AC_CHECK_HEADERS([assert.h cassert cctype cmath cstddef cstdint cstdio cstdlib deque dlfcn.h elf.h], [], [AC_MSG_FAILURE(Failed to find required header)])
+AC_CHECK_HEADERS([err.h errno.h fstream iomanip iostream libunwind.h link.h map memory pthread.h search.h], [], [AC_MSG_FAILURE(Failed to find required header)])
+AC_CHECK_HEADERS([set sstream stdarg.h stdbool.h stddef.h stdint.h stdio.h stdlib.h string string.h strings.h], [], [AC_MSG_FAILURE(Failed to find required header)])
+AC_CHECK_HEADERS([sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h sys/types.h unistd.h vector wchar.h], [], [AC_MSG_FAILURE(Failed to find required header)])
+AC_CHECK_HEADERS([alloca.h], [], [AC_MSG_FAILURE(Failed to find required header)])
 AC_CHECK_HEADERS([libelf.h libelf/libelf.h gelf.h libelf/gelf.h], [], [], [])
+AC_CHECK_HEADERS([dwarf.h], [], [AC_MSG_FAILURE(Failed to find required header)])
 
 AX_BOOST_BASE
 
@@ -95,6 +99,7 @@ PKG_CHECK_MODULES([LIBANTLR3CXX], [libantlr3cxx])
 AC_SUBST(TRAP_SYSCALLS, $TRAP_SYSCALLS)
 AC_SUBST(MALLOC_HOOKS, $MALLOC_HOOKS)
 AC_SUBST(LIBDLBIND, $LIBDLBIND)
+AC_SUBST(LIBRUNT, $LIBRUNT)
 
 AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [Enable debug mode]))
 AC_ARG_ENABLE([real-libunwind], AS_HELP_STRING([--enable-real-libunwind], [Use real libunwind (by default we have our own)]))

@@ -90,7 +90,7 @@ static inline unsigned long bitmap_rfind_first_set(unsigned long *p_bitmap, unsi
 	}
 	return (unsigned long) -1;
 }
-static inline unsigned long bitmap_find_first_set1(unsigned long *p_bitmap, unsigned long *p_limit, long start_idx, unsigned long *out_test_bit)
+static inline unsigned long bitmap_find_first_set1(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long start_idx, unsigned long *out_test_bit)
 {
 	unsigned long *p_base = p_bitmap;
 	p_bitmap += start_idx / UNSIGNED_LONG_NBITS;
