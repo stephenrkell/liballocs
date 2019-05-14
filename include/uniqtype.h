@@ -58,8 +58,10 @@ void *dlbind(void *lib, const char *symname, void *obj, size_t len, Elf64_Word t
 
 extern void *__liballocs_rt_uniqtypes_obj __attribute__((weak));
 struct uniqtype *
-__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
-	__attribute__((weak));
+__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len);
+
+struct uniqtype *
+__liballocs_get_or_create_address_type(const struct uniqtype *pointee_t);
 
 /* PROBLEM: when we generate and link this code, 
  * in the -types objects, 

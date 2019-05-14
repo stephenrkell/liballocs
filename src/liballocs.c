@@ -110,6 +110,75 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 }
 
 struct uniqtype *
+__liballocs_get_or_create_address_type(const struct uniqtype *pointee_t)
+{
+	// Very similar to __liballocs_get_or_create_array_type
+
+	assert(pointee_t);
+
+	char precise_uniqtype_name[4096];
+	const char *pointee_name = UNIQTYPE_NAME(pointee_t); /* gets "simple", not symbol, name */
+	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
+			"__uniqtype____PTR_%s", pointee_name);
+	/* FIXME: compute hash code. Should be an easy case. */
+
+	ElfW(Sym) *found_sym = __liballocs_rt_uniqtypes_gnu_hash ?
+		gnu_hash_lookup(__liballocs_rt_uniqtypes_gnu_hash,
+			__liballocs_rt_uniqtypes_dynsym, __liballocs_rt_uniqtypes_dynstr,
+			precise_uniqtype_name)
+		: NULL;
+	void *found = (found_sym ? sym_to_addr(found_sym) : NULL);
+	if (NULL != found || NULL != (found = dlsym(NULL, precise_uniqtype_name)))
+	{
+		return (struct uniqtype *) found;
+	}
+	else
+	{
+        int indir_level;
+        const struct uniqtype *ultimate_pointee_t;
+        if (UNIQTYPE_IS_POINTER_TYPE(pointee_t))
+        {
+            indir_level = 1 + pointee_t->un.address.indir_level;
+            ultimate_pointee_t = UNIQTYPE_ULTIMATE_POINTEE_TYPE(pointee_t);
+        }
+        else
+        {
+            indir_level = 1;
+            ultimate_pointee_t = pointee_t;
+        }
+
+		/* Create it and memoise using libdlbind. */
+		size_t sz = offsetof(struct uniqtype, related) + 2 * (sizeof (struct uniqtype_rel_info));
+		void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+		struct uniqtype *allocated_uniqtype = allocated;
+		*allocated_uniqtype = (struct uniqtype) {
+			.pos_maxoff = sizeof(void *),
+			.un = {
+				address: {
+					.kind = ADDRESS,
+					.indir_level = indir_level,
+                    .genericity = 0,
+				}
+			},
+			.make_precise = NULL
+		};
+		allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
+			.un = { t: { .ptr = (struct uniqtype *) pointee_t } }
+		};
+		allocated_uniqtype->related[1] = (struct uniqtype_rel_info) {
+			.un = { t: { .ptr = (struct uniqtype *) ultimate_pointee_t } }
+		};
+		void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
+		void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
+			allocated, sz, STT_OBJECT);
+		assert(reloaded);
+		update_rt_uniqtypes_obj(reloaded, old_base);
+
+		return allocated_uniqtype;
+	}
+}
+
+struct uniqtype *
 __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
    struct uniqtype *out, unsigned long out_len,
    void *obj, void *memrange_base, unsigned long memrange_sz, void *ip, struct mcontext *ctxt)
