@@ -298,8 +298,7 @@ static string attributes_for_uniqtype(const string& mangled_name, bool is_weak =
 	if (include_section)
 	{
 		if (need_comma) s << ",";
-		s << "section (\".data." << mangled_name
-			<< ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")";
+		s << "section (\".data." << mangled_name << "\\n\\t#\")";
 		need_comma = true;
 	}
 	if (is_weak)
@@ -321,12 +320,11 @@ static void emit_weak_alias_idem(std::ostream& out, const string& alias_name, co
 		<< " __attribute__((weak,alias(\"" << target_name << "\")";
 	if (emit_section)
 	{
-		out << ",section(\".data." << target_name
-			/* To satisfy gcc's "section of alias `...' must match section of its target",
-			 * we rather we even have to match the escape-hatch cruft (although it gets
-			 * discarded after gcc has done the check). */
-			<< ", \\\"awG\\\", @progbits, " << target_name << ", comdat#"
-			<< "\")";
+		/* To satisfy gcc's "section of alias `...' must match section of its target",
+		 * we rather we even have to match the escape-hatch cruft (although it gets
+		 * discarded after gcc has done the check). */
+		out << ",section(\".data." << target_name << "\\n\\t#\")";
+		// WARNING: This works only if we are never aliasing an alias
 	}
 	out <<"));"
 		<< endl;
@@ -349,15 +347,16 @@ void write_master_relation(master_relation_t& r,
 	 * a generic alias "int". */
 	std::map< std::string, std::set< string > > codeless_alias_blacklist;
 	
-	/* Note the very nasty hack with __attribute__((section (...))): 
-	 * we embed a '#' into the section string, after adding our own
-	 * assembler-level flags and attributes. This causes the compiler-
-	 * -generated flags and attributes to be ignored, because the '#' 
-	 * comments them out. Without this trick, there is no way of supplying
-	 * our own section flags and attributes to override the compiler.
-	 * FIXME: this works with gcc-generated assembly but not clang's.
-	 * Borrow glibc's somewhat-portable way of doing this, if that fixes things.
-	 * FIXME: fix the same thing elsewhere, too. */
+	/* Note the very nasty hack with __attribute__((section (...))):
+	 * we embed a '#' into the section string. This causes the compiler-
+	 * -generated flags and attributes to be ignored, because the '#'
+	 * comments them out. Our own assembler-level flags and attributes are
+	 * added in a module level assembly block placed before. Without this trick,
+	 * there is no way of supplying our own section flags and attributes to
+	 * override the compiler.
+	 * This trick is borrowed from glibc.
+	 * TODO: handle section quotes (cf. glibc's libc-symbols.h:__sec_comment)
+	 * TODO: this works with gcc but has not yet been tested with clang */
 	if (emit_void)
 	{
 		/* DWARF doesn't reify void, but we do. So output a rec for void first of all.
@@ -366,12 +365,12 @@ void write_master_relation(master_relation_t& r,
 		auto emit_empty_subobject_names = [&out](const string& name) {
 			out << "const char *" << mangle_typename(make_pair(string(""), name))
 				<< "_subobj_names[] "
-				<< " __attribute__((section (\".data.__uniqtype__" << name
-					<< ", \\\"awG\\\", @progbits, __uniqtype__" << name << ", comdat#\")))"
-				<< "= { (void*)0 };\n";
+				<< "__attribute__((section (\".data.__uniqtype__" << name
+				<< "\\n\\t#\"))) = { (void*)0 };\n";
 		};
 		
 		out << "\n/* uniqtype for void */\n";
+		write_uniqtype_section_decl(out, "__uniqtype__void");
 		if (emit_subobject_names) emit_empty_subobject_names("void");
 		string mangled_name = mangle_typename(make_pair(string(""), string("void")));
 		write_uniqtype_open_void(out,
@@ -385,6 +384,7 @@ void write_master_relation(master_relation_t& r,
 		/* We also now emit two further "special" types: the type of
 		 * generic pointers, and the type of uninterpreted bytes. */
 		out << "\n/* uniqtype for generic pointers */\n";
+		write_uniqtype_section_decl(out, "__uniqtype____EXISTS1___PTR__1");
 		if (emit_subobject_names) emit_empty_subobject_names("__EXISTS1___PTR__1");
 		mangled_name = mangle_typename(make_pair(string(""), string("__EXISTS1___PTR__1")));
 		/* How do we model a generic pointer? */
@@ -399,6 +399,7 @@ void write_master_relation(master_relation_t& r,
 		write_uniqtype_close(out, mangled_name);
 		
 		out << "\n/* uniqtype for uninterpreted bytes */\n";
+		write_uniqtype_section_decl(out, "__uniqtype____uninterpreted_byte");
 		if (emit_subobject_names) emit_empty_subobject_names("__uninterpreted_byte");
 		mangled_name = mangle_typename(make_pair(string(""), string("__uninterpreted_byte")));
 		write_uniqtype_open_generic(out,
@@ -633,6 +634,10 @@ void write_master_relation(master_relation_t& r,
 		{
 			cout << "/* Depends on something incomplete, so definition should be weak. */"
 				<< std::endl;
+		}
+		else
+		{
+			write_uniqtype_section_decl(out, mangled_name);
 		}
 
 		/* We can also be *variable-length*. In this case we output a pos_maxoff of -1
@@ -1008,6 +1013,7 @@ void write_master_relation(master_relation_t& r,
 			);
 			string compl_name = mangle_typename(compl_name_pair);
 			
+			write_uniqtype_section_decl(out, compl_name);
 			write_uniqtype_open_base(out, 
 				compl_name,
 				compl_name_pair.second,
@@ -1160,6 +1166,13 @@ void write_master_relation(master_relation_t& r,
 			}
 		}
 	}
+}
+
+void write_uniqtype_section_decl(std::ostream& o, const string& mangled_typename)
+{
+	o << "__asm__(\".section .data." << mangled_typename
+	  << ", \\\"awG\\\", @progbits, " << mangled_typename << ", comdat"
+	  << "\\n\\t.previous\");\n";
 }
 
 static void write_uniqtype_open_generic(std::ostream& o,

@@ -42,6 +42,8 @@ void write_master_relation(master_relation_t& r,
 	bool emit_codeless_aliases,
 	bool emit_subobject_names = true);
 
+void write_uniqtype_section_decl(std::ostream &o, const string& mangled_typename);
+
 void write_uniqtype_open_void(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,

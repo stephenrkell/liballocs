@@ -329,6 +329,7 @@ int main(int argc, char **argv)
 			// This OBVIOUSLY doesn't work because we added to names_emitted!
 			// Let the multiple definition error get us.
 			// compute and print destination name
+			write_uniqtype_section_decl(cout, mangled_codeless_array_name);
 			write_uniqtype_open_flex_array(cout,
 				mangled_codeless_array_name,
 				/* array_codeless_name.second */ i_mangled_name->second.second
@@ -1008,6 +1009,7 @@ int main(int argc, char **argv)
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
 			string mangled_name = mangle_typename(make_pair(cu_name, unmangled_typename));
+			write_uniqtype_section_decl(cout, mangled_name);
 			write_uniqtype_open_composite(cout,
 				mangled_name,
 				unmangled_typename,

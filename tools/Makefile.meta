@@ -24,7 +24,8 @@ GATHER_SRCALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-srcallocs.sh
 OBJDUMPMEMACC ?= $(dir $(THIS_MAKEFILE))/objdumpmemacc
 MERGE_MEMACC ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh # FIXME: change name
 GATHER_SRCMEMACC ?= $(dir $(THIS_MAKEFILE))/gather-srcmemacc.sh
-STD_CC ?= gcc
+META_CC ?= $(CC)
+META_CFLAGS ?= $(CFLAGS)
 
 # By default, remake everything we have already made,
 # but don't make new .allocsites files.
@@ -83,6 +84,6 @@ $(META_BASE)/%-meta.c: $(META_BASE)/%.allocs /% # pipe err through zip, so need 
 # using "... comdat# ..." doesn't work except on gcc). (FIXME: use configure-time
 # adaptation found in glibc's libc-symbols.h?)
 $(META_BASE)/%-meta.o: $(META_BASE)/%-meta.c
-	$(STD_CC) $(CFLAGS) $(CPPFLAGS) -c -o "$@" "$<"
+	$(META_CC) $(META_CFLAGS) $(CPPFLAGS) -c -o "$@" "$<"
 $(META_BASE)/%-meta.so: $(META_BASE)/%-meta.o
-	$(CC) -shared -Wl,--hash-style=both -o "$@" "$<"
+	$(META_CC) -shared -Wl,--hash-style=both -o "$@" "$<"

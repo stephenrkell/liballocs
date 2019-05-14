@@ -23,13 +23,16 @@ CC=${CC:-$(which cc)}
 LD=${LD:-$(which ld)}
 OBJCOPY=${OBJCOPY:-$(which objcopy)}
 
+# HACK: Seems that clang cannot compile generated files, so let the user choose
+# another compiler for these with an environnement variable
+META_CC=${META_CC:-${CC}}
+
 compile () {
    src="$1"
    dest="$2"
    asm="$( mktemp --suffix=.s )"
-   # HACK: only gcc lets us do the section flags injection attack ("comdat#..." trick)
-   gcc -S -x c -o "$asm" "$src" && \
-   gcc -c -o "$dest" "$asm" && \
+   ${META_CC} -S -x c -o "$asm" "$src" && \
+   ${META_CC} -c -o "$dest" "$asm" && \
    echo "Compiler generated $dest" 1>&2
 }
 
