@@ -320,7 +320,7 @@ extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); /
 #define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) ((u)->un.subprogram.narg)
 #define UNIQTYPE_IS_POINTER_TYPE(u)      ((u)->un.info.kind == ADDRESS)
 #define UNIQTYPE_POINTEE_TYPE(u)         (UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
-#define UNIQTYPE_ULTIMATE_POINTEE_TYPE(u)(UNIQTYPE_IS_POINTER_TYPE(u) ? ((u)->un.info.address.indir_level > 1) ? (u)->related[1].un.t.ptr : (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
+#define UNIQTYPE_ULTIMATE_POINTEE_TYPE(u)(UNIQTYPE_IS_POINTER_TYPE(u) ? ((u)->un.address.indir_level > 1) ? (u)->related[1].un.t.ptr : (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
 #define UNIQTYPE_IS_ARRAY_TYPE(u)        ((u)->un.array.is_array)
 #define UNIQTYPE_IS_COMPOSITE_TYPE(u)    ((u)->un.info.kind == COMPOSITE)
 #define UNIQTYPE_HAS_SUBOBJECTS(u)       (UNIQTYPE_IS_COMPOSITE_TYPE(u) || UNIQTYPE_IS_ARRAY_TYPE(u))
