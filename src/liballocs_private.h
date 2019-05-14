@@ -171,7 +171,7 @@ int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *
 int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 	__attribute__((visibility("hidden")));
 
-void *__notify_copy(void *dest, const void *src, unsigned long n);
+void __notify_copy(void *dest, const void *src, unsigned long n);
 /* Some boilerplate helpers for use by allocators. */
 #define DEFAULT_GET_TYPE \
 static struct uniqtype *get_type(void *obj) \

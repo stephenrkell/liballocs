@@ -991,10 +991,9 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	mem[len] = '\0';
 	return mem;
 }
-void *__notify_copy(void *dest, const void *src, unsigned long n)
+void __notify_copy(void *dest, const void *src, unsigned long n)
 {
 	/* We do nothing here. But libcrunch will wrap us. */
-	return dest;
 }
 
 /* These have hidden visibility */

@@ -656,9 +656,9 @@ void *memcpy(void *dest, const void *src, size_t n)
 		assert(orig_memcpy);
 	}
 	
-	orig_memcpy(dest, src, n);
-	
-	return __notify_copy(dest, src, n);
+	__notify_copy(dest, src, n);
+
+	return orig_memcpy(dest, src, n);
 }
 
 void *(*orig_memmove)(void *, const void *, size_t);
@@ -671,7 +671,7 @@ void *memmove(void *dest, const void *src, size_t n)
 		assert(orig_memmove);
 	}
 	
-	orig_memmove(dest, src, n);
-	
-	return __notify_copy(dest, src, n);
+	__notify_copy(dest, src, n);
+
+	return orig_memmove(dest, src, n);
 }
