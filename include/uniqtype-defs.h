@@ -316,6 +316,7 @@ extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); /
 #endif
 
 #define UNIQTYPE_SIZE_IN_BYTES(u)        ((u)->pos_maxoff)
+#define UNIQTYPE_KIND(u)                 ((u)->un.array.is_array ? ARRAY : (u)->un.info.kind)
 #define UNIQTYPE_IS_SUBPROGRAM_TYPE(u)   ((u)->un.info.kind == SUBPROGRAM)
 #define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) ((u)->un.subprogram.narg)
 #define UNIQTYPE_IS_POINTER_TYPE(u)      ((u)->un.info.kind == ADDRESS)
