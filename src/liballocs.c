@@ -894,17 +894,18 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	 * versus the mtime of the base obj.
 	 * If the base obj is newer, complain. */
 
-	dlerror();
+	// FIXME BUG: dlerror can SEGFAULT if called here (why?), also appears below
+	//dlerror();
 	// load with NOLOAD first, so that duplicate loads are harmless
 	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
 	if (meta_handle) return 0;
 	errno = 0;
-	dlerror();
+	//dlerror();
 	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	errno = 0;
 	if (!meta_handle)
 	{
-		debug_printf((is_exe || is_libc) ? 0 : 1, "loading meta object: %s\n", dlerror());
+		//debug_printf((is_exe || is_libc) ? 0 : 1, "loading meta object: %s\n", dlerror());
 		return 0;
 	}
 	debug_printf(3, "loaded meta object: %s\n", libfile_name);
