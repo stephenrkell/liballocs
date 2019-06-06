@@ -1046,21 +1046,20 @@ void *biggest_vaddr_in_obj(void *handle)
  * we shouldn't call strdup because libc will do the malloc. */
 char *__liballocs_private_strdup(const char *s)
 {
-	size_t len = strlen(s);
-	char *mem = __private_malloc(len + 1);
-	strncpy(mem, s, len);
-	mem[len] = '\0';
-	return mem;
+	size_t len = strlen(s) + 1;
+	char *mem = __private_malloc(len);
+	if (!mem) return NULL;
+	return memcpy(mem, s, len);
 }
 char *__liballocs_private_strndup(const char *s, size_t n)
 {
 	size_t maxlen = strlen(s);
-	size_t len = (n > maxlen) ? maxlen : n;
-	char *mem = __private_malloc(len + 1);
-	strncpy(mem, s, len);
-	mem[len] = '\0';
-	return mem;
+	size_t len = (n > maxlen ? maxlen : n) + 1;
+	char *mem = __private_malloc(len);
+	if (!mem) return NULL;
+	return memcpy(mem, s, len);
 }
+
 void __notify_copy(void *dest, const void *src, unsigned long n)
 {
 	/* We do nothing here. But libcrunch will wrap us. */
