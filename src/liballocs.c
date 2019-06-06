@@ -53,9 +53,9 @@ struct uniqtype *
 __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
 {
 	assert(element_t);
-	assert(element_t->pos_maxoff > 0);
-	assert(element_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
-	
+	if (element_t->pos_maxoff == 0) return NULL;
+	if (element_t->pos_maxoff == UNIQTYPE_POS_MAXOFF_UNBOUNDED) return NULL;
+
 	char precise_uniqtype_name[4096];
 	const char *element_name = UNIQTYPE_NAME(element_t); /* gets "simple", not symbol, name */
 	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
@@ -83,11 +83,11 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 		void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
 		struct uniqtype *allocated_uniqtype = allocated;
 		*allocated_uniqtype = (struct uniqtype) {
-			.pos_maxoff = array_len * element_t->pos_maxoff,
+			.pos_maxoff = array_len ? array_len * element_t->pos_maxoff : UNIQTYPE_POS_MAXOFF_UNBOUNDED,
 			.un = {
 				array: {
 					.is_array = 1,
-					.nelems = array_len
+					.nelems = array_len ? array_len : UNIQTYPE_ARRAY_LENGTH_UNBOUNDED
 				}
 			},
 			.make_precise = NULL
@@ -134,18 +134,18 @@ __liballocs_get_or_create_address_type(const struct uniqtype *pointee_t)
 	}
 	else
 	{
-        int indir_level;
-        const struct uniqtype *ultimate_pointee_t;
-        if (UNIQTYPE_IS_POINTER_TYPE(pointee_t))
-        {
-            indir_level = 1 + pointee_t->un.address.indir_level;
-            ultimate_pointee_t = UNIQTYPE_ULTIMATE_POINTEE_TYPE(pointee_t);
-        }
-        else
-        {
-            indir_level = 1;
-            ultimate_pointee_t = pointee_t;
-        }
+		int indir_level;
+		const struct uniqtype *ultimate_pointee_t;
+		if (UNIQTYPE_IS_POINTER_TYPE(pointee_t))
+		{
+			indir_level = 1 + pointee_t->un.address.indir_level;
+			ultimate_pointee_t = UNIQTYPE_ULTIMATE_POINTEE_TYPE(pointee_t);
+		}
+		else
+		{
+			indir_level = 1;
+			ultimate_pointee_t = pointee_t;
+		}
 
 		/* Create it and memoise using libdlbind. */
 		size_t sz = offsetof(struct uniqtype, related) + 2 * (sizeof (struct uniqtype_rel_info));
@@ -157,7 +157,7 @@ __liballocs_get_or_create_address_type(const struct uniqtype *pointee_t)
 				address: {
 					.kind = ADDRESS,
 					.indir_level = indir_level,
-                    .genericity = 0,
+					.genericity = 0,
 				}
 			},
 			.make_precise = NULL
