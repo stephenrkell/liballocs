@@ -982,6 +982,10 @@ void write_master_relation(master_relation_t& r,
 					*i_off,
 					mangled_name);
 			}
+
+			write_uniqtype_related_member_names(out,
+				real_members.begin() == real_members.end(),
+				emit_subobject_names ? mangled_name + "_subobj_names" : optional<string>());
 		}
 		else
 		{
@@ -1425,6 +1429,20 @@ void write_uniqtype_related_contained_member_type(std::ostream& o,
 	if (maybe_mangled_typename) o << "&" << *maybe_mangled_typename;
 	else o << "(void*) 0";
 	o << ", " << offset << ", 0, 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
+void write_uniqtype_related_member_names(std::ostream& o,
+	bool is_first,
+	optional<string> maybe_subobj_names,
+	optional<string> comment_str
+	)
+{
+	if (!is_first) o << ",\n\t\t";
+	/* begin the struct */
+	o << "{ { memb_names: { ";
+	if (maybe_subobj_names) o << *maybe_subobj_names;
+	else o << "(void*) 0";
 	o << " } } }";
 	if (comment_str) o << " /* " << *comment_str << " */ ";
 }

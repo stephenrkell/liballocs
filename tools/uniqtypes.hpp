@@ -156,6 +156,12 @@ void write_uniqtype_related_contained_member_type(std::ostream& o,
     boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
 	boost::optional<string> comment_str = boost::optional<string>()
     );
+
+void write_uniqtype_related_member_names(std::ostream& o,
+	bool is_first,
+	optional<string> maybe_subobj_names = boost::optional<string>(),
+	optional<string> comment_str = boost::optional<string>()
+	);
 void write_uniqtype_related_signedness_complement_type(std::ostream& o,
     boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
 	boost::optional<string> comment_str = boost::optional<string>()

@@ -740,28 +740,6 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom);
 /* FIXME: this call needs to go away. */
 struct insert *__liballocs_get_insert(struct big_allocation *maybe_the_allocation, const void *mem); // HACK: please remove (see libcrunch)
 
-/* FIXME: use newer/better features in uniqtype definition */
-static inline
-const char **__liballocs_uniqtype_subobject_names(const struct uniqtype *t)
-{
-	/* HACK: this all needs to go away, once we overhaul uniqtype's layout. */
-	Dl_info i = dladdr_with_cache(t);
-	if (i.dli_sname)
-	{
-		char names_name[strlen(i.dli_sname) + sizeof "_subobj_names"];
-		memcpy(names_name, i.dli_sname, strlen(i.dli_sname));
-		memcpy(names_name+strlen(i.dli_sname), "_subobj_names", sizeof "_subobj_names");
-		void *handle = dlopen(i.dli_fname, RTLD_NOW | RTLD_NOLOAD);
-		if (handle)
-		{
-			const char **names_name_array = (const char**) dlsym(handle, names_name);
-			dlclose(handle);
-			return names_name_array;
-		}
-	}
-	return NULL;
-}
-
 struct allocator *
 __liballocs_get_leaf_allocator(void *obj);
 
