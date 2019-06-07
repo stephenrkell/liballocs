@@ -132,17 +132,18 @@ let rec offsetFromList (ol : offset list) =
         [] -> NoOffset
       | Field(fi, _) :: rest -> Field(fi, offsetFromList rest)
       | Index(intExp, _) :: rest -> Index(intExp, offsetFromList rest)
+      | NoOffset :: rest -> offsetFromList rest
 
 let rec offsetPrefixAsList (o : offset) (suffix : offset) = 
     match o with
-        suffix -> []
+        _ when o = suffix -> []
       | NoOffset -> failwith "didn't find offset suffix"
       | Field(fi, rest) -> Field(fi, NoOffset) :: (offsetPrefixAsList rest suffix)
       | Index(intExp, rest) -> Index(intExp, NoOffset) :: (offsetPrefixAsList rest suffix)
 
 let rec offsetPrefix (o : offset) (suffix : offset) = 
     match o with
-        suffix -> NoOffset
+        _ when o = suffix -> NoOffset
       | NoOffset -> failwith "didn't find offset suffix"
       | Field(fi, rest) -> Field(fi, (offsetPrefix rest suffix))
       | Index(intExp, rest) -> Index(intExp, (offsetPrefix rest suffix))
@@ -213,12 +214,14 @@ let debug_print lvl s =
 let abspath f =
    if String.get f 0 = '/' then f else (getcwd ()) ^ "/" ^ f
 
+exception Empty
+
 (* stolen from StackOverflow:  http://stackoverflow.com/questions/1584758/ *)
 let trim str =   
     if str = "" then "" 
     else   
         let search_pos init p next =
-            let rec search i = if p i then raise(Failure "empty") else match str.[i] with
+            let rec search i = if p i then raise Empty else match str.[i] with
               | ' ' | '\n' | '\r' | '\t' -> search (next i)
               | _ -> i
             in
@@ -230,7 +233,7 @@ let trim str =
             and right = search_pos (len - 1) (fun i -> i < 0) (pred)
             in
             String.sub str left (right - left + 1)   
-        with Failure "empty" -> ""
+        with Empty -> ""
 
 let identFromString s = Str.global_replace (Str.regexp "[^a-zA-Z0-9_]") "_" s
 
