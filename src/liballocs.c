@@ -554,7 +554,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 const char *(__attribute__((pure)) __liballocs_uniqtype_symbol_name)(const struct uniqtype *u)
 {
 	if (!u) return NULL;
-	Dl_info i = dladdr_with_cache(u);
+	Dl_info i = dladdr_with_cache((char *)u + 1);
 	if (i.dli_saddr == u)
 	{
 		return i.dli_sname;

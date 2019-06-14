@@ -275,14 +275,17 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 		}
 		previous_offset = i.offset_here();
 	}
-}	
+}
+static void set_symbol_length(std::ostream& out, const string& mangled_name, unsigned length)
+{
+	out << "__asm__(\".size " << mangled_name << ", " << length
+		<< "\");" << endl;
+}
 string ensure_contained_length(const string& mangled_name, unsigned contained_length)
 {
 	ostringstream s;
-	s << "__asm__(\".size " << mangled_name << ", "
-		<< (offsetof(uniqtype, related) + contained_length * sizeof (uniqtype_rel_info))
-		<< "\");" << endl;
-	
+	set_symbol_length(s, mangled_name,
+		offsetof(uniqtype, related) + contained_length * sizeof (uniqtype_rel_info));
 	return s.str();
 }
 static string attributes_for_uniqtype(const string& mangled_name, bool is_weak = false, bool include_section = true)
@@ -328,6 +331,11 @@ static void emit_weak_alias_idem(std::ostream& out, const string& alias_name, co
 	}
 	out <<"));"
 		<< endl;
+
+	/* Make the alias symbol name short to be able to retrieve the original 
+	 * symbol name with dladdr.
+	 * Zero has a special meaning so use 1 instead. */
+	set_symbol_length(out, alias_name, 1);
 }
 void write_master_relation(master_relation_t& r, 
 	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def,
