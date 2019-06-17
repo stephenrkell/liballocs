@@ -154,18 +154,18 @@ $0 !~ disassembly_line_pattern {
 
 $0 ~ disassembly_line_pattern {
     # unpack the line a bit
-    thisline_address=gensub(disassembly_line_pattern, "\\1", "");
-    thisline_sym=gensub(disassembly_line_pattern, "\\2", "");
-    thisline_offset=0 + gensub(disassembly_line_pattern, "\\3", "");
+    thisline_address=gensub(disassembly_line_pattern, "\\1", 1);
+    thisline_sym=gensub(disassembly_line_pattern, "\\2", 1);
+    thisline_offset=0 + gensub(disassembly_line_pattern, "\\3", 1);
     # are we ready to output?
     if (next_disas_line_is_meta_return_addr) {
         return_addr_sym=thisline_sym
         return_addr=thisline_address
         return_addr_offset=sprintf("0x%x", thisline_offset)
         address=meta_instr_address
-        addr2line_filename=gensub(filename_line_pattern, "\\1", "", meta_instr_filename_line)
+        addr2line_filename=gensub(filename_line_pattern, "\\1", 1, meta_instr_filename_line)
         if (addr2line_filename == "") addr2line_filename="??";
-        addr2line_line_number=gensub(filename_line_pattern, "\\2", "", meta_instr_filename_line)
+        addr2line_line_number=gensub(filename_line_pattern, "\\2", 1, meta_instr_filename_line)
         addr2line_next_line_number=addr2line_line_number + (meta_instr_source_offset == 0 ? 1 : meta_instr_source_offset)
         # the first ident following the last occurrence of "new" or "sizeof"
         token="$FAILED$"
@@ -178,9 +178,9 @@ $0 ~ disassembly_line_pattern {
     if ($0 ~ meta_instr_regexp) {
         if (debug) printf("*META*  : %s\n", $0) >"/dev/stderr";
         # latch the meta-instr stuff
-        meta_instr_address=gensub(disassembly_line_pattern, "\\1", "");
-        meta_instr_sym=gensub(disassembly_line_pattern, "\\2", "");
-        meta_instr_offset=gensub(disassembly_line_pattern, "\\3", "");
+        meta_instr_address=gensub(disassembly_line_pattern, "\\1", 1);
+        meta_instr_sym=gensub(disassembly_line_pattern, "\\2", 1);
+        meta_instr_offset=gensub(disassembly_line_pattern, "\\3", 1);
         meta_instr_filename_line=filename_line
         meta_instr_source_offset=source_offset
         meta_instr_source_fragment=source_fragment
