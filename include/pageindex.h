@@ -23,7 +23,6 @@ struct insert
 		struct ptrs ptrs;
 		unsigned bits:16;
 	} un;
-
 } __attribute__((packed));
 
 /* We maintain two structures:
@@ -101,7 +100,7 @@ extern bigalloc_num_t *__liballocs_pageindex __attribute__((weak));
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
 void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));
-void __liballocs_report_wild_address(const void *ptr) __attribute__((visibility("protected")));
+void __liballocs_report_wild_address(const void *ptr); //__attribute__((visibility("protected")));
 
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a) __attribute__((visibility("hidden")));
 
@@ -142,9 +141,9 @@ inline struct big_allocation *__liballocs_get_bigalloc_containing(const void *ob
 	// if (__builtin_expect(obj == 0, 0)) return NULL;
 	// if (__builtin_expect(obj == (void*) -1, 0)) return NULL;
 	/* More heuristics go here. */
-	bigalloc_num_t bigalloc_num = pageindex[PAGENUM(obj)];
+	bigalloc_num_t bigalloc_num = __liballocs_pageindex[PAGENUM(obj)];
 	if (bigalloc_num == 0) return NULL;
-	struct big_allocation *b = &big_allocations[bigalloc_num];
+	struct big_allocation *b = &__liballocs_big_allocations[bigalloc_num];
 	return b;
 }
 
