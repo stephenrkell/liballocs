@@ -720,6 +720,8 @@ __liballocs_get_alloc_base(void *obj);
 #endif
 
 
+void
+__liballocs_set_alloc_type(void *obj, const struct uniqtype *type);
 
 struct uniqtype * 
 __liballocs_get_outermost_type(void *obj);

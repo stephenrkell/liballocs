@@ -1663,6 +1663,21 @@ failed:
 	return NULL;
 }
 
+void
+__liballocs_set_alloc_type(void *obj, const struct uniqtype *type)
+{
+	struct big_allocation *maybe_the_allocation;
+	struct allocator *a = __liballocs_leaf_allocator_for(obj, NULL,
+		&maybe_the_allocation);
+	if (!a || !a->set_type)
+	{
+		debug_printf(1, "Failed to set type for object at %p", obj);
+		return;
+	}
+	a->set_type(maybe_the_allocation, obj, (struct uniqtype *) type);
+	assert(__liballocs_get_alloc_type(obj) == type);
+}
+
 const void *
 __liballocs_get_alloc_site(void *obj)
 {
