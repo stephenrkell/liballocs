@@ -289,26 +289,20 @@ extern void  __attribute__((weak)) __libcrunch_scan_lazy_typenames(void*);
 void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
 void *dlopen(const char *filename, int flag)
 {
-	// write_string("Blah3000\n");
 	_Bool we_set_flag = 0;
 	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
 	
-	// write_string("Blah3001\n");
 	if (!orig_dlopen) // happens if we're called before liballocs init
 	{
-		// write_string("Blah3002\n");
 		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
 		if (!orig_dlopen) abort();
-		// write_string("Blah3003\n");
 	}
-	// write_string("Blah3004\n");
 
 	void *ret = NULL;
 	_Bool file_already_loaded = 0;
 	/* FIXME: inherently racy, but does any client really race here? */
 	if (filename) 
 	{
-		//write_string("Blah3004.5\n");
 		const char *file_realname_raw = realpath_quick(filename);
 		if (!file_realname_raw) 
 		{
@@ -316,19 +310,15 @@ void *dlopen(const char *filename, int flag)
 			goto skip_load;
 		}
 		const char *file_realname = __liballocs_private_strdup(file_realname_raw);
-		// write_string("Blah3004.6\n");
 		for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
 		{
-			// write_string("Blah3004.7\n");
 			const char *lm_ent_realname = dynobj_name_from_dlpi_name(l->l_name, (void*) l->l_addr);
-			// write_string("Blah3004.8\n");
 			file_already_loaded |= (lm_ent_realname && 
 					(0 == strcmp(lm_ent_realname, file_realname)));
 			if (file_already_loaded) break;
 		}
 		__private_free((void*) file_realname);
 	}
-	// write_string("Blah3005\n");
 	
 	ret = orig_dlopen(filename, flag);
 skip_load:
@@ -339,7 +329,6 @@ skip_load:
 	 * we haven't. Otherwise we rely on the racy logic above. */
 	if (filename != NULL && ret != NULL && !(flag & RTLD_NOLOAD) && !file_already_loaded)
 	{
-		// write_string("Blah3006\n");
 		if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(ret);
 
 		__static_allocator_notify_load(ret);
@@ -349,13 +338,16 @@ skip_load:
 		void *types_handle = NULL;
 		int ret_meta = dl_for_one_object_phdrs(ret, load_and_init_all_metadata_for_one_object, NULL);
 	}
-	// write_string("Blah3007\n");
 
 	return ret;
 }
 
 int dlclose(void *handle)
 {
+	/* FIXME: liballocs can keep allocations refering to static space of
+	 * libraries. Thus unloading is broken for the moment. */
+	return 0;
+
 	/* FIXME: libcrunch needs a way to purge its cache on dynamic unloading,
 	 * since it may contain "static" allocations. */
 
