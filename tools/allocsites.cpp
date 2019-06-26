@@ -101,10 +101,10 @@ int main(int argc, char **argv)
 	// extern-declare the uniqtypes
 	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
 	{
-		if (i_site->second.second /* declare as array0 */)
+		if (i_site->second.second /* declare as array */)
 		{
 			pair<string, string> array_name =
-				make_pair(string(""), string("__ARR0_") + i_site->second.first.second);
+				make_pair(string(""), string("__ARR_") + i_site->second.first.second);
 			cout << "extern struct uniqtype " << mangle_typename(array_name) << ";" << endl;
 		}
 		else
@@ -125,10 +125,10 @@ int main(int argc, char **argv)
 			<< " + 0x" << std::hex << i_site->first.second << std::dec << "UL, " 
 			<< "&";
 		
-		if (i_site->second.second /* declare as array0 */)
+		if (i_site->second.second /* declare as array */)
 		{
 			pair<string, string> array_name =
-				make_pair(string(""), string("__ARR0_") + i_site->second.first.second);
+				make_pair(string(""), string("__ARR_") + i_site->second.first.second);
 			cout << mangle_typename(array_name);
 		}
 		else

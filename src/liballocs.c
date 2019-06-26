@@ -53,6 +53,7 @@ struct uniqtype *
 __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
 {
 	assert(element_t);
+	assert(array_len < UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
 	if (element_t->pos_maxoff == 0) return NULL;
 	if (element_t->pos_maxoff == UNIQTYPE_POS_MAXOFF_UNBOUNDED) return NULL;
 
@@ -83,11 +84,11 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 		void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
 		struct uniqtype *allocated_uniqtype = allocated;
 		*allocated_uniqtype = (struct uniqtype) {
-			.pos_maxoff = array_len ? array_len * element_t->pos_maxoff : UNIQTYPE_POS_MAXOFF_UNBOUNDED,
+			.pos_maxoff = array_len * element_t->pos_maxoff,
 			.un = {
 				array: {
 					.is_array = 1,
-					.nelems = array_len ? array_len : UNIQTYPE_ARRAY_LENGTH_UNBOUNDED
+					.nelems = array_len
 				}
 			},
 			.make_precise = NULL
