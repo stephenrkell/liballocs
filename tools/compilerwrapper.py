@@ -330,10 +330,10 @@ class CompilerWrapper:
                 self.argItem({Phase.COMPILE}, num)
                 self.argItem({Phase.COMPILE}, num+1)
                 skipNext = True
-            elif args[num] in {'-MT', '-M', '-MM'}:
+            elif args[num] in {'-M', '-MM', '-MG', '-MP', '-MD', '-MMD'}:
                 self.argItem({Phase.PREPROCESS}, num)
                 skipNext = True
-            elif args[num] == "-MF":
+            elif args[num] in {'-MT', '-MQ', '-MF'}:
                 self.argOption({Phase.PREPROCESS}, num, args[num], args[num + 1])
                 skipNext = True
             elif args[num] == "-T":
@@ -416,7 +416,7 @@ class CompilerWrapper:
             elif not phase == Phase.LINK:
                 # if we have a unique source input (FIXME: should be input to the last phase...)
                 if len(self.getSourceInputFiles()) == 1:
-                     return self.getSourceInputFiles()[0].nameAfterPhase(phase)
+                     return next(iter(self.getSourceInputFiles())).nameAfterPhase(phase)
         return maybeGiven
     
     def parseInputAndOutputFiles(self):
