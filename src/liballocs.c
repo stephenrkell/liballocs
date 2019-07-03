@@ -49,6 +49,23 @@ static void update_rt_uniqtypes_obj(void *handle, void *old_base)
 	}
 }
 
+static struct uniqtype *
+get_type_from_symname(const char *precise_uniqtype_name)
+{
+	/* Does such a type exist?
+	 * On the assumption that we get called many times for the same typename,
+	 * and that usually therefore it *does* exist but in the synthetic libdlbind
+	 * object, we try a GNU hash lookup on that first. */
+	ElfW(Sym) *found_sym = __liballocs_rt_uniqtypes_gnu_hash ?
+		gnu_hash_lookup(__liballocs_rt_uniqtypes_gnu_hash,
+			__liballocs_rt_uniqtypes_dynsym, __liballocs_rt_uniqtypes_dynstr,
+			precise_uniqtype_name)
+		: NULL;
+	void *found = (found_sym ? sym_to_addr(found_sym) : NULL);
+	if (found) return (struct uniqtype *) found;
+	return (struct uniqtype *) dlsym(NULL, precise_uniqtype_name);
+}
+
 struct uniqtype *
 __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
 {
@@ -62,59 +79,89 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
 			"__uniqtype____ARR%d_%s", array_len, element_name);
 	/* FIXME: compute hash code. Should be an easy case. */
-	
-	/* Does such a type exist?
-	 * On the assumption that we get called many times for the same typename,
-	 * and that usually therefore it *does* exist but in the synthetic libdlbind
-	 * object, we try a GNU hash lookup on that first. */
-	ElfW(Sym) *found_sym = __liballocs_rt_uniqtypes_gnu_hash ?
-		gnu_hash_lookup(__liballocs_rt_uniqtypes_gnu_hash,
-			__liballocs_rt_uniqtypes_dynsym, __liballocs_rt_uniqtypes_dynstr,
-			precise_uniqtype_name)
-		: NULL;
-	void *found = (found_sym ? sym_to_addr(found_sym) : NULL);
-	if (NULL != found || NULL != (found = dlsym(NULL, precise_uniqtype_name)))
-	{
-		return (struct uniqtype *) found;
-	}
-	else
-	{
-		/* Create it and memoise using libdlbind. */
-		size_t sz = offsetof(struct uniqtype, related) + 1 * (sizeof (struct uniqtype_rel_info));
-		void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
-		struct uniqtype *allocated_uniqtype = allocated;
-		*allocated_uniqtype = (struct uniqtype) {
-			.pos_maxoff = array_len * element_t->pos_maxoff,
-			.un = {
-				array: {
-					.is_array = 1,
-					.nelems = array_len
-				}
-			},
-			.make_precise = NULL
-		};
-		allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
-			.un = {
-				t: {
-					.ptr = element_t
-				}
+
+	struct uniqtype *found = get_type_from_symname(precise_uniqtype_name);
+	if (found) return found;
+
+	/* Create it and memoise using libdlbind. */
+	size_t sz = offsetof(struct uniqtype, related) + 1 * (sizeof (struct uniqtype_rel_info));
+	void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+	struct uniqtype *allocated_uniqtype = allocated;
+	*allocated_uniqtype = (struct uniqtype) {
+		.pos_maxoff = array_len * element_t->pos_maxoff,
+		.un = {
+			array: {
+				.is_array = 1,
+				.nelems = array_len
 			}
-		};
-		void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
-		void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
-			allocated, sz, STT_OBJECT);
-		assert(reloaded);
-		update_rt_uniqtypes_obj(reloaded, old_base);
-		
-		return allocated_uniqtype;
-	}
+		},
+		.make_precise = NULL
+	};
+	allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
+		.un = {
+			t: {
+				.ptr = element_t
+			}
+		}
+	};
+	void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
+	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
+		allocated, sz, STT_OBJECT);
+	assert(reloaded);
+	update_rt_uniqtypes_obj(reloaded, old_base);
+
+	return allocated_uniqtype;
+}
+
+struct uniqtype *
+__liballocs_get_or_create_flexible_array_type(struct uniqtype *element_t)
+{
+	assert(element_t);
+	if (element_t->pos_maxoff == 0) return NULL;
+	if (element_t->pos_maxoff == UNIQTYPE_POS_MAXOFF_UNBOUNDED) return NULL;
+
+	char precise_uniqtype_name[4096];
+	const char *element_name = UNIQTYPE_NAME(element_t); /* gets "simple", not symbol, name */
+	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
+			"__uniqtype____ARR_%s", element_name);
+	/* FIXME: compute hash code. */
+
+	struct uniqtype *found = get_type_from_symname(precise_uniqtype_name);
+	if (found) return found;
+
+	/* Create it and memoise using libdlbind. */
+	size_t sz = offsetof(struct uniqtype, related) + 1 * (sizeof (struct uniqtype_rel_info));
+	void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+	struct uniqtype *allocated_uniqtype = allocated;
+	*allocated_uniqtype = (struct uniqtype) {
+		.pos_maxoff = UNIQTYPE_POS_MAXOFF_UNBOUNDED,
+		.un = {
+			array: {
+				.is_array = 1,
+				.nelems = UNIQTYPE_ARRAY_LENGTH_UNBOUNDED
+			}
+		},
+		.make_precise = __liballocs_make_array_precise_with_memory_bounds
+	};
+	allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
+		.un = {
+			t: {
+				.ptr = element_t
+			}
+		}
+	};
+	void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
+	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
+		allocated, sz, STT_OBJECT);
+	assert(reloaded);
+	update_rt_uniqtypes_obj(reloaded, old_base);
+
+	return allocated_uniqtype;
 }
 
 struct uniqtype *
 __liballocs_get_or_create_address_type(const struct uniqtype *pointee_t)
 {
-	// Very similar to __liballocs_get_or_create_array_type
-
 	assert(pointee_t);
 
 	char precise_uniqtype_name[4096];
@@ -123,60 +170,118 @@ __liballocs_get_or_create_address_type(const struct uniqtype *pointee_t)
 			"__uniqtype____PTR_%s", pointee_name);
 	/* FIXME: compute hash code. Should be an easy case. */
 
-	ElfW(Sym) *found_sym = __liballocs_rt_uniqtypes_gnu_hash ?
-		gnu_hash_lookup(__liballocs_rt_uniqtypes_gnu_hash,
-			__liballocs_rt_uniqtypes_dynsym, __liballocs_rt_uniqtypes_dynstr,
-			precise_uniqtype_name)
-		: NULL;
-	void *found = (found_sym ? sym_to_addr(found_sym) : NULL);
-	if (NULL != found || NULL != (found = dlsym(NULL, precise_uniqtype_name)))
+	struct uniqtype *found = get_type_from_symname(precise_uniqtype_name);
+	if (found) return found;
+
+	int indir_level;
+	const struct uniqtype *ultimate_pointee_t;
+	if (UNIQTYPE_IS_POINTER_TYPE(pointee_t))
 	{
-		return (struct uniqtype *) found;
+		indir_level = 1 + pointee_t->un.address.indir_level;
+		ultimate_pointee_t = UNIQTYPE_ULTIMATE_POINTEE_TYPE(pointee_t);
 	}
 	else
 	{
-		int indir_level;
-		const struct uniqtype *ultimate_pointee_t;
-		if (UNIQTYPE_IS_POINTER_TYPE(pointee_t))
-		{
-			indir_level = 1 + pointee_t->un.address.indir_level;
-			ultimate_pointee_t = UNIQTYPE_ULTIMATE_POINTEE_TYPE(pointee_t);
-		}
-		else
-		{
-			indir_level = 1;
-			ultimate_pointee_t = pointee_t;
-		}
-
-		/* Create it and memoise using libdlbind. */
-		size_t sz = offsetof(struct uniqtype, related) + 2 * (sizeof (struct uniqtype_rel_info));
-		void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
-		struct uniqtype *allocated_uniqtype = allocated;
-		*allocated_uniqtype = (struct uniqtype) {
-			.pos_maxoff = sizeof(void *),
-			.un = {
-				address: {
-					.kind = ADDRESS,
-					.indir_level = indir_level,
-					.genericity = 0,
-				}
-			},
-			.make_precise = NULL
-		};
-		allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
-			.un = { t: { .ptr = (struct uniqtype *) pointee_t } }
-		};
-		allocated_uniqtype->related[1] = (struct uniqtype_rel_info) {
-			.un = { t: { .ptr = (struct uniqtype *) ultimate_pointee_t } }
-		};
-		void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
-		void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
-			allocated, sz, STT_OBJECT);
-		assert(reloaded);
-		update_rt_uniqtypes_obj(reloaded, old_base);
-
-		return allocated_uniqtype;
+		indir_level = 1;
+		ultimate_pointee_t = pointee_t;
 	}
+
+	/* Create it and memoise using libdlbind. */
+	size_t sz = offsetof(struct uniqtype, related) + 2 * (sizeof (struct uniqtype_rel_info));
+	void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+	struct uniqtype *allocated_uniqtype = allocated;
+	*allocated_uniqtype = (struct uniqtype) {
+		.pos_maxoff = sizeof(void *),
+		.un = {
+			address: {
+				.kind = ADDRESS,
+				.indir_level = indir_level,
+				.genericity = 0,
+			}
+		},
+		.make_precise = NULL
+	};
+	allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
+		.un = { t: { .ptr = (struct uniqtype *) pointee_t } }
+	};
+	allocated_uniqtype->related[1] = (struct uniqtype_rel_info) {
+		.un = { t: { .ptr = (struct uniqtype *) ultimate_pointee_t } }
+	};
+	void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
+	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
+		allocated, sz, STT_OBJECT);
+	assert(reloaded);
+	update_rt_uniqtypes_obj(reloaded, old_base);
+
+	return allocated_uniqtype;
+}
+
+struct uniqtype *
+__liballocs_get_or_create_subprogram_type(struct uniqtype *return_type, unsigned narg, struct uniqtype **arg_types)
+{
+	assert(return_type);
+	assert(narg == 0 || arg_types);
+
+	char precise_uniqtype_name[4096];
+	memcpy(precise_uniqtype_name, "__uniqtype____FUN_FROM_", sizeof "__uniqtype____FUN_FROM_");
+	unsigned uniqtype_name_pos = sizeof "__uniqtype____FUN_FROM_" - 1;
+	for (unsigned i = 0; i < narg; ++i)
+	{
+		char *uniqtype_arg_name = precise_uniqtype_name + uniqtype_name_pos;
+		unsigned bufsz = sizeof precise_uniqtype_name - uniqtype_name_pos;
+		uniqtype_name_pos += snprintf(uniqtype_arg_name, bufsz, "__ARG%d_%s", i, UNIQTYPE_NAME(arg_types[i]));
+	}
+
+	char *uniqtype_ret_name = precise_uniqtype_name + uniqtype_name_pos;
+	unsigned bufsz = sizeof precise_uniqtype_name - uniqtype_name_pos;
+	snprintf(uniqtype_ret_name, bufsz, "__FUN_TO_%s", UNIQTYPE_NAME(return_type));
+
+	/* FIXME: compute hash code. */
+
+	struct uniqtype *found = get_type_from_symname(precise_uniqtype_name);
+	if (found) return found;
+
+	/* Create it and memoise using libdlbind. */
+	size_t sz = offsetof(struct uniqtype, related) + (1+narg) * (sizeof (struct uniqtype_rel_info));
+	void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+	struct uniqtype *allocated_uniqtype = allocated;
+	*allocated_uniqtype = (struct uniqtype) {
+		.pos_maxoff = UNIQTYPE_POS_MAXOFF_UNBOUNDED,
+		.un = {
+			subprogram: {
+				.kind = SUBPROGRAM,
+				.narg = narg,
+				.nret = 1,
+				.is_va = 0,
+				.cc = 0, // What is the good calling convention choice ?
+			}
+		},
+		.make_precise = NULL,
+	};
+	allocated_uniqtype->related[0] = (struct uniqtype_rel_info) {
+		.un = {
+			t: {
+				.ptr = return_type
+			}
+		}
+	};
+	for (unsigned i = 0; i < narg; i++)
+	{
+		allocated_uniqtype->related[i+1] = (struct uniqtype_rel_info) {
+			.un = {
+				t: {
+					.ptr = arg_types[i]
+				}
+			}
+		};
+	}
+	void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
+	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
+		allocated, sz, STT_OBJECT);
+	assert(reloaded);
+	update_rt_uniqtypes_obj(reloaded, old_base);
+
+	return allocated_uniqtype;
 }
 
 struct uniqtype *
