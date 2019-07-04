@@ -79,10 +79,6 @@ static void *userptr_to_allocptr(void *allocptr);
 #define ALLOCPTR_TO_USERPTR(p) (allocptr_to_userptr(p))
 #define USERPTR_TO_ALLOCPTR(p) (userptr_to_allocptr(p))
 
-#ifndef EXTRA_INSERT_SPACE
-#define EXTRA_INSERT_SPACE 0
-#endif
-
 #define ALLOC_EVENT_QUALIFIERS __attribute__((visibility("hidden")))
 
 #include "alloc_events.h"
@@ -392,12 +388,12 @@ static void list_sanity_check(entry_type *head, const void *should_see_chunk) {}
 // }
 
 static void 
-index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller);
+index_insert(void *new_userchunkaddr, size_t requested_size, const void *caller);
 
-void 
-__liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
+void __liballocs_index_insert(void *new_userchunkaddr, size_t requested_size,
+		const void *caller)
 {
-	index_insert(new_userchunkaddr, modified_size, caller);
+	index_insert(new_userchunkaddr, requested_size, caller);
 }
 
 static unsigned long index_insert_count;
@@ -473,8 +469,7 @@ static struct big_allocation *ensure_big(void *addr)
 						.alloc_site = (uintptr_t) site
 					}, __lookup_deepest_bigalloc(start));
 }
-static void 
-index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
+static void index_insert(void *new_userchunkaddr, size_t requested_size, const void *caller)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -501,7 +496,9 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	
 	/* Make sure the parent bigalloc knows we're suballocating it. */
 	char *allocptr = userptr_to_allocptr(new_userchunkaddr);
-	struct insert *p_insert = insert_for_chunk(new_userchunkaddr);
+	size_t usable_size = malloc_usable_size(new_userchunkaddr);
+	struct extended_insert *ext_insert = extended_insert_for_chunk_and_usable_size(new_userchunkaddr, usable_size);
+	struct insert *p_insert = &ext_insert->base;
 	struct big_allocation *containing_bigalloc = __lookup_deepest_bigalloc(
 		userptr_to_allocptr(new_userchunkaddr));
 	if (!containing_bigalloc)
@@ -534,6 +531,16 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	/* Populate our extra in-chunk fields */
 	p_insert->alloc_site_flag = 0U;
 	p_insert->alloc_site = (uintptr_t) caller;
+
+	ext_insert->insert_size = usable_size - requested_size;
+
+#ifdef LIFETIME_POLICIES
+	// alloca does not have a lifetime_insert
+	if (containing_bigalloc->suballocator == &__generic_malloc_allocator)
+	{
+		ext_insert->lifetime = MANUAL_DEALLOCATION_FLAG;
+	}
+#endif
 	
 	struct big_allocation *this_chunk_bigalloc = NULL;
 	/* If we're big enough, 
@@ -547,7 +554,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	{
 		char *bigalloc_begin = BIGALLOC_BEGIN(allocptr);
 		size_t extra_size = allocptr - bigalloc_begin;
-		size_t bigalloc_size = modified_size - sizeof (struct insert) + extra_size;
+		size_t bigalloc_size = requested_size + extra_size;
 		this_chunk_bigalloc = fresh_big(allocptr, bigalloc_size,
 			(struct insert) {
 						.alloc_site_flag = 0,
@@ -559,7 +566,7 @@ index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 	}
 	
 	/* if we got here, it's going in l1 */
-	if (modified_size > biggest_unpromoted_object) biggest_unpromoted_object = modified_size;
+	if (usable_size > biggest_unpromoted_object) biggest_unpromoted_object = usable_size;
 
 after_promotion: ;
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(new_userchunkaddr);
@@ -618,7 +625,7 @@ void
 post_successful_alloc(void *allocptr, size_t modified_size, size_t modified_alignment, 
 		size_t requested_size, size_t requested_alignment, const void *caller)
 {
-	index_insert(allocptr /* == userptr */, modified_size, __current_allocsite ? __current_allocsite : caller);
+	index_insert(allocptr /* == userptr */, requested_size, __current_allocsite ? __current_allocsite : caller);
 	safe_to_call_malloc = 1; // if somebody succeeded, anyone should succeed
 }
 
@@ -632,9 +639,9 @@ void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 	size_t orig_size = *p_size;
 	/* Add the size of struct insert, and round this up to the align of struct insert. 
 	 * This ensure we always have room for an *aligned* struct insert. */
-	size_t size_with_insert = orig_size + sizeof (struct insert) + EXTRA_INSERT_SPACE;
-	size_t size_to_allocate = PAD_TO_ALIGN(size_with_insert, sizeof (struct insert));
-	assert(0 == size_to_allocate % ALIGNOF(struct insert));
+	size_t size_with_insert = orig_size + sizeof (struct extended_insert);
+	size_t size_to_allocate = PAD_TO_ALIGN(size_with_insert, ALIGNOF(void *));
+	assert(0 == size_to_allocate % ALIGNOF(void *));
 	*p_size = size_to_allocate;
 }
 
@@ -730,8 +737,8 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 		userptr, index_entry);
 #endif
 	
-	unsigned suballocated_region_number = 0;
-	struct insert *ins = insert_for_chunk(userptr);
+	//unsigned suballocated_region_number = 0;
+	//struct insert *ins = insert_for_chunk(userptr);
 	//if (ALLOC_IS_SUBALLOCATED(userptr, ins)) 
 	//{
 	//	suballocated_region_number = (uintptr_t) ins->alloc_site;
@@ -808,6 +815,12 @@ int __liballocs_malloc_pre_nonnull_free(void *userptr, size_t freed_usable_size)
 		__attribute__((alias("pre_nonnull_free")));
 int pre_nonnull_free(void *userptr, size_t freed_usable_size)
 {
+#ifdef LIFETIME_POLICIES
+	lifetime_insert_t *lti = lifetime_insert_for_chunk(userptr);
+	*lti &= ~MANUAL_DEALLOCATION_FLAG;
+	if (*lti) return 1; // Cancel free if we are still alive
+	__notify_free(userptr);
+#endif
 	index_delete(userptr/*, freed_usable_size*/);
 	return 0;
 }
@@ -856,6 +869,10 @@ void post_nonnull_nonzero_realloc(void *userptr,
 	size_t old_usable_size,
 	const void *caller, void *__new_allocptr)
 {
+	// FIXME: This requested size could be wrong.
+	// The caller should give us the real requested size instead.
+	size_t requested_size = __current_allocsz ? __current_allocsz :
+		modified_size - sizeof(struct extended_insert);
 	/* Are we a bigalloc? */
 	struct big_allocation *b = __lookup_bigalloc(userptr, 
 			&__generic_malloc_allocator, NULL);
@@ -865,12 +882,12 @@ void post_nonnull_nonzero_realloc(void *userptr,
 		 * FIXME: check the new type metadata against the old! We can probably do this
 		 * in a way that's uniform with memcpy... the new chunk will take its type
 		 * from the realloc site, and we then check compatibility on the copy. */
-		index_insert(allocptr_to_userptr(__new_allocptr), 
-				modified_size, __current_allocsite ? __current_allocsite : caller);
+		index_insert(allocptr_to_userptr(__new_allocptr), requested_size,
+				__current_allocsite ? __current_allocsite : caller);
 		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
 		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
 		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
-		__notify_copy(__new_allocptr, userptr, old_usable_size - sizeof (struct insert) - EXTRA_INSERT_SPACE);
+		__notify_copy(__new_allocptr, userptr, requested_size_for_chunk(userptr, old_usable_size));
 	}
 	else // !__new_allocptr || __new_allocptr == userptr
 	{
@@ -879,7 +896,7 @@ void post_nonnull_nonzero_realloc(void *userptr,
 		 * allocating it, so we pass it as the modified_size to
 		 * index_insert. */
 		// FIXME: is this right? what if __new_allocptr is null?
-		index_insert(userptr, old_usable_size, __current_allocsite ? __current_allocsite : caller);
+		index_insert(userptr, requested_size, __current_allocsite ? __current_allocsite : caller);
 	}
 	
 	if (__new_allocptr == userptr && modified_size < old_usable_size)
@@ -1394,10 +1411,9 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 	{
 		size_t alloc_usable_chunksize;
 		heap_info = lookup_object_info(obj, out_base, &alloc_usable_chunksize, NULL);
-		if (heap_info)
+		if (heap_info && out_size)
 		{
-			if (out_size) *out_size = alloc_usable_chunksize
-				- sizeof (struct insert) - EXTRA_INSERT_SPACE;
+			*out_size = requested_size_for_chunk(*out_base, alloc_usable_chunksize);
 		}
 	}
 	
@@ -1426,5 +1442,6 @@ struct allocator __generic_malloc_allocator = {
 	.get_info = __generic_heap_get_info,
 	.is_cacheable = 1,
 	.ensure_big = ensure_big,
-	.set_type = __generic_heap_set_type
+	.set_type = __generic_heap_set_type,
+	.free = (void (*)(struct allocated_chunk *)) free,
 };

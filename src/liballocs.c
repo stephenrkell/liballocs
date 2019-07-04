@@ -1166,11 +1166,6 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	return memcpy(mem, s, len);
 }
 
-void __notify_copy(void *dest, const void *src, unsigned long n)
-{
-	/* We do nothing here. But libcrunch will wrap us. */
-}
-
 /* These have hidden visibility */
 struct uniqtype *pointer_to___uniqtype__void;
 struct uniqtype *pointer_to___uniqtype____uninterpreted_byte;

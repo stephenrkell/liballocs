@@ -57,9 +57,9 @@ int __liballocs_global_init(void) { return 0; }
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {
 }
-void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_size, 
-		unsigned long *frame_counter, const void *caller, 
-		const void *caller_sp, const void *caller_bp) {}
+void __alloca_allocator_notify(void *new_userchunkaddr,
+		unsigned long requested_size, unsigned long *frame_counter,
+		const void *caller, const void *caller_sp, const void *caller_bp) {}
 
 int __index_small_alloc(void *ptr, int level, unsigned size_bytes) { return 2; }
 void __unindex_small_alloc(void *ptr, int level) {}
@@ -241,5 +241,18 @@ Dl_info dladdr_with_cache(const void *addr)
 	Dl_info dummy;
 	memset(&dummy, 0, sizeof dummy);
 	return dummy;
+}
+
+void __notify_ptr_write(const void **dest, const void *val)
+{
+	/* Called for *dest = val; on code instrumented with trapptrwrites
+	 * Only provide this weak symbol unless lifetime policies are enabled */
+}
+
+void __notify_copy(void *dest, const void *src, unsigned long n)
+{
+	/* We provide a weak definition here that is overriden if lifetime policies
+	 * are enabled.
+	 * Also note that in any case, libcrunch will wrap us. */
 }
 

@@ -28,26 +28,36 @@ int __liballocs_global_init (void);
 /* This is not weak. */
 void __assert_fail(const char * assertion, const char * file, unsigned int line, const char * function);
 /* Heap index hooks -- these also aren't weak, for the usual reason. */
-void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_size, 
-		unsigned long *frame_counter, const void *caller, 
-		const void *caller_sp, const void *caller_bp);
+void __alloca_allocator_notify(void *new_userchunkaddr,
+		unsigned long requested_size, unsigned long *frame_counter,
+		const void *caller, const void *caller_sp, const void *caller_bp);
 void __liballocs_index_delete(void*);
 struct uniqtype; /* forward decl */
 
-/* This *must* match the size of 'struct insert' in heap_index! But we don't
- * include that header right now, to avoid perturbing the inclusion order
- * of the rest of this translation unit. */
+/* This *must* match the size of 'struct extended_insert' in heap_index!
+ * But we don't include that header right now, to avoid perturbing the
+ * inclusion order of the rest of this translation unit.
+ * HACK: We do not need the lifetime insert for alloca so it is not included. */
 #ifndef ALLOCA_TRAILER_SIZE
-#define ALLOCA_TRAILER_SIZE (sizeof (void*))
+#define ALLOCA_TRAILER_SIZE (1 + sizeof (void*))
 #endif
 
 /* HACK: copied from memtable.h. */
 /* Thanks to Martin Buchholz -- <http://www.wambold.com/Martin/writings/alignof.html> */
 #ifndef ALIGNOF
+#if __STDC_VERSION__ >= 201112L
+#define ALIGNOF _Alignof
+#else
 #define ALIGNOF(type) offsetof (struct { char c; type member; }, member)
+#endif
 #endif
 #ifndef PAD_TO_ALIGN
 #define PAD_TO_ALIGN(n, a) 	((0 == ((n) % (a))) ? (n) : (n) + (a) - ((n) % (a)))
+#endif
+
+// This must match the required alignment of an allocation after the insert is added
+#ifndef ALLOCA_ALIGN
+#define ALLOCA_ALIGN ALIGNOF(void *)
 #endif
 
 /* This *must* match the treatment of "early_malloc"'d chunks in malloc_hook_stubs.c. 
@@ -97,7 +107,7 @@ extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_
 	 * and heap indexing code does. ARGH. Maintenance nightmare.... 
 	 * 
 	 * AND only do the indexing things if liballocs is preloaded. Otherwise.... */
-	unsigned long chunk_size = PAD_TO_ALIGN(size + ALLOCA_TRAILER_SIZE, ALLOCA_TRAILER_SIZE);
+	unsigned long chunk_size = PAD_TO_ALIGN(size + ALLOCA_TRAILER_SIZE, ALLOCA_ALIGN);
 	void *alloc = __builtin_alloca(ALLOCA_HEADER_SIZE + chunk_size);
 #ifndef LIBALLOCS_NO_ZERO
 	__builtin_memset((char*) alloc + ALLOCA_HEADER_SIZE, 0, chunk_size);
@@ -111,7 +121,7 @@ extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_
 	
 	/* Note that we pass the caller directly; __current_allocsite is not required. */
 	void *userptr = (char*) alloc + ALLOCA_HEADER_SIZE;
-	__alloca_allocator_notify(userptr, chunk_size, frame_counter, caller,
+	__alloca_allocator_notify(userptr, size, frame_counter, caller,
 		__liballocs_get_sp(), __liballocs_get_bp());
 	
 	return userptr;
