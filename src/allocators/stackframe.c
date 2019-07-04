@@ -124,6 +124,9 @@ void __stackframe_allocator_init(void)
 	}
 }
 
+// Not declared in any header...
+void __liballocs_sanity_check_bigalloc(struct big_allocation *b);
+
 struct big_allocation *__stackframe_allocator_find_or_create_bigalloc(
 		unsigned long *frame_counter, const void *caller, const void *frame_sp_at_caller, 
 		const void *frame_bp_at_caller)
