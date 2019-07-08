@@ -39,6 +39,9 @@ static void update_rt_uniqtypes_obj(void *handle, void *old_base)
 		(void*) ((struct link_map *) handle)->l_addr == old_base;
 	if (!unchanged_base)
 	{
+		/* FIXME: if we get here, it's bad! Our dlbind stuff just moved.
+		 * We really need to fix libdlbind so that this doesn't happen,
+		 * i.e. sticking its fingers more deeply into the ld.so. */
 		__liballocs_rt_uniqtypes_obj = handle;
 		__liballocs_rt_uniqtypes_dynsym = get_dynsym(handle);
 		__liballocs_rt_uniqtypes_dynstr = get_dynstr(handle);
