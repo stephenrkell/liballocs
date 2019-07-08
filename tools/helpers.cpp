@@ -954,6 +954,35 @@ bool sticky_root_die::has_dwarf(int user_fd)
 	return retval;
 }
 
+static string get_liballocs_base()
+{
+	/* HACK HACK HACK: assume we're run in place, and use auxv to get our $0's dirname.
+	 * PROBLEM: if we're libtool'd, our program is built in .libs. */
+	static opt<string> liballocs_base;
+	if (!liballocs_base)
+	{
+		int dummy_local = 0;
+		struct auxv_limits limits = get_auxv_limits(get_auxv((const char **) environ, &dummy_local));
+		string argv0 = limits.argv_vector_start[0];
+		char *argv0_dup = strdup(argv0.c_str());
+		if (!argv0_dup) abort();
+		char *argv0_dir = dirname(argv0_dup);
+		char *argv0_dir_realname = realpath(argv0_dir, NULL);
+		string argv0_dir_realstr = argv0_dir_realname;
+		liballocs_base = string(argv0_dir) + "/.." + ((
+			/* HACK for libtool: if the realpath ends with ".libs", go one further level down. */
+				argv0_dir_realstr.length() >= string("/.libs").length()
+				&& 0 == argv0_dir_realstr.compare(
+				    /* pos */ argv0_dir_realstr.length() - string("/.libs").length() /* for '/' */,
+				    /* len */ string("/.libs").length(),
+				    string("/.libs"))) ? "/.." : ""
+			);
+		free(argv0_dir_realname);
+		free(argv0_dup);
+	}
+	return (*liballocs_base).c_str();
+}
+
 int sticky_root_die::open_debuglink(int user_fd)
 {
 	/* FIXME: linux-specific big hacks here. */
@@ -961,8 +990,8 @@ int sticky_root_die::open_debuglink(int user_fd)
 	char *fdstr = NULL;
 	int ret = asprintf(&fdstr, "/dev/fd/%d", user_fd);
 	if (ret <= 0) throw No_entry();
-	/* HACK HACK HACK */
-	ret = asprintf(&cmdstr, "bash -c \". ${LIBALLOCS}/tools/debug-funcs.sh && read_debuglink %s | tr -d '\\n'\"", fdstr);
+	ret = asprintf(&cmdstr, "bash -c \". '%s'/tools/debug-funcs.sh && read_debuglink '%s' | tr -d '\\n'\"",
+		get_liballocs_base().c_str(), fdstr);
 	if (ret <= 0) throw No_entry();
 	assert(cmdstr != NULL);
 	FILE *p = popen(cmdstr, "r");
@@ -1033,8 +1062,8 @@ int sticky_root_die::open_debug_via_build_id(int user_fd)
 	char *fdstr = NULL;
 	int ret = asprintf(&fdstr, "/dev/fd/%d", user_fd);
 	if (ret <= 0) throw No_entry();
-	/* HACK HACK HACK */
-	ret = asprintf(&cmdstr, "bash -c \". ${LIBALLOCS}/tools/debug-funcs.sh && read_build_id %s | tr -d '\\n'\"", fdstr);
+	ret = asprintf(&cmdstr, "bash -c \". '%s'/tools/debug-funcs.sh && read_build_id '%s' | tr -d '\\n'\"",
+		get_liballocs_base().c_str(), fdstr);
 	if (ret <= 0) throw No_entry();
 	assert(cmdstr != NULL);
 	FILE *p = popen(cmdstr, "r");
@@ -1046,13 +1075,8 @@ int sticky_root_die::open_debug_via_build_id(int user_fd)
 	{
 		/* We've successfully slurped a build_id */
 		std::cerr << "Slurped build ID: " << build_id_buf << std::endl;
-		/* How to build the path from the build ID? GDB docs say we
-		 * have to try:
-		 * the directory of the executable file, then
-		 * in a subdirectory of that directory named .debug, and finally
-		 * under each one of the global debug directories,
-		 *      in a subdirectory whose name is identical to
-		 *      the leading directories of the executable’s absolute file name. */
+		/* How to build the path from the build ID? HACK: Just do what works on typical
+		 * GNU/Linux distributions, for now. */
 		std::vector<std::string> paths_to_try;
 		paths_to_try.push_back(
 				string("/usr/lib/debug/.build-id/")
