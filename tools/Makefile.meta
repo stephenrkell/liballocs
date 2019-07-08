@@ -11,6 +11,9 @@ THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 META_BASE ?= /usr/lib/meta
 $(warning META_BASE is $(META_BASE))
 
+LIBALLOCS ?= $(realpath $(dir $(THIS_MAKEFILE))/..)
+export LIBALLOCS
+
 UNIQTYPES ?= $(dir $(THIS_MAKEFILE))/uniqtypes
 DUMPTYPES ?= $(dir $(THIS_MAKEFILE))/dumptypes
 ALLOCSITES ?= $(dir $(THIS_MAKEFILE))/allocsites

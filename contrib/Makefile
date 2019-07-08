@@ -4,8 +4,7 @@ CONTRIB_ROOT := $(realpath $(dir $(THIS_MAKEFILE)))
 NINJA ?= ninja
 CMAKE ?= cmake
 
-export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
-export LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
+export LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
 # trap-syscalls's and libdlbind's contribs need to be able to find librunt
 export LIBRUNT_BASE := $(realpath $(dir $(THIS_MAKEFILE))/librunt)
 

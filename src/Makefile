@@ -1,5 +1,5 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
-LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
+LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
 SRCROOT := $(dir $(THIS_MAKEFILE))../
 
 # HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
@@ -126,7 +126,7 @@ endif
 
 uniqtypes.o: uniqtypes.c
 	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
-	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
+	$(LIBALLOCS)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
 ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard allocators/*.c))
 UTIL_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o
