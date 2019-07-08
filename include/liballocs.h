@@ -14,6 +14,14 @@ typedef bool _Bool;
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
+#if !defined(_GNU_SOURCE) && !defined(HAVE_DL_INFO)
+typedef struct {
+	const char *dli_fname;
+	void       *dli_fbase;
+	const char *dli_sname;
+	void       *dli_saddr;
+} Dl_info;
+#endif
 #include <link.h>
 
 extern void warnx(const char *fmt, ...); // avoid repeating proto
@@ -69,15 +77,6 @@ struct addrlist;
 int __liballocs_addrlist_contains(struct addrlist *l, void *addr);
 void __liballocs_addrlist_add(struct addrlist *l, void *addr);
 extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
-
-#if !defined(_GNU_SOURCE) && !defined(HAVE_DL_INFO)
-typedef struct {
-	const char *dli_fname;
-	void       *dli_fbase;
-	const char *dli_sname;
-	void       *dli_saddr;
-} Dl_info;
-#endif
 
 extern void *__liballocs_main_bp; // beginning of main's stack frame
 char *get_exe_fullname(void) __attribute__((visibility("hidden")));

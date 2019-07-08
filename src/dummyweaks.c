@@ -82,18 +82,21 @@ void *__liballocs_my_metaobj(void)
 
 void *__liballocs_allocsmt;
 
-unsigned long __liballocs_get_alloc_size(const void *obj)
+unsigned long __liballocs_get_alloc_size(void *obj)
 {
 	return 0;
 }
-void *__liballocs_get_alloc_site(const void *obj)
+unsigned long alloc_get_size(void *obj) __attribute__((alias("__liballocs_get_alloc_size")));
+const void *__liballocs_get_alloc_site(void *obj)
 {
 	return 0;
 }
+const void *allocs_get_site(void *obj) __attribute__((alias("__liballocs_get_alloc_site")));
 void *__liballocs_get_base(void *obj)
 {
 	return NULL;
 }
+void *alloc_get_base(void *obj) __attribute__((alias("__liballocs_get_base")));
 void *__liballocs_get_alloc_base(void *obj)
 {
 	return NULL;
@@ -112,11 +115,12 @@ __liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*biga
 {
 	return NULL;
 }
-struct allocator * __liballocs_get_leaf_allocator(const void *obj)
+struct allocator * __liballocs_get_leaf_allocator(void *obj)
 {
 	return NULL;
 }
-struct allocator * __liballocs_leaf_allocator_for(const void *obj,
+struct allocator *alloc_get_allocator(void *obj) __attribute__((alias("__liballocs_get_leaf_allocator")));
+struct allocator * __liballocs_leaf_allocator_for(void *obj,
 	struct big_allocation **out_containing_bigalloc,
 	struct big_allocation **out_maybe_the_allocation)
 {
@@ -134,6 +138,8 @@ __liballocs_get_outermost_type(void *obj)
 {
 	return NULL;
 }
+struct uniqtype *
+alloc_get_type(void *obj) __attribute__((alias("__liballocs_get_outermost_type")));
 
 struct uniqtype;
 const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u)
