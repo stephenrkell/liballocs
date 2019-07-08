@@ -149,10 +149,15 @@ struct allocator
 	ALLOC_BASE_API(__allocmeta_fun_ptr, __allocmeta_fun_arg)
 };
 
-/* Declare the top-level functions. */
+/* Declare the top-level functions. FIXME: many of these are not defined
+ * anywhere. FIXME: do we want to use 'protected' to make the __liballocs_-
+ * prefixed ones non-overridable for internal calls? */
 #define __liballocs_toplevel_fun_decl(rett, name, ...) \
-	rett __liballocs_ ## name( __VA_ARGS__ );
+	rett __liballocs_ ## name( __VA_ARGS__ ); \
+	rett alloc_ ## name( __VA_ARGS__ );
 ALLOC_REFLECTIVE_API(__liballocs_toplevel_fun_decl, __allocmeta_fun_arg)
+// we can also ask for the allocator
+struct allocator *alloc_get_allocator(void *obj);
 void *__liballocs_get_alloc_base(void *); /* alias of __liballocs_get_base */
 
 /* Which allocators do we have? */
@@ -175,6 +180,7 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 // extern struct allocator __libc_malloc_allocator; // good idea? probably not
 // extern struct allocator __global_obstack_allocator;
 
+// FIXME: we should probably have per-allocator headers for the stuff below
 void __mmap_allocator_init(void);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
 	int prot, int flags, int fd, off_t offset, void *caller);

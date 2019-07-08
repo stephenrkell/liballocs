@@ -1,10 +1,6 @@
 #ifndef LIBALLOCS_H_
 #define LIBALLOCS_H_
 
-#ifndef _GNU_SOURCE
-#warning "compilation unit is not _GNU_SOURCE; some features liballocs requires may not be available"
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 typedef bool _Bool;
@@ -74,8 +70,13 @@ int __liballocs_addrlist_contains(struct addrlist *l, void *addr);
 void __liballocs_addrlist_add(struct addrlist *l, void *addr);
 extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
 
-#ifdef _GNU_SOURCE
-Dl_info dladdr_with_cache(const void *addr);
+#if !defined(_GNU_SOURCE) && !defined(HAVE_DL_INFO)
+typedef struct {
+	const char *dli_fname;
+	void       *dli_fbase;
+	const char *dli_sname;
+	void       *dli_saddr;
+} Dl_info;
 #endif
 
 extern void *__liballocs_main_bp; // beginning of main's stack frame
@@ -243,7 +244,11 @@ __liballocs_ensure_init(void)
 // -- we need ordinary headers to be all-inline, but
 // pageindex.c to have one non-inline.
 // How to placate the compiler of the translation unit that doesn't include pageindex.h?
-// I think the answer is "you can't; refactor headers to avoid this"
+// I think the answer is "you can't; refactor headers to avoid this".
+// In other words, always provide the inline definition, but
+// include a non-inline prototype in the instantiating compilation unit.
+// If there is an "internal-only inline" definition, it needs to have a
+// different name.
 /* The "leaf allocator" for an address is the allocator
  * of the most deeply nested allocation covering a particular
  * address. For example, if a malloc has two live allocations

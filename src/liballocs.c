@@ -1546,6 +1546,8 @@ __liballocs_get_outermost_type(void *obj)
 {
 	return __liballocs_get_alloc_type(obj);
 }
+struct uniqtype *
+alloc_get_type(void *obj) __attribute__((alias("__liballocs_get_outermost_type")));
 
 struct uniqtype * 
 __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
@@ -1592,7 +1594,7 @@ failed:
 	return NULL;
 }
 
-void *
+const void *
 __liballocs_get_alloc_site(void *obj)
 {
 	const void *alloc_site = NULL;
@@ -1600,6 +1602,8 @@ __liballocs_get_alloc_site(void *obj)
 		NULL, NULL, &alloc_site);
 	return (void*) alloc_site;
 }
+const void *
+alloc_get_site(void *obj) __attribute__((alias("__liballocs_get_alloc_site")));
 
 unsigned long
 __liballocs_get_alloc_size(void *obj)
@@ -1611,6 +1615,8 @@ __liballocs_get_alloc_size(void *obj)
 	if (err && err != &__liballocs_err_unrecognised_alloc_site) return 0;
 	return alloc_size;
 }
+unsigned long
+alloc_get_size(void *obj) __attribute__((alias("__liballocs_get_alloc_size")));
 
 struct allocator *
 __liballocs_get_leaf_allocator(void *obj)
@@ -1623,6 +1629,8 @@ __liballocs_get_leaf_allocator(void *obj)
 	
 	return a;
 }
+struct allocator *
+alloc_get_allocator(void *obj) __attribute__((alias("__liballocs_get_leaf_allocator")));
 
 struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 		struct big_allocation **maybe_out_bigalloc)
