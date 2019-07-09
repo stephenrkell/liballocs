@@ -23,7 +23,7 @@
 /tools/dumptypes
 /tools/ifacetypes
 /tools/find-allocated-type-size
-/tools/lang/c/bin
+/tools/lang/c/bin/base-types-translation
 /tools/lang/c/src/base-types-translation
 /tools/usedtypes
 /tools/lang/c/*/*.d
