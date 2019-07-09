@@ -1596,7 +1596,7 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 						err << i_tname->first;
 					}
 					err << endl;
-					return 1;
+					return;
 				case 1: 
 					// out << "Found match for " << key << ": " << found_pair.first->second << endl;
 					transitively_add_type(found_pair.first->second, master_relation);
@@ -1630,11 +1630,10 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 					else 
 					{
 						cerr << "Not identical, so not proceeding." << endl;
-						return 1;
+						return;
 					}
 				// end case default
 			}
-
 		};
 		
 		for_each_uniqtype_reference_in(fname, f);
