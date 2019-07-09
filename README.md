@@ -43,39 +43,39 @@ allocators visible in this example).
 More generally, liballocs provides the following.
 
 * run-time type information
- - in a flexible language-agnostic in-memory format
- - derived from DWARF debugging information
+    - in a flexible language-agnostic in-memory format
+    - derived from DWARF debugging information
 
 * a run-time model of memory as an allocation hierarchy
- - from memory mappings right down to individual variables, objects and fields
+    - from memory mappings right down to individual variables, objects and fields
 
 * a run-time notion of *allocator*
- - capturing how each piece of memory is allocated and managed
- - at each level in the hierarchy!
+    - capturing how each piece of memory is allocated and managed
+    - at each level in the hierarchy!
 
 * a reflective meta-level API answering queries about arbitrary memory
- - type, bounds, who allocated it, etc.
- - each allocator can have its own implementation of this
+    - type, bounds, who allocated it, etc.
+    - each allocator can have its own implementation of this
 
 * a uniform base-level API for manipulating memory allocations
- - at any level in the hierarchy
+    - at any level in the hierarchy
 
 It does this extension mostly transparently. In particular,
 
 * most of the time, you don't have to change your code
- - ... or even recompile it!
- - so long as you have debugging information
- - exception: custom allocators (alloca() and obstacks are fine)
-     + for these: annotate and relink, but usually no code changes (see doc/custom-allocators.md)
+    - ... or even recompile it!
+    - so long as you have debugging information
+    - exception: custom allocators (alloca() and obstacks are fine)
+        + for these: annotate and relink, but usually no code changes (see doc/custom-allocators.md)
 
 * most of the time, the slowdown is not noticeable
- - slowdowns I've seen are mostly under 5% 
- - ongoing work is reducing these further (see doc/projects.md)
- - some code patterns do fare worse 
-     + main one: non-malloc-like custom allocators
+    - slowdowns I've seen are mostly under 5% 
+    - ongoing work is reducing these further (see doc/projects.md)
+    - some code patterns do fare worse 
+        + main one: non-malloc-like custom allocators
 
 * most of the time, the memory overheads are low
- - I don't currently have precise measurements (soon!)
+    - I don't currently have precise measurements (soon!)
 
 What's the purpose of all this? Unix abstractions are fairly simple and
 fairly general, but they are not *humane*, and they invite
@@ -182,13 +182,13 @@ will eventually go away.
 * when code does need to be recompiled, the toolchain is a bit slow
 * it is a little fragile to churn (e.g. glibc or
    Linux kernel changes can break it)
-* reflection is only as good as the available debugging information (or other ground-truth metadata)
+* reflection is only as good as the available debugging information (or other ground-truth metadata).
    So, for example, if you want to find out where all the pointers
    are on your stack, you need the compiler's help --
-   and today's compilers only keep a very partial record of this
+   and today's compilers only keep a very partial record of this.
   Similarly, if you want to reflect on C preprocessor macros,
    you'll need some source of that metadata, which standard debuginfo
-   builds usually omit
+   builds usually omit.
 
 To build this software on a Debian-based GNU/Linux distribution,
 please see the buildtest/ directory. This has a number of
@@ -209,7 +209,7 @@ including nested submodules. Please make sure you pull them all.
 Generic download-and-build instructions for Debian platforms
 look something like the following.
 
-    $ # FIRST optionally build my binutils-gdb repo (see below)
+    $ # step 0: FIRST optionally build my binutils-gdb repo (see below)
     $ sudo apt-get install libelfg0-dev libdw-dev \
         autoconf automake libtool pkg-config autoconf-archive \
         g++ ocaml ocaml-findlib \
