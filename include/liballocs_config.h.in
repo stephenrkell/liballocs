@@ -1,0 +1,9 @@
+/* Defined to 1 if we must use our own libunwind */
+#undef USE_FAKE_LIBUNWIND
+
+/* If lifetime extenstion is available this macro expands to the number of
+ * available lifetime policies */
+#undef LIFETIME_POLICIES
+
+/* Defined to the integer type of the lifetime insert */
+#undef LIFETIME_INSERT_TYPE

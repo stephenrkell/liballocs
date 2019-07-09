@@ -2,6 +2,7 @@
 #define __HEAP_INDEX_H
 
 #include <stdbool.h>
+#include "liballocs_config.h"
 #include "pageindex.h"
 #include "memtable.h"
 
@@ -127,11 +128,8 @@ static size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
 static size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr_to_allocptr(userptr))); }
 static size_t allocsize(void *allocptr) { return malloc_usable_size(allocptr); }
 
-#define LIFETIME_INSERT_TYPE uint8_t // TODO: Define it in configuration
+#ifdef LIFETIME_POLICIES
 typedef LIFETIME_INSERT_TYPE lifetime_insert_t;
-#ifdef LIFETIME_INSERT_TYPE
-#include <limits.h>
-#define LIFETIME_POLICIES (CHAR_BIT * sizeof(lifetime_insert_t))
 #define LIFETIME_POLICY_FLAG(id) (0x1 << (id))
 // By convention lifetime policy 0 is the manual deallocation policy
 #define MANUAL_DEALLOCATION_POLICY 0

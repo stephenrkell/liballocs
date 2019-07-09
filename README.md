@@ -223,7 +223,7 @@ look something like the following.
     make -C contrib -j4 && \
     ./autogen.sh && \
     . contrib/env.sh && \
-    ./configure --prefix=/usr/local && \
+    ./configure && \
     make -j4
 
 ... where you should tune "-j4" according to your needs. After
