@@ -30,8 +30,8 @@ endif
 
 cases := $(sort $(wildcard [-a-z]*))
 
-LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
-export LIBALLOCS
+LIBALLOCS_LIB := $(realpath $(dir $(THIS_MAKEFILE))/..)
+export LIBALLOCS_LIB
 
 ifneq ($(LIBALLOCS_USE_PRELOAD),no)
 LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_preload.so)
@@ -39,13 +39,13 @@ else
 LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs.so)
 endif
 ifneq ($(MAKECMDGOALS),clean)
-ifeq ($(wildcard $(LIBALLOCS)),)
+ifeq ($(wildcard $(LIBALLOCS_LIB)),)
         $(error You must first build liballocs{.so,_preload.so} and link them from ../lib)
 endif
 endif
 
 ifneq ($(LIBALLOCS_USE_PRELOAD),no)
-export PRELOAD := "$(LIBALLOCS)"
+export PRELOAD := "$(LIBALLOCS_LIB)
 endif
 
 INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then /bin/echo -f mk.inc; else true; fi`

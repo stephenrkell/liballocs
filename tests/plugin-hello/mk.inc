@@ -5,7 +5,7 @@ export USE_LD := ld.gold
 LDFLAGS += -fuse-ld=gold 
 
 # actually use the plugin, yes
-LDFLAGS += -Wl,-plugin,$(LIBALLOCS)/tools/gold-plugin.so
+LDFLAGS += -Wl,-plugin,$(LIBALLOCS_LIB)/tools/gold-plugin.so
 
 export LIBALLOCS_ALLOC_FNS := fail_alloc(Z)p
 
