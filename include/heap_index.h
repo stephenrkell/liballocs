@@ -143,9 +143,11 @@ struct extended_insert
 #ifdef LIFETIME_POLICIES
 	lifetime_insert_t lifetime;
 #endif
+#ifdef PRECISE_REQUESTED_ALLOCSIZE
 	/* Include any padding inserted such that
 	 * usable_size - insert_size = requested_size */
 	uint8_t insert_size;
+#endif
 	/* The base insert is at the end because we want interoperabiliy between
 	 * allocators using extended_insert and allocators only using insert.
 	 * See insert_for_chunk. */
@@ -181,11 +183,18 @@ static inline struct extended_insert *extended_insert_for_chunk(void *userptr)
 			malloc_usable_size(userptr));
 }
 
+#ifdef PRECISE_REQUESTED_ALLOCSIZE
 static inline size_t requested_size_for_chunk(void *userptr, size_t usable_size)
 {
 	uint8_t insert_size = extended_insert_for_chunk_and_usable_size(userptr, usable_size)->insert_size;
 	return usable_size - insert_size;
 }
+#else
+static inline size_t requested_size_for_chunk(void *userptr, size_t usable_size)
+{
+	return usable_size - sizeof (struct extended_insert);
+}
+#endif
 
 #ifdef LIFETIME_POLICIES
 static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr)

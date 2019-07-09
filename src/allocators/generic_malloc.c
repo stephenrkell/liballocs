@@ -532,7 +532,9 @@ static void index_insert(void *new_userchunkaddr, size_t requested_size, const v
 	p_insert->alloc_site_flag = 0U;
 	p_insert->alloc_site = (uintptr_t) caller;
 
+#ifdef PRECISE_REQUESTED_ALLOCSIZE
 	ext_insert->insert_size = usable_size - requested_size;
+#endif
 
 #ifdef LIFETIME_POLICIES
 	// alloca does not have a lifetime_insert

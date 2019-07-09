@@ -1,6 +1,8 @@
 #ifndef LIBALLOCS_CIL_INLINES_H_
 #define LIBALLOCS_CIL_INLINES_H_
 
+#include "liballocs_config.h"
+
 #ifndef unlikely
 #define __liballocs_defined_unlikely
 #define unlikely(cond) (__builtin_expect( (cond), 0 ))
@@ -37,9 +39,13 @@ struct uniqtype; /* forward decl */
 /* This *must* match the size of 'struct extended_insert' in heap_index!
  * But we don't include that header right now, to avoid perturbing the
  * inclusion order of the rest of this translation unit.
- * HACK: We do not need the lifetime insert for alloca so it is not included. */
+ * HACK: We do not need the lifetime insert for alloca so it is never included. */
 #ifndef ALLOCA_TRAILER_SIZE
-#define ALLOCA_TRAILER_SIZE (1 + sizeof (void*))
+# ifdef PRECISE_REQUESTED_ALLOCSIZE
+#  define ALLOCA_TRAILER_SIZE (1 + sizeof (void*))
+# else
+#  define ALLOCA_TRAILER_SIZE (sizeof (void*))
+# endif
 #endif
 
 /* HACK: copied from memtable.h. */

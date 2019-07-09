@@ -109,7 +109,7 @@ AC_ARG_ENABLE([fake-libunwind],
               AS_HELP_STRING([--enable-fake-libunwind], [Use our own fake libunwind (faster but less stable)]),
               [enable_fake_libunwind=${enableval}])
 AC_ARG_ENABLE([lifetime-policies],
-              AS_HELP_STRING([--enable-lifetime-policies[=NB]],
+              AS_HELP_STRING([--enable-lifetime-policies@<:@=NB@:>@],
                              [Enable the lifetime extension interface, with at most NB distinct policies, or 8 if NB is not provided [disabled by default]]),
               [case ${enableval} in
                   no) lifetime_policies=0 ;;
@@ -125,6 +125,9 @@ AC_ARG_ENABLE([lifetime-policies],
                   *) AC_MSG_ERROR([bad value ${enableval} for --enable-lifetime-policies])
                esac],
               [lifetime_policies=0])
+AC_ARG_ENABLE([precise-requested-allocsize],
+              AS_HELP_STRING([--enable-precise-requested-allocsize], [Make size queries over allocated objects return precisely the size requested at the allocation site (enabled by default)]),
+              [precise_requested_allocsize=${enableval}], [precise_requested_allocsize=yes])
 
 AS_IF([test "x$enable_fake_libunwind" = "xyes"],
       [AC_DEFINE([USE_FAKE_LIBUNWIND],1,[Defined if using our own version of libunwind])])
@@ -133,6 +136,8 @@ AS_IF([test $lifetime_policies != 0],
                           [When lifetime extenstion is available this macro expands to the number of available lifetime policies, else it is undefined])
        AC_DEFINE_UNQUOTED([LIFETIME_INSERT_TYPE], [$lifetime_insert_type],
                           [Expands to the type of lifetime inserts])])
+AS_IF([test "x$precise_requested_allocsize" = "xyes"],
+      [AC_DEFINE([PRECISE_REQUESTED_ALLOCSIZE],1,[If defined, liballocs needs to return the precise requested size on size queries])])
 
 AC_ARG_WITH([libsystrap],
             [AS_HELP_STRING([--with-libsystrap=DIR],

@@ -5,5 +5,9 @@
  * available lifetime policies */
 #undef LIFETIME_POLICIES
 
-/* Defined to the integer type of the lifetime insert */
+/* Expands to the type of lifetime inserts */
 #undef LIFETIME_INSERT_TYPE
+
+/* If defined, liballocs needs to return the precise requested size on size
+ * queries */
+#undef PRECISE_REQUESTED_ALLOCSIZE
