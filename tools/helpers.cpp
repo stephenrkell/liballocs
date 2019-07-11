@@ -962,7 +962,7 @@ static string get_liballocs_base()
 	if (!liballocs_base)
 	{
 		int dummy_local = 0;
-		struct auxv_limits limits = get_auxv_limits(get_auxv((const char **) environ, &dummy_local));
+		struct auxv_limits limits = get_auxv_limits(get_auxv(environ, &dummy_local));
 		string argv0 = limits.argv_vector_start[0];
 		char *argv0_dup = strdup(argv0.c_str());
 		if (!argv0_dup) abort();

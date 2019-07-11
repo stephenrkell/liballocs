@@ -875,7 +875,7 @@ void __mmap_allocator_init(void)
 		 * Also, we don't want to call dlsym since it might not be safe to malloc.
 		 * Instead, get the executable's program headers directly from the auxv. */
 		char dummy;
-		ElfW(auxv_t) *auxv = get_auxv((const char **) environ, &dummy);
+		ElfW(auxv_t) *auxv = get_auxv(environ, &dummy);
 		assert(auxv);
 		ElfW(auxv_t) *ph_auxv = auxv_lookup(auxv, AT_PHDR);
 		ElfW(auxv_t) *phnum_auxv = auxv_lookup(auxv, AT_PHNUM);

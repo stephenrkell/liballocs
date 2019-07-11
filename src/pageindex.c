@@ -149,22 +149,38 @@ static void (__attribute__((constructor(101))) init)(void)
 {
 	if (!pageindex)
 	{
-		write_string("liballocs: process name ");
-		raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
-		write_string(", pid ");
-		int pid = raw_getpid();
-		char a;
-		_Bool seen_nonzero = 0;
+		/* PROBLEM: we're running too early to search the environment.
+		 * The libc's 'environ' has not been populated yet. And that
+		 * means we can't get the auxv, at least not by the usual
+		 * trick. For now, we use get_auxv_via_libc_stack_end(), which
+		 * is glibc-specific. The only way to do this portably will be
+		 * when we become our own ld.so, so we can snarf the auxv nice
+		 * and early from the stack.
+		 */
+		char *debug_envvar = NULL;
+		char **env = get_auxv_environ(get_auxv_via_libc_stack_end());
+		debug_envvar = environ_getenv("LIBALLOCS_DEBUG_LEVEL", env);
+		// HACK: should really do atoi here -- this is intolerant of leading space/zero
+		_Bool print_debug_message = debug_envvar && debug_envvar[0] != '0';
+		if (print_debug_message)
+		{
+			write_string("liballocs: process name ");
+			raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
+			write_string(", pid ");
+			int pid = raw_getpid();
+			char a;
+			_Bool seen_nonzero = 0;
 #define CHAR_TO_PRINT(ord) ( ((pid/(ord)) % 10) ? \
         (seen_nonzero |= 1, '0' + ((pid/(ord)) % 10)) : \
 		(seen_nonzero ? '0' : ' '))
-		a = CHAR_TO_PRINT(10000); if (a != ' ') raw_write(2, &a, 1);
-		a = CHAR_TO_PRINT(1000); if (a != ' ') raw_write(2, &a, 1);
-		a = CHAR_TO_PRINT(100); if (a != ' ') raw_write(2, &a, 1);
-		a = CHAR_TO_PRINT(10); if (a != ' ') raw_write(2, &a, 1);
-		a = CHAR_TO_PRINT(1); raw_write(2, &a, 1);
-		raw_write(2, "\n", 1);
+			a = CHAR_TO_PRINT(10000); if (a != ' ') raw_write(2, &a, 1);
+			a = CHAR_TO_PRINT(1000); if (a != ' ') raw_write(2, &a, 1);
+			a = CHAR_TO_PRINT(100); if (a != ' ') raw_write(2, &a, 1);
+			a = CHAR_TO_PRINT(10); if (a != ' ') raw_write(2, &a, 1);
+			a = CHAR_TO_PRINT(1); raw_write(2, &a, 1);
+			raw_write(2, "\n", 1);
 #undef CHAR_TO_PRINT
+		}
 		/* Mmap our region. We map one 16-bit number for every page in the user address region. */
 		/* HACK: always place at 0x410000000000, to avoid problems with shadow space.
 		 * The generic malloc index goes at 0x400000000000 
