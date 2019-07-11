@@ -419,8 +419,9 @@ char *dlerror(void)
 		else orig_dlerror = dlsym(RTLD_NEXT, "dlerror");
 		if (!orig_dlerror) abort();
 	}
-	char *orig_err = orig_dlerror(); // clear the original error
-	char *ret = our_dlerror ? our_dlerror : orig_err;
+	// we only call the original if our error is NULL *and*
+	// we think it's safe to call down
+	char *ret = our_dlerror ? our_dlerror : (__avoid_libdl_calls ? our_dlerror : orig_dlerror());
 	if (our_dlerror) our_dlerror = NULL;
 	
 	if (we_set_flag) __avoid_libdl_calls = 0;
