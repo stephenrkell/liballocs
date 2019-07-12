@@ -458,43 +458,6 @@ void __liballocs_systrap_init(void)
 	__liballocs_systrap_is_initialized = 1;
 }
 
-void __systrap_brk_hack(void) __attribute__((visibility("hidden")));
-void __systrap_brk_hack(void)
-{
-#ifdef GUESS_RELEVANT_SYSCALL_SITES
-	// we want to trap syscalls in "__brk"; // glibc HACK!
-	// but "__brk" in glibc isn't an exportd symbol.
-	// instead, we need to walk its allocations
-	for (struct link_map *l = find_r_debug()->r_map; l; l = l->l_next)
-	{
-		if ((const void *) l->l_ld != &_DYNAMIC && (intptr_t) l->l_addr > 0
-			&& strlen(l->l_name) > 0)
-		{
-			/* This is a reasonable object that isn't us. Look up "sbrk" in its
-			 * symtab. Then do the more expensive search for "__brk". */
-			Elf64_Sym *found = symbol_lookup_in_object(l, "sbrk"); // HACK
-			if (found)
-			{
-				if (&__lookup_static_allocation_by_name)
-				{
-					/* We want to trap syscalls in "__brk" but "__brk" in glibc 
-					 * isn't an exported symbol. So consult our allocs data for 
-					 * a definition named "__brk" and trap that. */
-					void *addr;
-					size_t len;
-					_Bool success = __lookup_static_allocation_by_name(l, "__brk", &addr, &len);
-					if (success)
-					{
-						trap_one_instruction_range((unsigned char*) addr, 
-							(unsigned char*) addr + len, 0, 1);
-					}
-				}
-			}
-		}
-	}
-#endif
-}
-
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller)
 {
