@@ -1,0 +1,2 @@
+CFLAGS := -I@librunt@/include
+export CFLAGS
