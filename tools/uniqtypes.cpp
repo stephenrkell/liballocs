@@ -1002,15 +1002,16 @@ void write_master_relation(master_relation_t& r,
 					i_vert->second
 				)
 			);
-			auto k = make_pair(
+			// compl_name_pair is the *language-independent* name, e.g. "uint$32"
+			auto compl_name_pair = make_pair(
 				complement_summary_code_string,
 				name_for_complement_base_type(i_vert->second)
 			);
-			string compl_name = mangle_typename(k);
+			string compl_name = mangle_typename(compl_name_pair);
 			
 			write_uniqtype_open_base(out, 
 				compl_name,
-				k.second,
+				compl_name_pair.second,
 				(opt_sz ? *opt_sz : 0),
 				(i_vert->second.as_a<base_type_die>()->get_encoding() == DW_ATE_unsigned) ? 
 					DW_ATE_signed : 
@@ -1026,8 +1027,12 @@ void write_master_relation(master_relation_t& r,
 			write_uniqtype_close(out, compl_name, 1);
 			
 			/* If our actual type has a C-style name, output a C-style alias for the 
-			 * complement we just output. FIXME: how *should* this work? Who consumes 
-			 * these aliases? Is it only our sloppy-dumptypes test case, i.e. typename-
+			 * complement we just output. For example, if we are processing a binary
+			 * that uses "int" but not "unsigned int", we'll just have emitted
+			 * "uint$32" so should emit its alias "unsigned int".
+			 *
+			 * FIXME: how *should* this work? Who consumes  these aliases?
+			 * Is it only our sloppy-dumptypes test case, i.e. typename-
 			 * -based client code that expects C-style names? 
 			 * 
 			 * In general we want to factor this into a pair of extra phases in allocscc:
@@ -1037,12 +1042,7 @@ void write_master_relation(master_relation_t& r,
 			 * this to support e.g. Fortran at the same time as C, etc..
 			 * BUT NOTE that the "language-dependent" form is, in general, both language-
 			 * and *compiler*-dependent, i.e. more than one base type might be "unsigned long"
-			 * depending on compiler flags etc.. So it's not as simple as re-aliasing them.
-			 * The typestr APIs need to be sensitive to the *caller* (e.g. an alias for 
-			 * "unsigned_long" might meaningfully exist in a caller's typeobj, but not globally
-			 * since multiple distinct "unsigned long"s are defined across the whole program). 
-			 * A simple re-aliasing pass on a per-typeobj basis is "good enough" for now though. 
-			 * (The case of multiple distinct definitions in the same dynamic object is rare.)
+			 * depending on compiler flags etc..
 			 * */
 			if (i_vert->second.name_here())
 			{
@@ -1050,23 +1050,37 @@ void write_master_relation(master_relation_t& r,
 					name_for_type_die(i_vert->second)->c_str());
 				if (equiv)
 				{
+					// we're outputting a type with a C-style name, i.e. matching one of
+					// the known equivalence classes. FIXME: only check this for DIES in
+					// C-language compilation units!
 					bool is_unsigned = (string(equiv[0]).find("unsigned") != string::npos);
-					// we are iterating through an array of pointer to equiv class
+					// Find the matching equivalence class in the top-level array thereof.
+					// This means we are iterating through an array of pointer to equiv class
 					const char ** const* found_equiv = std::find(
 						abstract_c_compiler::base_typename_equivs,
 						abstract_c_compiler::base_typename_equivs_end,
 						equiv
 					);
 					assert(found_equiv);
+					// Find the complementary equivalence class.
 					// equiv classes are {s, u, s, u, ...}
 					const char **compl_equiv = is_unsigned ? found_equiv[-1]  : found_equiv[+1];
-					auto complement_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
-					emit_weak_alias_idem(out, mangle_typename(complement_name_pair), /* existing name */ mangle_typename(k));
-					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
-					if (avoid_aliasing_as(compl_equiv[0], complement_name_pair.first,
-						i_vert->second))
+					// We take the *first* member of that equivalence class. FIXME: should be same-pos member?
+					auto complement_c_style_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
+					// alias our complement under that name.
+					emit_weak_alias_idem(out, mangle_typename(complement_c_style_name_pair),
+						/* existing name */ mangle_typename(compl_name_pair));
+					// we just emitted a definition for "unsigned int" or whatever,
+					// so remember it in case there is some ambiguity over the codeless alias
+					name_pairs_by_name[compl_equiv[0]].insert(compl_name_pair /* i.e. language-independent */);
+					/* If this is a DIE that we don't consider for aliasing, add it to the
+					 * blacklist. This mostly means bitfield types. FIXME: should also roll
+					 * 'depends on incomplete' into this? */
+					if (avoid_aliasing_as(compl_equiv[0], complement_c_style_name_pair.first /* the summary code */,
+						i_vert->second /* the DIE */))
 					{
-						codeless_alias_blacklist[compl_equiv[0]].insert(complement_name_pair.first);
+						// the blacklist just remembers the summary code
+						codeless_alias_blacklist[compl_equiv[0]].insert(complement_c_style_name_pair.first);
 					}
 				}
 			}
