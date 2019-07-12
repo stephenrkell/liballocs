@@ -12,15 +12,21 @@ RUN apt-get update && \
    apt-get install -y libelf-dev libdw-dev \
        autoconf automake libtool pkg-config autoconf-archive \
        g++ ocaml ocaml-findlib \
-       default-jre-headless python3 \
-       make git gawk gdb wget \
+       default-jre-headless python3 python2.7 python-minimal \
+       make git gawk gdb nano wget \
        libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
        libboost-iostreams-dev libboost-regex-dev libboost-serialization-dev libboost-filesystem-dev
 RUN git clone https://github.com/stephenrkell/liballocs.git
 RUN cd liballocs && \
    git submodule update --init --recursive && \
-   make -C contrib -j1
+   make -C contrib -j4
 RUN cd liballocs && \
    ./autogen.sh && \
    (. contrib/env.sh && ./configure --prefix=/usr/local) && \
    make
+RUN mkdir -p /usr/lib/meta && chown root:staff /usr/lib/meta && \
+   chmod g+w /usr/lib/meta
+RUN cd liballocs && \
+   make -f tools/Makefile.meta /usr/lib/meta/lib/x86_64-linux-gnu/libc-2.24.so-meta.c
+RUN cd liballocs && \
+   make -f tools/Makefile.meta /usr/lib/meta/lib/x86_64-linux-gnu/libc-2.24.so-meta.so
