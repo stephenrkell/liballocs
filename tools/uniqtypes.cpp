@@ -1115,8 +1115,8 @@ void write_master_relation(master_relation_t& r,
 				++i_pair)
 			{
 				const string& codestr = i_pair->first;
-				if (codeless_alias_blacklist[i_pair->second].find(codestr)
-						== codeless_alias_blacklist[i_pair->second].end())
+				if (codeless_alias_blacklist[name].find(codestr)
+						== codeless_alias_blacklist[name].end())
 				{
 					aliases_to_consider.push_back(&*i_pair);
 				}
@@ -1148,11 +1148,11 @@ void write_master_relation(master_relation_t& r,
 				for (auto i_pair = i_set_by_name->second.begin(); i_pair != i_set_by_name->second.end();
 					++i_pair)
 				{
-					for (auto i_str = codeless_alias_blacklist[i_pair->second].begin();
-						i_str != codeless_alias_blacklist[i_pair->second].end(); ++i_str)
+					for (auto i_str = codeless_alias_blacklist[name].begin();
+						i_str != codeless_alias_blacklist[name].end(); ++i_str)
 					{
 						if (emitted) cout << ", ";
-						out << *i_str << " (under " << i_pair->second << ")";
+						out << *i_str;
 						emitted = true;
 					}
 				}
