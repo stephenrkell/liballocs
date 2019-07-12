@@ -461,7 +461,7 @@ void write_master_relation(master_relation_t& r,
 			cerr << "Warning: master relation contained non-concrete: " << t << endl;
 		}
 		types_by_name[name.second].insert(t);
-		name_pairs_by_name[name.second].insert(name);
+		if (name.first != "") name_pairs_by_name[name.second].insert(name);
 		if (t.is_a<base_type_die>())
 		{
 			/* Are we an integer? */
@@ -619,10 +619,23 @@ void write_master_relation(master_relation_t& r,
 			continue;
 		}
 		
-		// we might not be incomplete, but be dependent on an incomplete somehow (e.g. points-to)
+		/* We might not be incomplete, but be dependent on an incomplete somehow
+		 * (e.g. points-to). We should emit something, because we might never see a
+		 * definition for the thing we depend on, but the depending-on type has
+		 * an independent existence. However, we should emit something weak, such
+		 * that it will be replaced by any strong definition. Since we don't have a
+		 * code, that strong definition will also be codeless. So emitting this
+		 * weak definition should not prevent a codeless alias from appearing...
+		 * i.e. it should not be considered to create ambiguity (ambiguity being
+		 * what normally prevents the generation of codeless aliases). In other
+		 * words, we should not add something to name_pairs_by_name. */
 		bool dependent_on_incomplete = (i_vert->first.first == "");
-		// AARGH. Functions don't count. If we're a pointer to a function, then
-		
+		if (dependent_on_incomplete)
+		{
+			cout << "/* Depends on something incomplete, so definition should be weak. */"
+				<< std::endl;
+		}
+
 		/* We can also be *variable-length*. In this case we output a pos_maxoff of -1
 		 * i.e. maximum-unsigned-value. */
 		if (emit_subobject_names)
