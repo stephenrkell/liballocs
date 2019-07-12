@@ -206,6 +206,9 @@ INLINE_DECL size_t INLINE_ATTRS memtable_mapping_size(
 #define MEMTABLE_MAPPING_SIZE_WITH_TYPE(t, range, addr_begin, addr_end) \
 	memtable_mapping_size(sizeof(t), (range), (addr_begin), (addr_end))
 
+/* We can only create memtables if we have MAP_NORESERVE. */
+#ifdef MAP_NORESERVE
+
 /* Allocate a memtable. */
 INLINE_DECL void *memtable_new(
 	unsigned entry_size_in_bytes, 
@@ -237,7 +240,7 @@ INLINE_DECL void *INLINE_ATTRS memtable_new_at_addr(
 		entry_coverage_in_bytes, addr_begin, addr_end);
 	assert(mapping_size <= BIGGEST_MMAP_ALLOWED);
 	void *ret = MEMTABLE_MMAP((void*) placement_addr, mapping_size, PROT_READ|PROT_WRITE, 
-		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|
+		MAP_PRIVATE|MAP_ANON|MAP_NORESERVE|
 			(placement_addr ? MAP_FIXED : 0), -1, 0);
 	return ret; /* MAP_FAILED on error */
 }
@@ -282,7 +285,7 @@ INLINE_DECL char *INLINE_ATTRS memtable_new_l1_page_bitmap(
  */
 	size_t bitmap_mapping_size = table_mapping_size / (sysconf(_SC_PAGE_SIZE) << 3);
 	void *ret = MEMTABLE_MMAP(NULL, bitmap_mapping_size, PROT_READ|PROT_WRITE, 
-		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
+		MAP_PRIVATE|MAP_ANON|MAP_NORESERVE, -1, 0);
 	return (char*) ret; /* MAP_FAILED on error */
 }
 #define MEMTABLE_NEW_L1_PAGE_BITMAP_WITH_TYPE(t, range, addr_begin, addr_end) \
@@ -310,7 +313,7 @@ INLINE_DECL char *INLINE_ATTRS memtable_new_l2_page_bitmap(
  *    For smaller memtables, this might be a nice size e.g. a few dozens of bytes.
  */
 	void *ret = MEMTABLE_MMAP(NULL, l2_bitmap_mapping_size, PROT_READ|PROT_WRITE, 
-		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
+		MAP_PRIVATE|MAP_ANON|MAP_NORESERVE, -1, 0);
 	return (char*) ret; /* MAP_FAILED on error */
 }
 #define MEMTABLE_NEW_L2_PAGE_BITMAP_WITH_TYPE(t, range, addr_begin, addr_end) \
@@ -342,8 +345,9 @@ INLINE_DECL size_t INLINE_ATTRS memtable_l3_page_bitmap_size(
 }
 #define MEMTABLE_L3_PAGE_BITMAP_SIZE_WITH_TYPE(t, range, addr_begin, addr_end) \
 	memtable_l3_page_bitmap_size(sizeof(t), (range), (addr_begin), (addr_end))
+#endif /* #if 0 */
 
-#endif
+#endif /* #ifdef MAP_NORESERVE */
 
 /* Get a pointer to the index-th entry. */
 INLINE_DECL void *memtable_index(
