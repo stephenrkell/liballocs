@@ -2,7 +2,7 @@ liballocs is a run-time library and toolchain extension which extends
 Unix-like operating systems (currently GNU/Linux) with a rich run-time
 reflective model.
 
-If you want to try it, here's how to run a simple demo:
+If you want to try it, here's how to run a simple demo in a container:
 
     $ git clone https://github.com/stephenrkell/liballocs.git
     $ docker build -t liballocs_built liballocs/buildtest/debian-stretch
@@ -247,11 +247,7 @@ That's almost all. But notice step 0 above: for a
 fully-functioning liballocs toolchain, you'll also want my
 *patched* binutils. You can get a long way without it, so this
 step is optional, but in some awkward cases, liballocs's
-compilers wrappers need to invoke my hacked objcopy. Also,
-Debian jessie's binutils 2.25 is too old to build the liballocs
-linker plugin (also optional), adding extra motivation to do
-this step. (I will remove this requirement eventually.) For now,
-assuming you're grabbing my code from my GitHub page:
+compilers wrappers need to invoke my hacked objcopy.
 
     $ sudo apt-get install bison flex texinfo
     $ git clone https://github.com/stephenrkell/binutils-gdb.git
