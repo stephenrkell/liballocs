@@ -1049,7 +1049,7 @@ void write_master_relation(master_relation_t& r,
 					const char **compl_equiv = is_unsigned ? found_equiv[-1]  : found_equiv[+1];
 					auto complement_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
 					emit_weak_alias_idem(out, mangle_typename(complement_name_pair), /* existing name */ mangle_typename(k));
-					name_pairs_by_name[compl_equiv[0] /*k.second*/].insert(/*complement_name_pair*/ k);
+					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
 					if (avoid_aliasing_as(compl_equiv[0], complement_name_pair.first,
 						i_vert->second))
 					{
