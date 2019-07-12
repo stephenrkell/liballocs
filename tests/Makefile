@@ -1,10 +1,11 @@
+THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+-include $(dir $(THIS_MAKEFILE))/../config.mk
+
 CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -O2 -save-temps
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
 CFLAGS += -DUSE_FAKE_LIBUNWIND=1
 endif
-
-THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 UNIQTYPES_BASE ?= /usr/lib/meta
 META_BASE ?= /usr/lib/meta
