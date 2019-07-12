@@ -246,6 +246,8 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 		assert(i.offset_here() >= previous_offset); // == for initial case, > afterwards
 		if (i.is_a<type_die>())
 		{
+			// HACK: don't add subrange types -- should really restrict to the array case (FIXME)
+			if (i.is_a<subrange_type_die>()) continue;
 			if (isatty(fileno(std::cerr)))
 			{
 				if (done_some_output) std::cerr << "\r";
@@ -486,7 +488,7 @@ void write_master_relation(master_relation_t& r,
 		{
 			out << " __attribute__((weak))";
 		}
-		out << ";" << endl;
+		out << ";" << " // forward-decl for " << t.summary() << endl;
 	}
 	/* Declare any signedness-complement base types that we didn't see. 
 	 * We will emit these specially. */
@@ -776,17 +778,23 @@ void write_master_relation(master_relation_t& r,
 				++contained_length;
 			}
 		}
-		else if (i_vert->second.is_a<subrange_type_die>()) // FIXME
+		else if (i_vert->second.is_a<subrange_type_die>())
 		{
-			auto base_t = i_vert->second.as_a<subrange_type_die>()->find_type();
-			write_uniqtype_open_subrange(out,
-				mangled_name,
-				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
-				0 /* FIXME */,
-				0 /* FIXME */
-			);
-			write_uniqtype_related_dummy(out);
+			/* If we're inside an array type, we do nothing. FIXME: perhaps test
+			 * for the C language too, though it's not clear whether this is a
+			 * C+DWARF-specific idiom. */
+			if (!i_vert->second.parent().is_a<array_type_die>())
+			{
+				auto base_t = i_vert->second.as_a<subrange_type_die>()->find_type();
+				write_uniqtype_open_subrange(out,
+					mangled_name,
+					i_vert->first.second,
+					(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+					0 /* FIXME */,
+					0 /* FIXME */
+				);
+				write_uniqtype_related_dummy(out);
+			}
 		}
 		else if (i_vert->second.is_a<base_type_die>())
 		{
