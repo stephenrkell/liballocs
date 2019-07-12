@@ -309,8 +309,12 @@ static string attributes_for_uniqtype(const string& mangled_name, bool is_weak =
 	if (need_termination) s << ")) ";
 	return s.str();
 }
-static void emit_weak_alias(std::ostream& out, const string& alias_name, const string& target_name, bool emit_section = true)
+static void emit_weak_alias_idem(std::ostream& out, const string& alias_name, const string& target_name, bool emit_section = true)
 {
+	// workaround for gcc bug 90470: don't emit the same alias twice
+	static set<string> emitted_previously;
+	if (emitted_previously.find(alias_name) != emitted_previously.end()) return;
+	emitted_previously.insert(alias_name);
 	out << "extern struct uniqtype " << alias_name
 		<< " __attribute__((weak,alias(\"" << target_name << "\")";
 	if (emit_section)
@@ -1036,8 +1040,8 @@ void write_master_relation(master_relation_t& r,
 					// equiv classes are {s, u, s, u, ...}
 					const char **compl_equiv = is_unsigned ? found_equiv[-1]  : found_equiv[+1];
 					auto complement_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
-					emit_weak_alias(out, mangle_typename(complement_name_pair), /* existing name */ mangle_typename(k));
-					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
+					emit_weak_alias_idem(out, mangle_typename(complement_name_pair), /* existing name */ mangle_typename(k));
+					name_pairs_by_name[compl_equiv[0] /*k.second*/].insert(/*complement_name_pair*/ k);
 					if (avoid_aliasing_as(compl_equiv[0], complement_name_pair.first,
 						i_vert->second))
 					{
@@ -1049,12 +1053,12 @@ void write_master_relation(master_relation_t& r,
 		
 		/* Output any (typedef-or-base-type) aliases for this type. NOTE that here we are
 		 * assuming that the canonical name for any base type (used above) is not the same as its
-		 * programmatic name (aliased here). */
+		 * programmatic name (aliased here), e.g. "uint$32" does not equal "unsigned int". */
 		for (auto i_alias = r.aliases[i_vert->second].begin(); 
 			i_alias != r.aliases[i_vert->second].end();
 			++i_alias)
 		{
-			emit_weak_alias(out, mangle_typename(make_pair(i_vert->first.first, *i_alias)), mangle_typename(i_vert->first), i_vert->first.first != "");
+			emit_weak_alias_idem(out, mangle_typename(make_pair(i_vert->first.first, *i_alias)), mangle_typename(i_vert->first), i_vert->first.first != "");
 			types_by_name[*i_alias].insert(i_vert->second);
 			name_pairs_by_name[*i_alias].insert(i_vert->first);
 			if (avoid_aliasing_as(*i_alias, i_vert->first.first, i_vert->second))
@@ -1093,7 +1097,7 @@ void write_master_relation(master_relation_t& r,
 					string full_name = mangle_typename(full_name_pair);
 					pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
 					string abbrev_name = mangle_typename(abbrev_name_pair);
-					emit_weak_alias(out, mangle_typename(abbrev_name_pair), cxxgen::escape(full_name));
+					emit_weak_alias_idem(out, mangle_typename(abbrev_name_pair), cxxgen::escape(full_name));
 				}
 			}
 			else
