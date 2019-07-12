@@ -6,8 +6,9 @@ For large-scale use cases, the list in the README is the definitive list.
 
 For existing use cases:
 * run-time type checking: libcrunch
-* for linking-related
-* multi-language programming without foreign function interfacing APIs:
-    - 
+* linking-related
+    - Jon French's use of liballocs tools to create a run-time interface model of the Linux kernel (more soon!)
+* multi-language programming without foreign function interfacing APIs
+    - work in progress on a CPython extension module (Guillaume Bertholon)
 * fine-grained versioning and adaptation of binary interfaces
-    - this doesn't exist with liballocs, but the origins were Cake
+    - see liballocs's ancestor project, Cake
