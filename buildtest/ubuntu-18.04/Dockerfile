@@ -19,7 +19,7 @@ RUN apt-get update && \
 RUN git clone https://github.com/stephenrkell/liballocs.git
 RUN cd liballocs && \
    git submodule update --init --recursive && \
-   make -C contrib -j1
+   make -C contrib -j4
 RUN cd liballocs && \
    ./autogen.sh && \
    (. contrib/env.sh && ./configure --prefix=/usr/local) && \
