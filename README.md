@@ -7,7 +7,7 @@ If you want to try it, here's how to run a simple demo in a container:
     $ git clone https://github.com/stephenrkell/liballocs.git
     $ docker build -t liballocs_built liballocs/buildtest/debian-stretch
     $ docker run --rm -i -t --name liballocs_test liballocs_built bash
-    $ export PATH=/liballocs/tools/lang/c/bin:$PATH
+    $ export PATH=/usr/local/src/liballocs/tools/lang/c/bin:$PATH
     $ cat >test.c <<EOF
       #include <allocs.h>
       #include <stdio.h>
@@ -27,8 +27,8 @@ If you want to try it, here's how to run a simple demo in a container:
         return 0;
       }
     EOF
-    $ allocscc -I/liballocs/include -o test test.c
-    $ LD_PRELOAD=/liballocs/lib/liballocs_preload.so ./test
+    $ allocscc -I/usr/local/src/liballocs/include -o test test.c
+    $ LD_PRELOAD=/usr/local/src/liballocs/lib/liballocs_preload.so ./test
 
 You should see something like the following. This is just a simple demo
 of how liballocs knows what is in memory, having precise dynamic
