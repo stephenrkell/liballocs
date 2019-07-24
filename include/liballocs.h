@@ -842,6 +842,10 @@ int __liballocs_register_gc_policy(__gc_callback_t addref, __gc_callback_t delre
 
 void __liballocs_attach_lifetime_policy(int policy_id, const void *obj);
 void __liballocs_detach_lifetime_policy(int policy_id, const void *obj);
+static inline void __liballocs_detach_manual_dealloc_policy(const void *obj)
+{
+    __liballocs_detach_lifetime_policy(0 /* MANUAL_DEALLOCATION_POLICY */, obj);
+}
 #endif
 
 struct uniqtype *
