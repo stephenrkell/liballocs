@@ -307,7 +307,27 @@ void *dlopen(const char *filename, int flag)
 		if (!file_realname_raw) 
 		{
 			/* The file does not exist. */
-			goto skip_load;
+			if (strchr(filename, '/') == NULL)
+			{
+				// FIXME: We are supposed to handle default search paths
+				// cf. glibc eld/dl-load.c:_dl_map_object
+				// HACK: For now just do a quick search on fixed known system library paths
+				// This is non portable!!
+				const char *library_sys_paths[] = { "/lib/", "/usr/lib/", "/lib/x86_64-linux-gnu/", "/usr/lib/x86_64-linux-gnu/", NULL };
+				char libfullpath[4096];
+				for (const char **libsyspath = library_sys_paths ; !file_realname_raw && *libsyspath ; ++libsyspath)
+				{
+					strcpy(libfullpath, *libsyspath);
+					strcat(libfullpath, filename);
+					file_realname_raw = realpath_quick(libfullpath);
+				}
+				if (!file_realname_raw)
+				{
+					debug_printf(0, "Failed attempt to load '%s' using system library search paths\n", filename);
+					goto skip_load;
+				}
+			}
+			else goto skip_load;
 		}
 		const char *file_realname = __liballocs_private_strdup(file_realname_raw);
 		for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
