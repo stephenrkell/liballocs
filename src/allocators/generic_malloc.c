@@ -861,15 +861,15 @@ void pre_nonnull_nonzero_realloc(void *userptr, size_t size, const void *caller)
 void post_nonnull_nonzero_realloc(void *userptr, 
 	size_t modified_size, 
 	size_t old_usable_size,
-	const void *caller, void *__new_allocptr) __attribute__((visibility("hidden")));
+	const void *caller, void *new_allocptr) __attribute__((visibility("hidden")));
 void __liballocs_malloc_post_nonnull_nonzero_realloc(void *userptr, 
 	size_t modified_size, 
 	size_t old_usable_size,
-	const void *caller, void *__new_allocptr) __attribute__((alias("post_nonnull_nonzero_realloc")));
+	const void *caller, void *new_allocptr) __attribute__((alias("post_nonnull_nonzero_realloc")));
 void post_nonnull_nonzero_realloc(void *userptr, 
 	size_t modified_size, 
 	size_t old_usable_size,
-	const void *caller, void *__new_allocptr)
+	const void *caller, void *new_allocptr)
 {
 	// FIXME: This requested size could be wrong.
 	// The caller should give us the real requested size instead.
@@ -878,37 +878,41 @@ void post_nonnull_nonzero_realloc(void *userptr,
 	/* Are we a bigalloc? */
 	struct big_allocation *b = __lookup_bigalloc(userptr, 
 			&__generic_malloc_allocator, NULL);
-	if (__new_allocptr && __new_allocptr != userptr)
+	if (new_allocptr && new_allocptr != userptr)
 	{
 		/* Create a new bin entry. This will also take care of becoming a bigalloc, etc..
 		 * FIXME: check the new type metadata against the old! We can probably do this
 		 * in a way that's uniform with memcpy... the new chunk will take its type
 		 * from the realloc site, and we then check compatibility on the copy. */
-		index_insert(allocptr_to_userptr(__new_allocptr), requested_size,
+		index_insert(allocptr_to_userptr(new_allocptr), requested_size,
 				__current_allocsite ? __current_allocsite : caller);
 		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
 		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
 		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
-		__notify_copy(__new_allocptr, userptr, requested_size_for_chunk(userptr, old_usable_size));
+		/* FIXME: THIS IS BROKEN when using lifetime extension: userptr is not
+		 * pointing to valid memory but is read through... */
+#ifndef LIFETIME_POLICIES
+		__notify_copy(new_allocptr, userptr, requested_size_for_chunk(userptr, old_usable_size));
+#endif
 	}
-	else // !__new_allocptr || __new_allocptr == userptr
+	else // !new_allocptr || new_allocptr == userptr
 	{
 		/* *recreate* the old bin entry! The old usable size
 		 * is the *modified* size, i.e. we modified it before
 		 * allocating it, so we pass it as the modified_size to
 		 * index_insert. */
-		// FIXME: is this right? what if __new_allocptr is null?
+		// FIXME: is this right? what if new_allocptr is null?
 		index_insert(userptr, requested_size, __current_allocsite ? __current_allocsite : caller);
 	}
 	
-	if (__new_allocptr == userptr && modified_size < old_usable_size)
+	if (new_allocptr == userptr && modified_size < old_usable_size)
 	{
 		if (b)
 		{
 			__liballocs_truncate_bigalloc_at_end(b, (char*) userptr + modified_size);
 		}
 	}
-	
+
 	/* If the old alloc has gone away, do the malloc_hooks call the free hook on it? 
 	 * YES: it was done before the realloc, in the pre-hook. */
 }
