@@ -184,7 +184,7 @@ struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site)
 {
-	return NULL;
+	return (void *)-1; // We need to return an error here so do not return NULL
 }
 
 
