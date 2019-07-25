@@ -80,7 +80,10 @@ let trapPtrWrites file =
       | _ -> false
       in
 
-      let lvNeedTrapCalls lv = typNeedTrapCalls (typeOfLval lv) in
+      let lvNeedTrapCalls = function
+      | (Var v, _) when not v.vglob -> false
+      | lv -> typNeedTrapCalls (typeOfLval lv)
+      in
 
       let rec addTrapCallsForLval lv rv loc tail =
           match unrollType (typeOfLval lv) with
