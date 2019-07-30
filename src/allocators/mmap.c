@@ -108,6 +108,32 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 	return b;
 }
 
+static struct big_allocation *add_static_mapping_sequence_bigalloc(struct mapping_sequence *seq) {
+	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
+	if (!b) abort();
+
+	static struct mapping_sequence mapping_sequence_static_pool[64];
+	static struct mapping_sequence *next_free_mapping_seq = mapping_sequence_static_pool;
+
+	assert(next_free_mapping_seq < mapping_sequence_static_pool + 64);
+
+	/* Note that this will use early_malloc if we would otherwise be reentrant. */
+	struct mapping_sequence *copy = next_free_mapping_seq++;
+	if (!copy) abort();
+	memcpy(copy, seq, sizeof (struct mapping_sequence));
+
+	b->meta = (struct meta_info) {
+		.what = DATA_PTR,
+		.un = {
+			opaque_data: {
+				.data_ptr = copy,
+				.free_func = __private_free
+			}
+		}
+	};
+	return b;
+}
+
 static _Bool mapping_entry_equal(struct mapping_entry *e1,
 		struct mapping_entry *e2)
 {
@@ -743,7 +769,9 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		}
 		else /* HMM -- probably an mmap from the private malloc. Not sure*/
 		{
-			add_mapping_sequence_bigalloc(&new_seq);
+			// HACK: Try to avoid infinite recursion by using a static version.
+			// FIXME: Will fail if called too many times
+			add_static_mapping_sequence_bigalloc(&new_seq);
 		}
 	}
 }

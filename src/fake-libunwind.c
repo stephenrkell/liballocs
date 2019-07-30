@@ -98,6 +98,10 @@ int unw_step(unw_cursor_t *cp)
 	// can't step if we don't have a bp
 	if (ctxt.frame_bp == 0) return 0;
 	
+	// Frame base pointer should NEVER be misaligned
+	// But actually -fomit-frame-ptr code can go horribly wrong...
+	assert(ctxt.frame_bp % _Alignof(void *) == 0);
+
 	// the next-higher ip is the return addr of the frame, i.e. 4(%eip)
 	void *return_addr = *(((void**)ctxt.frame_bp) + 1);
 	

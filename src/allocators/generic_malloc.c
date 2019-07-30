@@ -803,12 +803,13 @@ out:
 	BIG_UNLOCK
 }
 
-void pre_nonnull_free(void *userptr, size_t freed_usable_size) __attribute__((visibility("hidden")));
-void __liballocs_malloc_pre_nonnull_free(void *userptr, size_t freed_usable_size)
+int pre_nonnull_free(void *userptr, size_t freed_usable_size) __attribute__((visibility("hidden")));
+int __liballocs_malloc_pre_nonnull_free(void *userptr, size_t freed_usable_size)
 		__attribute__((alias("pre_nonnull_free")));
-void pre_nonnull_free(void *userptr, size_t freed_usable_size)
+int pre_nonnull_free(void *userptr, size_t freed_usable_size)
 {
 	index_delete(userptr/*, freed_usable_size*/);
+	return 0;
 }
 
 void post_nonnull_free(void *userptr) __attribute__((visibility("hidden")));

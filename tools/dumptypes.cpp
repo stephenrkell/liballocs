@@ -274,28 +274,28 @@ int main(int argc, char **argv)
 
 	// write a forward declaration for every uniqtype we need
 	set<string> names_emitted;
-	/* As a pre-pass, remember any ARR0 names we need. These need special handling,
+	/* As a pre-pass, remember any ARR names we need. These need special handling,
 	 * as flexible arrays with their make_precise members set. */
-	map<string, pair<string, string> > arr0_needed_by_allocsites;
+	map<string, pair<string, string> > flexarr_needed_by_allocsites;
 	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
 	{
 		auto objname = i_site->second.first.first;
 		auto file_addr = i_site->second.first.second;
 		string element_name_used_code = i_site->second.first.first;
 		string element_name_used_ident = i_site->second.first.second;
-		bool declare_as_array0 = i_site->second.second;
+		bool declare_as_array = i_site->second.second;
 		
-		if (declare_as_array0)
+		if (declare_as_array)
 		{
 			string element_mangled_name = mangle_typename(make_pair(element_name_used_code, element_name_used_ident));
-			cout << "/* Allocation site type needed: ARR0 of " 
+			cout << "/* Allocation site type needed: flexible ARR of "
 				<< element_mangled_name
 				<< " */" << endl;
 			
-			string codeless_array_name = string("__ARR0_") + element_name_used_ident;
+			string codeless_array_name = string("__ARR_") + element_name_used_ident;
 			string mangled_codeless_array_name
 			 = mangle_typename(make_pair(string(""), codeless_array_name));
-			arr0_needed_by_allocsites.insert(
+			flexarr_needed_by_allocsites.insert(
 				make_pair(mangled_codeless_array_name, 
 					make_pair(element_mangled_name, codeless_array_name)
 				)
@@ -312,9 +312,9 @@ int main(int argc, char **argv)
 	write_master_relation(master_relation, cout, cerr, true /* emit_void */, true, 
 		names_emitted, types_by_name, /* emit_codeless_alises */ true);
 	
-	// now write those pesky ARR0 ones -- any that we didn't emit earlier
-	for (auto i_mangled_name = arr0_needed_by_allocsites.begin();
-		i_mangled_name != arr0_needed_by_allocsites.end();
+	// now write those pesky flexible ARR ones -- any that we didn't emit earlier
+	for (auto i_mangled_name = flexarr_needed_by_allocsites.begin();
+		i_mangled_name != flexarr_needed_by_allocsites.end();
 		++i_mangled_name)
 	{
 		const string& mangled_codeless_array_name = i_mangled_name->first;
@@ -329,6 +329,7 @@ int main(int argc, char **argv)
 			// This OBVIOUSLY doesn't work because we added to names_emitted!
 			// Let the multiple definition error get us.
 			// compute and print destination name
+			write_uniqtype_section_decl(cout, mangled_codeless_array_name);
 			write_uniqtype_open_flex_array(cout,
 				mangled_codeless_array_name,
 				/* array_codeless_name.second */ i_mangled_name->second.second
@@ -352,7 +353,7 @@ int main(int argc, char **argv)
 		
 		if (!declare_as_array0)
 		{
-			cout << "/* Allocation site type not needing ARR0 type: " 
+			cout << "/* Allocation site type not needing flexible ARR type: "
 				<< i_site->second.first.second
 				<< " */" << endl;
 		} else cout << "/* We should have emitted a type of this name earlier: "
@@ -1008,6 +1009,7 @@ int main(int argc, char **argv)
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
 			string mangled_name = mangle_typename(make_pair(cu_name, unmangled_typename));
+			write_uniqtype_section_decl(cout, mangled_name);
 			write_uniqtype_open_composite(cout,
 				mangled_name,
 				unmangled_typename,

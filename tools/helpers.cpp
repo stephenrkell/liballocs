@@ -546,7 +546,7 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		 * Answers: always has exactly one nmemb, and use __ARRn_. */
 		
 		/* What should the type descriptor for "array of undeterminedly-many T" look like?
-		 * What should it be called? Answer: use __ARR0_*/
+		 * What should it be called? Answer: use __ARR_*/
 		
 		/* How do we encode mutual recursion between array and pointer?
 		 * Answer: nothing special: just cut off the array first part and emit it specially,
@@ -555,7 +555,7 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		 */
 		ostringstream array_prefix;
 		opt<Dwarf_Unsigned> element_count = t.as_a<array_type_die>()->element_count();
-		array_prefix << (element_count ? *element_count : 0);
+		if (element_count) array_prefix << *element_count;
 		return array_prefix.str();
 	};
 	auto is_str = [](iterator_df<type_die> t) { return t.is_a<string_type_die>(); };
