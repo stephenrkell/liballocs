@@ -13,9 +13,6 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-#ifdef USE_REAL_LIBUNWIND
-#include <libunwind.h>
-#endif
 #include "maps.h"
 #include "relf.h"
 #include "systrap.h"
@@ -404,8 +401,7 @@ __liballocs_walk_subobjects_spanning_rec(
 	void *arg
 	);
 
-#ifndef USE_REAL_LIBUNWIND
-#include "fake-libunwind.h"
+#ifdef USE_FAKE_LIBUNWIND
 int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp) __attribute__((visibility("hidden")));
 int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp)
 {
@@ -1166,11 +1162,6 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	return memcpy(mem, s, len);
 }
 
-void __notify_copy(void *dest, const void *src, unsigned long n)
-{
-	/* We do nothing here. But libcrunch will wrap us. */
-}
-
 /* These have hidden visibility */
 struct uniqtype *pointer_to___uniqtype__void;
 struct uniqtype *pointer_to___uniqtype____uninterpreted_byte;
@@ -1884,3 +1875,8 @@ __liballocs_find_matching_subobject(unsigned target_offset_within_uniqtype,
 		struct uniqtype **p_cur_containing_uniqtype,
 		struct uniqtype_rel_info **p_cur_contained_pos);
 
+// Weak no-op versions of notification functions to prevent undefined symbols
+void __notify_copy(void *dest, const void *src, unsigned long n) __attribute__((weak));
+void __notify_copy(void *dest, const void *src, unsigned long n) {}
+void __notify_free(void *dest) __attribute__((weak));
+void __notify_free(void *dest) {}

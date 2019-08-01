@@ -15,12 +15,6 @@
 #include "liballocs_private.h"
 #include "pageindex.h"
 
-#ifdef USE_REAL_LIBUNWIND
-#include <libunwind.h>
-#else
-#include "fake-libunwind.h"
-#endif
-
 /* This is the allocator that knows about ABI-defined *stack frames*,
  * as distinct from the (machine/OS-defined) *stack mappings*. */
 

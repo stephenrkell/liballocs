@@ -2,6 +2,7 @@
 #define __HEAP_INDEX_H
 
 #include <stdbool.h>
+#include "liballocs_config.h"
 #include "pageindex.h"
 #include "memtable.h"
 
@@ -56,7 +57,7 @@ struct insert *lookup_object_info(const void *mem,
 
 struct insert *__liballocs_insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);
 void __liballocs_index_delete(void *userptr);
-void __liballocs_index_insert(void *new_userchunkaddr, size_t modified_size, const void *caller);
+void __liballocs_index_insert(void *new_userchunkaddr, size_t requested_size, const void *caller);
 
 /* A thread-local variable to override the "caller" arguments. 
  * Platforms without TLS have to do without this feature. */
@@ -127,18 +128,79 @@ static size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
 static size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr_to_allocptr(userptr))); }
 static size_t allocsize(void *allocptr) { return malloc_usable_size(allocptr); }
 
-static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, size_t usable_size);
-static inline struct insert *insert_for_chunk(void *userptr)
+#ifdef LIFETIME_POLICIES
+typedef LIFETIME_INSERT_TYPE lifetime_insert_t;
+#define LIFETIME_POLICY_FLAG(id) (0x1 << (id))
+// By convention lifetime policy 0 is the manual deallocation policy
+#define MANUAL_DEALLOCATION_POLICY 0
+#define MANUAL_DEALLOCATION_FLAG LIFETIME_POLICY_FLAG(MANUAL_DEALLOCATION_POLICY)
+// Manual deallocation is not an "attached" policy
+#define HAS_LIFETIME_POLICIES_ATTACHED(lti) ((lti) & ~(MANUAL_DEALLOCATION_FLAG))
+#endif
+
+struct extended_insert
 {
-	return insert_for_chunk_and_usable_size(userptr, malloc_usable_size(userptr)); 
-}
+#ifdef LIFETIME_POLICIES
+	lifetime_insert_t lifetime;
+#endif
+#ifdef PRECISE_REQUESTED_ALLOCSIZE
+	/* Include any padding inserted such that
+	 * usable_size - insert_size = requested_size */
+	uint8_t insert_size;
+#endif
+	/* The base insert is at the end because we want interoperabiliy between
+	 * allocators using extended_insert and allocators only using insert.
+	 * See insert_for_chunk. */
+	struct insert base;
+} __attribute__((packed)); // Alignment from the end guaranteed by ourselves
+
 static inline struct insert *insert_for_chunk_and_usable_size(void *userptr, size_t usable_size)
 {
-	/* Round down to an aligned address! */
-	return (struct insert*) (
-			(uintptr_t)((char*) userptr + usable_size - sizeof (struct insert))
-				& (~(uintptr_t)(sizeof (struct insert) - 1))
-			);
+	uintptr_t insertptr = (uintptr_t)((char*) userptr + usable_size -
+			sizeof (struct insert));
+
+#ifndef NDEBUG
+	// Check alignment
+	assert(insertptr % ALIGNOF(struct insert) == 0);
+#endif
+
+	return (struct insert*) insertptr;
 }
+static inline struct insert *insert_for_chunk(void *userptr)
+{
+	return insert_for_chunk_and_usable_size(userptr, malloc_usable_size(userptr));
+}
+
+static inline struct extended_insert *
+extended_insert_for_chunk_and_usable_size(void *userptr, size_t usable_size)
+{
+	return (struct extended_insert *)((char*) userptr + usable_size -
+			sizeof (struct extended_insert));
+}
+static inline struct extended_insert *extended_insert_for_chunk(void *userptr)
+{
+	return extended_insert_for_chunk_and_usable_size(userptr,
+			malloc_usable_size(userptr));
+}
+
+#ifdef PRECISE_REQUESTED_ALLOCSIZE
+static inline size_t requested_size_for_chunk(void *userptr, size_t usable_size)
+{
+	uint8_t insert_size = extended_insert_for_chunk_and_usable_size(userptr, usable_size)->insert_size;
+	return usable_size - insert_size;
+}
+#else
+static inline size_t requested_size_for_chunk(void *userptr, size_t usable_size)
+{
+	return usable_size - sizeof (struct extended_insert);
+}
+#endif
+
+#ifdef LIFETIME_POLICIES
+static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr)
+{
+	return &extended_insert_for_chunk(userptr)->lifetime;
+}
+#endif
 
 #endif

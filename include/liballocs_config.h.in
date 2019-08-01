@@ -1,0 +1,13 @@
+/* Defined to 1 if we must use our own libunwind */
+#undef USE_FAKE_LIBUNWIND
+
+/* If lifetime extenstion is available this macro expands to the number of
+ * available lifetime policies */
+#undef LIFETIME_POLICIES
+
+/* Expands to the type of lifetime inserts */
+#undef LIFETIME_INSERT_TYPE
+
+/* If defined, liballocs needs to return the precise requested size on size
+ * queries */
+#undef PRECISE_REQUESTED_ALLOCSIZE

@@ -181,6 +181,9 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 // extern struct allocator __global_obstack_allocator;
 
 // FIXME: we should probably have per-allocator headers for the stuff below
+
+#define ALLOCATOR_HANDLE_LIFETIME_INSERT(a) ((a) == &__generic_malloc_allocator)
+
 void __mmap_allocator_init(void);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
 	int prot, int flags, int fd, off_t offset, void *caller);

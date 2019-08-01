@@ -29,6 +29,7 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 #include <assert.h>
 #endif
 
+#include "liballocs_config.h"
 #include "memtable.h"
 #include "uniqtype.h"
 struct insert; // instead of heap_index.h
@@ -39,10 +40,10 @@ struct allocator; // instead of allocmeta.h
 	((all) != (as))
 
 /* ** begin added for inline get_alloc_info */
-#ifdef USE_REAL_LIBUNWIND
-#include <libunwind.h>
-#else
+#ifdef USE_FAKE_LIBUNWIND
 #include "fake-libunwind.h"
+#else
+#include <libunwind.h>
 #endif
 
 #include "allocsmt.h"
@@ -821,6 +822,31 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 	
 	return ret;
 }
+
+#ifdef LIFETIME_POLICIES
+/* If LIFETIME_POLICIES is defined, we provide an API to dynamically extend
+ * the lifetime of an object by attaching more than one 'lifetime policy' to
+ * the same allocation. The object will be deallocated only when all the
+ * policies agree to delete it.
+ *
+ * For the moment there are two kind of policies:
+ * - Explicit deallocation (by calling the deallocation function directly)
+ * - Garbage collection (keep track of all pointers through write barriers) */
+
+/* Garbage collection policies are defined by two callback functions called on
+ * reference creation and deletion */
+typedef void (*__gc_callback_t)(const void *target, const void **from);
+
+// Return the new lifetime policy id (or negative number on failure)
+int __liballocs_register_gc_policy(__gc_callback_t addref, __gc_callback_t delref);
+
+void __liballocs_attach_lifetime_policy(int policy_id, const void *obj);
+void __liballocs_detach_lifetime_policy(int policy_id, const void *obj);
+static inline void __liballocs_detach_manual_dealloc_policy(const void *obj)
+{
+    __liballocs_detach_lifetime_policy(0 /* MANUAL_DEALLOCATION_POLICY */, obj);
+}
+#endif
 
 struct uniqtype *
 __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_t, */...);
