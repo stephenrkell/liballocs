@@ -210,10 +210,10 @@ Generic download-and-build instructions for Debian platforms
 look something like the following.
 
     $ # step 0: FIRST optionally build my binutils-gdb repo (see below)
-    $ sudo apt-get install libelfg0-dev libdw-dev binutils-dev \
+    $ sudo apt-get install libelf-dev libdw-dev binutils-dev \
         autoconf automake libtool pkg-config autoconf-archive \
-        g++ ocaml ocaml-findlib \
-        default-jre-headless \
+        g++ ocaml ocamlbuild ocaml-findlib \
+        default-jre-headless python3 python \
         make git gawk gdb wget \
         libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
         libboost-{iostreams,regex,serialization,filesystem}-dev && \

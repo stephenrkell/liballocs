@@ -21,8 +21,8 @@ RUN sudo mkdir -p /usr/lib/meta && sudo chown root:staff /usr/lib/meta && \
 RUN sudo apt-get install -y libelf-dev libdw-dev binutils-dev \
        autoconf automake libtool pkg-config autoconf-archive \
        g++ ocaml ocaml-findlib \
-       default-jre-headless python3 python2.7 python-minimal \
-       make git gawk gdb nano wget \
+       default-jre-headless python3 python \
+       make git gawk gdb wget \
        libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
        libboost-iostreams-dev libboost-regex-dev libboost-serialization-dev libboost-filesystem-dev
 RUN cd /usr/local/src && git clone https://github.com/stephenrkell/liballocs.git
