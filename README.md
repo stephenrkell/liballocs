@@ -210,7 +210,7 @@ Generic download-and-build instructions for Debian platforms
 look something like the following.
 
     $ # step 0: FIRST optionally build my binutils-gdb repo (see below)
-    $ sudo apt-get install libelfg0-dev libdw-dev \
+    $ sudo apt-get install libelfg0-dev libdw-dev binutils-dev \
         autoconf automake libtool pkg-config autoconf-archive \
         g++ ocaml ocaml-findlib \
         default-jre-headless \

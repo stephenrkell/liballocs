@@ -18,7 +18,7 @@ RUN cd /usr/local/src/binutils-gdb && \
 RUN cd /usr/local/bin && sudo rm -f ld && sudo ln -s ld.bfd ld
 RUN sudo mkdir -p /usr/lib/meta && sudo chown root:staff /usr/lib/meta && \
    sudo chmod g+w /usr/lib/meta
-RUN sudo apt-get install -y libelf-dev libdw-dev \
+RUN sudo apt-get install -y libelf-dev libdw-dev binutils-dev \
        autoconf automake libtool pkg-config autoconf-archive \
        g++ ocaml ocamlbuild ocaml-findlib \
        default-jre-headless python3 python2.7 python-minimal \
