@@ -20,6 +20,10 @@
 //#define assert(cond)
 //#endif
 #endif
+#ifndef offsetof
+#define __liballocs_defined_offsetof
+#define offsetof(type, member) (__builtin_offsetof(type, member))
+#endif
 
 /* Prototypes we omit. */
 void abort(void) __attribute__((noreturn));
