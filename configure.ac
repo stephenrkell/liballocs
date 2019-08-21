@@ -55,6 +55,7 @@ AC_CHECK_HEADERS([sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h 
 AC_CHECK_HEADERS([alloca.h], [], [AC_MSG_FAILURE(Failed to find required header)])
 AC_CHECK_HEADERS([libelf.h libelf/libelf.h gelf.h libelf/gelf.h], [], [], [])
 AC_CHECK_HEADERS([dwarf.h], [], [AC_MSG_FAILURE(Failed to find required header)])
+AC_CHECK_HEADERS([plugin-api.h], [], [AC_MSG_FAILURE([Failed to find required header, try installing `binutils-dev` or a similar package])])
 
 AX_BOOST_BASE
 
