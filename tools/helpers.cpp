@@ -1006,6 +1006,7 @@ int sticky_root_die::open_debuglink(int user_fd)
 	}
 	else if (nread > 0)
 	{
+		debuglink_buf[nread] = '\0';
 		/* We've successfully slurped a debuglink */
 		std::cerr << "Slurped debuglink: " << debuglink_buf << std::endl;
 		/* How to build the path from the debuglink? GDB docs say we
@@ -1048,6 +1049,7 @@ int sticky_root_die::open_debuglink(int user_fd)
 		for (auto i_path = paths_to_try.begin(); i_path != paths_to_try.end();
 			++i_path)
 		{
+			std::cerr << "Trying: " << i_path->c_str() << std::endl;
 			ret_fd = open(i_path->c_str(), O_RDONLY);
 			if (ret_fd != -1) break;
 		}
