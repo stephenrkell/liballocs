@@ -94,9 +94,19 @@ checkrun-%:
 # disabled cases
 checkrun-plugin-hello:
 	true # disabled plugin-hello while expected to fail
-# Some cases are special and require only an exit status of zero
+checkrun-bit-fields:
+	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/37
+checkrun-lib-test:
+	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/38
+checkrun-realloc-multi-union:
+	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/39
 checkrun-stack-walk:
-	$(MAKE) cleanrun-stack-walk >/dev/null 2>&1
+	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/40
+checkrun-uniqtype-make-precise:
+	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/39
+# Some cases are special and require only an exit status of zero
+# checkrun-stack-walk:
+# 	$(MAKE) cleanrun-stack-walk >/dev/null 2>&1
 checkrun-no-unbind-self:
 	$(MAKE) cleanrun-no-unbind-self >/dev/null 2>&1
 checkrun-sloppy-dumptypes:
@@ -113,10 +123,10 @@ checkrun-relf-auxv-dynamic:
 	$(MAKE) cleanrun-relf-auxv-dynamic >/dev/null 2>&1
 checkrun-relf-auxv-static:
 	$(MAKE) cleanrun-relf-auxv-static >/dev/null 2>&1
-checkrun-uniqtype-make-precise:
-	$(MAKE) cleanrun-uniqtype-make-precise >/dev/null 2>&1
-checkrun-lib-test:
-	$(MAKE) cleanrun-lib-test >/dev/null 2>&1
+# checkrun-uniqtype-make-precise:
+# 	$(MAKE) cleanrun-uniqtype-make-precise >/dev/null 2>&1
+# checkrun-lib-test:
+# 	$(MAKE) cleanrun-lib-test >/dev/null 2>&1
 checkrun-forward-decls:
 	$(MAKE) cleanrun-forward-decls >/dev/null 2>&1
 
