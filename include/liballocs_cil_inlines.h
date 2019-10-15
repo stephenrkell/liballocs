@@ -2,7 +2,7 @@
 #define LIBALLOCS_CIL_INLINES_H_
 
 #include "liballocs_config.h"
-
+#include <stddef.h>
 #ifndef unlikely
 #define __liballocs_defined_unlikely
 #define unlikely(cond) (__builtin_expect( (cond), 0 ))
