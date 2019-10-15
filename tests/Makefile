@@ -5,6 +5,8 @@ CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
 CFLAGS += -DUSE_FAKE_LIBUNWIND=1
+else
+LDLIBS += -lunwind-x86_64 -lunwind
 endif
 
 UNIQTYPES_BASE ?= /usr/lib/meta
