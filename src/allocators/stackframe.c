@@ -259,7 +259,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 			unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
 			// try to get the bp, but no problem if we don't
 			unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &higherframe_bp); 
-			got_higherframe_bp = (unw_ret == 0) && higherframe_bp != 0;
+			got_higherframe_bp = (unw_ret == 0) && higherframe_bp >= 0 && higherframe_bp >= bp;
 		}
 		/* NOTE that -UNW_EBADREG happens near the top of the stack where 
 		 * unwind info gets patchy, so we should handle it mostly like the 
