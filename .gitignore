@@ -119,3 +119,17 @@ Makefile.in
 .fuse_hidden*
 .nfs*
 .dropbox*
+
+# we might have .s files, but not in tools/
+tools/*.s
+
+config.mk
+tests/addrtaken-allocator/addrtaken-allocator
+tests/metavec-layout/
+tests/unit-tests/
+tools/alloctypes
+tools/dwarftypes
+tools/extrasyms
+tools/frametypes
+tools/metavector
+
