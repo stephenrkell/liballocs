@@ -10,6 +10,13 @@
 #include "liballocs.h"
 #include "liballocs_private.h"
 
+/* Each allocsite is logically assigned a contiguous
+ * ID, defined as the sum of its index in the allocsite array and its file's "start ID".
+ * The two lookups allocsites_by_id and allocsites_by_object_base_address_entry
+ * are "spines" for these per-DSO arrays, sorted by "start_id" and base address.
+ * FIXME: get rid of the by_object_base_address one, and just use the bigalloc
+ * looking (pageindex) to get to the per-file metadata. */
+
 /* The two arrays for indexing allocation sites */
 struct allocsites_by_id_entry allocsites_by_id[ALLOCSITES_INDEX_SIZE] __attribute__((visibility("hidden")));
 struct allocsites_by_object_base_address_entry
