@@ -96,8 +96,6 @@ checkrun-plugin-hello:
 	true # disabled plugin-hello while expected to fail
 checkrun-lib-test:
 	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/38
-checkrun-realloc-multi-union:
-	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/39
 checkrun-uniqtype-make-precise:
 	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/39
 # Some cases are special and require only an exit status of zero
