@@ -94,8 +94,6 @@ checkrun-%:
 # disabled cases
 checkrun-plugin-hello:
 	true # disabled plugin-hello while expected to fail
-checkrun-bit-fields:
-	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/37
 checkrun-lib-test:
 	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/38
 checkrun-realloc-multi-union:
