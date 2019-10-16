@@ -5,7 +5,18 @@
 #include <sys/time.h>
 #include <elf.h>
 #include <dlfcn.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <link.h> /* for ElfW() */
+#ifdef __cplusplus
+}
+#endif
+#ifdef __cplusplus
+#include <cstdbool>
+#endif
+
+#include "allocmeta-defs.h"
 
 struct liballocs_err;
 typedef struct liballocs_err *liballocs_err_t;
@@ -196,17 +207,6 @@ void __static_file_allocator_init(void);
 void __static_file_allocator_notify_load(void *handle, const void *load_site);
 void __static_file_allocator_notify_unload(const char *copied_filename);
 
-/* This is basically our supplement to the stuff we can access
- * from the struct link_map entries in the ld.so. There is some
- * duplication, mainly because we don't want to depend on impl-
- * -specific stuff in there. */
-enum sym_or_reloc_kind
-{
-	REC_DYNSYM,
-	REC_SYMTAB,
-	REC_EXTRASYM,
-	REC_RELOC
-};
 /* We don't actually use these constants, at least not at present,
  * but they're here to enumerate the parts of the file we care
  * about that are not necessarily mapped already. We then use MAPPING_MAX
@@ -260,12 +260,7 @@ struct file_metadata
 	   Logically the content is a pointer to its ELF metadata *and* its type.
 	   For spans that are in dynsym, it points to their dynsym entry.
 	*/
-	struct sym_or_reloc_rec
-	{
-		unsigned kind:2; // an instance of sym_or_reloc_kind
-		unsigned idx:18; /* i.e. at most 256K symbols of each kind, per file */
-		unsigned long uniqtype_ptr_bits:44; /* i.e. the low-order 3 bits are 0 */
-	} *sorted_meta_vec; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
+	struct sym_or_reloc_rec *sorted_meta_vec; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
 #define UNIQTYPE_OF_SPAN(s) (struct uniqtype*)(((unsigned long) ((s).t))<<3)
 	unsigned long (*starts_bitmaps)[];
 };

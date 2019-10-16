@@ -1,32 +1,7 @@
 #ifndef LIBALLOCS_ALLOCSMT_H_
 #define LIBALLOCS_ALLOCSMT_H_
 
-struct uniqtype;
-struct allocsite_entry
-{ 
-	void *next; 
-	void *prev;
-	void *allocsite; 
-	struct uniqtype *uniqtype;
-};
-struct frame_allocsite_entry
-{
-	unsigned offset_from_frame_base;
-	struct allocsite_entry entry;
-};
-struct static_allocsite_entry
-{
-	const char *name;
-	struct allocsite_entry entry;
-};
-
-/* To test for a null (terminator) entry is tricky -- static-alloc names 
- * and addresses are all allowed to be null, as are the prev and/or next
- * pointers. But we shouldn't have *everything* be null except in a real
- * terminator entry. */
-#define STATIC_ALLOCSITE_IS_NULL(p_ent) \
-	(!(p_ent)->entry.allocsite && !(p_ent)->name && \
-	!(p_ent)->entry.next && !(p_ent)->entry.prev)
+#include "allocmeta-defs.h"
 
 /* allocsmt is a memtable lookup mainly because it's easy 
  * and reduces code dependencies. In particular, it's easy to 
