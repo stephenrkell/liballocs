@@ -1,75 +1,56 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 SRCROOT := $(dir $(THIS_MAKEFILE))../
+srcdir := $(SRCROOT)/src
+include $(SRCROOT)/config.mk
 
-# HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
-# object. It complains about __next_malloc_hook et al being undefined, even though
-# we --defsym'd them and they are clearly defined in the .o file.
-# So don't use that rule. We use the preprocessor (above) to define __next_hook_*.
-
-HOOKS_PRELOAD_OBJS := malloc_hook_stubs_preload_fast.o event_hooks_fast.o
-HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap_fast.o event_hooks_fast.o
-
-CFLAGS += -std=gnu11 -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS) \
-   -I$(LIBSYSTRAP) -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(SRCROOT)/src -Wno-unused
-
-ifeq ($(DEBUG),1)
-    DEFAULT_EXTRA_CFLAGS := -g
-else
-    # STRANGE: this
-    #DEFAULT_EXTRA_CFLAGS := -flto -O4 # note! no -DNDEBUG
-    # is slower than the following (4.61, 4.54, 4.60)
-    #DEFAULT_EXTRA_CFLAGS := -O0 -finline-functions
-    # ; what about this? it's the same or slightly slower
-    #DEFAULT_EXTRA_CFLAGS := -O4 -flto -finline-functions -DNDEBUG
-    # what about this one? makes little difference
-    #DEFAULT_EXTRA_CFLAGS := -O4 -flto -DNDEBUG
-    # what about this one? same or slightly slower
-    #DEFAULT_EXTRA_CFLAGS := -Os -flto -DNDEBUG
-    # what about this one? slightly faster
-    #DEFAULT_EXTRA_CFLAGS := -O0 -DNDEBUG
-    # what about this one?  among the fastest (4.52, 4.50, 4.51)
-    #DEFAULT_EXTRA_CFLAGS := -O3 -DNDEBUG
-    # really double-check that the following isn't faster? nope (4.64, 4.64, 4.59)
-    #DEFAULT_EXTRA_CFLAGS := -O4 -flto -DNDEBUG
-
-    # Summary of the above: -O3 -DNDEBUG is the fastest
-    FAST_EXTRA_CFLAGS := -O3 -DNDEBUG -flto -ffat-lto-objects
-    DEBUG_EXTRA_CFLAGS := -O0
-endif
-
-default: liballocs_preload.so liballocs_test.so liballocs_nonshared.a liballocs_dummyweaks.so liballocs_dummyweaks.o liballocs.a
-all: default
-
-HOOKS_NON_FAST_CFLAGS += -fPIC -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
-HOOKS_FAST_CFLAGS += -fpic -flto -ffat-lto-objects
-ifneq ($(DEBUG),1)
-    HOOKS_FAST_CFLAGS += -O4 -DNDEBUG
-endif
-
-# regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
-LDFLAGS += -Wl,-O2 -flto -Bsymbolic-functions -fPIC 
-
-# until binutils bug 13600 is fixed, gold is the linker we need
-LDFLAGS += -Wl,-fuse-ld=gold
-
+CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS) \
+   -I$(LIBSYSTRAP) -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused \
+   -flto -ffat-lto-objects
 LDFLAGS += -L$(LIBDLBIND)/lib
-LDLIBS += -ldlbind
 
-# We define our own malloc_usable_size to catch the alloca case.
-liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size
+# run-from-srcdir case:
+# if the current dir is the source dir, change to the output directory
+# and re-invoke this makefile from there.
+# If we don't know which output directory we want, we want the production one.
+ifeq ($(realpath .),$(realpath $(srcdir)))
+ifeq ($(MAKECMDGOALS),)
+MAKECMDGOALS := default
+endif
+.PHONY: $(MAKECMDGOALS)
+$(MAKECMDGOALS):
+	mkdir -p $(SRCROOT)/build/opt && $(MAKE) -C $(SRCROOT)/build/opt -f $(srcdir)/Makefile $(MAKECMDGOALS)
+else
+# the rest
+vpath %.c $(srcdir)
+vpath liballocs.so $(srcdir)
 
-export BUILD_MALLOC_HOOKS := event
-event_hooks.o event_hooks_fast.o event_hooks_nonshared.o: CFLAGS += -D__next_hook_init=__terminal_hook_init \
--D__next_hook_malloc=__terminal_hook_malloc \
--D__next_hook_free=__terminal_hook_free \
--D__next_hook_realloc=__terminal_hook_realloc \
--D__next_hook_memalign=__terminal_hook_memalign 
+# if we're building from a dir called "debug"
+ifeq ($(notdir $(realpath .)),debug)
+DEBUG := 1
+endif
 
-# $(warning CFLAGS is $(CFLAGS))
+.PHONY: default
+default: all # autotools likes an 'all' target (I think)
 
-CXXFLAGS := $(filter-out -std=%,$(CFLAGS)) -std=c++11
-C_SRC := $(wildcard *.c)
+# What binaries do we build?
+TARGETS += liballocs_preload.so    # the main binary
+TARGETS += liballocs_preload.a     # in archive form, for extending libraries to link in (libcrunch)
+TARGETS += liballocs.so            # nasty linker script for clients, working around uniqueness problem
+TARGETS += liballocs_nonshared.a   # uniqtypes and (own-malloc) allocator stubs; linker script points to this, s.t. client exes (-lallocs) get this linked in statically
+TARGETS += liballocs.a             # the main binary usable for statically-linked client exes -- no uniqueness problem
+TARGETS += liballocs_dummyweaks.so # non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
+TARGETS += liballocs_dummyweaks.o  # non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
+                                   # (what do client solibs get? easiest is just to treat them like exes, *except* I *think* they don't get nonshared_hooks.o)
+TARGETS += liballocs_test.so       # version only usable for doing dlopen() -- runs unit tests in its constructor (see tests/lib-test)
+
+.PHONY: all
+all: $(TARGETS)
+
+ifeq ($(DEBUG),)
+    # FIXME: check this is still true: -O3 -DNDEBUG is the fastest, faster than -O4!
+    CFLAGS += -O3 -DNDEBUG
+endif
 
 # Don't use allocscc to compile liballocs!
 # if CC is allocscc, unset it
@@ -77,26 +58,95 @@ ifeq ($(notdir $(CC)),allocscc)
 export CC := cc
 endif
 
+# regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
+LDFLAGS += -Wl,-O2 -flto -Bsymbolic-functions -fPIC 
+# until binutils bug 13600 is fixed, gold is the linker we need
+LDFLAGS += -Wl,-fuse-ld=gold
+# NOTE that our use of __private_malloc, a defsym'd symbol,
+# used to provoke a gold bug when we were generating protected-visibility
+# undefineds that were bound to it. That bug has been reported (#24286) and
+# I've removed the protected undefineds (which came from libmallochooks
+# template code). So we are still committed to using gold to link liballocs
+# owing to binutils issue 13600 is fixed.
+
+# HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
+# object. It complains about __next_malloc_hook et al being undefined, even though
+# we --defsym'd them and they are clearly defined in the .o file. LTO doesn't grok --defsym.
+# So we use the preprocessor (above) to define __next_hook_*.
+export BUILD_MALLOC_HOOKS := event
+event_hooks.o event_hooks_nonshared.o: CFLAGS += \
+-D__next_hook_init=__terminal_hook_init \
+-D__next_hook_malloc=__terminal_hook_malloc \
+-D__next_hook_free=__terminal_hook_free \
+-D__next_hook_realloc=__terminal_hook_realloc \
+-D__next_hook_memalign=__terminal_hook_memalign 
+CFLAGS += -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
+event_hooks.c:
+
 # GRR. We can't include the Makerules now that we need to build the hooks by 
 # two different methods. Also, we can't get dependency information about these
 # files from the makefiles. So we always want to run these rules. HMM.
-malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o: $(LIBMALLOCHOOKS)/malloc_hook_stubs_wrap.c
-	CFLAGS="$(CFLAGS) -fPIC" $(MAKE) MALLOC_HOOKS_METHOD=preload -f $(LIBMALLOCHOOKS)/Makerules malloc_hook_stubs_preload.o malloc_hook_stubs_preload_fast.o
-malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o: $(LIBMALLOCHOOKS)/malloc_hook_stubs_wrap.c
-	$(MAKE) MALLOC_HOOKS_METHOD=wrap -f $(LIBMALLOCHOOKS)/Makerules malloc_hook_stubs_wrap.o malloc_hook_stubs_wrap_fast.o
+vpath malloc_hook_stubs_wrap.c $(LIBMALLOCHOOKS)
+vpath malloc_hook_stubs_preload.c $(LIBMALLOCHOOKS)
+vpath event_hooks.c $(LIBMALLOCHOOKS)
 
-vpath %.c $(LIBMALLOCHOOKS)
+ifneq ($(TRACE_HEAP_INDEX),)
+CFLAGS += -DTRACE_HEAP_INDEX
+endif
+CFLAGS += -I$(srcdir)
 
-vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: move to libsystrap
+# different outputs involve different subgroups of objects
+UTIL_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o
+ifneq ($(USE_REAL_LIBUNWIND),)
+LDLIBS += -lunwind -lunwind-`uname -m`
+CFLAGS += -DUSE_REAL_LIBUNWIND
+else
+UTIL_OBJS += fake-libunwind.o
+CFLAGS += -fno-omit-frame-pointer
+endif
+ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard $(srcdir)/allocators/*.c))
+MAIN_OBJS := liballocs.o event_hooks.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
+HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap.o
+NOPRELOAD_OBJS := uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
+NONSHARED_OBJS := nonshared_hooks.o # does *not* go in liballocs.a -- FIXME: why not? recall that liballocs.a is only for static-linked client binaries (exe or solib). Otherwise we get _nonshared.a, from the liballocs.so linker script. Probably, liballocs.a should include this, e.g. a client static-linked exe needs this if it defines its own malloc.
+PRELOAD_OBJS := preload.o malloc_hook_stubs_preload.o
+SYSTRAP_OBJS := systrap.o
+
+# Generate deps.
+ALL_OBJS := $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(NONSHARED_OBJS) $(PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) $(SYSTRAP_OBJS)
+# build src backwards from our .o files
+C_SRC := $(sort $(patsubst %.o,%.c,$(ALL_OBJS)))
+dep_fname = $(dir $1)$(patsubst %.c,.%.d,$(notdir $1))
+C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
+DEPS := $(C_DEPS)
+$(call dep_fname,%.c): %.c
+	$(CC) -MM $(CFLAGS) "$<" > "$@" || (rm -f "$@"; false)
+-include $(DEPS)
+
+# event_hooks.c is macroised so that we can create special versions of it.
+# This version is used when we link an executable including its own malloc impl.
+# FIXME: this should be made more uniform, as part of the allocator/stub-generation refactoring.
+event_hooks_nonshared.o: CFLAGS += -D'ALLOC_EVENT(s)=__liballocs_malloc_\#\#s' -DALLOC_EVENT_ATTRIBUTES=
+event_hooks_nonshared.o: event_hooks.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o "$@" $+
+nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
+	$(LD) -r -o "$@" $+
+
+# FIXME: remove the need for this
+uniqtypes.o: uniqtypes.c
+	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
+	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
+
+# we include our own malloc impl, for which we use dlmalloc
+# of which libsystrap already has a copy, so borrow that (HACK)
+vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: actually in trap-syscalls but should be in libsystrap
 # We put dlmalloc in a library so that --exclude-libs=dlmalloc.a will hide its symbols
 # in our output .so, so that they don't override anything in the rest of the program.
 dlmalloc.a: dlmalloc.o
-	$(AR) r "$@" $^
 dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0 -DUSE_DL_PREFIX -fPIC
 dlmalloc-ext.o: CFLAGS += -fPIC
-liballocs_preload.so liballocs_test.so: LDFLAGS += -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
+PRIVATE_MALLOC_LDFLAGS := -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
  -Wl,--wrap,dlfree -Wl,--wrap,dlrealloc -Wl,--wrap,dlmemalign -Wl,-wrap,dlposix_memalign \
- -Wl,--whole-archive dlmalloc.a  -Wl,--no-whole-archive \
  -Wl,--defsym,__private_malloc=__wrap_dlmalloc \
  -Wl,--defsym,__private_calloc=__wrap_dlcalloc \
  -Wl,--defsym,__private_free=__wrap_dlfree \
@@ -109,155 +159,89 @@ liballocs_preload.so liballocs_test.so: LDFLAGS += -Wl,--wrap,dlmalloc -Wl,--wra
 # NOTE: we need to defsym to the __wrap_* functions, because of the way
 # --wrap and --defsym interact: references generated by --defsym are *not*
 # wrapped, unlike references that were in the file already.
+PRIVATE_MALLOC_LDLIBS := -Wl,--whole-archive dlmalloc.a  -Wl,--no-whole-archive
 
-ifeq ($(USE_REAL_LIBUNWIND),)
-FAKE_LIBUNWIND_OBJ := fake-libunwind.o
-CFLAGS += -fno-omit-frame-pointer
-LIBUNWIND_LDLIBS :=
-else
-FAKE_UNWIND_OBJ :=
-LIBUNWIND_LDLIBS := -lunwind -lunwind-`uname -m` 
-CFLAGS += -DUSE_REAL_LIBUNWIND
-endif
+LIBALLOCS_PRELOAD_A_OBJS := dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS)
+LIBALLOCS_NONSHARED_A_OBJS := $(NOPRELOAD_OBJS) $(NONSHARED_OBJS)
+LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(HOOKS_WRAP_OBJS)
 
-ifneq ($(TRACE_HEAP_INDEX),)
-CFLAGS += -DTRACE_HEAP_INDEX
-endif
+# liballocs_preload.so build rule is funky becuase dlmalloc.a is in LDFLAGS.
+# It needs to be there because it goes inside --whole-archive (and these options
+# are not files, so can't be prerequisites)
+liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size $(PRIVATE_MALLOC_LDFLAGS)
+liballocs_preload.so: LDLIBS += -ldlbind $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/libsystrap.a -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
+liballocs_preload.so: $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)
 
-uniqtypes.o: uniqtypes.c
-	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
-	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
+# FIXME: this is supposed to obsolete liballocs_test.so and tests/lib-test
+# ... but I'm not sure it can. Some unit tests need to run within a wider liballocs
+liballocs_preload.so-test-%: LDFLAGS += $(PRIVATE_MALLOC_LDFLAGS)
+liballocs_preload.so-test-%: LDLIBS += -ldlbind $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/libsystrap.a -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
+liballocs_preload.so-test-%.c.test: %.c $(filter-out %.o,$(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS)) dlmalloc.a
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DUNIT_TEST -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)
+vpath %.h $(SRCROOT)/include
+liballocs_preload.so-test-%.h.test: %.h $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DUNIT_TEST -o "$@" $(filter-out dlmalloc.a $<,$+) -x c $< -x none $(LDFLAGS) $(LDLIBS)
 
-ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard allocators/*.c))
-UTIL_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o
-NOPRELOAD_OBJS := uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
-NONSHARED_OBJS := nonshared_hooks.o
-MAIN_OBJS := liballocs.o $(UTIL_OBJS) $(FAKE_UNWIND_OBJ) $(ALLOCATOR_OBJS)
-MAIN_OBJS_NOMEMTABLE := liballocs_nomemtable.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
-PRELOAD_OBJS := preload.o
-# HOOKS_*_OBJS are defined at the top
+%.a:
+	$(AR) r "$@" $+
+liballocs_preload.a: $(LIBALLOCS_PRELOAD_A_OBJS)
+liballocs_nonshared.a: $(LIBALLOCS_NONSHARED_A_OBJS)
+liballocs.a: $(LIBALLOCS_A_OBJS)
 
-# build src backwards 
-C_SRC := $(sort $(patsubst %.o,%.c,$(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(HOOKS_PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) liballocs_nomemtable.o systrap.o))
-dep_fname = $(dir $1)$(patsubst %.c,.%.d,$(notdir $1))
-C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
-# patsubst %.c,$(dir %.c).$(patsubst %.c,%.d$(notdir %.c).d,$(C_SRC))
-
-DEPS := $(C_DEPS)
-# $(warning DEPS are $(DEPS))
-
-CFLAGS += -I$(SRCROOT)/src
-
-# FIXME: make complains "target `allocators/.alloca.d' doesn't match the target pattern"
-# if we prefix with C_DEPS here. 
-# Actually it's a bit weird (but nice) that it's happy to expand "$(call dep_fname,%.c)".
-#$(C_DEPS): 
-$(call dep_fname,%.c) : %.c
-	$(CC) -MM $(CFLAGS) "$<" > "$@" || (rm -f "$@"; false)
-$(CC_DEPS): $(dir %.cc)$(patsubst %.cc,.%.d,$(notdir %.cc)) : %.cc
-	$(CXX) -MM $(CXXFLAGS) "$<"  > "$@" || (rm -f "$@"; false)
-
--include $(DEPS)
-
-%_fast.o: %.c
-	$(CC) $(CFLAGS) -c -o "$@" "$<"
-
-ifeq ($(DEBUG),1)
-systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(DEBUG_EXTRA_CFLAGS) # hooks have either fpic or fPIC
-else
-systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(FAST_EXTRA_CFLAGS) # hooks have either fpic or fPIC
-endif 
-.SECONDARY: heap_index_hooks_fast.c
-heap_index_hooks_fast.o: CFLAGS += $(HOOKS_FAST_CFLAGS)
-heap_index_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
-event_hooks_fast.o: CFLAGS += $(HOOKS_FAST_CFLAGS)
-event_hooks.o: CFLAGS += $(HOOKS_NON_FAST_CFLAGS)
-
-event_hooks_nonshared.o: CFLAGS += -D'ALLOC_EVENT(s)=__liballocs_malloc_\#\#s' -DALLOC_EVENT_ATTRIBUTES=
-event_hooks_nonshared.o: event_hooks.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o "$@" $+
-
-nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
+# HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option
+# or if we could statically link-in our stubs without making them non-overridable.
+# Perhaps the custom ld.so will make this feasible.
+liballocs_dummyweaks.o: dummyweaks.o
 	$(LD) -r -o "$@" $+
+liballocs_dummyweaks.so: dummyweaks.o
+	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
 
-# HACK override the rule for *.c -> *.o as a possible fix for debug info non-findy (does it work?)
-%.o: %.c
-	$(CC) -o "$@" $(CFLAGS) -c $(realpath $<)
-
-# FIXME: in preload case, can be clever with stubs? 
-# HMM. We still have to --wrap the allocation funcs, but we could put the wrappers in the preload lib...
-# BUT since they're generated per-build from the LIBALLOCS_ALLOC_FNS content, this doesn't work --
-# stick with stubs!
-
-# What libraries do we build?
-# 
-# liballocs_preload.so -- the main binary
-# liballocs_preload.a  -- in archive form, for extending libraries to link in (libcrunch)
-# liballocs.so         -- nasty linker script for clients, working around uniqueness problem
-# liballocs_nonshared.a -- just uniqtypes; linker script points to this, s.t. client exes (-lallocs) get this linked in statically (uniqtypes)
-# liballocs.a          -- the main binary usable for statically-linked exes -- no uniqueness problem
-# liballocs_pic.a         -- PIC non-preload archive, used for testing (_test.so)
-# liballocs_test.so       -- designed to be dlopen()able, to run self-tests in constructors
-# liballocs_dummyweaks.so -- non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
-# liballocs_dummyweaks.o  -- non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
-#
-# What do client solibs get?
-# Easiest is just to treat them like exes. They will get their own copy 
-# of the basic uniqtypes, but this will get uniqued as appropriate.
-
-# NOTE that our use of __private_malloc, a defsym'd symbol,
-# used to provoke a gold bug when we were generating protected-visibility
-# undefineds that were bound to it. That bug has been reported (#24286) and
-# I've removed the protected undefineds (which came from libmallochooks
-# template code). So we are still committed to using gold to link liballocs
-# owing to binutils issue 13600 is fixed (see elsewhere in this file).
-liballocs_preload.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
-liballocs_preload.so: systrap.o liballocs_preload.a dlmalloc.a
-	$(CC) $(CFLAGS) -shared -o "$@" \
-	-Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive \
-	$(LIBSYSTRAP)/libsystrap.a $(LDFLAGS) $(LDLIBS)
-
+# FIXME: this should probably go away, if our .test stuff above starts working
 liballocs_test.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 liballocs_test.so: systrap_noop.o liballocs_pic.a dlmalloc.a
 	$(CC) $(CFLAGS) -shared -o "$@" \
 	-Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive \
 	$(LIBSYSTRAP)/libsystrap.a $(LDFLAGS) $(LDLIBS)
 
-liballocs_preload.a: dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
-	$(AR) r "$@" $+
-
-liballocs_pic.a: dlmalloc-ext.o $(MAIN_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_PRELOAD_OBJS)
-	$(AR) r "$@" $+
-
-liballocs_nonshared.a: $(NOPRELOAD_OBJS) $(NONSHARED_OBJS)
-	$(AR) r "$@" $+
-
-liballocs.a: systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
-	$(AR) r "$@" $+
-
-# HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option.
-dummyweaks.o: CFLAGS += -fPIC 
-liballocs_dummyweaks.o: dummyweaks.o
-	$(LD) -r -o "$@" $+
-
-liballocs_dummyweaks.so: dummyweaks.o
-	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
-
-libdumpsmaps.so: libdumpsmaps.o
-	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) 
-
-liballocs_nomemtable_preload.so: $(MAIN_OBJS_NOMEMTABLE) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) dummy_thread_locals.o
-	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out %hooks.a,$^) $(LDFLAGS) -ldl $(LIBUNWIND_LDLIBS)
-
-liballocs_nomemtable.o: liballocs.c
-	$(CC) $(CFLAGS) -DNO_MEMTABLE -c -o "$@" "$<" 
-
-# have to preload the hooks yourself if you want them to hook!
+# Instead of a nomemtable build (for Valgrinding)
+# can we just arrange that on a nomemtable *execution*,
+# pageindex points to a large non-canonical address range
+# and we handle the fault in our fault handler (Valgrind
+# does honour user-supplied segfault handlers, apparently)
 
 # liballocs.so is a linker script, so don't remove it
+.PHONY: clean
 clean: 
 	rm -f *.o */*.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d */.*.d *.a *_fast.c
 
+.PHONY: install
 install: all
-	${INSTALL} liballocs_preload.so liballocs.so liballocs_dummyweaks.so ${libdir}
+	${INSTALL} liballocs_preload.so $(srcdir)/liballocs.so liballocs_dummyweaks.so ${libdir}
 	${INSTALL_DATA} liballocs_preload.a liballocs_nonshared.a liballocs.a liballocs_dummyweaks.o ${libdir}
+
+vpath %.h $(srcdir)/%.h
+
+# unit test pattern for C:
+# 1. Any source file (.c or .h) may contain a unit-test main(), #ifdef-guarded by UNIT_TEST
+# 2. It may link with "the rest of the binary". What does that mean?
+#     -- for %.c, we do a normal build of liballocs_preload.so, but filter-out %.o and
+#liballocs_preload.so-test-%.c: %.c $(filter-out $(patsubst %.o,%.c,$*.c),$(ALL_OBJS))
+# HM. We used to say "put the tests in constructors, and run by dlopening the _test.so or just firing up a debug build"
+# What's good or bad about this?
+# Good: we don't do a separate build of each .o file, so the tests remain in any non-NDEBUG build.
+# Bad: we don't test optimised code, unless we do a non-NDEBUG-but-optimised build.
+# Bad-ish: we don't currently run this very frequently, but we have to adjust habits either way.
+# Bad-ish: we can't supply arguments to a test case... but do we want to? No, probably.
+# Bad-ish: Any debug build will run the tests before doing anything else, so tests can't be long-running (that would be annoying).
+# What about our new way of building one executable per test?
+# Bad: If a failing test should be signposted by an assertion failure in another module,
+#   we won't see that because they were probably -DNDEBUG.
+# Bad: running tests means extra compilation, but
+# Unclear: we can have debug builds that execute without running tests (good or bad?), and
+# Good-ish: we can have long-running tests (desirable?), and
+# Good: we can have tests even for .h files  (there is exactly one test entry point per linked executable; called main()) and
+# Good: tests can themselves have "debug builds" i.e. the rest of the linked in stuff is the debug build
+# Bad: complicates this makefile (see how it turns out...)
+
+endif # test for run-from-srcdir
