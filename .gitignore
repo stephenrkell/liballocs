@@ -125,8 +125,6 @@ tools/*.s
 
 config.mk
 tests/addrtaken-allocator/addrtaken-allocator
-tests/metavec-layout/
-tests/unit-tests/
 tools/alloctypes
 tools/dwarftypes
 tools/extrasyms
