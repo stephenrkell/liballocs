@@ -38,144 +38,9 @@ extern "C" {
 #include <unistd.h> /* for stats printing */
 
 #include "bitops.h"
+#include "bitmap.h"
 
-/* Some bitmap stuff. */
-static inline _Bool bitmap_get(unsigned long *p_bitmap, unsigned long index)
-{
-	return p_bitmap[index / UNSIGNED_LONG_NBITS] & (1ul << (index % UNSIGNED_LONG_NBITS));
-}
-static inline void bitmap_set(unsigned long *p_bitmap, unsigned long index)
-{
-	p_bitmap[index / UNSIGNED_LONG_NBITS] |= (1ul << (index % UNSIGNED_LONG_NBITS));
-}
-static inline void bitmap_clear(unsigned long *p_bitmap, unsigned long index)
-{
-	p_bitmap[index / UNSIGNED_LONG_NBITS] &= ~(1ul << (index % UNSIGNED_LONG_NBITS));
-}
-static inline unsigned long bitmap_rfind_first_set(unsigned long *p_bitmap, unsigned long *p_limit, long start_idx, unsigned long *out_test_bit)
-{
-	unsigned long *p_base = p_bitmap;
-	p_bitmap += start_idx / UNSIGNED_LONG_NBITS;
-	start_idx %= UNSIGNED_LONG_NBITS;
-	// FIXME: the following shows why if we're optimising for rfind,
-	// we should use the *most* significant bit as the *lowest*-indexed position in the word.
-// 	if (*p_bitmap < (1ul<<start_idx))
-// 	{
-// 		/* The word has a value less than the query bit pattern, so
-// 		 * it can't have the query bit or any higher bit set. */
-// 	}
-// 	else
-// 	{
-// 		/* The word has a value greater than or equal to the query bit pattern, so
-// 		 * it may or may not have the query bit set. */
-// 		
-// 	}
-	if (p_bitmap > p_limit) return (unsigned long) -1;
-	while (1)
-	{
-		while (start_idx >= 0)
-		{
-			unsigned long test_bit = 1ul << start_idx;
-			if (*p_bitmap & test_bit)
-			{
-				if (out_test_bit) *out_test_bit = test_bit;
-				return start_idx + (p_bitmap - p_base) * UNSIGNED_LONG_NBITS;
-			}
-			--start_idx;
-		}
-		// now start_idx < 0
-		if (p_bitmap == p_base) break;
-		start_idx = UNSIGNED_LONG_NBITS - 1;
-		--p_bitmap;
-	}
-	return (unsigned long) -1;
-}
-static inline unsigned long bitmap_find_first_set1(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long start_idx, unsigned long *out_test_bit)
-{
-	unsigned long *p_base = p_bitmap;
-	p_bitmap += start_idx / UNSIGNED_LONG_NBITS;
-	start_idx %= UNSIGNED_LONG_NBITS;
-	if (p_bitmap > p_limit) return (unsigned long) -1;
-	while (1)
-	{
-		while (start_idx < UNSIGNED_LONG_NBITS)
-		{
-			unsigned long test_bit = 1ul << start_idx;
-			if (*p_bitmap & test_bit)
-			{
-				if (out_test_bit) *out_test_bit = test_bit;
-				return start_idx + (p_bitmap - p_base) * UNSIGNED_LONG_NBITS;
-			}
-			++start_idx;
-		}
-		// now start_idx < 0
-		++p_bitmap;
-		if (p_bitmap == p_limit) break;
-		start_idx = 0;
-	}
-	return (unsigned long) -1;
-}
-static inline unsigned long bitmap_find_first_set(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long *out_test_bit)
-{
-	unsigned long *p_initial_bitmap;
-			
-	while (*p_bitmap == (unsigned long) 0
-				&& p_bitmap < p_limit) ++p_bitmap;
-	if (p_bitmap == p_limit) return (unsigned long) -1;
-	
-	/* Find the lowest free bit in this bitmap. */
-	unsigned long test_bit = 1;
-	unsigned test_bit_index = 0;
-	// while the test bit is unset...
-	while (!(*p_bitmap & test_bit))
-	{
-		if (__builtin_expect(test_bit != 1ul<<(UNSIGNED_LONG_NBITS - 1), 1))
-		{
-			test_bit <<= 1;
-			++test_bit_index;
-		}
-		else assert(0); // all 1s --> we shouldn't have got here
-	}
-	/* FIXME: thread-safety */
-	unsigned free_index = (p_bitmap - p_initial_bitmap) * UNSIGNED_LONG_NBITS
-			+ test_bit_index;
-	
-	if (out_test_bit) *out_test_bit = test_bit;
-	return free_index;	
-}
-static inline unsigned long bitmap_find_first_clear(unsigned long *p_bitmap, unsigned long *p_limit, unsigned long *out_test_bit)
-{
-	unsigned long *p_initial_bitmap;
-			
-	while (*p_bitmap == (unsigned long) -1
-				&& p_bitmap < p_limit) ++p_bitmap;
-	if (p_bitmap == p_limit) return (unsigned long) -1;
-	
-	/* Find the lowest free bit in this bitmap. */
-	unsigned long test_bit = 1;
-	unsigned test_bit_index = 0;
-	while (*p_bitmap & test_bit)
-	{
-		if (__builtin_expect(test_bit != 1ul<<(UNSIGNED_LONG_NBITS - 1), 1))
-		{
-			test_bit <<= 1;
-			++test_bit_index;
-		}
-		else assert(0); // all 1s --> we shouldn't have got here
-	}
-	/* FIXME: thread-safety */
-	unsigned free_index = (p_bitmap - p_initial_bitmap) * UNSIGNED_LONG_NBITS
-			+ test_bit_index;
-	
-	if (out_test_bit) *out_test_bit = test_bit;
-	return free_index;
-}
-
-INLINE_DECL size_t memtable_mapping_size(
-	unsigned entry_size_in_bytes,
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
-INLINE_DECL size_t INLINE_ATTRS memtable_mapping_size(
+static inline size_t memtable_mapping_size(
 	unsigned entry_size_in_bytes,
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -205,29 +70,7 @@ INLINE_DECL size_t INLINE_ATTRS memtable_mapping_size(
 }
 #define MEMTABLE_MAPPING_SIZE_WITH_TYPE(t, range, addr_begin, addr_end) \
 	memtable_mapping_size(sizeof(t), (range), (addr_begin), (addr_end))
-
-/* Allocate a memtable. */
-INLINE_DECL void *memtable_new(
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
-INLINE_DECL void *memtable_new_at_addr(
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end,
-	const void *placement_addr) INLINE_ATTRS;
-
-INLINE_DECL void *INLINE_ATTRS memtable_new(
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end)
-{
-	return memtable_new_at_addr(entry_size_in_bytes, 
-		entry_coverage_in_bytes,
-		addr_begin, addr_end,
-		NULL);
-}
-INLINE_DECL void *INLINE_ATTRS memtable_new_at_addr(
+static inline void *memtable_new_at_addr(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end,
@@ -240,6 +83,17 @@ INLINE_DECL void *INLINE_ATTRS memtable_new_at_addr(
 		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|
 			(placement_addr ? MAP_FIXED : 0), -1, 0);
 	return ret; /* MAP_FAILED on error */
+}
+/* Allocate a memtable. */
+static inline void *memtable_new(
+	unsigned entry_size_in_bytes, 
+	unsigned entry_coverage_in_bytes,
+	const void *addr_begin, const void *addr_end)
+{
+	return memtable_new_at_addr(entry_size_in_bytes, 
+		entry_coverage_in_bytes,
+		addr_begin, addr_end,
+		NULL);
 }
 #define MEMTABLE_NEW_WITH_TYPE(t, range, addr_begin, addr_end) \
 	(t*) memtable_new(sizeof(t), (range), (addr_begin), (addr_end))
@@ -260,11 +114,7 @@ INLINE_DECL void *INLINE_ATTRS memtable_new_at_addr(
  * so that we can automatically maintain the bitmaps. */
 
 /* Allocate a "page bitmap" for a memtable. */
-INLINE_DECL char *memtable_new_l1_page_bitmap(
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
-INLINE_DECL char *INLINE_ATTRS memtable_new_l1_page_bitmap(
+static inline char *memtable_new_l1_page_bitmap(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -289,11 +139,7 @@ INLINE_DECL char *INLINE_ATTRS memtable_new_l1_page_bitmap(
 	memtable_new_l1_page_bitmap(sizeof(t), (range), (addr_begin), (addr_end))
 
 /* Allocate a "second-order page bitmap" for a memtable. */
-INLINE_DECL char *memtable_new_l2_page_bitmap(
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
-INLINE_DECL char *INLINE_ATTRS memtable_new_l2_page_bitmap(
+static inline char *memtable_new_l2_page_bitmap(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -318,11 +164,7 @@ INLINE_DECL char *INLINE_ATTRS memtable_new_l2_page_bitmap(
 
 /* The "third-order page bitmap" case: don't allocate, just return the size.
  * Will return zero for all but the biggest memtables. */
-INLINE_DECL size_t memtable_l3_page_bitmap_size(
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
-INLINE_DECL size_t INLINE_ATTRS memtable_l3_page_bitmap_size(
+static inline size_t memtable_l3_page_bitmap_size(
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -346,14 +188,7 @@ INLINE_DECL size_t INLINE_ATTRS memtable_l3_page_bitmap_size(
 #endif
 
 /* Get a pointer to the index-th entry. */
-INLINE_DECL void *memtable_index(
-	void *memtable,
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end,
-	unsigned long index
-	) INLINE_ATTRS;
-INLINE_DECL void *INLINE_ATTRS memtable_index(
+static inline void *memtable_index(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -367,14 +202,7 @@ INLINE_DECL void *INLINE_ATTRS memtable_index(
 	((t*) memtable_index((m), sizeof(t), (range), (addr_begin), (addr_end), (index)))
 
 /* Get a pointer to the entry for address addr. */
-INLINE_DECL void *memtable_addr(
-	void *memtable,
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end,
-	const void *addr
-	) INLINE_ATTRS;
-INLINE_DECL void *INLINE_ATTRS memtable_addr(
+static inline void *memtable_addr(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -391,14 +219,7 @@ INLINE_DECL void *INLINE_ATTRS memtable_addr(
 
 /* The inverse of memtable_addr: given a pointer into the table, get the pointer
  * to the base of the region to which the pointed-at entry corresponds. */
-INLINE_DECL void *memtable_entry_range_base(
-	void *memtable,
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end, 
-	const void *memtable_entry_ptr
-) INLINE_ATTRS;
-INLINE_DECL void *INLINE_ATTRS memtable_entry_range_base(
+static inline void *memtable_entry_range_base(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -421,14 +242,7 @@ INLINE_DECL void *INLINE_ATTRS memtable_entry_range_base(
 
 /* For an address, get the base address of the region that it belongs to,
  * where a region is the memory covered by exactly one memtable entry. */
-INLINE_DECL void *memtable_addr_range_base(
-	void *memtable,
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end, 
-	const void *addr
-) INLINE_ATTRS;
-INLINE_DECL void *INLINE_ATTRS memtable_addr_range_base(
+static inline void *memtable_addr_range_base(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -451,13 +265,7 @@ INLINE_DECL void *INLINE_ATTRS memtable_addr_range_base(
 		(addr))
 
 /* Like above, but get the offset. */
-INLINE_DECL ptrdiff_t memtable_addr_range_offset(
-	void *memtable,
-	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end, 
-	const void *addr) INLINE_ATTRS;
-INLINE_DECL ptrdiff_t INLINE_ATTRS memtable_addr_range_offset(
+static inline ptrdiff_t memtable_addr_range_offset(
 	void *memtable,
 	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
@@ -473,11 +281,7 @@ INLINE_DECL ptrdiff_t INLINE_ATTRS memtable_addr_range_offset(
 		(addr))
 
 /* Delete a memtable. */
-INLINE_DECL int memtable_free(void *memtable, 
- 	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
-INLINE_DECL int INLINE_ATTRS memtable_free(void *memtable, 
+static inline int memtable_free(void *memtable, 
  	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
@@ -491,11 +295,7 @@ INLINE_DECL int INLINE_ATTRS memtable_free(void *memtable,
 
 /* Print memory usage statistics for this memtable. We get 
  * these by reading from /proc/$PID/smaps */
-INLINE_DECL void print_memtable_stats(void *memtable, 
- 	unsigned entry_size_in_bytes, 
-	unsigned entry_coverage_in_bytes,
-	const void *addr_begin, const void *addr_end) INLINE_ATTRS;
-INLINE_DECL void INLINE_ATTRS print_memtable_stats(void *memtable, 
+static inline void print_memtable_stats(void *memtable, 
  	unsigned entry_size_in_bytes, 
 	unsigned entry_coverage_in_bytes,
 	const void *addr_begin, const void *addr_end)
