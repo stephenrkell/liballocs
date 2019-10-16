@@ -186,7 +186,14 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	int ret_meta = dl_for_one_object_phdrs(handle,
 		load_and_init_all_metadata_for_one_object, &meta_handle);
 	if (ret_meta == 0) assert(meta_handle);
-
+	/* Look up the mapping sequence for this file. Note that
+	 * although a file is notionally sparse, modern glibc's ld.so
+	 * does ensure that it is spanned by a contiguous sequence of
+	 * memory mappings, by first mapping a no-permissions chunk
+	 * and then mprotecting various bits. FIXME: what about other
+	 * ld.sos which may not do it this way? It would be bad if
+	 * files could interleave with one another... we should
+	 * probably just not support that case. */
 	struct big_allocation *containing_mapping_bigalloc = __lookup_bigalloc(
 		(void*) l->l_addr,
 		&__mmap_allocator, NULL);
