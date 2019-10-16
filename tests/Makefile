@@ -28,7 +28,7 @@ ifeq ($(CC),)
 $(error Could not find allocscc)
 endif
 
-cases := $(sort $(wildcard [-a-z]*))
+cases := $(filter-out unit-tests,$(sort $(wildcard [-a-z]*)))
 
 LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
 export LIBALLOCS_BASE
@@ -163,3 +163,7 @@ clean: # (delete anything whose name is a prefix of a .c file's and doesn't cont
 	find -name '*.cil.*' -o -name '*.i' -o -name '*.o' -o \
 	     -name '*.s' -o -name '*.allocs' -o -name '*.so' -o \
 	     -name '*.allocstubs.c' -o -name '*.fixuplog' | xargs rm -f
+
+.PHONY: unit-tests
+unit-tests:
+	$(MAKE) -C unit-tests
