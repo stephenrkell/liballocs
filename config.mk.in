@@ -1,0 +1,5 @@
+LIBMALLOCHOOKS := @libmallochooks@
+LIBSYSTRAP := @libsystrap@
+LIBRUNT := @librunt@
+LIBDLBIND := @libdlbind@
+

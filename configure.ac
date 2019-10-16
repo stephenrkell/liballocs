@@ -160,5 +160,5 @@ AC_SUBST([libdlbind], [$ac_libdlbind])
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])
 AM_CONDITIONAL(USE_REAL_LIBUNWIND, [test "x$enable_real-libunwind" = "xyes"])
 
-AC_CONFIG_FILES([Makefile liballocs.pc])
+AC_CONFIG_FILES([Makefile liballocs.pc config.mk])
 AC_OUTPUT
