@@ -114,9 +114,9 @@ int main(int argc, char **argv)
 
 				if (equiv)
 				{
-					cout << mangle_string(equiv[0]) 
+					cout << allocs::tool::mangle_string(equiv[0]) 
 						<< "\t" 
-						<< mangle_string(i.as_a<base_type_die>()->get_canonical_name())
+						<< allocs::tool::mangle_string(i.as_a<base_type_die>()->get_canonical_name())
 						<< endl;
 				}
 

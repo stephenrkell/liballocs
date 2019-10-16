@@ -1,7 +1,3 @@
-/* This is a simple dwarfpp program which generates a C file
- * recording data on a uniqued set of data types  allocated in a given executable.
- */
- 
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -9,7 +5,9 @@
 #include <string>
 #include <cctype>
 #include <memory>
+#include <utility>
 #include <boost/algorithm/string.hpp>
+#include <boost/optional.hpp>
 #include <boost/regex.hpp>
 // #include <regex> // broken in GNU libstdc++!
 //#include <boost/filesystem.hpp>
@@ -17,29 +15,22 @@
 #include <srk31/ordinal.hpp>
 #include <fileno.hpp>
 
-#include "helpers.hpp"
+#include "allocsites-info.hpp"
 
 using std::cin;
 using std::cout;
 using std::cerr;
+using std::endl;
 using std::map;
 using std::multimap;
 using std::ios;
 using std::ifstream;
 using std::unique_ptr;
+using std::pair;
+using std::make_pair;
+using std::vector;
 using boost::optional;
 using std::ostringstream;
-using namespace dwarf;
-//using boost::filesystem::path;
-using dwarf::core::root_die;
-using dwarf::core::iterator_base;
-using dwarf::core::iterator_df;
-using dwarf::core::iterator_sibs;
-using dwarf::core::type_die;
-using dwarf::core::subprogram_die;
-using dwarf::core::compile_unit_die;
-using dwarf::core::pointer_type_die;
-using dwarf::tool::abstract_c_compiler;
 
 // regex usings
 using boost::regex;
@@ -48,6 +39,8 @@ using boost::smatch;
 using boost::regex_constants::egrep;
 using boost::match_default;
 using boost::format_all;
+
+using namespace allocs::tool;
 
 int main(int argc, char **argv)
 {
@@ -86,30 +79,21 @@ int main(int argc, char **argv)
 		
 		make_allocsites_relation(allocsites_relation, allocsites_to_add, types_by_codeless_name, *p_root);
 	}	
-	
-	// FIXME: make this configurable. Right now we don't need it -- dumptypes has done it
-#if 0
-	cout << "struct allocsite_entry\n\
-{ \n\
-	void *next; \n\
-	void *prev; \n\
-	void *allocsite; \n\
-	struct uniqtype *uniqtype; \n\
-};\n";
-#endif
 
-	// extern-declare the uniqtypes
+	cout << "#include \"allocmeta-defs.h\"\n\n";
+
+	// extern-declare the uniqtypes as weak! we might still want typeless alloc site info
 	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
 	{
 		if (i_site->second.second /* declare as array0 */)
 		{
 			pair<string, string> array_name =
 				make_pair(string(""), string("__ARR0_") + i_site->second.first.second);
-			cout << "extern struct uniqtype " << mangle_typename(array_name) << ";" << endl;
+			cout << "extern struct uniqtype " << mangle_typename(array_name) << " __attribute__((weak));" << endl;
 		}
 		else
 		{
-			cout << "extern struct uniqtype " << mangle_typename(i_site->second.first) << ";" << endl;
+			cout << "extern struct uniqtype " << mangle_typename(i_site->second.first) << " __attribute__((weak));" << endl;
 		}
 	}
 
@@ -120,8 +104,7 @@ int main(int argc, char **argv)
 		
 		cout << "\n\t/* allocsite info for " << i_site->first.first << "+"
 			<< std::hex << "0x" << i_site->first.second << std::dec << " */";
-		cout << "\n\t{ (void*)0, (void*)0, "
-			<< "(char*) " << "0" // will fix up at load time
+		cout << "\n\t{ (char*) " << "0" // will fix up at load time
 			<< " + 0x" << std::hex << i_site->first.second << std::dec << "UL, " 
 			<< "&";
 		
@@ -139,7 +122,7 @@ int main(int argc, char **argv)
 	}
 	// output a null terminator entry
 	if (allocsites_relation.size() > 0) cout << ",";
-	cout << "\n\t{ (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 }";
+	cout << "\n\t{ (void*)0, (struct uniqtype *)0 }";
 	
 	// close the list
 	cout << "\n};\n";

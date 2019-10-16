@@ -29,7 +29,7 @@
 #error "Could not find a gelf.h"
 #endif
 
-#include "helpers.hpp"
+#include "stickyroot.hpp"
 #include "uniqtypes.hpp"
 
 using std::cin;
@@ -62,6 +62,7 @@ using dwarf::core::type_chain_die;
 using dwarf::core::Fde;
 using dwarf::core::Cie;
 using dwarf::core::FrameSection;
+using dwarf::spec::opt;
 
 using namespace dwarf::lib;
 
@@ -73,6 +74,8 @@ using boost::regex_constants::egrep;
 using boost::match_default;
 using boost::format_all;
 using boost::icl::interval_map;
+
+using namespace allocs::tool;
 
 template<typename _Key, typename _Compare = std::less<_Key>,
 	   typename _Alloc = std::allocator<_Key> >

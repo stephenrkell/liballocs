@@ -7,21 +7,28 @@ nullstring :=
 space := $(nullstring) # end
 
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
+LIBALLOCS ?= $(realpath $(dir $(THIS_MAKEFILE))/..)
 
 META_BASE ?= /usr/lib/meta
 $(warning META_BASE is $(META_BASE))
 
-UNIQTYPES ?= $(dir $(THIS_MAKEFILE))/uniqtypes
-DUMPTYPES ?= $(dir $(THIS_MAKEFILE))/dumptypes
+DWARFTYPES ?= $(dir $(THIS_MAKEFILE))/dwarftypes
+FRAMETYPES ?= $(dir $(THIS_MAKEFILE))/frametypes
 ALLOCSITES ?= $(dir $(THIS_MAKEFILE))/allocsites
+ALLOCSITES_BLOOM ?= $(dir $(THIS_MAKEFILE))/allocsites-bloom
+ALLOCTYPES ?= $(dir $(THIS_MAKEFILE))/alloctypes
+
 LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
 OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
 MERGE_ALLOCS ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh
 GATHER_SRCALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-srcallocs.sh
+
 OBJDUMPMEMACC ?= $(dir $(THIS_MAKEFILE))/objdumpmemacc
 MERGE_MEMACC ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh # FIXME: change name
 GATHER_SRCMEMACC ?= $(dir $(THIS_MAKEFILE))/gather-srcmemacc.sh
+
 STD_CC ?= gcc
+CFLAGS += -I$(LIBALLOCS)/include
 
 # By default, remake everything we have already made,
 # but don't make new .allocsites files.
@@ -66,20 +73,85 @@ $(META_BASE)/%.memacc: $(META_BASE)/%.objmemacc $(META_BASE)/%.srcmemacc
 	( $(MERGE_MEMACC) $+ 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
 	test -e "$@"
 
-$(META_BASE)/%-meta.c: $(META_BASE)/%.allocs /% # pipe err through zip, so need to swap stdout and stderr
-	( \
-	  ( \
-	     ( $(DUMPTYPES) "/$*" && \
-	       $(ALLOCSITES) < "$<" \
-	      ) 3>&2 2>&1 1>&3 \
-	  ) 2>"$@" || ( rm -f "$@"; false ) \
-	) | gzip >"$@".log.gz
-	test -e "$@"
-
+METADATA_KINDS ?= roottypes dwarftypes alloctypes frametypes allocsites extrasyms \
+  # sorted-meta starts-bitmaps allocsites-bloom 
 # can't use builtin .o rule in case CC is not gcc (section flags injection attack
 # using "... comdat# ..." doesn't work except on gcc). (FIXME: use configure-time
 # adaptation found in glibc's libc-symbols.h?)
-$(META_BASE)/%-meta.o: $(META_BASE)/%-meta.c
-	$(STD_CC) $(CFLAGS) $(CPPFLAGS) -c -o "$@" "$<"
-$(META_BASE)/%-meta.so: $(META_BASE)/%-meta.o
-	$(CC) -shared -Wl,--hash-style=both -o "$@" "$<"
+meta_sources =
+# It's not the existence of a file that we care about; it's the inclusion
+# of a file in the link. But it's OK -- make let us incrementally build
+# the list of inputs across a series of rules.
+ifneq ($(filter dwarftypes,$(METADATA_KINDS)),)
+$(info Generating dwarftypes)
+meta_sources += $(META_BASE)/$(1)-roottypes.c $(META_BASE)/$(1)-dwarftypes.c
+endif
+ifneq ($(filter alloctypes,$(METADATA_KINDS)),)
+$(info Generating alloctypes)
+meta_sources += $(META_BASE)/$(1)-alloctypes.c
+endif
+ifneq ($(filter allocsites,$(METADATA_KINDS)),)
+$(info Generating allocsites)
+meta_sources += $(META_BASE)/$(1)-allocsites.c
+endif
+ifneq ($(filter allocsites-bloom,$(METADATA_KINDS)),)
+$(info Generating allocsites-bloom)
+meta_sources += $(META_BASE)/$(1)-allocsites-bloom.c
+endif
+
+# for debugging, try: @echo all dependencies: $+
+$(META_BASE)/%-meta.so: /% $(call meta_sources,%)
+	$(STD_CC) -I$(dir $(THIS_MAKEFILE))/../include -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+)
+
+SWAP_STDOUT_STDERR := 3>&2 2>&1 1>&3
+
+# We have a new taxonomy of meta-information, as follows.
+# uniqtypes that we always generate (void, existential...)
+.PRECIOUS: $(META_BASE)/%-roottypes.c
+$(META_BASE)/%-roottypes.c:
+	cat $(dir $(THIS_MAKEFILE))/roottypes.c >$@
+# real uniqtypes
+.PRECIOUS: $(META_BASE)/%-dwarftypes.c
+$(META_BASE)/%-dwarftypes.c: /%
+	errs=$$( ( $(DWARFTYPES) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
+	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+# synthetic heap uniqtypes: depends on real uniqtypes
+.PRECIOUS: $(META_BASE)/%-alloctypes.c
+$(META_BASE)/%-alloctypes.c: /% $(META_BASE)/%.allocs
+	errs=$$( ( $(ALLOCTYPES) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
+	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+# frame uniqtypes: depends on real uniqtypes
+.PRECIOUS: $(META_BASE)/%-frametypes.c
+$(META_BASE)/%-frametypes.c: /%
+	errs=$$( ( $(FRAMETYPES) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
+	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+# heap allocsites: depends on synthetic heap types
+.PRECIOUS: $(META_BASE)/%-allocsites.c
+$(META_BASE)/%-allocsites.c: $(META_BASE)/%.allocs
+	errs=$$( ( $(ALLOCSITES) < $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
+	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+# heap allocsites bloom filter: depends on heap allocsites
+.PRECIOUS: $(META_BASE)/%-allocsites-bloom.c
+$(META_BASE)/%-allocsites-bloom.c: $(META_BASE)/%.allocs
+	errs=$$( ( $(ALLOCSITES_BLOOM) < $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
+	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+# file extrasyms: does *not* depend on anything (just generates fake syms from debug info)
+.PRECIOUS: $(META_BASE)/%-extrasyms.c
+$(META_BASE)/%-extrasyms.c: /%
+	errs=$$( ( $(EXTRASYMS) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
+	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+# file sorted meta-vector: type info is optional -- we might want to use this from librunt
+# -- so just emit weak references to the types? and/or use conditional compilation?
+# file per-segment starts bitmaps are now included here
+# file sorted meta-vector really with type info: depends on real uniqtypes
+.PRECIOUS: $(META_BASE)/%-sorted-meta.c
+$(META_BASE)/%-sorted-meta.c: /%
+	errs=$$( ( $(METAVECTOR) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
+	status=$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+# Given this complexity, perhaps we should
+# 1. never output struct definitions in-line. always include them from a header.
+#     -- the header can use #ifdef-guards to make repeated includes harmless
+# 2. try to save running time / code by making multiple kinds of metadata
+#     generable from a single tool invocation?
+#    - e.g.  build a single program with command-line options --types --synthetic-heap --frame --heap-alloc-sites --heap-alloc-bloom --file-extrasyms --file-meta-vector --file-starts-bitmaps
+#    - allow it to be $0-symlinked as tools which simply generate a single kind of meta-info

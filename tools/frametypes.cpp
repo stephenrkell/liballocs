@@ -23,7 +23,7 @@
 #include <dwarfpp/regs.hpp>
 #include <fileno.hpp>
 
-#include "helpers.hpp"
+#include "stickyroot.hpp"
 #include "uniqtypes.hpp"
 
 using std::cin;
@@ -64,6 +64,8 @@ using boost::regex_constants::egrep;
 using boost::match_default;
 using boost::format_all;
 
+using namespace allocs::tool;
+
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval);
 
@@ -85,17 +87,6 @@ using dwarf::lib::Dwarf_Off;
 using dwarf::lib::Dwarf_Addr;
 using dwarf::lib::Dwarf_Signed;
 using dwarf::lib::Dwarf_Unsigned;
-
-template <typename Second>
-struct compare_first_iter_offset
-{
-	bool operator()(const pair< iterator_df<with_dynamic_location_die>, Second >& x,
-		            const pair< iterator_df<with_dynamic_location_die>, Second >& y)
-		const
-	{
-		return x.first.offset_here() < y.first.offset_here();
-	}
-};
 
 struct compare_first_signed_second_offset
 {
@@ -220,9 +211,9 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 	
-	if (getenv("DUMPTYPES_DEBUG"))
+	if (getenv("FRAMETYPES_DEBUG"))
 	{
-		debug_out = atoi(getenv("DUMPTYPES_DEBUG"));
+		debug_out = atoi(getenv("FRAMETYPES_DEBUG"));
 	}
 	
 	using core::root_die;
@@ -231,25 +222,6 @@ int main(int argc, char **argv)
 	if (!p_root) { std::cerr << "Error opening file" << std::endl; return 1; }
 	sticky_root_die& root = *p_root;
 	assert(&root.get_frame_section());
-	
-	/* Do we have an allocsites file for this object? If so, we incorporate its 
-	 * synthetic data types. */
-	auto allocsites = read_allocsites_for_binary(argv[1]);
-	allocsites_relation_t allocsites_relation;
-	multimap<string, iterator_df<type_die> > types_by_codeless_name;
-	//set< pair<string, string> > to_generate_array0;
-	if (allocsites)
-	{
-		/* rewrite the allocsites we were passed */
-		merge_and_rewrite_synthetic_data_types(root, *allocsites);
-	}
-	get_types_by_codeless_uniqtype_name(types_by_codeless_name,
-		root.begin(), root.end());
-	if (allocsites)
-	{
-		make_allocsites_relation(allocsites_relation, *allocsites, types_by_codeless_name, root);
-		cerr << "Allocsites relation contains " << allocsites_relation.size() << " data types." << endl;
-	}
 
 	struct subprogram_key : public pair< pair<string, string>, string > // ordering for free
 	{
@@ -264,104 +236,6 @@ int main(int argc, char **argv)
 
 	master_relation_t master_relation;
 	make_exhaustive_master_relation(master_relation, root.begin(), root.end());
-
-	cerr << "Master relation contains " << master_relation.size() << " data types." << endl;
-	/* For each type we output a record:
-	 * - a pointer to its name;
-	 * - a length prefix;
-	 * - a list of <offset, included-type-record ptr> pairs.
-	 */
-
-	// write a forward declaration for every uniqtype we need
-	set<string> names_emitted;
-	/* As a pre-pass, remember any ARR0 names we need. These need special handling,
-	 * as flexible arrays with their make_precise members set. */
-	map<string, pair<string, string> > arr0_needed_by_allocsites;
-	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
-	{
-		auto objname = i_site->second.first.first;
-		auto file_addr = i_site->second.first.second;
-		string element_name_used_code = i_site->second.first.first;
-		string element_name_used_ident = i_site->second.first.second;
-		bool declare_as_array0 = i_site->second.second;
-		
-		if (declare_as_array0)
-		{
-			string element_mangled_name = mangle_typename(make_pair(element_name_used_code, element_name_used_ident));
-			cout << "/* Allocation site type needed: ARR0 of " 
-				<< element_mangled_name
-				<< " */" << endl;
-			
-			string codeless_array_name = string("__ARR0_") + element_name_used_ident;
-			string mangled_codeless_array_name
-			 = mangle_typename(make_pair(string(""), codeless_array_name));
-			arr0_needed_by_allocsites.insert(
-				make_pair(mangled_codeless_array_name, 
-					make_pair(element_mangled_name, codeless_array_name)
-				)
-			);
-			
-			// /* forward-declare it right now; we'll define it after everything else */
-			// cout << "extern struct uniqtype " << mangled_codeless_array_name << ";" << endl;
-			// /* pretend we've already emitted it... */
-			// names_emitted.insert(mangled_codeless_array_name);
-		}
-	}
-	map<string, set< iterator_df<type_die> > > types_by_name;
-	
-	write_master_relation(master_relation, cout, cerr, true /* emit_void */, true, 
-		names_emitted, types_by_name, /* emit_codeless_alises */ true);
-	
-	// now write those pesky ARR0 ones -- any that we didn't emit earlier
-	for (auto i_mangled_name = arr0_needed_by_allocsites.begin();
-		i_mangled_name != arr0_needed_by_allocsites.end();
-		++i_mangled_name)
-	{
-		const string& mangled_codeless_array_name = i_mangled_name->first;
-		const string& element_mangled_name = i_mangled_name->second.first;
-		const string& codeless_array_name = i_mangled_name->second.second;
-		if (names_emitted.find(mangled_codeless_array_name) == names_emitted.end())
-		{
-			// we were intending to forestall the emission during the master relation
-			// FIXME: there might be two cases here! want ARR0 and FLEXARR?
-			// If we introduce FLEXARR, be sure to update symname-funcs.sh / translate_symnames
-			// assert(names_emitted.find(mangled_array_name) == names_emitted.end());
-			// This OBVIOUSLY doesn't work because we added to names_emitted!
-			// Let the multiple definition error get us.
-			// compute and print destination name
-			write_uniqtype_open_flex_array(cout,
-				mangled_codeless_array_name,
-				/* array_codeless_name.second */ i_mangled_name->second.second
-			);
-			write_uniqtype_related_array_element_type(cout,
-				i_mangled_name->second.first // i.e. the element type
-			);
-
-		write_uniqtype_close(cout, mangled_codeless_array_name);
-		}
-	}
-	
-	cerr << "Allocsites relation has " << allocsites_relation.size() << " members." << endl;
-	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
-	{
-		auto objname = i_site->second.first.first;
-		auto file_addr = i_site->second.first.second;
-		string name_used_code = i_site->second.first.first;
-		string name_used_ident = i_site->second.first.second;
-		bool declare_as_array0 = i_site->second.second;
-		
-		if (!declare_as_array0)
-		{
-			cout << "/* Allocation site type not needing ARR0 type: " 
-				<< i_site->second.first.second
-				<< " */" << endl;
-		} else cout << "/* We should have emitted a type of this name earlier: "
-			<< name_used_ident << " */" << endl;
-	}
-	
-	
-	// now output for the subprograms
-	cout << "/* Begin stack frame types. */" << endl;
 	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
 	{
 		if (i.is_a<subprogram_die>())
@@ -453,7 +327,9 @@ int main(int argc, char **argv)
 	map< iterator_df<subprogram_die>, unsigned > frame_offsets_by_subprogram;
 	
 	using dwarf::core::with_static_location_die;
-	
+	cout << "#include \"allocmeta-defs.h\"\n";
+	cout << "#include \"uniqtype-defs.h\"\n\n";
+
 	for (auto i_i_subp = subprograms_list.begin(); i_i_subp != subprograms_list.end(); ++i_i_subp)
 	{
 		auto i_subp = i_i_subp->second;
@@ -477,7 +353,7 @@ int main(int argc, char **argv)
 				auto symtab_etc = root.get_symtab();
 				auto &symtab = symtab_etc.first.first;
 				auto &strtab = symtab_etc.first.second;
-				unsigned &n = symtab_etc.second;
+				unsigned &n = symtab_etc.second.second;
 				
 				for (auto p = symtab; p < symtab + n; ++p)
 				{
@@ -1052,8 +928,6 @@ int main(int argc, char **argv)
 				// FIXME: also want to report holes at the start or end of the frame
 
 				string mangled_name = mangle_typename(canonical_key_for_type(el_type));
-				assert(names_emitted.find(mangled_name) != names_emitted.end());
-				
 				write_uniqtype_related_contained_member_type(cout,
 					/* is_first */ i_by_off == i_frame_int->second.begin(),
 					offset_after_fixup,
@@ -1083,29 +957,9 @@ int main(int argc, char **argv)
 // 		}
 	} // end for subprogram
 	
-	/* Now write frame_vaddr allocsites. */
-	cout << "struct allocsite_entry\n\
-{ \n\
-	void *next; \n\
-	void *prev; \n\
-	void *allocsite; \n\
-	struct uniqtype *uniqtype; \n\
-};\n";
-	cout << "struct frame_allocsite_entry\n\
-{ \n\
-	unsigned offset_from_frame_base;\n\
-	struct allocsite_entry entry;\n\
-};\n";
-	cout << "struct static_allocsite_entry\n\
-{ \n\
-	const char *name;\n\
-	struct allocsite_entry entry;\n\
-};\n";
-	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
-
 	unsigned total_emitted = 0;
 	
-	/* NOTE: our allocsite chaining trick in liballocs requires that our allocsites 
+	/* NOTE: our allocsite chaining trick in liballocs requires/d that our allocsites 
 	 * are sorted in vaddr order, so that adjacent allocsites in the memtable buckets
 	 * are adjacent in the table. So we sort them here. */
 	set< pair< boost::icl::discrete_interval<Dwarf_Addr>, iterator_df<subprogram_die> > > sorted_intervals;
@@ -1120,7 +974,7 @@ int main(int argc, char **argv)
 			sorted_intervals.insert(make_pair(i_int->first, i_subp_intervals->first));
 		}
 	}
-	
+	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
 	for (auto i_pair = sorted_intervals.begin(); i_pair != sorted_intervals.end(); ++i_pair)
 	{
 		unsigned offset_from_frame_base = frame_offsets_by_subprogram[i_pair->second];
@@ -1139,125 +993,10 @@ int main(int argc, char **argv)
 		++total_emitted;
 	}
 	// output a null terminator entry
-	cout << "\n\t{ 0, { (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 } }";
+	cout << "\n\t{ /* offset from base */ 0, { /* site */ (void*)0, /* type */ (struct uniqtype *)0 } }";
 	
 	// close the list
 	cout << "\n};\n";
-
-	/* Now write static allocsites. As above, we also have to sort them. */
-	set<pair< Dwarf_Addr, iterator_df<program_element_die> > > sorted_statics;
-
-	for (auto i = root.begin(); i != root.end(); ++i)
-	{
-		cerr << i.summary() << std::endl;
-		boost::icl::interval_map<Dwarf_Addr, Dwarf_Unsigned> intervals;
-		if (i.tag_here() == DW_TAG_variable
-			&& i.has_attribute_here(DW_AT_location))
-			
-		{
-			iterator_df<variable_die> i_var = i.as_a<variable_die>();
-			if (!i_var->has_static_storage())
-			{
-				// cerr << "Skipping non-static var " << i.summary() << std::endl;
-				continue;
-			}
-			/* Just because we have a location doesn't mean we have a complete
-			 * type. In general it's buggy DWARF that lacks a complete type in
-			 * such cases, but I've seen it. So guard against it. */
-			auto maybe_t = i_var->find_type();
-			if (!maybe_t)
-			{
-				std::cerr << "Warning: DIE at " << i_var.offset_here() << " has location "
-					<< "but no type" << std::endl;
-				continue;
-			}
-			if (!maybe_t->calculate_byte_size())
-			{
-				std::cerr << "Warning: DIE at " << i_var.offset_here() << " has location "
-					<< "but incomplete type: " << maybe_t << std::endl;
-				continue;
-			}
-			try
-			{
-				intervals = 
-					i_var->file_relative_intervals(
-						root, 
-						0 /* sym_binding_t (*sym_resolve)(const std::string& sym, void *arg) */, 
-						0 /* arg */);
-			}
-			catch (dwarf::lib::No_entry)
-			{
-				// this happens if we don't have a real location -- continue
-				continue;
-			}
-		}
-		else if (i.is_a<subprogram_die>())
-		{
-			try
-			{
-				intervals = 
-					i.as_a<subprogram_die>()->file_relative_intervals(
-						root, 
-						0 /* sym_binding_t (*sym_resolve)(const std::string& sym, void *arg) */, 
-						0 /* arg */);
-			}
-			catch (dwarf::lib::No_entry)
-			{
-				// this happens if we don't have a real location -- continue
-				continue;
-			}
-		}
-		if (intervals.size() == 0)
-		{
-			// this happens if we don't have a real location -- continue
-			continue;
-		}
-
-		// calculate its file-relative addr
-		Dwarf_Off addr = intervals.begin()->first.lower();
-
-		sorted_statics.insert(make_pair(addr, i.as_a<program_element_die>()));
-	}
-	
-	cout << "struct static_allocsite_entry statics[] = {" << endl;
-	
-	for (auto i_var_pair = sorted_statics.begin(); i_var_pair != sorted_statics.end(); ++i_var_pair)
-	{
-		auto addr = i_var_pair->first;
-		auto& i_var = i_var_pair->second;
-		
-		/* Addr 0 is problematic. It generally refers to thinks that aren't really 
-		 * there, like weak symbols (that somehow have debug info) or __evoke_link_warning_*
-		 * things. But it could also be a legitimate vaddr. Hmm. Well, skip it for now.
-		 * If we leave it, the addr lookup function becomes ambiguous if there are many
-		 * allocs at address zero, and this confuses us (e.g. our assertion after chaining
-		 * allocsites). FIXME: better to filter out based on the *type* of the thing? */
-		if (addr == 0) continue;
-
-		ostringstream anon_name; anon_name << "0x" << std::hex << i_var.offset_here();
-
-		cout << "\n\t/* static alloc record for object "
-			 << (i_var->find_name() ? *i_var->find_name() : ("anonymous, DIE " + anon_name.str())) 
-			 << " at vaddr " << std::hex << "0x" << addr << std::dec << " */";
-		ostringstream name_token;
-		if (i_var->find_name()) name_token << "\"" << cxxgen::escape(*i_var->find_name()) << "\"";
-		else name_token << "(void*)0";
-		cout << "\n\t{ " << name_token.str() << ","
-			<< "\n\t  { (void*)0, (void*)0, "
-			<< "(char*) " << "0" // will fix up at load time
-			<< " + " << addr << "UL, " 
-			<< "&" << mangle_typename(canonical_key_for_type(
-				i_var.is_a<subprogram_die>() ? i_var.as_a<type_die>() : i_var.as_a<variable_die>()->find_type()))
-			<< " }\n\t}";
-		cout << ",";
-	}
-
-	// output a null terminator entry
-	cout << "\n\t{ (void*)0, { (void*)0, (void*)0, (void*)0, (struct uniqtype *)0 } }";
-	
-	// close the list
-	cout << "\n};\n";
-
 
 	// success! 
 	return 0;

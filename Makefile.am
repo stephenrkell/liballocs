@@ -25,11 +25,11 @@ pkgconfig_DATA = liballocs.pc
 liballocs_includedir = $(includedir)/liballocs
 liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsmt.h include/vas.h
 
-bin_PROGRAMS = tools/dumptypes tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles
+bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles
 #tools/objdumpallocs-llvm
 lib_LIBRARIES = tools/liballocstool.a
 
-tools_liballocstool_a_SOURCES = tools/helpers.cpp tools/uniqtypes.cpp
+tools_liballocstool_a_SOURCES = tools/stickyroot.cpp tools/uniqtypes.cpp tools/allocsites-info.cpp
 
 LIBELF ?= -lelf
 export LIBELF
@@ -42,9 +42,21 @@ TOOLS_CXXFLAGS := $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)/include
 
 tools_liballocstool_a_CXXFLAGS = $(TOOLS_CXXFLAGS)
 
-tools_dumptypes_SOURCES = tools/dumptypes.cpp
-tools_dumptypes_LDADD = $(TOOLS_LDADD)
-tools_dumptypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_dwarftypes_SOURCES = tools/dwarftypes.cpp
+tools_dwarftypes_LDADD = $(TOOLS_LDADD)
+tools_dwarftypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_frametypes_SOURCES = tools/frametypes.cpp
+tools_frametypes_LDADD = $(TOOLS_LDADD)
+tools_frametypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_extrasyms_SOURCES = tools/extrasyms.cpp
+tools_extrasyms_LDADD = $(TOOLS_LDADD)
+tools_extrasyms_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_metavector_SOURCES = tools/metavector.cpp
+tools_metavector_LDADD = $(TOOLS_LDADD)
+tools_metavector_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_alloctypes_SOURCES = tools/alloctypes.cpp
+tools_alloctypes_LDADD = $(TOOLS_LDADD)
+tools_alloctypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_dumpptrs_SOURCES = tools/dumpptrs.cpp
 tools_dumpptrs_LDADD = $(TOOLS_LDADD)
 tools_dumpptrs_CXXFLAGS = $(TOOLS_CXXFLAGS)

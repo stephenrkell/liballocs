@@ -302,7 +302,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             baseDir = "/usr/lib/meta"
         if os.path.exists(os.path.realpath(outputFile)):
             targetNames = [baseDir + os.path.realpath(outputFile) + ext \
-                for ext in [".allocs", "-meta.c", "-meta.so"]]
+                for ext in [".allocs", "-meta.so"]]
             errfilename = baseDir + os.path.realpath(outputFile) + ".makelog"
 
             ret2 = 42

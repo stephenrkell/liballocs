@@ -10,7 +10,7 @@
 #include <srk31/indenting_ostream.hpp>
 #include <dwarfidl/dwarf_interface_walk.hpp>
 #include <srk31/algorithm.hpp>
-#include "helpers.hpp"
+#include "stickyroot.hpp"
 #include "uniqtypes.hpp"
 
 using namespace srk31;
@@ -42,6 +42,9 @@ using dwarf::core::type_set;
 using dwarf::core::subprogram_die;
 using dwarf::tool::gather_interface_dies;
 using dwarf::core::iterator_df;
+using dwarf::spec::opt;
+
+using namespace allocs::tool;
 
 int main(int argc, char **argv)
 {

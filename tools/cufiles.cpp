@@ -10,44 +10,23 @@
 #include <cctype>
 #include <memory>
 #include <boost/algorithm/string.hpp>
-#include <boost/regex.hpp>
-// #include <regex> // broken in GNU libstdc++!
-//#include <boost/filesystem.hpp>
 #include <srk31/algorithm.hpp>
 #include <srk31/ordinal.hpp>
 #include <fileno.hpp>
-
-#include "helpers.hpp"
+#include <dwarfpp/lib.hpp>
 
 using std::cin;
 using std::cout;
 using std::cerr;
 using std::map;
-using std::multimap;
-using std::ios;
+using std::string;
 using std::ifstream;
-using std::unique_ptr;
-using boost::optional;
 using std::ostringstream;
-using namespace dwarf;
-//using boost::filesystem::path;
-using dwarf::core::root_die;
-using dwarf::core::iterator_base;
-using dwarf::core::iterator_df;
-using dwarf::core::iterator_sibs;
-using dwarf::core::type_die;
-using dwarf::core::subprogram_die;
-using dwarf::core::compile_unit_die;
-using dwarf::core::pointer_type_die;
-using dwarf::tool::abstract_c_compiler;
 
-// regex usings
-using boost::regex;
-using boost::regex_match;
-using boost::smatch;
-using boost::regex_constants::egrep;
-using boost::match_default;
-using boost::format_all;
+using namespace dwarf;
+using dwarf::core::root_die;
+using dwarf::core::iterator_sibs;
+using dwarf::core::compile_unit_die;
 
 int debug_level;
 int main(int argc, char **argv)

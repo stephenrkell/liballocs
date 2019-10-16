@@ -30,6 +30,9 @@
 #include <utility> /* for pair */
 //#include <experimental/optional>
 #include <boost/optional.hpp>
+extern "C" {
+#include <link.h>
+}
 #include "uniqtypes.hpp"
 #include "relf.h" /* to get our own binary's realpath -- bit of a HACK */
 
@@ -42,6 +45,8 @@ using std::pair;
 using std::make_pair;
 // using std::experimental::optional;
 using boost::optional;
+
+using namespace allocs::tool;
 
 /* Firstly let's reimplement all the helper logic of allocscompilerwrapper.py. */
 vector<string> 

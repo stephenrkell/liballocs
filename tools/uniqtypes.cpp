@@ -60,8 +60,11 @@ using dwarf::core::type_chain_die;
 using dwarf::core::subroutine_type_die;
 using dwarf::core::unspecified_type_die;
 using dwarf::core::formal_parameter_die;
+using dwarf::spec::opt;
 
 using dwarf::lib::Dwarf_Off;
+using dwarf::lib::Dwarf_Unsigned;
+using dwarf::lib::Dwarf_Signed;
 
 using dwarf::tool::abstract_c_compiler;
 
@@ -72,6 +75,10 @@ using boost::regex_constants::egrep;
 using boost::match_default;
 using boost::format_all;
 
+namespace allocs
+{
+namespace tool
+{
 /* Forward declaration of a local helper function */
 static void write_uniqtype_open_generic(std::ostream& o,
     const string& mangled_typename,
@@ -325,6 +332,18 @@ static void emit_weak_alias(std::ostream& out, const string& alias_name, const s
 	out <<"));"
 		<< endl;
 }
+void emit_extern_declaration(std::ostream& out,
+	const uniqued_name& name_pair,
+	bool force_weak)
+{
+	out << "extern struct uniqtype " << mangle_typename(name_pair);
+	// incompletes are weak-ref'd
+	if (force_weak || name_pair.first == "")
+	{
+		out << " __attribute__((weak))";
+	}
+	out << ";" << endl;
+}
 void write_master_relation(master_relation_t& r, 
 	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def,
 	std::set< std::string >& names_emitted,
@@ -332,7 +351,6 @@ void write_master_relation(master_relation_t& r,
 	bool emit_codeless_aliases,
 	bool emit_subobject_names /* = false */)
 {
-	/* Keep in sync with liballocs_private.h! */
 	if (emit_struct_def) cout << UNIQTYPE_DECLSTR;
 
 	std::map< std::string, std::set< pair<string, string> > > name_pairs_by_name;
@@ -476,13 +494,7 @@ void write_master_relation(master_relation_t& r,
 				codeless_alias_blacklist[name.second].insert(name.first);
 			}
 		}
-		out << "extern struct uniqtype " << s;
-		// incompletes are weak-ref'd
-		if (i_pair->first.first == "")
-		{
-			out << " __attribute__((weak))";
-		}
-		out << ";" << endl;
+		emit_extern_declaration(out, i_pair->first, /* force_weak */ false);
 	}
 	/* Declare any signedness-complement base types that we didn't see. 
 	 * We will emit these specially. */
@@ -1433,7 +1445,7 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 	{
 		const string& fname = fnames.at(i);
 		infstreams[i] = std::move(unique_ptr<std::ifstream>(new std::ifstream(fname)));
-		std::ifstream & infstream = *infstreams[i];
+		std::ifstream& infstream = *infstreams[i];
 		if (!infstream) 
 		{
 			err << "Could not open file " << fname << endl;
@@ -1555,8 +1567,8 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	map< iterator_df<type_die>, set<string> > names_by_type;
-	write_master_relation(master_relation, out, cerr, true /* emit_void */, true, 
-		names_emitted, types_by_name, true);
+	write_master_relation(master_relation, out, cerr, true /* emit_void */, false /* emit struct def */, 
+		names_emitted, types_by_name, /* subobject names */ true);
 	
 	// for CIL workaround: for each alias, write a one-element master relation
 	// defining it under the alias name (do *not* use the other name at all!)
@@ -1579,9 +1591,362 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 		
 		set<string> tmp_names_emitted;
 		map<string, set< iterator_df<type_die> > > tmp_types_by_name;
-		write_master_relation(tmp_master_relation, out, err, false /* emit_void */, false, 
-			tmp_names_emitted, tmp_types_by_name, true);
+		write_master_relation(tmp_master_relation, out, err, false /* emit_void */, false /* emit struct def */, 
+			tmp_names_emitted, tmp_types_by_name, true /* subobject names */);
 	}
 	
 	return 0;
 }
+
+string summary_code_to_string(opt<uint32_t> maybe_code)
+{
+	if (!maybe_code) return "";
+	uint32_t code = *maybe_code;
+	ostringstream summary_string_str;
+	summary_string_str << std::hex << std::setfill('0') << std::setw(2 * sizeof code) << code 
+		<< std::dec;
+	return summary_string_str.str();
+}
+string
+name_for_complement_base_type(iterator_df<base_type_die> base_t)
+{
+	/* For base types, we use our own language-independent naming scheme. */
+	ostringstream name;
+	unsigned size = *base_t->get_byte_size();
+	auto encoding = base_t->get_encoding();
+	assert(encoding == DW_ATE_signed || encoding == DW_ATE_unsigned);
+	pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = base_t->bit_size_and_offset();
+	bool needs_suffix = !((bit_size_and_offset.second == 0) 
+		&& (bit_size_and_offset.first == 8 * size));
+	name << ((base_t->get_encoding() == DW_ATE_signed) ? "uint" : "int")
+		<< "$" << bit_size_and_offset.first;
+	if (needs_suffix) name << "$" << bit_size_and_offset.second;
+
+	return name.str();
+}
+
+string canonical_name_for_type(iterator_df<type_die> t)
+{
+	/* This is now reimplemented in libdwarfpp. But test against the old code. */
+	string libdwarfpp_said = abstract_name_for_type(t);
+	if (!t) { assert(libdwarfpp_said == "void"); return "void"; }
+	// FIXME: not the right semantics probably
+	if (t.is_a<unspecified_type_die>()) { assert(libdwarfpp_said == "void"); return "void"; }
+	t = t->get_concrete_type();
+	if (!t) { assert(libdwarfpp_said == "void"); return "void"; }
+	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>()
+		&& !t.is_a<subprogram_die>())
+	{
+		/* for base types, the canonical key is *always* the summary code *only*, 
+		 * i.e. the name component is empty. UNLESS we can place ourselves in a C
+		 * equivalence class, in which case.... */
+		string name_to_use;
+		if (t.is_a<base_type_die>())
+		{
+			if (t.as_a<base_type_die>()->get_encoding() == 0)
+			{
+				assert(t.as_a<base_type_die>()->get_byte_size() == 1);
+				name_to_use = "__uninterpreted_byte";
+			}
+			/* For base types, we use our own language-independent naming scheme. */
+			else name_to_use = t.as_a<base_type_die>()->get_canonical_name();
+		} 
+		else
+		{
+			/* FIXME: deal with nested/qualified names also (nested data types, 
+			   local data types, C++ namespaces). */
+			/* FIXME: deal with struct/union tags also (but being sensitive to language: 
+			   don't do it with C++ CUs). */
+			if (t.name_here())
+			{
+				name_to_use = *name_for_type_die(t);
+			}
+			else
+			{
+				string offsetstr = offset_to_string(t.offset_here());
+				/* We really want to allow deduplicating anonymous structure types
+				 * that originate in the same header file but are included in multiple
+				 * compilation units. Since each gets a different offset, using that
+				 * for the fake name string is a bad idea. Instead, use the defining
+				 * source file path, if we have it. */
+				if (t->get_decl_file() && t->get_decl_line())
+				{
+					ostringstream s;
+					opt<string> maybe_fqp = t.enclosing_cu()->source_file_fq_pathname(*t->get_decl_file());
+					s << (maybe_fqp ? 
+						*maybe_fqp : 
+						t.enclosing_cu()->source_file_name(*t->get_decl_file())) 
+						<< "_" << *t->get_decl_line();
+					name_to_use = s.str();
+				}
+				else name_to_use = offsetstr;
+			}
+		}
+		assert(libdwarfpp_said == name_to_use || t.is_a<subrange_type_die>());
+		return name_to_use;
+	}
+	else if (t.is_a<subroutine_type_die>() || t.is_a<subprogram_die>())
+	{
+		// "__FUN_FROM_" ^ (labelledArgTs argTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (stringFromSig returnTs) 		
+		ostringstream s;
+		s << "__FUN_FROM_";
+		auto fps = t.children().subseq_of<formal_parameter_die>();
+		unsigned argnum = 0;
+		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp, ++argnum)
+		{
+			/* args should not be void */
+			/* We're making a canonical typename, so use canonical argnames. */
+			s << "__ARG" << argnum << "_" << canonical_name_for_type(i_fp->find_type());
+		}
+		if (IS_VARIADIC(t))
+		{
+			s << "__VA_";
+		}
+		s << "__FUN_TO_";
+		iterator_df<type_die> return_t = RETURN_TYPE(t);
+		
+		s << ((!return_t || !return_t->get_concrete_type()) ? string("void") : canonical_name_for_type(return_t));
+		string result = s.str();
+		assert(libdwarfpp_said == result);
+		return result;
+	}
+	else if (t.is_a<array_type_die>())
+	{
+		/* What should the type descriptor for "array of n T" look like? 
+		 * What should it be called? 
+		 * Answers: always has exactly one nmemb, and use __ARRn_. */
+		
+		/* What should the type descriptor for "array of undeterminedly-many T" look like?
+		 * What should it be called? Answer: use __ARR0_*/
+		
+		/* How do we encode mutual recursion between array and pointer?
+		 * Answer: nothing special: just cut off the array first part and emit it specially,
+		 * with a reference to the remainder (what it's an array of).
+		 * This handles multidimensional arrays too.
+		 */
+		
+		auto array_t = t.as_a<array_type_die>();
+		ostringstream array_prefix;
+		opt<Dwarf_Unsigned> element_count = array_t->element_count();
+		array_prefix << "__ARR" << (element_count ? *element_count : 0) << "_";
+		string el_type_name = canonical_name_for_type(array_t->get_type());
+		assert(libdwarfpp_said == array_prefix.str() + el_type_name);
+		return array_prefix.str() + el_type_name;
+	}
+	else if (t.is_a<string_type_die>())
+	{
+		auto string_t = t.as_a<string_type_die>();
+		// get the name of whatever the element type is, and prepend a prefix
+		const Dwarf_Unsigned element_size = 1; /* FIXME: always 1? */
+		opt<Dwarf_Unsigned> opt_byte_size = string_t->fixed_length_in_bytes();
+		opt<Dwarf_Unsigned> element_count
+		 = opt_byte_size ? opt<Dwarf_Unsigned>(*opt_byte_size / element_size ) : opt<Dwarf_Unsigned>();
+		ostringstream string_prefix;
+		string_prefix << "__STR" << (element_count ? *element_count : 0) << "_"
+			<< element_size;
+
+		assert(libdwarfpp_said == string_prefix.str());
+		return string_prefix.str();
+	}
+	else // DW_TAG_pointer_type and friends
+	{
+		int levels_of_indirection = 0;
+		ostringstream indirection_prefix;
+		iterator_df<type_die> working_t = t->get_concrete_type(); // initially
+		while (working_t && working_t.is_a<address_holding_type_die>())
+		{
+			++levels_of_indirection;
+			switch (working_t.tag_here())
+			{
+				case DW_TAG_pointer_type: 
+					indirection_prefix << "__PTR_"; break;
+				case DW_TAG_reference_type:
+					indirection_prefix << "__REF_"; break;
+				case DW_TAG_rvalue_reference_type:
+					indirection_prefix << "__RR_"; break;
+				default:
+					assert(false);
+			}
+			
+			// try moving on to the next in the chain
+			if (working_t.is_a<address_holding_type_die>()) 
+			{
+				working_t = working_t.as_a<address_holding_type_die>()->get_type();
+				// concretify if we got something
+				if (working_t)
+				{
+					working_t = working_t->get_concrete_type();
+				}
+			}
+		}
+		assert(levels_of_indirection >= 1);
+		
+		ostringstream os;
+		os << indirection_prefix.str() << (!working_t ? "void" : canonical_name_for_type(working_t));
+		assert(libdwarfpp_said == os.str());
+		return os.str();
+	}
+	assert(false);
+	abort();
+}
+
+string canonical_codestring_for_type(iterator_df<type_die> t)
+{
+	if (!t) return "";
+	t = t->get_concrete_type();
+	if (!t) return "";
+
+	opt<uint32_t> code = type_summary_code(t);
+	string summary_string;
+	if (code)
+	{
+		summary_string = summary_code_to_string(*code);
+		assert(summary_string.size() == 2 * sizeof *code);
+	} else summary_string = "";
+	return summary_string;
+}
+
+uniqued_name
+canonical_key_for_type(iterator_df<type_die> t)
+{
+	return make_pair(canonical_codestring_for_type(t), canonical_name_for_type(t));
+}
+
+// iterator_df<type_die>
+// find_type_in_cu(iterator_df<compile_unit_die> cu, const string& name)
+// {
+// 	/* For the most part, we just do named_child.
+// 	 * BUT, for base types, we widen the search, using our equivalence classes. */
+// 	for (const char **const *p_equiv = &abstract_c_compiler::base_typename_equivs[0]; *p_equiv != NULL; ++p_equiv)
+// 	{
+// 		for (const char **p_el = p_equiv[0]; *p_el != NULL; ++p_el)
+// 		{
+// 			if (name == string(*p_el))
+// 			{
+// 				/* We try every element in the class */
+// 				for (const char **i_attempt = p_equiv[0]; *i_attempt != NULL; ++i_attempt)
+// 				{
+// 					iterator_df<type_die> found = cu.named_child(string(*i_attempt));
+// 					if (found != iterator_base::END) return found;
+// 				}
+// 			}
+// 		}
+// 	}
+// 
+// 	// if we got here, just try named_child
+// 	return iterator_df<type_die>(cu.named_child(name)); //shared_ptr<type_die>();
+// }
+
+opt<uint32_t> type_summary_code(core::iterator_df<core::type_die> t)
+{
+	if (!t) return opt<uint32_t>(0);
+	else return t->summary_code();
+}
+opt<uint32_t> signedness_complement_type_summary_code(core::iterator_df<core::base_type_die> base_t)
+{
+	unsigned encoding = base_t->get_encoding();
+	assert(encoding == DW_ATE_signed || encoding == DW_ATE_unsigned);
+	dwarf::core::summary_code_word<uint32_t> output_word;
+	assert(base_t->get_byte_size());
+	unsigned byte_size = *base_t->get_byte_size();
+	pair<Dwarf_Unsigned, Dwarf_Unsigned> bit_size_and_offset = base_t->bit_size_and_offset();
+	unsigned bit_size = bit_size_and_offset.first;
+	unsigned bit_offset = bit_size_and_offset.second;
+	output_word << DW_TAG_base_type 
+		<< (encoding == DW_ATE_unsigned ? DW_ATE_signed : DW_ATE_unsigned) 
+		<< byte_size << bit_size << bit_offset;
+	return output_word.val;
+}	
+
+void get_types_by_codeless_uniqtype_name(
+	std::multimap<string, iterator_df<type_die> >& m, 
+	iterator_df<> begin, iterator_df<> end)
+{	
+	/* First we look through the whole file and index its types by their *codeless*
+	 * *canonical* uniqtype name, i.e. we blank out the first element of the name pair. */
+	bool done_some_output = false;
+	for (iterator_df<> i = begin; i != end; ++i)
+	{
+		if (i.is_a<type_die>())
+		{
+			if (isatty(fileno(std::cerr)))
+			{
+				if (done_some_output) std::cerr << "\r";
+				std::cerr << "Codeless uniqtypes: adding DIE at 0x" << std::hex << i.offset_here() << std::dec;
+				done_some_output = true;
+			}
+			opt<string> opt_name = i.name_here(); // for debugging
+			if (opt_name)
+			{
+				string name = *opt_name;
+				assert(name != "");
+			}
+			
+			auto t = i.as_a<type_die>();
+			assert(t.is_real_die_position());
+			auto concrete_t = t->get_concrete_type();
+			pair<string, string> uniqtype_name_pair;
+			
+			// handle void case specially
+			string canonical_typename = canonical_name_for_type(t);
+			
+			/* CIL/trumptr will only generate references to aliases in the case of 
+			 * base types. We need to handle these here. What should happen? 
+			 * 
+			 * - we will see references looking like __uniqtype__signed_char
+			 * - we want to link in two things:
+			 *    1. the nameless __uniqtype_<code>_ definition of this base type
+			 *    2. the alias    __uniqtype_<code>_signed_char from the usual alias handling
+			 * - we do this by indexing all our types by a *codeless* version of their
+			 *   name, then matching our inputs lines against that.
+			 * - the input lines will have signed_char instead of ""
+			 * - ... so that's what we need to put in our index.
+			 * 
+			 * IT GETS WORSE: the same is true for any typename *mentioning* a base
+			 * type! We will see references in terms of C-canonicalised base type names, 
+			 * but we will be trying to match them against language-independent names. 
+			 * It seems that we need to do a separate "C fix up" pass first.
+			 * This is now done in link-used-types (and will be 
+			 * */
+			
+			
+			if (canonical_typename == "")
+			{
+				assert(concrete_t.is_a<base_type_die>());
+				// if the base type has no name, this DWARF type is useless to us
+				if (!concrete_t.name_here()) continue;
+				canonical_typename = *name_for_type_die(concrete_t);
+			}
+			string codeless_symname = mangle_typename(make_pair("", canonical_typename));
+
+			m.insert(make_pair(codeless_symname, concrete_t));
+
+			/* Special handling for base types: also add them by the name in which they 
+			 * appear in the DWARF, *and* by their C-canonical name. Our CIL frontend
+			 * doesn't know the exact bit-widths so must use the latter. */
+			if (concrete_t.is_a<base_type_die>() && concrete_t.name_here()
+				&& !concrete_t.as_a<base_type_die>()->is_bitfield_type())
+			{
+				m.insert(
+					make_pair(
+						mangle_typename(make_pair("", *name_for_type_die(concrete_t))), 
+						concrete_t
+					)
+				);
+				const char **equiv = abstract_c_compiler::get_equivalence_class_ptr(name_for_type_die(concrete_t)->c_str());
+				if (equiv)
+				{
+					m.insert(
+						make_pair(
+							mangle_typename(make_pair("", equiv[0])), 
+							concrete_t
+						)
+					);
+				}
+			}
+		}
+	}
+}
+
+} // end namespace tool
+} // end namespace allocs

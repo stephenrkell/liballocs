@@ -13,7 +13,7 @@
 #include <srk31/ordinal.hpp>
 #include <fileno.hpp>
 
-#include "helpers.hpp"
+#include "uniqtypes.hpp"
 
 using std::cin;
 using std::cout;
@@ -34,7 +34,8 @@ using dwarf::core::type_die;
 using dwarf::core::subprogram_die;
 using dwarf::core::compile_unit_die;
 using dwarf::core::pointer_type_die;
-using dwarf::tool::abstract_c_compiler;
+
+using namespace allocs::tool;
 
 int main(int argc, char **argv)
 {
