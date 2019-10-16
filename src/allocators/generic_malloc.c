@@ -1416,10 +1416,13 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe
 	else
 	{
 		size_t alloc_usable_chunksize;
-		heap_info = lookup_object_info(obj, out_base, &alloc_usable_chunksize, NULL);
+		void *base_if_no_out_base;
+		heap_info = lookup_object_info(obj, out_base ? out_base : &base_if_no_out_base,
+			&alloc_usable_chunksize, NULL);
 		if (heap_info && out_size)
 		{
-			*out_size = requested_size_for_chunk(*out_base, alloc_usable_chunksize);
+			*out_size = requested_size_for_chunk(out_base ? *out_base : base_if_no_out_base,
+				alloc_usable_chunksize);
 		}
 	}
 	
