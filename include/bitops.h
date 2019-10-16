@@ -16,8 +16,25 @@ extern "C" {
 #define INLINE_ATTRS __attribute__((always_inline,gnu_inline))
 #endif
 
-INLINE_DECL int is_power_of_two(size_t i) INLINE_ATTRS;
-INLINE_DECL int INLINE_ATTRS is_power_of_two(size_t i)
+static inline int popcount64(uint64_t x) {
+	int c = 0;
+	for (int i = 0; i < 64; i++) {
+		c += x & 1;
+		x >>= 1;
+	}
+	return c;
+}
+
+static inline int popcount32(uint32_t x) {
+	int c = 0;
+	for (int i = 0; i < 32; i++) {
+		c += x & 1;
+		x >>= 1;
+	}
+	return c;
+}
+
+static inline int is_power_of_two(size_t i)
 {
 	/* If we are a power of two, then one less than us 
 	 * has a run of low-order bits set and no others set,
@@ -30,8 +47,7 @@ INLINE_DECL int INLINE_ATTRS is_power_of_two(size_t i)
 }
 
 // stolen from Hacker's Delight, then updated for 64 bits
-INLINE_DECL int nlz1(unsigned long x) INLINE_ATTRS;
-INLINE_DECL int INLINE_ATTRS nlz1(unsigned long x)
+static inline int nlz1(unsigned long x)
 {
 	int n;
 
@@ -49,8 +65,7 @@ INLINE_DECL int INLINE_ATTRS nlz1(unsigned long x)
 }
 
 // same but zero bytes, not bits
-INLINE_DECL int nlzb1(unsigned long x) INLINE_ATTRS;
-INLINE_DECL int INLINE_ATTRS nlzb1(unsigned long x)
+static inline int nlzb1(unsigned long x)
 {
 	int n;
 
@@ -64,14 +79,19 @@ INLINE_DECL int INLINE_ATTRS nlzb1(unsigned long x)
 	return n;
 }
 
-#define BOTTOM_N_BITS_SET(n) \
- ( ( (n)==0 ) ? 0 : ((n) == 8*sizeof(uintptr_t) ) \
- 	? (~((uintptr_t)0)) \
-	: ((((uintptr_t)1u) << ((n))) - 1))
-#define BOTTOM_N_BITS_CLEAR(n) (~(BOTTOM_N_BITS_SET((n))))
+#define BOTTOM_N_BITS_SET_T(t, n) \
+ ( ( (n)==0 ) ? 0 : ((n) == 8*sizeof(t) ) \
+ 	? (~((t)0)) \
+	: ((((t)1u) << ((n))) - 1))
+#define BOTTOM_N_BITS_CLEAR_T(t, n) (~(BOTTOM_N_BITS_SET_T(t, (n))))
+#define TOP_N_BITS_SET_T(t, n)      (BOTTOM_N_BITS_CLEAR_T(t, 8*(sizeof(t))-((n))))
+#define TOP_N_BITS_CLEAR_T(t, n)    (BOTTOM_N_BITS_SET_T(t, 8*(sizeof(t))-((n))))
 
-#define TOP_N_BITS_SET(n)      (BOTTOM_N_BITS_CLEAR(8*(sizeof(uintptr_t))-((n))))
-#define TOP_N_BITS_CLEAR(n)    (BOTTOM_N_BITS_SET(8*(sizeof(uintptr_t))-((n))))
+#define BOTTOM_N_BITS_SET(n)   BOTTOM_N_BITS_SET_T(uintptr_t, n)
+#define BOTTOM_N_BITS_CLEAR(n) BOTTOM_N_BITS_CLEAR_T(uintptr_t, n)
+#define TOP_N_BITS_SET(n)      TOP_N_BITS_SET_T(uintptr_t, n)
+#define TOP_N_BITS_CLEAR(n)    TOP_N_BITS_CLEAR(uintptr_t, n)
+
 #define NBITS(t) ((sizeof (t))<<3)
 #define UNSIGNED_LONG_NBITS (NBITS(unsigned long))
 /* Thanks to Martin Buchholz -- <http://www.wambold.com/Martin/writings/alignof.html> */
@@ -80,8 +100,7 @@ INLINE_DECL int INLINE_ATTRS nlzb1(unsigned long x)
 #endif
 #define PAD_TO_ALIGN(n, a) 	((0 == ((n) % (a))) ? (n) : (n) + (a) - ((n) % (a)))
 
-INLINE_DECL int next_power_of_two_ge(size_t i) INLINE_ATTRS;
-INLINE_DECL int INLINE_ATTRS next_power_of_two_ge(size_t i)
+static inline int next_power_of_two_ge(size_t i)
 {
 	if (is_power_of_two(i)) return i;
 	else 
@@ -94,8 +113,7 @@ INLINE_DECL int INLINE_ATTRS next_power_of_two_ge(size_t i)
 
 /* The integer log 2 of a power of two is the number of trailing zeroes.
  * FIXME: use Hacker's Delight code here. */
-INLINE_DECL unsigned integer_log2(size_t i) INLINE_ATTRS;
-INLINE_DECL unsigned INLINE_ATTRS integer_log2(size_t i)
+static inline unsigned integer_log2(size_t i)
 {
 	unsigned count = 0;
 	assert(i != 0);
