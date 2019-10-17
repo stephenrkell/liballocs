@@ -73,36 +73,11 @@ ElfW(Half) find_shndx(Elf *e,
 	if (!scn) return (ElfW(Half)) -1;
 	return shndx;
 }
-ElfW(Half) find_shndx_by_sht(Elf * e, ElfW(Half) sht)
+ElfW(Half) find_shndx_by_sh_type(Elf * e, ElfW(Half) sh_type)
 {
-#if 0
-	size_t shstrndx;
-	if (elf_getshdrstrndx(e, &shstrndx) != 0)
-	{
-		throw lib::No_entry();
-	}
-#endif
-	return find_shndx(e, [sht](unsigned idx, GElf_Shdr *shdr) -> bool {
-		return shdr->sh_type == sht;
+	return find_shndx(e, [sh_type](unsigned idx, GElf_Shdr *shdr) -> bool {
+		return shdr->sh_type == sh_type;
 	});
-#if 0
-	Elf_Scn *scn = NULL;
-	GElf_Shdr shdr;
-	unsigned shndx = 0;
-	// iterate through sections looking for symtab
-	while (NULL != (scn = elf_nextscn(e, scn)))
-	{
-		++shndx;
-		if (gelf_getshdr(scn, &shdr) != &shdr)
-		{
-			cerr << "Unexpected ELF error" << std::endl;
-			throw lib::No_entry(); 
-		}
-		if (shdr.sh_type == sht) break;
-	}
-	if (!scn) return (ElfW(Half)) -1;
-	return shndx;
-#endif
 }
 Elf_Data raw_data_by_shndx(Elf *e, ElfW(Half) shndx)
 {
@@ -125,14 +100,14 @@ pair<pair<ElfW(Sym) *, char*>, pair<Elf*, unsigned> > sticky_root_die::find_symb
 	/* We try the Elf that underlies our DWARF info first.
 	 * If that doesn't work, */
 	Elf *e = get_elf();
-	ElfW(Half) shndx = find_shndx_by_sht(e, use_dynsym ? SHT_DYNSYM : SHT_SYMTAB);
+	ElfW(Half) shndx = find_shndx_by_sh_type(e, use_dynsym ? SHT_DYNSYM : SHT_SYMTAB);
 	if (shndx == -1) throw lib::No_entry();
 	Elf_Scn *scn = elf_getscn(e, shndx);
 	if (!scn && base_elf_if_different != nullptr)
 	{
 		// try the other file
 		e = base_elf_if_different;
-		shndx = find_shndx_by_sht(e, use_dynsym ? SHT_DYNSYM : SHT_SYMTAB);
+		shndx = find_shndx_by_sh_type(e, use_dynsym ? SHT_DYNSYM : SHT_SYMTAB);
 		if (shndx == -1) throw lib::No_entry();
 		scn = elf_getscn(e, shndx);
 	}
@@ -447,7 +422,7 @@ shared_ptr<sticky_root_die> sticky_root_die::create(int user_fd)
 boost::icl::discrete_interval<Dwarf_Addr>
 sticky_root_die::static_descr::address_range() const
 {
-	switch (kind)
+	switch (k)
 	{
 		case DYNSYM:
 		case SYMTAB:
@@ -553,23 +528,6 @@ sticky_root_die::static_descr::address_range() const
 	}
 }
 
-#define ELFW_ST_TYPE_y(p, enc) \
-	ELF ## enc ## _ST_TYPE(p)
-// pass-through dummy to actually substitute the "64" or "32", not paste tokens as given
-#define ELFW_ST_TYPE_x(info, enc) \
-	ELFW_ST_TYPE_y(info, enc)
-// the actual macro we wanted to define
-#define ELFW_ST_TYPE(info) \
-	ELFW_ST_TYPE_x(info, __ELF_NATIVE_CLASS)
-
-// same idea again
-#define ELFW_ST_INFO_y(b, t, enc) \
-	ELF ## enc ## _ST_INFO(b, t)
-#define ELFW_ST_INFO_x(b, t, enc) \
-	ELFW_ST_INFO_y(b, t, enc)
-#define ELFW_ST_INFO(b, t) \
-	ELFW_ST_INFO_x(b, t, __ELF_NATIVE_CLASS)
-
 boost::icl::interval_map< Dwarf_Addr, sticky_root_die::static_descr_set >
 sticky_root_die::get_statics()
 {
@@ -595,7 +553,7 @@ sticky_root_die::get_statics()
 	 */
 	boost::icl::interval_map< Dwarf_Addr, static_descr_set > statics;
 	auto process_a_symtab = [&statics](ElfW(Sym) *syms, char *strtab, unsigned n,
-		static_descr::k kind) {
+		static_descr::kind k) {
 		for (unsigned i = 0; i < n; ++i)
 		{
 			/* Is this a symbol with non-zero size?
@@ -609,7 +567,7 @@ sticky_root_die::get_statics()
 				//out.insert(make_pair((Dwarf_Addr) syms[i].st_value,
 				//	make_pair(&syms[i], syms[i].st_name == 0 ? nullptr : &strtab[syms[i].st_name])));
 				static_descr_set singleton_set;
-				singleton_set.insert(static_descr(kind, make_pair(
+				singleton_set.insert(static_descr(k, make_pair(
 					make_pair(i, &syms[i]),
 					syms[i].st_name == 0 ? nullptr : &strtab[syms[i].st_name]
 				)));
@@ -655,7 +613,7 @@ iterator_df<program_element_die> sticky_root_die::static_descr_set::get_die() co
 {
 	for (auto i_descr = begin(); i_descr != end(); ++i_descr)
 	{
-		if (i_descr->kind == sticky_root_die::static_descr::DWARF)
+		if (i_descr->k == sticky_root_die::static_descr::DWARF)
 		{
 			return i_descr->get_d();
 		}
@@ -667,22 +625,36 @@ sticky_root_die::static_descr_set::summary
 sticky_root_die::static_descr_set::get_summary(
 	bool symtab_is_external, opt<unsigned> maybe_expected_size) const
 {
-	bool saw_non_external_sym = false;
+	assert(size() > 0);
+	iterator seen_non_external_sym = end();
 	ElfW(Sym) *saw_sym = nullptr;
 	opt<string> opt_name;
 	opt<string> maybe_sym_name;
 	opt<string> maybe_dwarf_name;
 	opt<unsigned> maybe_sym_idx;
 	iterator_df<program_element_die> maybe_die;
+	// first to a pass that looks for DWARF
 	for (auto i_descr = begin(); i_descr != end(); ++i_descr)
 	{
-		if (i_descr->kind == sticky_root_die::static_descr::DYNSYM
-		|| (i_descr->kind == sticky_root_die::static_descr::SYMTAB
+		if (i_descr->k == sticky_root_die::static_descr::DWARF)
+		{
+			cerr << "Covered by DWARF: "
+				<< *i_descr << std::endl;
+			opt_name = i_descr->get_d()->get_name();
+			maybe_dwarf_name = opt_name;
+			maybe_die = i_descr->get_d();
+		}
+	}
+	// now do a pass that looks for a symbol
+	for (auto i_descr = begin(); i_descr != end(); ++i_descr)
+	{
+		if (i_descr->k == sticky_root_die::static_descr::DYNSYM
+		|| (i_descr->k == sticky_root_die::static_descr::SYMTAB
 			&& !symtab_is_external))
 		{
 			cerr << "Covered by a non-external symbol: "
 				<< *i_descr << std::endl;
-			saw_non_external_sym = true;
+			seen_non_external_sym = i_descr;
 			saw_sym = i_descr->get_sym().first.second;
 			if (!opt_name) opt_name = string(i_descr->get_sym().second);
 			if (!maybe_sym_name)
@@ -691,7 +663,7 @@ sticky_root_die::static_descr_set::get_summary(
 				maybe_sym_idx = opt<unsigned>(i_descr->get_sym().first.first);
 			}
 		}
-		else if (i_descr->kind == sticky_root_die::static_descr::SYMTAB
+		else if (i_descr->k == sticky_root_die::static_descr::SYMTAB
 			&& symtab_is_external)
 		{
 			cerr << "Covered by an external symbol: "
@@ -704,32 +676,29 @@ sticky_root_die::static_descr_set::get_summary(
 				maybe_sym_idx = opt<unsigned>(i_descr->get_sym().first.first);
 			}
 		}
-		if (i_descr->kind == sticky_root_die::static_descr::DWARF)
-		{
-			cerr << "Covered by DWARF: "
-				<< *i_descr << std::endl;
-			opt_name = i_descr->get_d()->get_name();
-			maybe_dwarf_name = opt_name;
-			maybe_die = i_descr->get_d();
-		}
 	}
-	if (saw_non_external_sym)
+	if (seen_non_external_sym != end())
 	{
+		assert(maybe_sym_idx);
+		assert(saw_sym);
+		assert(maybe_sym_name);
 		// return the summary
-		struct summary s = {
+		summary s = {
 			opt_name,
+			maybe_die,
 			type_from_die(maybe_die),
-			(this->begin()->kind == static_descr::DYNSYM) ? REC_DYNSYM
-			 : (this->begin()->kind == static_descr::SYMTAB) ? REC_SYMTAB
+			(seen_non_external_sym->k == static_descr::DYNSYM) ? REC_DYNSYM
+			 : (seen_non_external_sym->k == static_descr::SYMTAB) ? REC_SYMTAB
 			 : (assert(false), REC_EXTRASYM),
+			begin()->k,
 			maybe_sym_idx,
-			saw_sym ? *saw_sym : opt<ElfW(Sym)>()
+			*saw_sym
 		};
 		return s;
 	}
 	/* Else we only saw external syms, if any syms at all.
 	 * Dynsyms are never external, so this means we didn't see one. */
-	assert(this->begin()->kind != static_descr::DYNSYM);
+	assert(this->begin()->k != static_descr::DYNSYM);
 	/* FIXME: use information from the external sym if we have one.
 	 * If we have both DWARF and a symbol, we need to choose/merge.
 	 * We resolved the size differences above, so assert that they
@@ -741,83 +710,39 @@ sticky_root_die::static_descr_set::get_summary(
 			<< *maybe_sym_name << ", " << *maybe_dwarf_name << std::endl;
 	}
 	if (saw_sym && maybe_expected_size) assert(saw_sym->st_size == *maybe_expected_size);
-	struct summary s = {
+	summary s = {
 		opt_name,
+		maybe_die,
 		type_from_die(maybe_die),
 		REC_EXTRASYM,
+		begin()->k,
 		maybe_sym_idx,
 		saw_sym ? *saw_sym : opt<ElfW(Sym)>()
 	};
 	return s;
 }
-opt<pair<ElfW(Sym), opt<string> > >
-sticky_root_die::sane_interval_map::generate_extrasym_if_necessary(
-	bool symtab_is_external,
-	const boost::icl::discrete_interval<Dwarf_Addr>& interval,
-	const static_descr_set& descrs
-)
+vector<pair< sticky_root_die::sym_with_ctxt, opt<string> > > sticky_root_die::get_extrasyms()
 {
-	cerr << "Considering extrasym for interval: " << interval << std::endl;
-	static_descr_set::summary ret = descrs.get_summary(symtab_is_external,
-		/* expected size */ opt<unsigned>(interval.upper() - interval.lower()));
-	assert(ret.t || ret.maybe_idx);
-	/* Bit of a HACK: to allow tools like `extrasyms' to identify where the
-	 * info came from, we set st_shndx to the static_descr `kind', and
-	 * st_name to the DWARF DIE offset (if any) (NOT type offset) or symbol offset. */
-	ElfW(Word) st_name;
-	if (ret.t) st_name = static_cast<ElfW(Word)>(descrs.get_die().offset_here());
-	else st_name = *ret.maybe_idx;
-	auto st_value = interval.lower() ;
-	auto st_size = interval.upper() - interval.lower();
-	auto st_info = (ret.maybe_sym) ? ret.maybe_sym->st_info : ELFW_ST_INFO(STB_LOCAL, STT_OBJECT);
-	auto st_other = (ret.maybe_sym) ? ret.maybe_sym->st_other : STV_HIDDEN;
-	ElfW(Section) st_shndx = descrs.begin()->kind;
-	// HACK until we have designated initializers in all versions of g++ we care about
-	ElfW(Sym) s;
-	memset(&s, 0, sizeof s);
-	s.st_name = st_name;
-	assert(s.st_name != 0); // we always have a DIE or a sym, so should have non-zero
-	s.st_size = st_size;
-	s.st_info = st_info;
-	s.st_other = st_other;
-	s.st_shndx = st_shndx;
-	s.st_value = st_value;
-	return opt<pair<ElfW(Sym), opt<string> > >(make_pair(
-#if 0
-		(ElfW(Sym)) {
-			.st_name = st_name /* real name will be issued when emitted */,
-			.st_size = st_size,
-			.st_info = st_info,
-			.st_other = st_other,
-			.st_shndx = st_shndx,
-			.st_value = st_value
-		},
-#else
-		s,
-#endif
-		ret.name
-	));
-}
-
-vector<pair< ElfW(Sym), opt<string> > > sticky_root_die::get_extrasyms()
-{
-	vector<pair<ElfW(Sym), opt<string> > > extrasyms;
+	vector<pair<sym_with_ctxt, opt<string> > > extrasyms;
 	// add the null initial entry
-	extrasyms.push_back(make_pair((ElfW(Sym)) { 0 }, opt<string>()));
+	extrasyms.push_back(make_pair(sym_with_ctxt(), opt<string>()));
 	auto statics = get_sanely_described_statics();
 	/* For each range we have a *set* of metadata descriptions.
 	 * Here we just want the "extrasyms", i.e. things that have DWARF info
-	 * but no symbol. */
+	 * but no symbol (or have an external/stripped symbol but no in-binary symbol). */
 	for (auto i_int = statics.begin(); i_int != statics.end(); ++i_int)
 	{
 		auto& interval = i_int->first;
 		auto& descr_set = i_int->second;
 		assert(sticky_root_die::static_interval_is_sanely_described(*i_int));
-		auto maybe_extrasym = statics.generate_extrasym_if_necessary(
-			this->symtab_is_external(), i_int->first, i_int->second);
-		if (maybe_extrasym)
+		//auto maybe_extrasym = statics.generate_extrasym_if_necessary(
+		//	this->symtab_is_external(), i_int->first, i_int->second);
+		auto summary = i_int->second.get_summary(this->symtab_is_external(),
+		/* expected size */ opt<unsigned>(i_int->first.upper() - i_int->first.lower()));
+		if (summary.k == REC_EXTRASYM)
 		{
-			extrasyms.push_back(*maybe_extrasym);
+			sym_with_ctxt s(i_int->first, summary);
+			extrasyms.push_back(make_pair(s, summary.name));
 		}
 	}
 	return extrasyms;

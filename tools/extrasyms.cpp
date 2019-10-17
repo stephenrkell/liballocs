@@ -102,8 +102,8 @@ int main(int argc, char **argv)
 
 	auto statics = root.get_sanely_described_statics();
 	cout << "#include <elf.h>\n"
-	     << "const char (__attribute__((section(\".extrastrtab\"))) str)[] = \"\";\n";
-	cout << "const " ElfWstr(Elf, _Sym) " extrasyms[] __attribute__((section(\".extrasymtab\"))) = {\n\t(" ElfWstr(Elf, _Sym) ") { .st_name = 0 }\n};" << endl;
+	     << "static const char (__attribute__((section(\".extrastrtab\"))) extrastr)[] = \"\";\n";
+	cout << "static const " ElfWstr(Elf, _Sym) " extrasyms[] __attribute__((section(\".extrasymtab\"))) = {\n\t(" ElfWstr(Elf, _Sym) ") { .st_name = 0 }\n};" << endl;
 	cout << "#define APPEND_STRING(s) \\\n\
 		__asm__(\".pushsection .extrastrtab\\n\\\n\
 			.asciz \\\"\"s \"\\\"\" )" << std::endl;
@@ -121,9 +121,47 @@ int main(int argc, char **argv)
 		ASSEMBLE_ELF64_SYM_y(nameoff, value, size, info, other, shndx)\n";
 	/* Keep track of how many bytes we've written to the strtab. */
 	unsigned stroff = 1;
-	vector< pair <ElfW(Sym), opt<string> > > extrasyms = root.get_extrasyms();
+	vector< pair < sticky_root_die::sym_with_ctxt, opt<string> > > extrasyms
+	 = root.get_extrasyms();
 	// use begin+1 because of the null initial entry
 	assert(extrasyms.size() >= 1);
+// Would be nice to showed the ELF stuff symbolically
+// in the generated file. . How? All we need is a
+// stringified value<->string table so that we can emit
+// the raw values as strings when we recognise them...
+#define ELF_STB_VALUES(v) \
+	v(STB_LOCAL) \
+	v(STB_GLOBAL) \
+	v(STB_WEAK)
+#define stb_initializer(v) make_pair(v, #v),
+	std::map<unsigned, string> stb_map {
+		ELF_STB_VALUES(stb_initializer)
+		make_pair(UINT_MAX, "dummy terminator")
+	};
+#define ELF_STT_VALUES(v) \
+	v(STT_NOTYPE) \
+	v(STT_OBJECT) \
+	v(STT_FUNC) \
+	v(STT_SECTION) \
+	v(STT_FILE) \
+	v(STT_COMMON) \
+	v(STT_TLS)
+#define stt_initializer(v) make_pair(v, #v),
+	std::map<unsigned, string> stt_map {
+		ELF_STT_VALUES(stt_initializer)
+		make_pair(UINT_MAX, "dummy terminator")
+	};
+#define KNOWN(frag, val) (frag ## _map.find(val) != frag ## _map.end())
+#define ELF_STV_VALUES(v) \
+	v(STV_DEFAULT) \
+	v(STV_INTERNAL) \
+	v(STV_HIDDEN) \
+	v(STV_PROTECTED)
+#define stv_initializer(v) make_pair(v, #v),
+	std::map<unsigned, string> stv_map {
+		ELF_STV_VALUES(stv_initializer)
+		make_pair(UINT_MAX, "dummy terminator")
+	};
 	for (auto i_sym = extrasyms.begin() + 1; i_sym != extrasyms.end(); ++i_sym)
 	{
 		opt<string> opt_name = i_sym->second;
@@ -133,53 +171,35 @@ int main(int argc, char **argv)
 		if (opt_name)
 		{
 			cout << "APPEND_STRING(\"" << *opt_name << "\");\n";
-			stroff += opt_name->length();
+			stroff += opt_name->length() + 1 /* for the null */;
 		}
-		sticky_root_die::static_descr::k kind
-		 = static_cast<sticky_root_die::static_descr::k>(i_sym->first.st_shndx);
-		Dwarf_Off die_offset_or_symidx = i_sym->first.st_name;
-		cout << "// extrasym from descr of kind " << kind << ", ";
-		if (kind == sticky_root_die::static_descr::DWARF) cout << root.pos(die_offset_or_symidx).summary();
-		else cout << "index " << die_offset_or_symidx;
+		cout << "// extrasym from descr of priority kind " << i_sym->first.descr_priority_k;
+		cout << ", type ";
+		if (i_sym->first.t) cout << i_sym->first.t.summary();
+		else cout << "(no type DIE)";
+		if (i_sym->first.pe) cout << "; program element " << i_sym->first.pe.summary();
+		else cout << "; no DIE; name is " << (i_sym->second ? *i_sym->second : "(no name)");
+		if (i_sym->first.maybe_idx) cout << "; symbol index " << *i_sym->first.maybe_idx;
 		cout << "\n";
 		cout << ElfWstr(ASSEMBLE_ELF, _SYM) << "("
 			<< nameoff << " /* name */, "
-// FIXME: we used to have this quite nice code which showed the ELF stuff symbolically
-// in the generated file. Would be nice to restore it. How? All we need is a
-// stringified value<->string table so that we could emit the raw values as strings
-// when we recognise them...
-#define ELF_STB_VALUES(v) \
-	v(STB_LOCAL) \
-	v(STB_GLOBAL) \
-	v(STB_WEAK)
-#define ELF_STT_VALUES(v) \
-	v(STT_NOTYPE) \
-	v(STT_OBJECT) \
-	v(STT_FUNC) \
-	v(STT_SECTION) \
-	v(STT_FILE) \
-	v(STT_COMMON) \
-	v(STT_TLS)
-#define ELF_STV_VALUES(v) \
-	v(STV_DEFAULT) \
-	v(STV_INTERNAL) \
-	v(STV_HIDDEN) \
-	v(STV_PROTECTED)
-#if 0
-			<< "0x" << std::hex << interval.lower() << std::dec << " /* value */, "
-			<< interval.upper() - interval.lower() << " /* size */, ";
-		if (saw_sym) cout << saw_sym->st_info;
-		else cout << ElfWstr(ELF, _ST_INFO) "(STB_LOCAL, STT_OBJECT)";
-		cout << " /* info */, ";
-		if (saw_sym) cout << saw_sym->st_other;
-		else cout << "STV_HIDDEN";
-		cout << " /* other */, "
-#else
-			<< "0x" << i_sym->first.st_value << std::dec << " /* value */, "
-			<< i_sym->first.st_size << " /* size */, "
-			<< (int) i_sym->first.st_info << " /* info */, "
-			<< (int) i_sym->first.st_other << " /* other */, "
-#endif
+			<< "0x" << std::hex << i_sym->first.st_value << std::dec << " /* value */, "
+			<< i_sym->first.st_size << " /* size */, ";
+			if (KNOWN(stb, ELFW_ST_BIND(i_sym->first.st_info))
+				&& KNOWN(stt, ELFW_ST_TYPE(i_sym->first.st_info)))
+			{
+				cout << ElfWstr(ELF, _ST_INFO) "("
+					<< stb_map[ELFW_ST_BIND(i_sym->first.st_info)] << ", " 
+					<< stt_map[ELFW_ST_TYPE(i_sym->first.st_info)]
+				<< ")";
+			}
+			else cout << (int) i_sym->first.st_info;
+			cout << " /* info */, ";
+			if (KNOWN(stv, i_sym->first.st_other))
+			{
+				cout << stv_map[i_sym->first.st_other];
+			} else cout << (int) i_sym->first.st_other;
+			cout << " /* other */, "
 			<< "0 /* shndx */);\n";
 	}
 	// fix up the size of our extrasyms
