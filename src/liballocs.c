@@ -510,9 +510,6 @@ const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqt
 	return "(unnamed type)";
 }
 
-struct allocsite_entry *__liballocs_allocsite_to_entry(const void *allocsite)
-{ return allocsite_to_entry(allocsite); }
-
 struct uniqtype *__liballocs_allocsite_to_uniqtype(const void *allocsite)
 { return allocsite_to_uniqtype(allocsite); }
 
@@ -657,141 +654,7 @@ _Bool is_meta_object_for_lib(struct link_map *maybe_meta, struct link_map *l)
 	else return 0;
 }
 
-static void chain_allocsite_entries(struct allocsite_entry *cur_ent, 
-	struct allocsite_entry *prev_ent, unsigned *p_current_bucket_size, 
-	intptr_t load_addr, intptr_t extrabits)
-{
-#define FIXADDR(a) 	((void*)((intptr_t)(a) | extrabits))
 
-	// fix up the allocsite by the containing object's load address
-	*((unsigned char **) &cur_ent->allocsite) += load_addr;
-
-	// debugging: print out entry
-	debug_printf(4, "allocsite entry: %p, extrabits %p, to uniqtype at %p\n", 
-		cur_ent->allocsite, (void*) extrabits, cur_ent->uniqtype);
-
-	// if we've moved to a different bucket, point the table entry at us
-	struct allocsite_entry **bucketpos = ALLOCSMT_FUN(ADDR, FIXADDR(cur_ent->allocsite));
-	struct allocsite_entry **prev_ent_bucketpos
-	 = prev_ent ? ALLOCSMT_FUN(ADDR, FIXADDR(prev_ent->allocsite)) : NULL;
-
-	// first iteration is too early to do chaining, 
-	// but we do need to set up the first bucket
-	if (!prev_ent || bucketpos != prev_ent_bucketpos)
-	{
-		// fresh bucket, so should be null
-		assert(*bucketpos == NULL);
-		debug_printf(4, "starting a new bucket for allocsite %p, mapped from %p\n", 
-			cur_ent->allocsite, bucketpos);
-		*bucketpos = cur_ent;
-	}
-	if (!prev_ent) return;
-
-	void *cur_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, FIXADDR(cur_ent->allocsite));
-	void *prev_range_base = ALLOCSMT_FUN(ADDR_RANGE_BASE, FIXADDR(prev_ent->allocsite));
-
-	if (cur_range_base == prev_range_base)
-	{
-		// chain these guys together
-		prev_ent->next = cur_ent;
-		cur_ent->prev = prev_ent;
-
-		++(*p_current_bucket_size);
-	} else *p_current_bucket_size = 1; 
-	// we don't (currently) distinguish buckets of zero from buckets of one
-
-	// last iteration doesn't need special handling -- next will be null,
-	// prev will be set within the "if" above, if it needs to be set.
-#undef FIXADDR
-}
-
-int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
-{
-	// get the canonical libfile name
-	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
-	if (!canon_objname) return 0;
-
-	// skip objects that are themselves meta objects
-	if (0 == strncmp(canon_objname, meta_base, meta_base_len)) return 0;
-	
-	// get the meta object's name
-	const char *libfile_name = meta_libfile_name(canon_objname);
-	if (!libfile_name) return 0;
-	// don't load if we end with "-meta.so"
-	if (0 == strcmp(META_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(META_OBJ_SUFFIX)))
-	{
-		return 0;
-	}
-
-	dlerror();
-	void *meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_NOLOAD);
-	if (!meta_handle)
-	{
-		debug_printf(1, "re-loading meta object: %s\n", dlerror());
-		return 0;
-	}
-	
-	{
-		dlerror();
-		struct frame_allocsite_entry *first_frame_entry
-		 = (struct frame_allocsite_entry *) dlsym(meta_handle, "frame_vaddrs");
-		if (!first_frame_entry)
-		{
-			debug_printf(1, "Could not load frame vaddrs (%s)\n", dlerror());
-			return 0;
-		}
-
-		/* We chain these much like the allocsites, BUT we OR each vaddr with 
-		 * STACK_BEGIN first.  */
-		struct frame_allocsite_entry *cur_frame_ent = first_frame_entry;
-		struct frame_allocsite_entry *prev_frame_ent = NULL;
-		unsigned current_frame_bucket_size = 1; // out of curiosity...
-		for (; cur_frame_ent->entry.allocsite; prev_frame_ent = cur_frame_ent++)
-		{
-			chain_allocsite_entries(cur_frame_ent ? &cur_frame_ent->entry : NULL, 
-				prev_frame_ent ? &prev_frame_ent->entry : NULL, 
-				&current_frame_bucket_size,
-				info->dlpi_addr, 0x800000000000ul);
-		}
-
-		// debugging: check that we can look up the first entry, if we are non-empty
-		assert(!first_frame_entry || !first_frame_entry->entry.allocsite || 
-			vaddr_to_stack_uniqtype(first_frame_entry->entry.allocsite).u == first_frame_entry->entry.uniqtype);
-	}
-	
-	/* Now a similar job for the statics. */
-	{
-		dlerror();
-		struct static_allocsite_entry *first_static_entry
-		 = (struct static_allocsite_entry *) dlsym(meta_handle, "statics");
-		if (!first_static_entry)
-		{
-			debug_printf(1, "Could not load statics (%s)", dlerror());
-			return 0;
-		}
-
-		/* We chain these much like the allocsites, BUT we OR each vaddr with 
-		 * STACK_BEGIN<<1 first.  */
-		struct static_allocsite_entry *cur_static_ent = first_static_entry;
-		struct static_allocsite_entry *prev_static_ent = NULL;
-		unsigned current_static_bucket_size = 1; // out of curiosity...
-		for (; !STATIC_ALLOCSITE_IS_NULL(cur_static_ent); prev_static_ent = cur_static_ent++)
-		{
-			chain_allocsite_entries(cur_static_ent ? &cur_static_ent->entry : NULL, 
-					prev_static_ent ? &prev_static_ent->entry : NULL,
-					&current_static_bucket_size,
-				info->dlpi_addr, 0x800000000000ul<<1);
-		}
-
-		// debugging: check that we can look up the first entry, if we are non-empty
-		assert(!first_static_entry || STATIC_ALLOCSITE_IS_NULL(first_static_entry) || 
-			static_addr_to_uniqtype(first_static_entry->entry.allocsite, NULL)
-				== first_static_entry->entry.uniqtype);
-	}
-	
-	// always continue with further objects
-	return 0;
-}
 
 int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
@@ -844,34 +707,12 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	// always continue with further objects
 #ifndef NO_MEMTABLE
 	dlerror();
-	struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(meta_handle, "allocsites");
-	// allocsites cannot be null anyhow
-	assert(first_entry && "symbol 'allocsites' must be present in -allocsites.so"); 
-	unsigned n_allocsites = 0;
-
-	/* We walk through allocsites in this object, chaining together those which
-	 * should be in the same bucket. NOTE that this is the kind of thing we'd
-	 * like to get the linker to do for us, but it's not quite expressive enough. */
-	struct allocsite_entry *cur_ent = first_entry;
-	struct allocsite_entry *prev_ent = NULL;
-	unsigned current_bucket_size = 1; // out of curiosity...
-	for (; cur_ent->allocsite; prev_ent = cur_ent++)
-	{
-		chain_allocsite_entries(cur_ent, prev_ent, &current_bucket_size, 
-			info->dlpi_addr, 0);
-		++n_allocsites;
-	}
-	
-	issue_allocsites_ids(n_allocsites, first_entry, (const void *) info->dlpi_addr);
-
-	// debugging: check that we can look up the first entry, if we are non-empty
-	assert(!first_entry || !first_entry->allocsite || 
-		allocsite_to_uniqtype(first_entry->allocsite) == first_entry->uniqtype);
-	int link_said_stop = link_stackaddr_and_static_allocs_for_one_object(info, size, NULL);
+	// FIXME: new version
+	//struct allocsite_entry *first_entry = (struct allocsite_entry *) dlsym(meta_handle, "allocsites");
 #endif
 	if (&__hook_loaded_one_object_meta) __hook_loaded_one_object_meta(info, size, meta_handle);
 #ifndef NO_MEMTABLE
-	return link_said_stop;
+	return 0; //link_said_stop;
 #else
 	return 0;
 #endif
@@ -1397,7 +1238,7 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		uintptr_t alloc_site_addr = p_ins->alloc_site;
 		void *alloc_site = (void*) alloc_site_addr;
 		if (out_site) *out_site = alloc_site;
-		struct allocsite_entry *entry = allocsite_to_entry(alloc_site/*, p_ins*/);
+		struct allocsite_entry *entry = NULL; // FIXME: allocsite_to_entry(alloc_site/*, p_ins*/);
 		alloc_uniqtype = entry ? entry->uniqtype : NULL;
 		/* Remember the unrecog'd alloc sites we see. */
 		if (!alloc_uniqtype && alloc_site && 
