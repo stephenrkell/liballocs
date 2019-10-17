@@ -121,6 +121,7 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 		{
 			ElfW(Sym) *statics_sym = symbol_lookup_in_object(inner_l, "statics");
 			if (!statics_sym) abort();
+#if 0
 			struct static_allocsite_entry *statics = sym_to_addr(statics_sym);
 			for (struct static_allocsite_entry *cur_ent = statics;
 					!STATIC_ALLOCSITE_IS_NULL(cur_ent);
@@ -138,6 +139,7 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 				}
 			}
 			// didn't find the symbol we were looking for -- oh well
+#endif
 			return 0;
 		}
 	}	
@@ -158,6 +160,7 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 struct uniqtype *
 static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 {
+#if 0
 	assert(__liballocs_allocsmt != NULL);
 	if (!static_addr) return NULL;
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)static_addr | (0x800000000000ul<<1)));
@@ -192,6 +195,7 @@ static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
 		--bucketpos;
 	} while (might_start_in_lower_bucket && 
 	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_static_obj_size);
+#endif
 	return NULL;
 }
 #undef maximum_vaddr_range_size
