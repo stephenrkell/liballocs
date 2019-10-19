@@ -57,9 +57,9 @@ int __liballocs_global_init(void) { return 0; }
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {
 }
-void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_size, 
-		unsigned long *frame_counter, const void *caller, 
-		const void *caller_sp, const void *caller_bp) {}
+void __alloca_allocator_notify(void *new_userchunkaddr,
+		unsigned long requested_size, unsigned long *frame_counter,
+		const void *caller, const void *caller_sp, const void *caller_bp) {}
 
 int __index_small_alloc(void *ptr, int level, unsigned size_bytes) { return 2; }
 void __unindex_small_alloc(void *ptr, int level) {}
@@ -82,18 +82,21 @@ void *__liballocs_my_metaobj(void)
 
 void *__liballocs_allocsmt;
 
-unsigned long __liballocs_get_alloc_size(const void *obj)
+unsigned long __liballocs_get_alloc_size(void *obj)
 {
 	return 0;
 }
-void *__liballocs_get_alloc_site(const void *obj)
+unsigned long alloc_get_size(void *obj) __attribute__((alias("__liballocs_get_alloc_size")));
+const void *__liballocs_get_alloc_site(void *obj)
 {
 	return 0;
 }
+const void *allocs_get_site(void *obj) __attribute__((alias("__liballocs_get_alloc_site")));
 void *__liballocs_get_base(void *obj)
 {
 	return NULL;
 }
+void *alloc_get_base(void *obj) __attribute__((alias("__liballocs_get_base")));
 void *__liballocs_get_alloc_base(void *obj)
 {
 	return NULL;
@@ -112,10 +115,11 @@ __liballocs_get_alloc_type_with_fill(void *obj, struct allocator **out_a, /*biga
 {
 	return NULL;
 }
-struct allocator * __liballocs_get_leaf_allocator(const void *obj)
+struct allocator * __liballocs_get_leaf_allocator(void *obj)
 {
 	return NULL;
 }
+struct allocator *alloc_get_allocator(void *obj) __attribute__((alias("__liballocs_get_leaf_allocator")));
 struct allocator * __liballocs_leaf_allocator_for(const void *obj,
 	struct big_allocation **out_bigalloc)
 {
@@ -133,6 +137,8 @@ __liballocs_get_outermost_type(void *obj)
 {
 	return NULL;
 }
+struct uniqtype *
+alloc_get_type(void *obj) __attribute__((alias("__liballocs_get_outermost_type")));
 
 struct uniqtype;
 const char *(__attribute__((pure)) __liballocs_uniqtype_name)(const struct uniqtype *u)
@@ -177,7 +183,7 @@ struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site)
 {
-	return NULL;
+	return (void *)-1; // We need to return an error here so do not return NULL
 }
 
 
@@ -234,5 +240,18 @@ Dl_info dladdr_with_cache(const void *addr)
 	Dl_info dummy;
 	memset(&dummy, 0, sizeof dummy);
 	return dummy;
+}
+
+void __notify_ptr_write(const void **dest, const void *val)
+{
+	/* Called for *dest = val; on code instrumented with trapptrwrites
+	 * Only provide this weak symbol unless lifetime policies are enabled */
+}
+
+void __notify_copy(void *dest, const void *src, unsigned long n)
+{
+	/* We provide a weak definition here that is overriden if lifetime policies
+	 * are enabled.
+	 * Also note that in any case, libcrunch will wrap us. */
 }
 

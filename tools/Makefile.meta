@@ -27,8 +27,8 @@ OBJDUMPMEMACC ?= $(dir $(THIS_MAKEFILE))/objdumpmemacc
 MERGE_MEMACC ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh # FIXME: change name
 GATHER_SRCMEMACC ?= $(dir $(THIS_MAKEFILE))/gather-srcmemacc.sh
 
-STD_CC ?= gcc
-CFLAGS += -I$(LIBALLOCS)/include
+META_CC ?= $(CC)
+META_CFLAGS ?= $(CFLAGS)
 
 # By default, remake everything we have already made,
 # but don't make new .allocsites files.
@@ -78,6 +78,7 @@ METADATA_KINDS ?= roottypes dwarftypes alloctypes frametypes allocsites extrasym
 # can't use builtin .o rule in case CC is not gcc (section flags injection attack
 # using "... comdat# ..." doesn't work except on gcc). (FIXME: use configure-time
 # adaptation found in glibc's libc-symbols.h?)
+
 meta_sources =
 # It's not the existence of a file that we care about; it's the inclusion
 # of a file in the link. But it's OK -- make let us incrementally build
@@ -101,7 +102,7 @@ endif
 
 # for debugging, try: @echo all dependencies: $+
 $(META_BASE)/%-meta.so: /% $(call meta_sources,%)
-	$(STD_CC) -I$(dir $(THIS_MAKEFILE))/../include -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+)
+	$(META_CC) -I$(dir $(THIS_MAKEFILE))/../include -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+)
 
 SWAP_STDOUT_STDERR := 3>&2 2>&1 1>&3
 

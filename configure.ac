@@ -2,8 +2,10 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_PREREQ([2.69])
 AC_INIT([liballocs], [0.1], [srk31@cl.cam.ac.uk])
 AC_CONFIG_SRCDIR([tools/ifacetypes.cpp])
-AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_HEADERS([config.h include/liballocs_config.h])
 AC_PREFIX_DEFAULT(/usr/local)
+
+AS_IF([test "x$prefix" = xNONE], [prefix=/usr/local])
 
 CFLAGS="-I$prefix/include $CFLAGS"
 CXXFLAGS="-I$prefix/include $CXXFLAGS"
@@ -53,6 +55,7 @@ AC_CHECK_HEADERS([sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h 
 AC_CHECK_HEADERS([alloca.h], [], [AC_MSG_FAILURE(Failed to find required header)])
 AC_CHECK_HEADERS([libelf.h libelf/libelf.h gelf.h libelf/gelf.h], [], [], [])
 AC_CHECK_HEADERS([dwarf.h], [], [AC_MSG_FAILURE(Failed to find required header)])
+AC_CHECK_HEADERS([plugin-api.h], [], [AC_MSG_FAILURE([Failed to find required header, try installing `binutils-dev` or a similar package])])
 
 AX_BOOST_BASE
 
@@ -101,8 +104,41 @@ AC_SUBST(MALLOC_HOOKS, $MALLOC_HOOKS)
 AC_SUBST(LIBDLBIND, $LIBDLBIND)
 AC_SUBST(LIBRUNT, $LIBRUNT)
 
-AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [Enable debug mode]))
-AC_ARG_ENABLE([real-libunwind], AS_HELP_STRING([--enable-real-libunwind], [Use real libunwind (by default we have our own)]))
+AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [Enable debug mode]),
+              [enable_debug=${enableval}])
+AC_ARG_ENABLE([fake-libunwind],
+              AS_HELP_STRING([--enable-fake-libunwind], [Use our own fake libunwind (faster but less stable)]),
+              [enable_fake_libunwind=${enableval}])
+AC_ARG_ENABLE([lifetime-policies],
+              AS_HELP_STRING([--enable-lifetime-policies@<:@=NB@:>@],
+                             [Enable the lifetime extension interface, with at most NB distinct policies, or 8 if NB is not provided [disabled by default]]),
+              [case ${enableval} in
+                  no) lifetime_policies=0 ;;
+                  yes) lifetime_policies=8 ;;
+                  *) lifetime_policies=${enableval} ;;
+               esac
+               case ${lifetime_policies} in
+                  0) ;;
+                  8) lifetime_insert_type="uint8_t" ;;
+                  16) lifetime_insert_type="uint16_t" ;;
+                  32) lifetime_insert_type="uint32_t" ;;
+                  64) lifetime_insert_type="uint64_t" ;;
+                  *) AC_MSG_ERROR([bad value ${enableval} for --enable-lifetime-policies])
+               esac],
+              [lifetime_policies=0])
+AC_ARG_ENABLE([precise-requested-allocsize],
+              AS_HELP_STRING([--enable-precise-requested-allocsize], [Make size queries over allocated objects return precisely the size requested at the allocation site (enabled by default)]),
+              [precise_requested_allocsize=${enableval}], [precise_requested_allocsize=yes])
+
+AS_IF([test "x$enable_fake_libunwind" = "xyes"],
+      [AC_DEFINE([USE_FAKE_LIBUNWIND],1,[Defined if using our own version of libunwind])])
+AS_IF([test $lifetime_policies != 0],
+      [AC_DEFINE_UNQUOTED([LIFETIME_POLICIES], [$lifetime_policies],
+                          [When lifetime extenstion is available this macro expands to the number of available lifetime policies, else it is undefined])
+       AC_DEFINE_UNQUOTED([LIFETIME_INSERT_TYPE], [$lifetime_insert_type],
+                          [Expands to the type of lifetime inserts])])
+AS_IF([test "x$precise_requested_allocsize" = "xyes"],
+      [AC_DEFINE([PRECISE_REQUESTED_ALLOCSIZE],1,[If defined, liballocs needs to return the precise requested size on size queries])])
 
 AC_ARG_WITH([libsystrap],
             [AS_HELP_STRING([--with-libsystrap=DIR],
@@ -157,8 +193,10 @@ AC_SUBST([libmallochooks], [$ac_libmallochooks])
 AC_SUBST([librunt], [$ac_librunt])
 AC_SUBST([libsystrap], [$ac_libsystrap])
 AC_SUBST([libdlbind], [$ac_libdlbind])
+
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])
-AM_CONDITIONAL(USE_REAL_LIBUNWIND, [test "x$enable_real-libunwind" = "xyes"])
+AM_CONDITIONAL(USE_FAKE_LIBUNWIND, [test "x$enable_fake_libunwind" = "xyes"])
+AM_CONDITIONAL(LIFETIME_POLICIES, [test $lifetime_policies != 0])
 
 AC_CONFIG_FILES([Makefile liballocs.pc config.mk])
 AC_OUTPUT

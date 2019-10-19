@@ -616,7 +616,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         allLinkOutputOptions = {"-pie", "-shared", "--pic-executable", \
                        "-Wl,-pie", "-Wl,-shared", "-Wl,--pic-executable", "-Wl,-r", "-Wl,--relocatable"}
         thisLinkOutputOptions = set(self.phaseOptions[Phase.LINK].keys()).intersection(allLinkOutputOptions)
-        finalLinkOutput = self.getOutputFilename()
+        finalLinkOutput = self.getOutputFilename(Phase.LINK)
         finalItemsAndOpts = []
         if self.doingFinalLink():
             # okay, first do a via-big-.o link

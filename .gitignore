@@ -23,12 +23,13 @@
 /tools/dumptypes
 /tools/ifacetypes
 /tools/find-allocated-type-size
-/tools/lang/c/bin
+/tools/lang/c/bin/base-types-translation
 /tools/lang/c/src/base-types-translation
 /tools/usedtypes
 /tools/lang/c/*/*.d
 /tools/cufiles
 /tools/dumpptrs
+/tools/*.s
 
 /contrib/antlr-3.4-complete.jar
 /contrib/antlr-3.4.tar.gz
@@ -39,6 +40,7 @@
 
 /config.h
 /config.h.in
+/include/liballocs_config.h
 
 
 /Makefile
@@ -65,6 +67,7 @@ Makefile.in
 /install-sh
 /missing
 /stamp-h1
+/include/stamp-h2
 /m4/
 /config.guess
 /config.sub

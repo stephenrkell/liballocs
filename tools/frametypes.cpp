@@ -234,8 +234,6 @@ int main(int argc, char **argv)
 
 	map<subprogram_key, iterator_df<subprogram_die> > subprograms_list;
 
-	master_relation_t master_relation;
-	make_exhaustive_master_relation(master_relation, root.begin(), root.end());
 	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
 	{
 		if (i.is_a<subprogram_die>())
@@ -884,6 +882,7 @@ int main(int argc, char **argv)
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
 			string mangled_name = mangle_typename(make_pair(cu_name, unmangled_typename));
+			write_uniqtype_section_decl(cout, mangled_name);
 			write_uniqtype_open_composite(cout,
 				mangled_name,
 				unmangled_typename,

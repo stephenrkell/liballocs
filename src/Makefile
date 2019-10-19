@@ -1,5 +1,5 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
-LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
+LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
 SRCROOT := $(dir $(THIS_MAKEFILE))../
 srcdir := $(SRCROOT)/src
 include $(SRCROOT)/config.mk
@@ -114,7 +114,7 @@ SYSTRAP_OBJS := systrap.o
 
 # Generate deps.
 ALL_OBJS := $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(NONSHARED_OBJS) $(PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) $(SYSTRAP_OBJS)
-# build src backwards from our .o files
+# enumerate src files backwards from our .o files
 C_SRC := $(sort $(patsubst %.o,%.c,$(ALL_OBJS)))
 dep_fname = $(dir $1)$(patsubst %.c,.%.d,$(notdir $1))
 C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
@@ -188,6 +188,29 @@ liballocs_preload.so-test-%.h.test: %.h $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OB
 liballocs_preload.a: $(LIBALLOCS_PRELOAD_A_OBJS)
 liballocs_nonshared.a: $(LIBALLOCS_NONSHARED_A_OBJS)
 liballocs.a: $(LIBALLOCS_A_OBJS)
+
+ifeq ($(USE_FAKE_LIBUNWIND),)
+FAKE_LIBUNWIND_OBJ :=
+LIBUNWIND_LDLIBS := -lunwind -lunwind-$(shell uname -m)
+else
+FAKE_LIBUNWIND_OBJ := fake-libunwind.o
+CFLAGS += -fno-omit-frame-pointer
+LIBUNWIND_LDLIBS :=
+endif
+
+ifeq ($(LIFETIME_POLICIES),)
+LIFETIME_EXT_OBJ :=
+else
+LIFETIME_EXT_OBJ := lifetime_policies.o
+endif
+
+ifneq ($(TRACE_HEAP_INDEX),)
+CFLAGS += -DTRACE_HEAP_INDEX
+endif
+
+uniqtypes.o: uniqtypes.c
+	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
+	$(LIBALLOCS)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
 # HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option
 # or if we could statically link-in our stubs without making them non-overridable.

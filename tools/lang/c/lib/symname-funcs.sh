@@ -27,7 +27,7 @@ translate_symnames() {
     
     BASE_TYPES_TRANSLATION=${BASE_TYPES_TRANSLATION:-$( dirname "$(this_filename)" )/../src/base-types-translation}
 
-    signpost_frag_regexp="__ARG[0-9]+_|__PTR_|__REF_|__RR_|__ARR[0-9]+_|__FUN_FROM_|__FUN_TO_|__VA_"
+    signpost_frag_regexp="__ARG[0-9]+_|__PTR_|__REF_|__RR_|__ARR[0-9]*_|__FUN_FROM_|__FUN_TO_|__VA_"
     type_pred_regexp="__uniqtype__|${signpost_frag_regexp}"
     type_succ_regexp="${signpost_frag_regexp}|\$|"$'\t'
     

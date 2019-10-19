@@ -108,6 +108,32 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 	return b;
 }
 
+static struct big_allocation *add_static_mapping_sequence_bigalloc(struct mapping_sequence *seq) {
+	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
+	if (!b) abort();
+
+	static struct mapping_sequence mapping_sequence_static_pool[64];
+	static struct mapping_sequence *next_free_mapping_seq = mapping_sequence_static_pool;
+
+	assert(next_free_mapping_seq < mapping_sequence_static_pool + 64);
+
+	/* Note that this will use early_malloc if we would otherwise be reentrant. */
+	struct mapping_sequence *copy = next_free_mapping_seq++;
+	if (!copy) abort();
+	memcpy(copy, seq, sizeof (struct mapping_sequence));
+
+	b->meta = (struct meta_info) {
+		.what = DATA_PTR,
+		.un = {
+			opaque_data: {
+				.data_ptr = copy,
+				.free_func = __private_free
+			}
+		}
+	};
+	return b;
+}
+
 static _Bool mapping_entry_equal(struct mapping_entry *e1,
 		struct mapping_entry *e2)
 {
@@ -743,7 +769,9 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		}
 		else /* HMM -- probably an mmap from the private malloc. Not sure*/
 		{
-			add_mapping_sequence_bigalloc(&new_seq);
+			// HACK: Try to avoid infinite recursion by using a static version.
+			// FIXME: Will fail if called too many times
+			add_static_mapping_sequence_bigalloc(&new_seq);
 		}
 	}
 }
@@ -875,7 +903,7 @@ void __mmap_allocator_init(void)
 		 * Also, we don't want to call dlsym since it might not be safe to malloc.
 		 * Instead, get the executable's program headers directly from the auxv. */
 		char dummy;
-		ElfW(auxv_t) *auxv = get_auxv((const char **) environ, &dummy);
+		ElfW(auxv_t) *auxv = get_auxv(environ, &dummy);
 		assert(auxv);
 		ElfW(auxv_t) *ph_auxv = auxv_lookup(auxv, AT_PHDR);
 		ElfW(auxv_t) *phnum_auxv = auxv_lookup(auxv, AT_PHNUM);
@@ -961,6 +989,43 @@ void __mmap_allocator_init(void)
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
+}
+
+void __systrap_brk_hack(void) __attribute__((visibility("hidden")));
+void __systrap_brk_hack(void)
+{
+#ifdef GUESS_RELEVANT_SYSCALL_SITES
+	// we want to trap syscalls in "__brk"; // glibc HACK!
+	// but "__brk" in glibc isn't an exportd symbol.
+	// instead, we need to walk its allocations
+	for (struct link_map *l = find_r_debug()->r_map; l; l = l->l_next)
+	{
+		if ((const void *) l->l_ld != &_DYNAMIC && (intptr_t) l->l_addr > 0
+			&& strlen(l->l_name) > 0)
+		{
+			/* This is a reasonable object that isn't us. Look up "sbrk" in its
+			 * symtab. Then do the more expensive search for "__brk". */
+			Elf64_Sym *found = symbol_lookup_in_object(l, "sbrk"); // HACK
+			if (found)
+			{
+				if (&__lookup_static_allocation_by_name)
+				{
+					/* We want to trap syscalls in "__brk" but "__brk" in glibc 
+					 * isn't an exported symbol. So consult our allocs data for 
+					 * a definition named "__brk" and trap that. */
+					void *addr;
+					size_t len;
+					_Bool success = __lookup_static_allocation_by_name(l, "__brk", &addr, &len);
+					if (success)
+					{
+						trap_one_instruction_range((unsigned char*) addr, 
+							(unsigned char*) addr + len, 0, 1);
+					}
+				}
+			}
+		}
+	}
+#endif
 }
 
 void copy_all_left_from_by(struct mapping_sequence *s, int from, int by)

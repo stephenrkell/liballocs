@@ -4,8 +4,7 @@ CONTRIB_ROOT := $(realpath $(dir $(THIS_MAKEFILE)))
 NINJA ?= ninja
 CMAKE ?= cmake
 
-export LIBALLOCS_DIR := $(realpath $(dir $(THIS_MAKEFILE))/..)
-export LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
+export LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
 # trap-syscalls's and libdlbind's contribs need to be able to find librunt
 export LIBRUNT_BASE := $(realpath $(dir $(THIS_MAKEFILE))/librunt)
 
@@ -192,6 +191,9 @@ CONFIG_MK += \nLIBDLBIND ?= $(CONTRIB_ROOT)/libdlbind\n
 CONFIG_MK += \nMALLOC_HOOKS := $(CONTRIB_ROOT)/libmallochooks\n
 
 # ----------------------------optional: LLVM (Chris Diamand's fork, for now)
+# Currently not usable, work needed to revive. To test, check out:
+#   * https://github.com/stephenrkell/llvm to contrib/llvm
+#   * https://github.com/stephenrkell/clang to contrib/llvm/tools/clang
 .PHONY: llvm llvm-build
 llvm: llvm/build/LLVMBuild.cmake llvm-build
 

@@ -316,11 +316,12 @@ extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); /
 #endif
 
 #define UNIQTYPE_SIZE_IN_BYTES(u)        ((u)->pos_maxoff)
+#define UNIQTYPE_KIND(u)                 ((u)->un.array.is_array ? ARRAY : (u)->un.info.kind)
 #define UNIQTYPE_IS_SUBPROGRAM_TYPE(u)   ((u)->un.info.kind == SUBPROGRAM)
 #define UNIQTYPE_SUBPROGRAM_ARG_COUNT(u) ((u)->un.subprogram.narg)
 #define UNIQTYPE_IS_POINTER_TYPE(u)      ((u)->un.info.kind == ADDRESS)
 #define UNIQTYPE_POINTEE_TYPE(u)         (UNIQTYPE_IS_POINTER_TYPE(u) ? (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
-#define UNIQTYPE_ULTIMATE_POINTEE_TYPE(u)(UNIQTYPE_IS_POINTER_TYPE(u) ? ((u)->un.info.address.indir_level > 1) ? (u)->related[1].un.t.ptr : (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
+#define UNIQTYPE_ULTIMATE_POINTEE_TYPE(u)(UNIQTYPE_IS_POINTER_TYPE(u) ? ((u)->un.address.indir_level > 1) ? (u)->related[1].un.t.ptr : (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
 #define UNIQTYPE_IS_ARRAY_TYPE(u)        ((u)->un.array.is_array)
 #define UNIQTYPE_IS_COMPOSITE_TYPE(u)    ((u)->un.info.kind == COMPOSITE)
 #define UNIQTYPE_HAS_SUBOBJECTS(u)       (UNIQTYPE_IS_COMPOSITE_TYPE(u) || UNIQTYPE_IS_ARRAY_TYPE(u))
@@ -331,6 +332,7 @@ extern struct uniqtype __uniqtype____uninterpreted_byte __attribute__((weak)); /
 #define UNIQTYPE_ARRAY_LENGTH(u)         (UNIQTYPE_IS_ARRAY_TYPE(u) ? (u)->un.array.nelems : -1)
 #define UNIQTYPE_ARRAY_ELEMENT_TYPE(u)   (UNIQTYPE_IS_ARRAY_TYPE(u) ? (u)->related[0].un.t.ptr : NULL_UNIQTYPE)
 #define UNIQTYPE_COMPOSITE_MEMBER_COUNT(u) (UNIQTYPE_IS_COMPOSITE_TYPE(u) ? (u)->un.composite.nmemb : 0)
+#define UNIQTYPE_COMPOSITE_SUBOBJ_NAMES(u) (UNIQTYPE_IS_COMPOSITE_TYPE(u) ? (u)->related[(u)->un.composite.nmemb].un.memb_names.n : NULL)
 #define UNIQTYPE_IS_2S_COMPL_INTEGER_TYPE(u) \
    ((u)->un.info.kind == BASE && (u)->un.base.enc == 0x5 /*DW_ATE_signed */)
 #define UNIQTYPE_BASE_TYPE_SIGNEDNESS_COMPLEMENT(u) \

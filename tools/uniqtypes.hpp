@@ -61,6 +61,8 @@ void write_master_relation(master_relation_t& r,
 	bool emit_codeless_aliases,
 	bool emit_subobject_names = true);
 
+void write_uniqtype_section_decl(std::ostream &o, const string& mangled_typename);
+
 void write_uniqtype_open_void(std::ostream& o,
     const string& mangled_typename,
     const string& unmangled_typename,
@@ -173,6 +175,12 @@ void write_uniqtype_related_contained_member_type(std::ostream& o,
     boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
 	boost::optional<string> comment_str = boost::optional<string>()
     );
+
+void write_uniqtype_related_member_names(std::ostream& o,
+	bool is_first,
+	optional<string> maybe_subobj_names = boost::optional<string>(),
+	optional<string> comment_str = boost::optional<string>()
+	);
 void write_uniqtype_related_signedness_complement_type(std::ostream& o,
     boost::optional<string> maybe_mangled_typename = boost::optional<string>(),
 	boost::optional<string> comment_str = boost::optional<string>()

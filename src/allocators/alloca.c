@@ -94,9 +94,9 @@ struct big_allocation *__stackframe_allocator_find_or_create_bigalloc(
 		unsigned long *frame_counter, const void *caller, const void *frame_sp_at_caller, 
 		const void *frame_bp_at_caller);
 
-void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_size, 
-		unsigned long *frame_counter, const void *caller, const void *sp_at_caller,
-		const void *bp_at_caller)
+void __alloca_allocator_notify(void *new_userchunkaddr,
+		unsigned long requested_size, unsigned long *frame_counter,
+		const void *caller, const void *sp_at_caller, const void *bp_at_caller)
 {
 	/* 1. We need to register the current frame as a "big" allocation, or
 	 *    if it already is "big", to extend that to cover the current extent.
@@ -122,7 +122,7 @@ void __alloca_allocator_notify(void *new_userchunkaddr, unsigned long modified_s
 	__liballocs_pre_extend_bigalloc_recursive(b, /*sp_at_caller*/ new_userchunkaddr);
 	 
 	/* index it */
-	__liballocs_index_insert(new_userchunkaddr, modified_size, caller);
+	__liballocs_index_insert(new_userchunkaddr, requested_size, caller);
 	
 #undef __liballocs_get_alloc_base /* inlcache HACKaround */
 	assert(__liballocs_get_alloc_base(new_userchunkaddr));

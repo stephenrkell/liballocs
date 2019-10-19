@@ -253,6 +253,8 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 		assert(i.offset_here() >= previous_offset); // == for initial case, > afterwards
 		if (i.is_a<type_die>())
 		{
+			// HACK: don't add subrange types -- should really restrict to the array case (FIXME)
+			if (i.is_a<subrange_type_die>()) continue;
 			if (isatty(fileno(std::cerr)))
 			{
 				if (done_some_output) std::cerr << "\r";
@@ -280,14 +282,17 @@ void make_exhaustive_master_relation(master_relation_t& rel,
 		}
 		previous_offset = i.offset_here();
 	}
-}	
+}
+static void set_symbol_length(std::ostream& out, const string& mangled_name, unsigned length)
+{
+	out << "__asm__(\".size " << mangled_name << ", " << length
+		<< "\");" << endl;
+}
 string ensure_contained_length(const string& mangled_name, unsigned contained_length)
 {
 	ostringstream s;
-	s << "__asm__(\".size " << mangled_name << ", "
-		<< (offsetof(uniqtype, related) + contained_length * sizeof (uniqtype_rel_info))
-		<< "\");" << endl;
-	
+	set_symbol_length(s, mangled_name,
+		offsetof(uniqtype, related) + contained_length * sizeof (uniqtype_rel_info));
 	return s.str();
 }
 static string attributes_for_uniqtype(const string& mangled_name, bool is_weak = false, bool include_section = true)
@@ -303,8 +308,7 @@ static string attributes_for_uniqtype(const string& mangled_name, bool is_weak =
 	if (include_section)
 	{
 		if (need_comma) s << ",";
-		s << "section (\".data." << mangled_name
-			<< ", \\\"awG\\\", @progbits, " << mangled_name << ", comdat#\")";
+		s << "section (\".data." << mangled_name << "\\n\\t#\")";
 		need_comma = true;
 	}
 	if (is_weak)
@@ -316,21 +320,29 @@ static string attributes_for_uniqtype(const string& mangled_name, bool is_weak =
 	if (need_termination) s << ")) ";
 	return s.str();
 }
-static void emit_weak_alias(std::ostream& out, const string& alias_name, const string& target_name, bool emit_section = true)
+static void emit_weak_alias_idem(std::ostream& out, const string& alias_name, const string& target_name, bool emit_section = true)
 {
+	// workaround for gcc bug 90470: don't emit the same alias twice
+	static set<string> emitted_previously;
+	if (emitted_previously.find(alias_name) != emitted_previously.end()) return;
+	emitted_previously.insert(alias_name);
 	out << "extern struct uniqtype " << alias_name
 		<< " __attribute__((weak,alias(\"" << target_name << "\")";
 	if (emit_section)
 	{
-		out << ",section(\".data." << target_name
-			/* To satisfy gcc's "section of alias `...' must match section of its target",
-			 * we rather we even have to match the escape-hatch cruft (although it gets
-			 * discarded after gcc has done the check). */
-			<< ", \\\"awG\\\", @progbits, " << target_name << ", comdat#"
-			<< "\")";
+		/* To satisfy gcc's "section of alias `...' must match section of its target",
+		 * we rather we even have to match the escape-hatch cruft (although it gets
+		 * discarded after gcc has done the check). */
+		out << ",section(\".data." << target_name << "\\n\\t#\")";
+		// WARNING: This works only if we are never aliasing an alias
 	}
 	out <<"));"
 		<< endl;
+
+	/* Make the alias symbol name short to be able to retrieve the original 
+	 * symbol name with dladdr.
+	 * Zero has a special meaning so use 1 instead. */
+	set_symbol_length(out, alias_name, 1);
 }
 void emit_extern_declaration(std::ostream& out,
 	const uniqued_name& name_pair,
@@ -361,15 +373,16 @@ void write_master_relation(master_relation_t& r,
 	 * a generic alias "int". */
 	std::map< std::string, std::set< string > > codeless_alias_blacklist;
 	
-	/* Note the very nasty hack with __attribute__((section (...))): 
-	 * we embed a '#' into the section string, after adding our own
-	 * assembler-level flags and attributes. This causes the compiler-
-	 * -generated flags and attributes to be ignored, because the '#' 
-	 * comments them out. Without this trick, there is no way of supplying
-	 * our own section flags and attributes to override the compiler.
-	 * FIXME: this works with gcc-generated assembly but not clang's.
-	 * Borrow glibc's somewhat-portable way of doing this, if that fixes things.
-	 * FIXME: fix the same thing elsewhere, too. */
+	/* Note the very nasty hack with __attribute__((section (...))):
+	 * we embed a '#' into the section string. This causes the compiler-
+	 * -generated flags and attributes to be ignored, because the '#'
+	 * comments them out. Our own assembler-level flags and attributes are
+	 * added in a module level assembly block placed before. Without this trick,
+	 * there is no way of supplying our own section flags and attributes to
+	 * override the compiler.
+	 * This trick is borrowed from glibc.
+	 * TODO: handle section quotes (cf. glibc's libc-symbols.h:__sec_comment)
+	 * TODO: this works with gcc but has not yet been tested with clang */
 	if (emit_void)
 	{
 		/* DWARF doesn't reify void, but we do. So output a rec for void first of all.
@@ -378,12 +391,12 @@ void write_master_relation(master_relation_t& r,
 		auto emit_empty_subobject_names = [&out](const string& name) {
 			out << "const char *" << mangle_typename(make_pair(string(""), name))
 				<< "_subobj_names[] "
-				<< " __attribute__((section (\".data.__uniqtype__" << name
-					<< ", \\\"awG\\\", @progbits, __uniqtype__" << name << ", comdat#\")))"
-				<< "= { (void*)0 };\n";
+				<< "__attribute__((section (\".data.__uniqtype__" << name
+				<< "\\n\\t#\"))) = { (void*)0 };\n";
 		};
 		
 		out << "\n/* uniqtype for void */\n";
+		write_uniqtype_section_decl(out, "__uniqtype__void");
 		if (emit_subobject_names) emit_empty_subobject_names("void");
 		string mangled_name = mangle_typename(make_pair(string(""), string("void")));
 		write_uniqtype_open_void(out,
@@ -397,6 +410,7 @@ void write_master_relation(master_relation_t& r,
 		/* We also now emit two further "special" types: the type of
 		 * generic pointers, and the type of uninterpreted bytes. */
 		out << "\n/* uniqtype for generic pointers */\n";
+		write_uniqtype_section_decl(out, "__uniqtype____EXISTS1___PTR__1");
 		if (emit_subobject_names) emit_empty_subobject_names("__EXISTS1___PTR__1");
 		mangled_name = mangle_typename(make_pair(string(""), string("__EXISTS1___PTR__1")));
 		/* How do we model a generic pointer? */
@@ -411,6 +425,7 @@ void write_master_relation(master_relation_t& r,
 		write_uniqtype_close(out, mangled_name);
 		
 		out << "\n/* uniqtype for uninterpreted bytes */\n";
+		write_uniqtype_section_decl(out, "__uniqtype____uninterpreted_byte");
 		if (emit_subobject_names) emit_empty_subobject_names("__uninterpreted_byte");
 		mangled_name = mangle_typename(make_pair(string(""), string("__uninterpreted_byte")));
 		write_uniqtype_open_generic(out,
@@ -446,8 +461,7 @@ void write_master_relation(master_relation_t& r,
 			 /* HACK: only complement zero-off cases for now, since we don't track the 
 			  * bit offset in the big _by_size_and_signedness map. */
 	};
-	auto avoid_aliasing_as = [&codeless_alias_blacklist](const string& alias,
-		const string& codestring, iterator_df<type_die> t) {
+	auto avoid_aliasing_as = [](const string& alias, iterator_df<type_die> t) {
 		if (!t.is_a<base_type_die>()) return false;
 		auto base_t = t.as_a<base_type_die>();
 		/* Funky bitfield types are 
@@ -473,7 +487,7 @@ void write_master_relation(master_relation_t& r,
 			cerr << "Warning: master relation contained non-concrete: " << t << endl;
 		}
 		types_by_name[name.second].insert(t);
-		name_pairs_by_name[name.second].insert(name);
+		if (name.first != "") name_pairs_by_name[name.second].insert(name);
 		if (t.is_a<base_type_die>())
 		{
 			/* Are we an integer? */
@@ -489,7 +503,7 @@ void write_master_relation(master_relation_t& r,
 					integer_base_types_by_size_and_signedness[bit_size][signedness].insert(*i_pair);
 				}
 			}
-			if (avoid_aliasing_as(name.second, name.first, t))
+			if (avoid_aliasing_as(name.second, t))
 			{
 				codeless_alias_blacklist[name.second].insert(name.first);
 			}
@@ -625,10 +639,27 @@ void write_master_relation(master_relation_t& r,
 			continue;
 		}
 		
-		// we might not be incomplete, but be dependent on an incomplete somehow (e.g. points-to)
+		/* We might not be incomplete, but be dependent on an incomplete somehow
+		 * (e.g. points-to). We should emit something, because we might never see a
+		 * definition for the thing we depend on, but the depending-on type has
+		 * an independent existence. However, we should emit something weak, such
+		 * that it will be replaced by any strong definition. Since we don't have a
+		 * code, that strong definition will also be codeless. So emitting this
+		 * weak definition should not prevent a codeless alias from appearing...
+		 * i.e. it should not be considered to create ambiguity (ambiguity being
+		 * what normally prevents the generation of codeless aliases). In other
+		 * words, we should not add something to name_pairs_by_name. */
 		bool dependent_on_incomplete = (i_vert->first.first == "");
-		// AARGH. Functions don't count. If we're a pointer to a function, then
-		
+		if (dependent_on_incomplete)
+		{
+			cout << "/* Depends on something incomplete, so definition should be weak. */"
+				<< std::endl;
+		}
+		else
+		{
+			write_uniqtype_section_decl(out, mangled_name);
+		}
+
 		/* We can also be *variable-length*. In this case we output a pos_maxoff of -1
 		 * i.e. maximum-unsigned-value. */
 		if (emit_subobject_names)
@@ -784,17 +815,23 @@ void write_master_relation(master_relation_t& r,
 				++contained_length;
 			}
 		}
-		else if (i_vert->second.is_a<subrange_type_die>()) // FIXME
+		else if (i_vert->second.is_a<subrange_type_die>())
 		{
-			auto base_t = i_vert->second.as_a<subrange_type_die>()->find_type();
-			write_uniqtype_open_subrange(out,
-				mangled_name,
-				i_vert->first.second,
-				(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
-				0 /* FIXME */,
-				0 /* FIXME */
-			);
-			write_uniqtype_related_dummy(out);
+			/* If we're inside an array type, we do nothing. FIXME: perhaps test
+			 * for the C language too, though it's not clear whether this is a
+			 * C+DWARF-specific idiom. */
+			if (!i_vert->second.parent().is_a<array_type_die>())
+			{
+				auto base_t = i_vert->second.as_a<subrange_type_die>()->find_type();
+				write_uniqtype_open_subrange(out,
+					mangled_name,
+					i_vert->first.second,
+					(opt_sz ? (int) *opt_sz : (real_members.size() > 0 ? -1 : 0)) /* pos_maxoff */,
+					0 /* FIXME */,
+					0 /* FIXME */
+				);
+				write_uniqtype_related_dummy(out);
+			}
 		}
 		else if (i_vert->second.is_a<base_type_die>())
 		{
@@ -965,6 +1002,10 @@ void write_master_relation(master_relation_t& r,
 					*i_off,
 					mangled_name);
 			}
+
+			write_uniqtype_related_member_names(out,
+				real_members.begin() == real_members.end(),
+				emit_subobject_names ? mangled_name + "_subobj_names" : optional<string>());
 		}
 		else
 		{
@@ -989,15 +1030,17 @@ void write_master_relation(master_relation_t& r,
 					i_vert->second
 				)
 			);
-			auto k = make_pair(
+			// compl_name_pair is the *language-independent* name, e.g. "uint$32"
+			auto compl_name_pair = make_pair(
 				complement_summary_code_string,
 				name_for_complement_base_type(i_vert->second)
 			);
-			string compl_name = mangle_typename(k);
+			string compl_name = mangle_typename(compl_name_pair);
 			
+			write_uniqtype_section_decl(out, compl_name);
 			write_uniqtype_open_base(out, 
 				compl_name,
-				k.second,
+				compl_name_pair.second,
 				(opt_sz ? *opt_sz : 0),
 				(i_vert->second.as_a<base_type_die>()->get_encoding() == DW_ATE_unsigned) ? 
 					DW_ATE_signed : 
@@ -1013,8 +1056,12 @@ void write_master_relation(master_relation_t& r,
 			write_uniqtype_close(out, compl_name, 1);
 			
 			/* If our actual type has a C-style name, output a C-style alias for the 
-			 * complement we just output. FIXME: how *should* this work? Who consumes 
-			 * these aliases? Is it only our sloppy-dumptypes test case, i.e. typename-
+			 * complement we just output. For example, if we are processing a binary
+			 * that uses "int" but not "unsigned int", we'll just have emitted
+			 * "uint$32" so should emit its alias "unsigned int".
+			 *
+			 * FIXME: how *should* this work? Who consumes  these aliases?
+			 * Is it only our sloppy-dumptypes test case, i.e. typename-
 			 * -based client code that expects C-style names? 
 			 * 
 			 * In general we want to factor this into a pair of extra phases in allocscc:
@@ -1024,12 +1071,7 @@ void write_master_relation(master_relation_t& r,
 			 * this to support e.g. Fortran at the same time as C, etc..
 			 * BUT NOTE that the "language-dependent" form is, in general, both language-
 			 * and *compiler*-dependent, i.e. more than one base type might be "unsigned long"
-			 * depending on compiler flags etc.. So it's not as simple as re-aliasing them.
-			 * The typestr APIs need to be sensitive to the *caller* (e.g. an alias for 
-			 * "unsigned_long" might meaningfully exist in a caller's typeobj, but not globally
-			 * since multiple distinct "unsigned long"s are defined across the whole program). 
-			 * A simple re-aliasing pass on a per-typeobj basis is "good enough" for now though. 
-			 * (The case of multiple distinct definitions in the same dynamic object is rare.)
+			 * depending on compiler flags etc..
 			 * */
 			if (i_vert->second.name_here())
 			{
@@ -1037,23 +1079,36 @@ void write_master_relation(master_relation_t& r,
 					name_for_type_die(i_vert->second)->c_str());
 				if (equiv)
 				{
+					// we're outputting a type with a C-style name, i.e. matching one of
+					// the known equivalence classes. FIXME: only check this for DIES in
+					// C-language compilation units!
 					bool is_unsigned = (string(equiv[0]).find("unsigned") != string::npos);
-					// we are iterating through an array of pointer to equiv class
+					// Find the matching equivalence class in the top-level array thereof.
+					// This means we are iterating through an array of pointer to equiv class
 					const char ** const* found_equiv = std::find(
 						abstract_c_compiler::base_typename_equivs,
 						abstract_c_compiler::base_typename_equivs_end,
 						equiv
 					);
 					assert(found_equiv);
+					// Find the complementary equivalence class.
 					// equiv classes are {s, u, s, u, ...}
 					const char **compl_equiv = is_unsigned ? found_equiv[-1]  : found_equiv[+1];
-					auto complement_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
-					emit_weak_alias(out, mangle_typename(complement_name_pair), /* existing name */ mangle_typename(k));
-					name_pairs_by_name[compl_equiv[0]].insert(complement_name_pair);
-					if (avoid_aliasing_as(compl_equiv[0], complement_name_pair.first,
-						i_vert->second))
+					// We take the *first* member of that equivalence class. FIXME: should be same-pos member?
+					auto complement_c_style_name_pair = make_pair(complement_summary_code_string, compl_equiv[0]);
+					// alias our complement under that name.
+					emit_weak_alias_idem(out, mangle_typename(complement_c_style_name_pair),
+						/* existing name */ mangle_typename(compl_name_pair));
+					// we just emitted a definition for "unsigned int" or whatever,
+					// so remember it in case there is some ambiguity over the codeless alias
+					name_pairs_by_name[compl_equiv[0]].insert(compl_name_pair /* i.e. language-independent */);
+					/* If this is a DIE that we don't consider for aliasing, add it to the
+					 * blacklist. This mostly means bitfield types. FIXME: should also roll
+					 * 'depends on incomplete' into this? */
+					if (avoid_aliasing_as(compl_equiv[0], i_vert->second /* the DIE */))
 					{
-						codeless_alias_blacklist[compl_equiv[0]].insert(complement_name_pair.first);
+						// the blacklist just remembers the summary code
+						codeless_alias_blacklist[compl_equiv[0]].insert(complement_c_style_name_pair.first);
 					}
 				}
 			}
@@ -1061,15 +1116,15 @@ void write_master_relation(master_relation_t& r,
 		
 		/* Output any (typedef-or-base-type) aliases for this type. NOTE that here we are
 		 * assuming that the canonical name for any base type (used above) is not the same as its
-		 * programmatic name (aliased here). */
+		 * programmatic name (aliased here), e.g. "uint$32" does not equal "unsigned int". */
 		for (auto i_alias = r.aliases[i_vert->second].begin(); 
 			i_alias != r.aliases[i_vert->second].end();
 			++i_alias)
 		{
-			emit_weak_alias(out, mangle_typename(make_pair(i_vert->first.first, *i_alias)), mangle_typename(i_vert->first), i_vert->first.first != "");
+			emit_weak_alias_idem(out, mangle_typename(make_pair(i_vert->first.first, *i_alias)), mangle_typename(i_vert->first), i_vert->first.first != "");
 			types_by_name[*i_alias].insert(i_vert->second);
 			name_pairs_by_name[*i_alias].insert(i_vert->first);
-			if (avoid_aliasing_as(*i_alias, i_vert->first.first, i_vert->second))
+			if (avoid_aliasing_as(*i_alias, i_vert->second))
 			{
 				codeless_alias_blacklist[*i_alias].insert(i_vert->first.first);
 			}
@@ -1081,18 +1136,19 @@ void write_master_relation(master_relation_t& r,
 	if (emit_codeless_aliases)
 	{
 		out << "/* Begin codeless (__uniqtype__<typename>) aliases. */" << endl;
-		for (auto i_by_name_pair = name_pairs_by_name.begin(); i_by_name_pair != name_pairs_by_name.end();
-			++i_by_name_pair)
+		for (auto i_set_by_name = name_pairs_by_name.begin(); i_set_by_name != name_pairs_by_name.end();
+			++i_set_by_name)
 		{
+			string name = i_set_by_name->first;
 			std::vector<const pair<string, string> *> aliases_to_consider;
-			for (auto i = i_by_name_pair->second.begin(); i != i_by_name_pair->second.end();
-				++i)
+			for (auto i_pair = i_set_by_name->second.begin(); i_pair != i_set_by_name->second.end();
+				++i_pair)
 			{
-				const string& codeful = i->first;
-				if (codeless_alias_blacklist[i->second].find(codeful)
-						== codeless_alias_blacklist[i->second].end())
+				const string& codestr = i_pair->first;
+				if (codeless_alias_blacklist[name].find(codestr)
+						== codeless_alias_blacklist[name].end())
 				{
-					aliases_to_consider.push_back(&*i);
+					aliases_to_consider.push_back(&*i_pair);
 				}
 			}
 			
@@ -1103,24 +1159,44 @@ void write_master_relation(master_relation_t& r,
 				if (full_name_pair.first != "")
 				{
 					string full_name = mangle_typename(full_name_pair);
-					pair<string, string> abbrev_name_pair = make_pair("", i_by_name_pair->first);
+					pair<string, string> abbrev_name_pair = make_pair("", i_set_by_name->first);
 					string abbrev_name = mangle_typename(abbrev_name_pair);
-					emit_weak_alias(out, mangle_typename(abbrev_name_pair), cxxgen::escape(full_name));
+					emit_weak_alias_idem(out, mangle_typename(abbrev_name_pair), cxxgen::escape(full_name));
 				}
 			}
 			else
 			{
-				out << "/* Not aliasing \"" << i_by_name_pair->first << "\"; set is {\n";
+				out << "/* No unique meaning for alias \"" << i_set_by_name->first << "\"; set is {";
 				for (auto i_t = aliases_to_consider.begin(); i_t != aliases_to_consider.end(); ++i_t)
 				{
-					if (i_t != aliases_to_consider.begin()) cout << ",\n";
-					out << "\t" << mangle_typename(**i_t);
+					if (i_t != aliases_to_consider.begin()) cout << ",";
+					out << "\n\t" << mangle_typename(**i_t);
 				}
 
-				out << "\n} */" << endl;
+				out << "\n} (blacklisted: {";
+				bool emitted = false;
+				for (auto i_pair = i_set_by_name->second.begin(); i_pair != i_set_by_name->second.end();
+					++i_pair)
+				{
+					for (auto i_str = codeless_alias_blacklist[name].begin();
+						i_str != codeless_alias_blacklist[name].end(); ++i_str)
+					{
+						if (emitted) cout << ", ";
+						out << *i_str;
+						emitted = true;
+					}
+				}
+				out << " }) */" << endl;
 			}
 		}
 	}
+}
+
+void write_uniqtype_section_decl(std::ostream& o, const string& mangled_typename)
+{
+	o << "__asm__(\".section .data." << mangled_typename
+	  << ", \\\"awG\\\", @progbits, " << mangled_typename << ", comdat"
+	  << "\\n\\t.previous\");\n";
 }
 
 static void write_uniqtype_open_generic(std::ostream& o,
@@ -1376,6 +1452,20 @@ void write_uniqtype_related_contained_member_type(std::ostream& o,
 	o << " } } }";
 	if (comment_str) o << " /* " << *comment_str << " */ ";
 }
+void write_uniqtype_related_member_names(std::ostream& o,
+	bool is_first,
+	optional<string> maybe_subobj_names,
+	optional<string> comment_str
+	)
+{
+	if (!is_first) o << ",\n\t\t";
+	/* begin the struct */
+	o << "{ { memb_names: { ";
+	if (maybe_subobj_names) o << *maybe_subobj_names;
+	else o << "(void*) 0";
+	o << " } } }";
+	if (comment_str) o << " /* " << *comment_str << " */ ";
+}
 void write_uniqtype_related_signedness_complement_type(std::ostream& o,
 	optional<string> maybe_mangled_typename,
 	optional<string> comment_str
@@ -1518,7 +1608,7 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 						err << i_tname->first;
 					}
 					err << endl;
-					return 1;
+					return;
 				case 1: 
 					// out << "Found match for " << key << ": " << found_pair.first->second << endl;
 					transitively_add_type(found_pair.first->second, master_relation);
@@ -1552,11 +1642,10 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 					else 
 					{
 						cerr << "Not identical, so not proceeding." << endl;
-						return 1;
+						return;
 					}
 				// end case default
 			}
-
 		};
 		
 		for_each_uniqtype_reference_in(fname, f);

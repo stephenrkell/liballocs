@@ -15,12 +15,6 @@
 #include "liballocs_private.h"
 #include "pageindex.h"
 
-#ifdef USE_REAL_LIBUNWIND
-#include <libunwind.h>
-#else
-#include "fake-libunwind.h"
-#endif
-
 /* This is the allocator that knows about ABI-defined *stack frames*,
  * as distinct from the (machine/OS-defined) *stack mappings*. */
 
@@ -123,6 +117,9 @@ void __stackframe_allocator_init(void)
 		 * mmap trap logic to identify them, by their MAP_GROWSDOWN flag. */
 	}
 }
+
+// Not declared in any header...
+void __liballocs_sanity_check_bigalloc(struct big_allocation *b);
 
 struct big_allocation *__stackframe_allocator_find_or_create_bigalloc(
 		unsigned long *frame_counter, const void *caller, const void *frame_sp_at_caller, 
@@ -262,7 +259,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 			unw_ret = unw_get_reg(&cursor, UNW_REG_IP, &higherframe_ip); assert(unw_ret == 0);
 			// try to get the bp, but no problem if we don't
 			unw_ret = unw_get_reg(&cursor, UNW_TDEP_BP, &higherframe_bp); 
-			got_higherframe_bp = (unw_ret == 0) && higherframe_bp != 0;
+			got_higherframe_bp = (unw_ret == 0) && higherframe_bp >= 0 && higherframe_bp >= bp;
 		}
 		/* NOTE that -UNW_EBADREG happens near the top of the stack where 
 		 * unwind info gets patchy, so we should handle it mostly like the 

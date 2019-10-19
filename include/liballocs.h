@@ -1,10 +1,6 @@
 #ifndef LIBALLOCS_H_
 #define LIBALLOCS_H_
 
-#ifndef _GNU_SOURCE
-#warning "compilation unit is not _GNU_SOURCE; some features liballocs requires may not be available"
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 typedef bool _Bool;
@@ -18,6 +14,14 @@ typedef bool _Bool;
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
+#if !defined(_GNU_SOURCE) && !defined(HAVE_DL_INFO)
+typedef struct {
+	const char *dli_fname;
+	void       *dli_fbase;
+	const char *dli_sname;
+	void       *dli_saddr;
+} Dl_info;
+#endif
 #include <link.h>
 
 extern void warnx(const char *fmt, ...); // avoid repeating proto
@@ -25,6 +29,7 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 #include <assert.h>
 #endif
 
+#include "liballocs_config.h"
 #include "memtable.h"
 #include "uniqtype.h"
 struct insert; // instead of heap_index.h
@@ -35,10 +40,10 @@ struct allocator; // instead of allocmeta.h
 	((all) != (as))
 
 /* ** begin added for inline get_alloc_info */
-#ifdef USE_REAL_LIBUNWIND
-#include <libunwind.h>
-#else
+#ifdef USE_FAKE_LIBUNWIND
 #include "fake-libunwind.h"
+#else
+#include <libunwind.h>
 #endif
 
 #include "allocsmt.h"
@@ -73,10 +78,6 @@ struct addrlist;
 int __liballocs_addrlist_contains(struct addrlist *l, void *addr);
 void __liballocs_addrlist_add(struct addrlist *l, void *addr);
 extern struct addrlist __liballocs_unrecognised_heap_alloc_sites;
-
-#ifdef _GNU_SOURCE
-Dl_info dladdr_with_cache(const void *addr);
-#endif
 
 extern void *__liballocs_main_bp; // beginning of main's stack frame
 char *get_exe_fullname(void) __attribute__((visibility("hidden")));
@@ -226,7 +227,11 @@ __liballocs_ensure_init(void)
 // -- we need ordinary headers to be all-inline, but
 // pageindex.c to have one non-inline.
 // How to placate the compiler of the translation unit that doesn't include pageindex.h?
-// I think the answer is "you can't; refactor headers to avoid this"
+// I think the answer is "you can't; refactor headers to avoid this".
+// In other words, always provide the inline definition, but
+// include a non-inline prototype in the instantiating compilation unit.
+// If there is an "internal-only inline" definition, it needs to have a
+// different name.
 /* The "leaf allocator" for an address is the allocator
  * of the most deeply nested allocation covering a particular
  * address. For example, if a malloc has two live allocations
@@ -697,6 +702,8 @@ __liballocs_get_alloc_base(void *obj);
 #endif
 
 
+void
+__liballocs_set_alloc_type(void *obj, const struct uniqtype *type);
 
 struct uniqtype * 
 __liballocs_get_outermost_type(void *obj);
@@ -716,28 +723,6 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom);
 
 /* FIXME: this call needs to go away. */
 struct insert *__liballocs_get_insert(struct big_allocation *maybe_the_allocation, const void *mem); // HACK: please remove (see libcrunch)
-
-/* FIXME: use newer/better features in uniqtype definition */
-static inline
-const char **__liballocs_uniqtype_subobject_names(const struct uniqtype *t)
-{
-	/* HACK: this all needs to go away, once we overhaul uniqtype's layout. */
-	Dl_info i = dladdr_with_cache(t);
-	if (i.dli_sname)
-	{
-		char names_name[strlen(i.dli_sname) + sizeof "_subobj_names"];
-		memcpy(names_name, i.dli_sname, strlen(i.dli_sname));
-		memcpy(names_name+strlen(i.dli_sname), "_subobj_names", sizeof "_subobj_names");
-		void *handle = dlopen(i.dli_fname, RTLD_NOW | RTLD_NOLOAD);
-		if (handle)
-		{
-			const char **names_name_array = (const char**) dlsym(handle, names_name);
-			dlclose(handle);
-			return names_name_array;
-		}
-	}
-	return NULL;
-}
 
 struct allocator *
 __liballocs_get_leaf_allocator(void *obj);
@@ -818,6 +803,31 @@ static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void 
 	
 	return ret;
 }
+
+#ifdef LIFETIME_POLICIES
+/* If LIFETIME_POLICIES is defined, we provide an API to dynamically extend
+ * the lifetime of an object by attaching more than one 'lifetime policy' to
+ * the same allocation. The object will be deallocated only when all the
+ * policies agree to delete it.
+ *
+ * For the moment there are two kind of policies:
+ * - Explicit deallocation (by calling the deallocation function directly)
+ * - Garbage collection (keep track of all pointers through write barriers) */
+
+/* Garbage collection policies are defined by two callback functions called on
+ * reference creation and deletion */
+typedef void (*__gc_callback_t)(const void *target, const void **from);
+
+// Return the new lifetime policy id (or negative number on failure)
+int __liballocs_register_gc_policy(__gc_callback_t addref, __gc_callback_t delref);
+
+void __liballocs_attach_lifetime_policy(int policy_id, const void *obj);
+void __liballocs_detach_lifetime_policy(int policy_id, const void *obj);
+static inline void __liballocs_detach_manual_dealloc_policy(const void *obj)
+{
+    __liballocs_detach_lifetime_policy(0 /* MANUAL_DEALLOCATION_POLICY */, obj);
+}
+#endif
 
 struct uniqtype *
 __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_t, */...);

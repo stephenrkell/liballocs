@@ -4,7 +4,7 @@ objfile="$1"
 
 test -n "$objfile" || (echo "Please specify an object file"; false) || exit 1
 
-. $(dirname "$0")/../../../used-types-funcs.sh
+. $(dirname "$0")/../../../used-types-funcs.sh # sets LIBALLOCS
 
 usedtypes_src=$( mktemp --suffix=.c )
 usedtypes_obj=$( mktemp --suffix=.o )
@@ -20,7 +20,7 @@ sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype__ )"
     # we need to push candidates into the filter and see what comes out;
     # if it changes, add a --redefine-sym option to the list 
     
-    . ${LIBALLOCS_BASE}/tools/lang/c/lib/symname-funcs.sh
+    . ${LIBALLOCS}/tools/lang/c/lib/symname-funcs.sh
 
     # if any substitutions took effect, issue a redefine-sym command
     first_redefinition_args=""

@@ -330,10 +330,10 @@ class CompilerWrapper:
                 self.argItem({Phase.COMPILE}, num)
                 self.argItem({Phase.COMPILE}, num+1)
                 skipNext = True
-            elif args[num] in {'-MT', '-M', '-MM'}:
+            elif args[num] in {'-M', '-MM', '-MG', '-MP', '-MD', '-MMD'}:
                 self.argItem({Phase.PREPROCESS}, num)
                 skipNext = True
-            elif args[num] == "-MF":
+            elif args[num] in {'-MT', '-MQ', '-MF'}:
                 self.argOption({Phase.PREPROCESS}, num, args[num], args[num + 1])
                 skipNext = True
             elif args[num] == "-T":
@@ -407,18 +407,18 @@ class CompilerWrapper:
         return list(self.allSourceFiles.values())
 
     def getOutputFilename(self, phase=Phase.DRIVER):
-        fn = self.phaseOptions[phase].get("-o")
-        if fn == None:
+        maybeGiven = self.phaseOptions[phase].get("-o")
+        if maybeGiven == None:
             if self.doingFinalLink() \
                 and not "-shared" in self.phaseOptions[Phase.LINK].keys() \
                 and not "-Wl,-r" in self.phaseOptions[Phase.LINK].keys():
-                fn = "a.out"
+                return "a.out"
                 # there are no defaults for shared lib outputs (or other linker outputs)
             elif not phase == Phase.LINK:
                 # if we have a unique source input (FIXME: should be input to the last phase...)
                 if len(self.getSourceInputFiles()) == 1:
-                     fn = self.getSourceInputFiles()[0].nameAfterPhase(phase)
-        return fn
+                     return next(iter(self.getSourceInputFiles())).nameAfterPhase(phase)
+        return maybeGiven
     
     def parseInputAndOutputFiles(self):
         args = sys.argv

@@ -42,6 +42,9 @@ case "$filetype" in
     (application/x-executable*)
         inputfile="$1"
     ;;
+    (application/x-pie-executable*)
+        inputfile="$1"
+    ;;
     (application/x-sharedlib*)
         inputfile="$1"
     ;;

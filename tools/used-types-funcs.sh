@@ -16,20 +16,23 @@ this_filename () {
     done
 }
 
-LIBALLOCS_BASE="${LIBALLOCS_BASE:-$( dirname "$(this_filename)" )/..}"
-USEDTYPES=${USEDTYPES:-${LIBALLOCS_BASE}/tools/usedtypes}
-BASE_TYPES_TRANSLATION=${BASE_TYPES_TRANSLATION:-${LIBALLOCS_BASE}/tools/lang/c/bin/base-types-translation}
+LIBALLOCS="${LIBALLOCS:-$( dirname "$(this_filename)" )/..}"
+USEDTYPES=${USEDTYPES:-${LIBALLOCS}/tools/usedtypes}
+BASE_TYPES_TRANSLATION=${BASE_TYPES_TRANSLATION:-${LIBALLOCS}/tools/lang/c/bin/base-types-translation}
 CC=${CC:-$(which cc)}
 LD=${LD:-$(which ld)}
 OBJCOPY=${OBJCOPY:-$(which objcopy)}
+
+# HACK: Seems that clang cannot compile generated files, so let the user choose
+# another compiler for these with an environnement variable
+META_CC=${META_CC:-${CC}}
 
 compile () {
    src="$1"
    dest="$2"
    asm="$( mktemp --suffix=.s )"
-   # HACK: only gcc lets us do the section flags injection attack ("comdat#..." trick)
-   gcc -S -x c -I${LIBALLOCS_BASE}/include -o "$asm" "$src" && \
-   gcc -c -o "$dest" "$asm" && \
+   ${META_CC} -S -x c -o "$asm" "$src" && \
+   ${META_CC} -c -o "$dest" "$asm" && \
    echo "Compiler generated $dest" 1>&2
 }
 

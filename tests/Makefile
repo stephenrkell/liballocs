@@ -1,10 +1,13 @@
+THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+-include $(dir $(THIS_MAKEFILE))/../config.mk
+
 CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -O2 -save-temps
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
 CFLAGS += -DUSE_FAKE_LIBUNWIND=1
+else
+LDLIBS += -lunwind-x86_64 -lunwind
 endif
-
-THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 UNIQTYPES_BASE ?= /usr/lib/meta
 META_BASE ?= /usr/lib/meta
@@ -30,22 +33,22 @@ endif
 
 cases := $(filter-out unit-tests,$(sort $(wildcard [-a-z]*)))
 
-LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/..)
-export LIBALLOCS_BASE
+LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
+export LIBALLOCS
 
 ifneq ($(LIBALLOCS_USE_PRELOAD),no)
-LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_preload.so)
+LIBALLOCS_LIB := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_preload.so)
 else
-LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs.so)
+LIBALLOCS_LIB := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs.so)
 endif
 ifneq ($(MAKECMDGOALS),clean)
-ifeq ($(wildcard $(LIBALLOCS)),)
+ifeq ($(wildcard $(LIBALLOCS_LIB)),)
         $(error You must first build liballocs{.so,_preload.so} and link them from ../lib)
 endif
 endif
 
 ifneq ($(LIBALLOCS_USE_PRELOAD),no)
-export PRELOAD := "$(LIBALLOCS)"
+export PRELOAD := "$(LIBALLOCS_LIB)"
 endif
 
 INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then /bin/echo -f mk.inc; else true; fi`
