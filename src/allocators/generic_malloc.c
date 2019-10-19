@@ -917,20 +917,6 @@ void post_nonnull_nonzero_realloc(void *userptr,
 	 * YES: it was done before the realloc, in the pre-hook. */
 }
 
-// same but zero bytes, not bits
-static int nlzb1(unsigned long x) {
-	int n;
-
-	if (x == 0) return 8;
-	n = 0;
-
-	if (x <= 0x00000000FFFFFFFFL) { n += 4; x <<= 32; }
-	if (x <= 0x0000FFFFFFFFFFFFL) { n += 2; x <<= 16; }
-	if (x <= 0x00FFFFFFFFFFFFFFL) { n += 1;  x <<= 8; }
-	
-	return n;
-}
-
 static inline unsigned char *rfind_nonzero_byte(unsigned char *one_beyond_start, unsigned char *last_good_byte)
 {
 #define SIZE (sizeof (unsigned long))

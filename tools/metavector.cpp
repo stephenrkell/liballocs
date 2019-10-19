@@ -48,10 +48,22 @@ using dwarf::lib::Dwarf_Unsigned;
 
 using namespace allocs::tool;
 
+/* The metavector is a per-segment address-sorted array of records
+ * of a fixed format. These records are supplements to the metadata
+ * recorded in (some) symbol table entries and (some) relocation
+ * records -- those defining the collection of /static allocations/.
+ * Roughly, that means that they must have nonzero length and must
+ * not overlap with other static allocations; there are some ad-hoc
+ * rules for inferring the length of reloc targets that do not fall
+ * within a symbol.
+ *
+ * The vector's main purpose is to support an efficient by-
+ * address lookup of this metadata, and to ad type information. */
+
 struct sym_or_reloc_rec_to_generate
 {
 	Dwarf_Addr vaddr;
-	unsigned kind;
+	sym_or_reloc_kind k;
 	unsigned idx_in_per_kind_table;
 	opt<uniqued_name> maybe_uniqtype;
 };
@@ -91,7 +103,7 @@ int main(int argc, char **argv)
 	{
 		for (auto i_descr = i_int->second.begin(); i_descr != i_int->second.end(); ++i_descr)
 		{
-			if (i_descr->kind == sticky_root_die::static_descr::DWARF)
+			if (i_descr->k == sticky_root_die::static_descr::DWARF)
 			{
 				seen_codeful_type_names.insert(
 					canonical_key_for_type(i_descr->get_d().is_a<type_die>() ?
@@ -284,19 +296,6 @@ generate_recs(sticky_root_die& root)
 		if (summary.k == REC_EXTRASYM)
 		{
 			++extrasym_idx; // HACK: we hope this stays in sync with the actual extrasyms table
-			/* What would it take for the maybe_idx to be filled in with
-			 * the extrasyms idx? We'd have to have called extrasyms() already
-			 * and somehow cached its result where summary() can find it. Since
-			 * the latter is on static_descr_set whereas the former is on
-			 * our statics interval map, we'd have to pass in the extrasyms
-			 * vector and somehow have it search. That's a bit nasty. */
-			auto generated = statics.generate_extrasym_if_necessary(
-				root.symtab_is_external(),
-				i_static->first,
-				i_static->second
-			);
-			assert(generated);
-			string name = *generated->second;
 			sym_or_reloc_rec_to_generate rec = {
 				/* vaddr */ i_static->first.lower(),
 				/* kind */ REC_EXTRASYM,
@@ -361,8 +360,8 @@ generate_recs(sticky_root_die& root)
 				relscntype
 			);
 			add_sane_reloc_intervals(statics, reloc_target_addr_end_pairs, recs);
+			relscn_global_base += shdr.sh_size / shdr.sh_entsize;
 		}
-		relscn_global_base += shdr.sh_size / shdr.sh_entsize;
 	}
 	return recs;
 }
@@ -387,7 +386,7 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 			if (i_rec->maybe_uniqtype) cout << "(unsigned long) &" << mangle_typename(*i_rec->maybe_uniqtype);
 			else cout << "0UL";
 			cout << ", "
-				<< "/* kind */ " << i_rec->kind
+				<< "/* kind */ " << i_rec->k
 				<< ")";
 		};
 	}
@@ -422,7 +421,7 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 			auto i_descr = i_int_pair->second.begin();
 			// choose the highest-priority descr that isn't DWARF
 			while (i_descr != i_int_pair->second.end()
-				&& i_descr->kind != sticky_root_die::static_descr::DWARF) ++i_descr;
+				&& i_descr->k != sticky_root_die::static_descr::DWARF) ++i_descr;
 			if (i_descr == i_int_pair->second.end())
 			{
 				std::cerr << "Internal error: static has only a DWARF descr" << std::endl;

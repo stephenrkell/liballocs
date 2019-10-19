@@ -379,6 +379,7 @@ vaddr_to_stack_uniqtype(const void *vaddr)
 	
 	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)vaddr | (BEGINNING_OF_STACK+1ul)));
 	struct allocsite_entry **bucketpos = initial_bucketpos;
+#if 0
 	_Bool might_start_in_lower_bucket = 1;
 	do 
 	{
@@ -407,6 +408,7 @@ vaddr_to_stack_uniqtype(const void *vaddr)
 		--bucketpos;
 	} while (might_start_in_lower_bucket && 
 	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_vaddr_range_size);
+#endif
 	return (struct frame_uniqtype_and_offset) { NULL, 0 };
 }
 #undef maximum_vaddr_range_size

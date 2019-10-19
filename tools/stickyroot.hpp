@@ -33,6 +33,35 @@ extern "C" {
 
 #include "allocmeta.h"
 
+/* Like ElfW() in link.h, but for the ELF{32,64}_ST_TYPE macros and similar. */
+#define ELFW_ST_TYPE_y(p, enc) \
+	ELF ## enc ## _ST_TYPE(p)
+// pass-through dummy to actually substitute the "64" or "32", not paste tokens as given
+#define ELFW_ST_TYPE_x(info, enc) \
+	ELFW_ST_TYPE_y(info, enc)
+// the actual macro we wanted to define
+#define ELFW_ST_TYPE(info) \
+	ELFW_ST_TYPE_x(info, __ELF_NATIVE_CLASS)
+
+// same idea again
+#define ELFW_ST_BIND_y(p, enc) \
+	ELF ## enc ## _ST_BIND(p)
+// pass-through dummy to actually substitute the "64" or "32", not paste tokens as given
+#define ELFW_ST_BIND_x(info, enc) \
+	ELFW_ST_BIND_y(info, enc)
+// the actual macro we wanted to define
+#define ELFW_ST_BIND(info) \
+	ELFW_ST_BIND_x(info, __ELF_NATIVE_CLASS)
+
+// same idea again
+#define ELFW_ST_INFO_y(b, t, enc) \
+	ELF ## enc ## _ST_INFO(b, t)
+#define ELFW_ST_INFO_x(b, t, enc) \
+	ELFW_ST_INFO_y(b, t, enc)
+#define ELFW_ST_INFO(b, t) \
+	ELFW_ST_INFO_x(b, t, __ELF_NATIVE_CLASS)
+
+
 namespace allocs
 {
 namespace tool
@@ -146,7 +175,7 @@ public:
 		 * - which name "wins";
 		 * - the debugging output in -extrasyms.c files, describing where the info comes from;
 		 * - . */
-		enum k { DWARF, DYNSYM, SYMTAB, REL, DYNREL, UNKNOWN } kind;
+		enum kind { DWARF, DYNSYM, SYMTAB, REL, DYNREL, UNKNOWN } k;
 	protected:
 		//union
 		//{
@@ -156,20 +185,20 @@ public:
 			pair<Dwarf_Addr, unsigned> reltgt;
 		//};
 	public:
-		      pair< pair<unsigned, ElfW(Sym) *>, const char *>& get_sym()       { assert(kind == DYNSYM || kind == SYMTAB); return sym; }
-		const pair< pair<unsigned, ElfW(Sym) *>, const char *>& get_sym() const { assert(kind == DYNSYM || kind == SYMTAB); return sym; }
-		iterator_df<program_element_die>&       get_d()         { assert(kind == DWARF); return d; }
-		const iterator_df<program_element_die>& get_d()   const { assert(kind == DWARF); return d; }
-		      pair<Dwarf_Addr, unsigned >& get_reltgt()            { assert(kind == REL || kind == DYNREL); return reltgt; }
-		const pair<Dwarf_Addr, unsigned >& get_reltgt() const      { assert(kind == REL || kind == DYNREL); return reltgt; }
-		static_descr() : kind(UNKNOWN) {}
-		static_descr(iterator_df<program_element_die> d) : kind(DWARF), d(d) {}
-		static_descr(k kind, const pair< pair<unsigned, ElfW(Sym) *>, const char *>& p) : kind(kind), sym(p)
-		{ assert(kind == SYMTAB || kind == DYNSYM); }
+		      pair< pair<unsigned, ElfW(Sym) *>, const char *>& get_sym()       { assert(k == DYNSYM || k == SYMTAB); return sym; }
+		const pair< pair<unsigned, ElfW(Sym) *>, const char *>& get_sym() const { assert(k == DYNSYM || k == SYMTAB); return sym; }
+		iterator_df<program_element_die>&       get_d()         { assert(k == DWARF); return d; }
+		const iterator_df<program_element_die>& get_d()   const { assert(k == DWARF); return d; }
+		      pair<Dwarf_Addr, unsigned >& get_reltgt()            { assert(k == REL || k == DYNREL); return reltgt; }
+		const pair<Dwarf_Addr, unsigned >& get_reltgt() const      { assert(k == REL || k == DYNREL); return reltgt; }
+		static_descr() : k(UNKNOWN) {}
+		static_descr(iterator_df<program_element_die> d) : k(DWARF), d(d) {}
+		static_descr(kind k, const pair< pair<unsigned, ElfW(Sym) *>, const char *>& p) : k(k), sym(p)
+		{ assert(k == SYMTAB || k == DYNSYM); }
 		static_descr(const static_descr& arg)
-		 : kind(arg.kind)
+		 : k(arg.k)
 		{
-			switch (arg.kind)
+			switch (arg.k)
 			{
 				case DYNSYM:
 				case SYMTAB:
@@ -188,15 +217,15 @@ public:
 			}
 		}
 		bool operator==(const static_descr& arg) const
-		{ return (arg.kind == this->kind) &&
-			((kind == DWARF) ? (arg.get_d() == this->get_d())
-			 : (kind == SYMTAB || kind == DYNSYM) ? (arg.get_sym() == this->get_sym())
+		{ return (arg.k == this->k) &&
+			((k == DWARF) ? (arg.get_d() == this->get_d())
+			 : (k == SYMTAB || k == DYNSYM) ? (arg.get_sym() == this->get_sym())
 			 : arg.get_reltgt() == this->get_reltgt());
 		}
 		bool operator<(const static_descr& arg) const
 		{
-			if (arg.kind != this->kind) return this->kind < arg.kind;
-			switch (kind)
+			if (arg.k != this->k) return this->k < arg.k;
+			switch (k)
 			{
 				case DYNSYM:
 				case SYMTAB:
@@ -214,7 +243,7 @@ public:
 		boost::icl::discrete_interval<Dwarf_Addr> address_range() const;
 		~static_descr() {}
 		friend std::ostream& operator<<(std::ostream& s, const static_descr& descr);
-		friend std::ostream& operator<<(std::ostream& s, const k& descr);
+		friend std::ostream& operator<<(std::ostream& s, const kind& descr);
 	};
 	/* Since a given static may have many descriptions -- e.g. a dynsym entry,
 	 * a symtab entry and also a DWARF record -- we collect sets of them
@@ -226,16 +255,26 @@ public:
 		struct summary
 		{
 			opt<string> name;
+			iterator_df<program_element_die> pe;
 			iterator_df<type_die> t;
 			sym_or_reloc_kind k;
+			static_descr::kind descr_priority_k;
 			opt<unsigned> maybe_idx;
 			opt<ElfW(Sym)> maybe_sym;
+			//summary() : k(REC_UNKNOWN), descr_priority_k(static_descr::UNKNOWN) {}
+			static inline summary default_value()
+			{
+				struct summary s;
+				bzero(&s, sizeof s);
+				s.descr_priority_k = static_descr::UNKNOWN;
+				return s;
+			}
 		};
 		summary
 		get_summary(bool symtab_is_external, opt<unsigned> maybe_expected_size = opt<unsigned>()) const;
 		iterator_df<program_element_die> get_die() const;
 		iterator_df<type_die> type_from_die(iterator_df<program_element_die> maybe_die) const
-		{ return (maybe_die && maybe_die.is_a<variable_die>()) ? maybe_die.as_a<variable_die>()->get_type()
+		{ return (maybe_die && maybe_die.is_a<variable_die>()) ? maybe_die.as_a<variable_die>()->find_type()
 			 : (maybe_die && maybe_die.is_a<subprogram_die>()) ? maybe_die.as_a<type_die>()
 			 :  iterator_df<type_die>(iterator_base::END);
 		}
@@ -293,6 +332,21 @@ public:
 		is_sane_t,
 		boost::icl::interval_map< Dwarf_Addr, static_descr_set >::iterator
 	> sane_interval_iterator;
+	struct sym_with_ctxt : ElfW(Sym), static_descr_set::summary
+	{
+		sym_with_ctxt(const boost::icl::discrete_interval<Dwarf_Addr>& interval,
+			const static_descr_set::summary& summary) :
+			static_descr_set::summary(summary)
+		{
+			this->st_value = interval.lower();
+			this->st_size = interval.upper() - interval.lower(),
+			this->st_info = summary.maybe_sym ? summary.maybe_sym->st_info : ELFW_ST_INFO(STB_LOCAL, STT_OBJECT),
+			this->st_other = summary.maybe_sym ? summary.maybe_sym->st_other : STV_HIDDEN;
+		}
+		// need a default for the summy initial symbol
+		sym_with_ctxt() : summary(summary::default_value())//: die_offset(0), sym_index(0), k(REC_UNKNOWN)
+		{}
+	};
 	struct sane_interval_map : boost::icl::interval_map< Dwarf_Addr, static_descr_set >
 	{
 		typedef typename std::set<sticky_root_die::static_descr> descr_set;
@@ -304,12 +358,12 @@ public:
 		sane_interval_iterator end()
 		{ return sane_interval_iterator(this->super::end(),
 			this->super::end()); }
-		opt<pair<ElfW(Sym), opt<string> > > generate_extrasym_if_necessary(
+#if 0
+		opt<pair<sym_with_ctxt, opt<string> > > generate_extrasym_if_necessary(
 			bool symtab_is_external,
 			const boost::icl::discrete_interval<Dwarf_Addr>& interval,
 			const static_descr_set& descrs
 		);
-#if 0
 		opt<uniqued_name> get_type(
 			bool symtab_is_external,
 			const boost::icl::discrete_interval<Dwarf_Addr>& interval,
@@ -322,11 +376,11 @@ public:
 	{
 		return sane_interval_map(get_statics());
 	}
-	vector<pair< ElfW(Sym), opt<string> > > get_extrasyms();
+	vector<pair< sym_with_ctxt, opt<string> > > get_extrasyms();
 };
-inline std::ostream& operator<<(std::ostream& s, const sticky_root_die::static_descr::k& kind)
+inline std::ostream& operator<<(std::ostream& s, const sticky_root_die::static_descr::kind& k)
 {
-	switch (kind)
+	switch (k)
 	{
 		case sticky_root_die::static_descr::DYNSYM: s << "DYNSYM"; break;
 		case sticky_root_die::static_descr::SYMTAB: s << "SYMTAB"; break;
@@ -341,15 +395,15 @@ inline std::ostream& operator<<(std::ostream& s, const sticky_root_die::static_d
 }
 inline std::ostream& operator<<(std::ostream& s, const sticky_root_die::static_descr& descr)
 {
-	switch (descr.kind)
+	switch (descr.k)
 	{
 		case sticky_root_die::static_descr::DYNSYM:
 		case sticky_root_die::static_descr::SYMTAB:
 		// print_sym:
-			s << descr.kind << ", name: " << descr.get_sym().second;
+			s << descr.k << ", name: " << descr.get_sym().second;
 			break;
 		case sticky_root_die::static_descr::DWARF:
-			s << descr.kind << " " << descr.get_d().summary();
+			s << descr.k << " " << descr.get_d().summary();
 			break;
 		case sticky_root_die::static_descr::REL:
 		case sticky_root_die::static_descr::DYNREL:
