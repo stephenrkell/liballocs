@@ -17,13 +17,29 @@ ifeq ($(realpath .),$(realpath $(srcdir)))
 ifeq ($(MAKECMDGOALS),)
 MAKECMDGOALS := default
 endif
+ifneq ($(DEBUG),)
+outdir := debug
+else
+outdir := opt
+endif
 .PHONY: $(MAKECMDGOALS)
 $(MAKECMDGOALS):
-	mkdir -p $(SRCROOT)/build/opt && $(MAKE) -C $(SRCROOT)/build/opt -f $(srcdir)/Makefile $(MAKECMDGOALS)
+	mkdir -p $(SRCROOT)/build/$(outdir)
+	$(MAKE) -C $(SRCROOT)/build/$(outdir) -f $(srcdir)/Makefile $(MAKECMDGOALS)
 else
 # the rest
 vpath %.c $(srcdir)
-vpath liballocs.so $(srcdir)
+vpath %.c $(srcdir)/allocators
+
+allocators/.%.d allocators/%.o:: allocators
+allocators:
+	mkdir -p allocators
+
+#%.o:: %.c
+#	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+
+liballocs.so: $(srcdir)/liballocs.so
+	cp $< $@
 
 # if we're building from a dir called "debug"
 ifeq ($(notdir $(realpath .)),debug)
@@ -104,7 +120,8 @@ else
 UTIL_OBJS += fake-libunwind.o
 CFLAGS += -fno-omit-frame-pointer
 endif
-ALLOCATOR_OBJS := $(patsubst %.c,%.o,$(wildcard $(srcdir)/allocators/*.c))
+ALLOCATOR_OBJS := $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
+$(info ALLOCATORS_OBJS is $(ALLOCATOR_OBJS))
 MAIN_OBJS := liballocs.o event_hooks.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap.o
 NOPRELOAD_OBJS := uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
@@ -120,7 +137,7 @@ dep_fname = $(dir $1)$(patsubst %.c,.%.d,$(notdir $1))
 C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
 DEPS := $(C_DEPS)
 $(call dep_fname,%.c): %.c
-	$(CC) -MM $(CFLAGS) "$<" > "$@" || (rm -f "$@"; false)
+	mkdir -p $(dir $@) && $(CC) -MM $(CFLAGS) "$<" > "$@" || (rm -f "$@"; false)
 -include $(DEPS)
 
 # event_hooks.c is macroised so that we can create special versions of it.
@@ -135,7 +152,7 @@ nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
 # FIXME: remove the need for this
 uniqtypes.o: uniqtypes.c
 	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
-	$(LIBALLOCS_BASE)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
+	$(SRCROOT)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
 # we include our own malloc impl, for which we use dlmalloc
 # of which libsystrap already has a copy, so borrow that (HACK)
@@ -208,10 +225,6 @@ ifneq ($(TRACE_HEAP_INDEX),)
 CFLAGS += -DTRACE_HEAP_INDEX
 endif
 
-uniqtypes.o: uniqtypes.c
-	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
-	$(LIBALLOCS)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
-
 # HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option
 # or if we could statically link-in our stubs without making them non-overridable.
 # Perhaps the custom ld.so will make this feasible.
@@ -237,6 +250,7 @@ liballocs_test.so: systrap_noop.o liballocs_pic.a dlmalloc.a
 .PHONY: clean
 clean: 
 	rm -f *.o */*.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d */.*.d *.a *_fast.c
+	rm -r allocators
 
 .PHONY: install
 install: all
@@ -266,5 +280,7 @@ vpath %.h $(srcdir)/%.h
 # Good: we can have tests even for .h files  (there is exactly one test entry point per linked executable; called main()) and
 # Good: tests can themselves have "debug builds" i.e. the rest of the linked in stuff is the debug build
 # Bad: complicates this makefile (see how it turns out...)
+# Good/bad: our tests are not true unit tests, because they integrate with the wider library
+# (i.e. they use no stubs/mocks)
 
 endif # test for run-from-srcdir

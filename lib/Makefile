@@ -3,15 +3,34 @@ SRCROOT := $(realpath $(dir $(THIS_MAKEFILE))/..)
 
 default: all
 
-SYMLINKS := liballocs.so liballocs_nonshared.a liballocs_preload.a liballocs_preload.so liballocs_dummyweaks.o liballocs_dummyweaks.so liballocs.a
+SYMLINKS := liballocs_nonshared.a liballocs_preload.a liballocs_preload.so liballocs_dummyweaks.o liballocs_dummyweaks.so liballocs.a
 
-all: $(SYMLINKS) liballocs_systrap.o
+# Now that we build in '$(SRCROOT)/build/<outdir>', where <outdir> might
+# be 'opt' or 'debug', we have a problem -- which one do we symlink?
+# The answer is that we symlink the outdir, then make our symlinks point
+# under there.
+ifneq ($(DEBUG),)
+outdir := debug
+else
+outdir := opt
+endif
 
-$(SYMLINKS): %: $(SRCROOT)/src/%
-	ln -sf "$<" "$@"
+all: outdir $(SYMLINKS) liballocs_systrap.o
 
-liballocs_systrap.o: $(SRCROOT)/src/systrap.o
-	ln -sf "$<" "$@"
+outdir:
+	ln -sf $(SRCROOT)/build/$(outdir) $@
+
+$(SYMLINKS): %: $(SRCROOT)/build/$(outdir)/%
+	ln -sf outdir/$(notdir $<) "$@"
+
+# the systrap one has a different name
+# We export this separately because libcrunch uses it, even in its
+# stubs (dummyweaks) objects, which wrap __liballocs_nudge_mmap.
+# I think a better fix would be to have libcrunch pick up that
+# function from liballocs.a, but that may be fiddly (FIXME), e.g.
+# requiring one-function-per-object or --gc-sections.
+liballocs_systrap.o: $(SRCROOT)/build/$(outdir)/systrap.o
+	ln -sf outdir/$(notdir $<) "$@"
 
 clean:
-	rm -f $(SYMLINKS) liballocs_systrap.o
+	rm -f outdir $(SYMLINKS) liballocs_systrap.o liballocs.so

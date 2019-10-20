@@ -38,6 +38,8 @@
 /contrib/libantlr3c-3.4/
 /libltdl/
 
+/lib/outdir
+
 /config.h
 /config.h.in
 /include/liballocs_config.h
@@ -124,19 +126,19 @@ Makefile.in
 .dropbox*
 
 # we might have .s files, but not in tools/
-tools/*.s
+/tools/*.s
 
-config.mk
-tests/addrtaken-allocator/addrtaken-allocator
-tools/alloctypes
-tools/dwarftypes
-tools/extrasyms
-tools/frametypes
-tools/metavector
+/config.mk
+/tests/addrtaken-allocator/addrtaken-allocator
+/tools/alloctypes
+/tools/dwarftypes
+/tools/extrasyms
+/tools/frametypes
+/tools/metavector
 
-tests/unit-tests/metavec
-tests/unit-tests/metavec-debug
-tests/unit-tests/*.s
-tests/unit-tests/*.h
+/tests/unit-tests/metavec
+/tests/unit-tests/metavec-debug
+/tests/unit-tests/*.s
+/tests/unit-tests/*.h
 
 tmp-*.txt
