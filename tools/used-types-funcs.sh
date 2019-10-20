@@ -31,7 +31,7 @@ compile () {
    src="$1"
    dest="$2"
    asm="$( mktemp --suffix=.s )"
-   ${META_CC} -S -x c -o "$asm" "$src" && \
+   ${META_CC} -I"${LIBALLOCS}"/include -S -o "$asm" -x c "$src" && \
    ${META_CC} -c -o "$dest" "$asm" && \
    echo "Compiler generated $dest" 1>&2
 }
