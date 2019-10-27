@@ -892,6 +892,9 @@ int main(int argc, char **argv)
 				min_s.str()
 			);
 			opt<unsigned> prev_offset_plus_size;
+			opt<unsigned> highest_unused_offset = opt<unsigned>(0u);
+			// FIXME: prev_offset_plus_size needn't be the right thing.
+			// We want the highest offset yet seen.
 			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
 			{
 				ostringstream comment_s;
@@ -911,16 +914,29 @@ int main(int argc, char **argv)
 				if (el_type_size) comment_s << *el_type_size;
 				else comment_s << "(no size)";
 				comment_s << ")";
-				if (prev_offset_plus_size)
+				if (highest_unused_offset)
 				{
-					if (offset_after_fixup > *prev_offset_plus_size)
+					if (offset_after_fixup > *highest_unused_offset)
 					{
-						comment_s << " (HOLE of " << (offset_after_fixup - *prev_offset_plus_size)
-							<< " bytes)";
+						unsigned hole_size = offset_after_fixup - *highest_unused_offset;
+						unsigned align = el_type->get_alignment();
+						unsigned highest_unused_offset_rounded_to_align
+						 = ROUND_UP_TO(align, highest_unused_offset);
+						comment_s << " (preceded by ";
+						if (hole_size ==
+							highest_unused_offset_rounded_to_align - highest_unused_offset)
+						{
+							comment_s << "an alignment-consistent hole";
+						}
+						else
+						{
+							comment_s << " (preceded by an alignment-unexpected HOLE";
+						}
+						comment_s << " of " << hole_size << " bytes)";
 					}
-					else if (offset_after_fixup < *prev_offset_plus_size)
+					else if (offset_after_fixup < *highest_unused_offset)
 					{
-						comment_s << " (OVERLAP of " << (*prev_offset_plus_size - offset_after_fixup)
+						comment_s << " (constituting an OVERLAP in the first " << (*highest_unused_offset - offset_after_fixup)
 							<< " bytes)";
 					}
 				}
@@ -933,8 +949,16 @@ int main(int argc, char **argv)
 					mangled_name,
 					comment_s.str()
 				);
-				if (el_type_size) prev_offset_plus_size = offset_after_fixup + *el_type_size;
-				else prev_offset_plus_size = opt<unsigned>();
+				if (el_type_size)
+				{
+					prev_offset_plus_size = offset_after_fixup + *el_type_size;
+					highest_unused_offset = MAX(offset_after_fixup + *el_type_size, highest_unused_offset);
+				}
+				else
+				{
+					prev_offset_plus_size = opt<unsigned>();
+					highest_unused_offset = opt<unsigned>();
+				}
 			}
 			write_uniqtype_close(cout, mangled_name);
 		}
