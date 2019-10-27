@@ -291,6 +291,8 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 // HACK: call out to libcrunch if it's linked in
 extern void  __attribute__((weak)) __libcrunch_scan_lazy_typenames(void*);
 
+struct link_map *early_lib_handles[MAX_EARLY_LIBS] __attribute((visibility("hidden")));
+
 void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
 void *dlopen(const char *filename, int flag)
 {
@@ -302,6 +304,21 @@ void *dlopen(const char *filename, int flag)
 		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
 		if (!orig_dlopen) abort();
 	}
+	if (!early_lib_handles[0])
+	{
+		/* We have to scan for the libraries that were active
+		 * before we started trapping dlopens. This is so that
+		 * when we initialize the static file allocator, we don't
+		 * double-process any files that were already notified
+		 * (below) because they were opened with our dlopen wrapper. */
+		unsigned idx = 0;
+		for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
+		{
+			if (idx == MAX_EARLY_LIBS) abort();
+			early_lib_handles[idx++] = l;
+		}
+	}
+	assert(early_lib_handles[0]);
 
 	void *ret = NULL;
 	_Bool file_already_loaded = 0;

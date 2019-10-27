@@ -197,6 +197,10 @@ struct allocsites_by_object_base_address_entry
 };
 #define ALLOCSITES_INDEX_SIZE 256 /* i.e. up to 256 objects with allocsite metadata */
 extern struct allocsites_by_id_entry allocsites_by_id[ALLOCSITES_INDEX_SIZE];
+
+#define MAX_EARLY_LIBS 128
+extern struct link_map *early_lib_handles[MAX_EARLY_LIBS] __attribute((visibility("hidden")));
+
 extern struct allocsites_by_object_base_address_entry allocsites_by_object_base_address[ALLOCSITES_INDEX_SIZE];
 unsigned issue_allocsites_ids(unsigned count, struct allocsite_entry *first_entry,
 	const void *object_base_address) __attribute__((visibility("hidden")));
@@ -234,7 +238,7 @@ void __generic_malloc_allocator_init(void) __attribute__((visibility("hidden")))
 /* If this weak function is defined, it will be called when we've loaded
  * the metadata for one object. */
 int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *meta_object_handle) __attribute__((weak));
-int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
+int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *out_meta_handle)
 	__attribute__((visibility("hidden")));
 
 void __notify_copy(void *dest, const void *src, unsigned long n);
