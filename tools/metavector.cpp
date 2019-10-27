@@ -64,6 +64,7 @@ struct sym_or_reloc_rec_to_generate
 {
 	Dwarf_Addr vaddr;
 	sym_or_reloc_kind k;
+	sticky_root_die::static_descr::kind priority_k;
 	unsigned idx_in_per_kind_table;
 	opt<uniqued_name> maybe_uniqtype;
 };
@@ -155,6 +156,9 @@ int main(int argc, char **argv)
 	// this is our generation-time equivalent of sym_or_reloc_rec
 	std::vector< sym_or_reloc_rec_to_generate > recs = generate_recs(root);
 
+	std::cout << "#include \"allocmeta-defs.h\"" << std::endl;
+	std::cout << "#define STRx(s) #s" << std::endl;
+	std::cout << "#define STR(s) STRx(s)" << std::endl;
 	// for each LOAD phdr
 	for (unsigned i = 0; i < ehdr.e_phnum; ++i)
 	{
@@ -186,13 +190,13 @@ scan_reloc_target_addr_end_pairs(Elf *e,
 	unsigned symtab_shndx = get_shdr(e, relscnidx).sh_link;
 	assert(symtab_shndx != 0);
 	/* We need to get hold of the symtab content. */
-	Elf_Data symtab_data = raw_data_by_shndx(e, symtab_shndx);
-	ElfW(Sym) *symtab = reinterpret_cast<ElfW(Sym)*>(symtab_data.d_buf);
+	Elf_Data *symtab_data = raw_data_by_shndx(e, symtab_shndx);
+	ElfW(Sym) *symtab = reinterpret_cast<ElfW(Sym)*>(symtab_data->d_buf);
 	unsigned nrel = get_shdr(e, relscnidx).sh_size / 
 		(is_rela ? sizeof (ElfW(Rela)) : sizeof (ElfW(Rel))); // FIXME: use entsize
-	Elf_Data tbl_data = raw_data_by_shndx(e, relscnidx);
-	ElfW(Rela) *rela_base = is_rela ? (ElfW(Rela) *) tbl_data.d_buf : NULL;
-	ElfW(Rel) *rel_base = is_rela ? NULL : (ElfW(Rel) *) tbl_data.d_buf;
+	Elf_Data *tbl_data = raw_data_by_shndx(e, relscnidx);
+	ElfW(Rela) *rela_base = is_rela ? (ElfW(Rela) *) tbl_data->d_buf : NULL;
+	ElfW(Rel) *rel_base = is_rela ? NULL : (ElfW(Rel) *) tbl_data->d_buf;
 	for (unsigned i = 0; i < nrel; ++i)
 	{
 		/* Is this relocation referencing a section symbol?
@@ -275,6 +279,7 @@ add_sane_reloc_intervals(
 			struct sym_or_reloc_rec_to_generate rec = {
 				/* vaddr */ i_tuple->second.first /* the addr/end pair is the itself second thing in a pair */,
 				/* kind */ REC_RELOC,
+				/* static_descr kind */ sticky_root_die::static_descr::REL,
 				/* idx_in_per_kind_table */ i_tuple->first /* the index in the linearised collection of reloc-record-containing sections */,
 				/* maybe_uniqtype */ opt<uniqued_name>()
 			};
@@ -299,6 +304,7 @@ generate_recs(sticky_root_die& root)
 			sym_or_reloc_rec_to_generate rec = {
 				/* vaddr */ i_static->first.lower(),
 				/* kind */ REC_EXTRASYM,
+				/* priority kind */ summary.descr_priority_k,
 				/* idx_in_per_kind_table */ extrasym_idx,
 				/* maybe_uniqtype */ i_static->second.get_type() ?
 					opt<uniqued_name>(canonical_key_for_type(summary.t))
@@ -317,6 +323,7 @@ generate_recs(sticky_root_die& root)
 			struct sym_or_reloc_rec_to_generate rec = {
 				/* vaddr */ i_static->first.lower(),
 				/* kind */ summary.k,
+				/* priority kind */ summary.descr_priority_k,
 				/* idx_in_per_kind_table */ *summary.maybe_idx,
 				/* maybe_uniqtype */  i_static->second.get_type() ?
 					opt<uniqued_name>(canonical_key_for_type(i_static->second.get_type()))
@@ -374,22 +381,37 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 	// what are the segment limits?
 	uintptr_t base_addr = ph->p_vaddr;
 	uintptr_t limit_addr = base_addr + ph->p_memsz;
-
+	cout << "// metavector for segment " << idx << " spanning 0x" << std::hex << base_addr
+		<< " to 0x" << limit_addr << std::dec << std::endl;
+	// cout << "unsigned long metavec_0x" << std::hex << base_addr << std::dec << "[] = {" << std::endl;
+	cout << "__asm__(\".pushsection .rodata \\n\\" << std::endl;
+	cout << ".globl metavec_0x" << std::hex << base_addr << std::dec << " \\n\\" << std::endl;
 	for (auto i_rec = recs.begin(); i_rec != recs.end(); ++i_rec)
 	{
 		// FIXME: don't iterate n times for n segments; be smarter
 		if (i_rec->vaddr >= base_addr && i_rec->vaddr < limit_addr)
 		{
-			cout << "SYM_OR_RELOC_REC_WORD("
-				<< "/* idx in per-kind table */ " << i_rec->idx_in_per_kind_table << ", "
-				<< "/* ptr_as_integer_incl_lowbits */ ";
+#if 0
+			cout << "STR(SYM_OR_RELOC_REC_WORD("
+				<< "/* alloc at 0x" << std::hex << i_rec->vaddr < std::dec
+				<< " of kind (based on priority kind " << i_rec->priority_k << ") */ " << i_rec->k
+				<< ",\n"
+				<< "\t/* idx in relevant sym or reloc table */ " << i_rec->idx_in_per_kind_table << ",\n"
+				<< "\t/* type_ptr_as_integer_incl_lowbits */ ";
 			if (i_rec->maybe_uniqtype) cout << "(unsigned long) &" << mangle_typename(*i_rec->maybe_uniqtype);
 			else cout << "0UL";
-			cout << ", "
-				<< "/* kind */ " << i_rec->k
-				<< ")";
+				<< "),\n";
+#endif
+			cout << ".8byte \"STR(SYM_OR_RELOC_REC_WORD(" << (int) i_rec->k << ", "
+				<< i_rec->idx_in_per_kind_table << ", "
+				<< ((i_rec->maybe_uniqtype) ? mangle_typename(*i_rec->maybe_uniqtype) : "0")
+				<< "))\" ; // alloc at 0x" << std::hex << i_rec->vaddr << std::dec
+				<< " of kind " << i_rec->k
+				<< " (based on priority kind " << i_rec->priority_k << ")\\n \\" << std::endl;
 		};
 	}
+	// std::cout << "};" << std::endl;
+	std::cout << "\");" << std::endl;
 #if 0
 	// start at begin + 1, because the first entry is a dummy
 	unsigned idx = 1;
@@ -437,8 +459,6 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 
 			}
 
-			cout << "__asm__(\".8byte   SYM_OR_RELOC_REC_WORD(" << (int) kind << ", " << idx
-				<< ", " << uniqtype_symname << ")\");\n";
 		}
 	}
 #endif

@@ -43,6 +43,17 @@ using std::deque;
 using namespace dwarf::core;
 using dwarf::tool::abstract_c_compiler;
 
+std::ostream& operator<<(std::ostream& s, const enum sym_or_reloc_kind& k)
+{
+#define _sym_or_reloc_kind_v(tok, n)  case tok: s << #tok; break;
+	switch (k)
+	{
+_sym_or_reloc_kind(_sym_or_reloc_kind_v, _sym_or_reloc_kind_v)
+		default: break;
+	}
+	return s;
+}
+
 namespace allocs
 {
 namespace tool
@@ -79,7 +90,20 @@ ElfW(Half) find_shndx_by_sh_type(Elf * e, ElfW(Half) sh_type)
 		return shdr->sh_type == sh_type;
 	});
 }
-Elf_Data raw_data_by_shndx(Elf *e, ElfW(Half) shndx)
+ElfW(Half) find_shndx_by_sh_name(Elf * e, const char *name)
+{
+	Elf_Scn *shstrtab_scn = elf_getscn(e, gelf_getehdr(e, NULL)->e_shstrndx);
+	GElf_Shdr the_shdr;
+	GElf_Shdr *shstrtab_hdr = gelf_getshdr(shstrtab_scn, &the_shdr);
+	Elf_Data *shstrtab_elf_data = elf_rawdata(shstrtab_scn, NULL);
+	char *shstrtab_data = reinterpret_cast<char*>(shstrtab_elf_data->d_buf);
+	return find_shndx(e, [name, shstrtab_hdr, shstrtab_data](unsigned idx, GElf_Shdr *shdr) -> bool {
+		return shdr->sh_name <= shstrtab_hdr->sh_size &&
+			0 == strncmp(shstrtab_data + shdr->sh_name, name,
+			std::min<size_t>(shstrtab_hdr->sh_size - shdr->sh_name, strlen(name)));
+	});
+}
+Elf_Data *raw_data_by_shndx(Elf *e, ElfW(Half) shndx)
 {
 	assert(shndx != -1);
 	Elf_Scn *scn = elf_getscn(e, shndx);
@@ -87,12 +111,10 @@ Elf_Data raw_data_by_shndx(Elf *e, ElfW(Half) shndx)
 	GElf_Shdr the_shdr = (GElf_Shdr) { 0 };
 	GElf_Shdr *shdr = gelf_getshdr(scn, &the_shdr);
 	if (!shdr) throw lib::No_entry();
-	Elf_Data rawdata;
-	Elf_Data *p_rawdata = elf_rawdata(scn, &rawdata);
+	Elf_Data *p_rawdata = elf_rawdata(scn, NULL);
 	assert(p_rawdata);
-	assert(p_rawdata == &rawdata);
 	assert(p_rawdata->d_size >= shdr->sh_size);
-	return rawdata;
+	return p_rawdata;
 }
 
 pair<pair<ElfW(Sym) *, char*>, pair<Elf*, unsigned> > sticky_root_die::find_symbols(bool use_dynsym)

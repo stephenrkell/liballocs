@@ -17,6 +17,7 @@ FRAMETYPES ?= $(dir $(THIS_MAKEFILE))/frametypes
 ALLOCSITES ?= $(dir $(THIS_MAKEFILE))/allocsites
 ALLOCSITES_BLOOM ?= $(dir $(THIS_MAKEFILE))/allocsites-bloom
 ALLOCTYPES ?= $(dir $(THIS_MAKEFILE))/alloctypes
+METAVECTOR ?= $(dir $(THIS_MAKEFILE))/metavector
 
 LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
 OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
@@ -52,7 +53,7 @@ $(META_BASE)/%.objmemacc: $(call prefix_exactly_one_slash,%)
 # # allocsites_from_obj = $(patsubst %,$(META_BASE)%.allocsites,$1)
 # # all_allocsites_for_obj = $(foreach f,$1 $(call depend,$1),$(call allocsites_from_obj,$(f)))
 
-# don't build /usr/lib/allocsites/usr/lib/allocsites/anything... 
+# don't build /usr/lib/meta/usr/lib/meta/anything... 
 # and it's a bug if we try
 $(META_BASE)$(META_BASE)/%:
 	false
@@ -73,8 +74,8 @@ $(META_BASE)/%.memacc: $(META_BASE)/%.objmemacc $(META_BASE)/%.srcmemacc
 	( $(MERGE_MEMACC) $+ 2>&1 1>"$@" || (rm -f "$@"; false) ) | tee "$@.rej"
 	test -e "$@"
 
-METADATA_KINDS ?= roottypes dwarftypes alloctypes frametypes allocsites extrasyms \
-  # sorted-meta starts-bitmaps allocsites-bloom 
+METADATA_KINDS ?= roottypes dwarftypes alloctypes frametypes allocsites extrasyms metavector \
+  # starts-bitmaps allocsites-bloom 
 # can't use builtin .o rule in case CC is not gcc (section flags injection attack
 # using "... comdat# ..." doesn't work except on gcc). (FIXME: use configure-time
 # adaptation found in glibc's libc-symbols.h?)
@@ -94,6 +95,10 @@ endif
 ifneq ($(filter allocsites,$(METADATA_KINDS)),)
 $(info Generating allocsites)
 meta_sources += $(META_BASE)/$(1)-allocsites.c
+endif
+ifneq ($(filter metavector,$(METADATA_KINDS)),)
+$(info Generating metavector)
+meta_sources += $(META_BASE)/$(1)-metavector.c
 endif
 ifneq ($(filter allocsites-bloom,$(METADATA_KINDS)),)
 $(info Generating allocsites-bloom)
@@ -145,10 +150,10 @@ $(META_BASE)/%-extrasyms.c: /%
 # -- so just emit weak references to the types? and/or use conditional compilation?
 # file per-segment starts bitmaps are now included here
 # file sorted meta-vector really with type info: depends on real uniqtypes
-.PRECIOUS: $(META_BASE)/%-sorted-meta.c
-$(META_BASE)/%-sorted-meta.c: /%
+.PRECIOUS: $(META_BASE)/%-metavector.c
+$(META_BASE)/%-metavector.c: /%
 	errs=$$( ( $(METAVECTOR) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
-	status=$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # Given this complexity, perhaps we should
 # 1. never output struct definitions in-line. always include them from a header.
 #     -- the header can use #ifdef-guards to make repeated includes harmless

@@ -32,6 +32,9 @@ extern "C" {
 }
 
 #include "allocmeta.h"
+/* HACK: our C enum sym_or_reloc_kind goes in the toplevel namespace, but
+ * we define a C++ operator<< for it. */
+std::ostream& operator<<(std::ostream& s, const enum sym_or_reloc_kind& k);
 
 /* Like ElfW() in link.h, but for the ELF{32,64}_ST_TYPE macros and similar. */
 #define ELFW_ST_TYPE_y(p, enc) \
@@ -97,7 +100,7 @@ inline GElf_Shdr get_shdr(Elf *e, unsigned ndx)
 { GElf_Shdr shdr; bzero(&shdr, sizeof shdr);
   find_shndx(e, [ndx](unsigned u, GElf_Shdr *) { return u == ndx; }, &shdr);
   return shdr; }
-Elf_Data raw_data_by_shndx(Elf *e, ElfW(Half) ndx);
+Elf_Data *raw_data_by_shndx(Elf *e, ElfW(Half) ndx);
 
 /* This is the root_die subclass we use for most type-gathering
  * metadata processing. Originally it was designed to make type DIEs
