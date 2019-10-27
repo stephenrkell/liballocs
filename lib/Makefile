@@ -17,8 +17,12 @@ endif
 
 all: outdir $(SYMLINKS) liballocs_systrap.o
 
+ifneq ($(notdir $(shell readlink outdir)),$(outdir))
+.PHONY: outdir
+endif
 outdir:
-	ln -sf $(SRCROOT)/build/$(outdir) $@
+	rm -f outdir
+	ln -sf ../build/$(outdir) $@
 
 $(SYMLINKS): %: $(SRCROOT)/build/$(outdir)/%
 	ln -sf outdir/$(notdir $<) "$@"
