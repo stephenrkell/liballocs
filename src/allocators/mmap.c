@@ -918,13 +918,18 @@ void __mmap_allocator_init(void)
 			if (phdr->p_type == PT_PHDR)
 			{
 				executable_load_addr = (char*) phdr - (char*) phdr->p_vaddr;
+				break;
 			}
-			else if (phdr->p_type == PT_LOAD)
+		}
+		uintptr_t last_seen_end_vaddr_rounded_up = (uintptr_t) -1;
+		for (int i = 0; i < phnum_auxv->a_un.a_val; ++i)
+		{
+			ElfW(Phdr) *phdr = ((ElfW(Phdr)*) ph_auxv->a_un.a_val) + i;
+			if (phdr->p_type == PT_LOAD)
 			{
 				/* Kernel's treatment of extra-memsz is not reliable -- i.e. the 
 				 * memsz bit needn't show up in /proc/<pid>/maps -- so use the
 				 * beginning. */
-				// FIXME: assumes executable load addr is 0
 				uintptr_t end = executable_load_addr + 
 					(uintptr_t) phdr->p_vaddr + phdr->p_memsz;
 				if (end > biggest_end_seen)
@@ -933,6 +938,19 @@ void __mmap_allocator_init(void)
 					biggest_start_seen = executable_load_addr + 
 						(uintptr_t) phdr->p_vaddr;
 				}
+				if (last_seen_end_vaddr_rounded_up != (uintptr_t) -1
+						&& phdr->p_vaddr != last_seen_end_vaddr_rounded_up)
+				{
+					/* We have a hole. Map a PROT_NONE region in the space. */
+					void* hole_base = (void*)(executable_load_addr + last_seen_end_vaddr_rounded_up);
+					size_t hole_size = ROUND_DOWN(phdr->p_vaddr, PAGE_SIZE)
+						 - last_seen_end_vaddr_rounded_up;
+					void *ret = raw_mmap(hole_base, hole_size,
+						PROT_NONE, MAP_FIXED|MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+					assert(ret == hole_base);
+				}
+				last_seen_end_vaddr_rounded_up = ROUND_UP(phdr->p_vaddr + phdr->p_memsz, PAGE_SIZE);
+
 				// write_string("Saw executable phdr end address: ");
 				// write_ulong((unsigned long) end);
 				// write_string("\n");
@@ -1070,6 +1088,8 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 	/* Can we extend the current mapping sequence?
 	 * This is tricky because ELF segments, "allocated" by __static_allocator,
 	 * must have a single parent mapping sequence.
+	 * In fact we're trying to make it even stronger: a whole mapped file
+	 * must have a single parent mapping sequence.
 	 * In the case of segments with memsz > filesz, we have to make sure
 	 * that the *trailing* anonymous mapping gets lumped into the preceding 
 	 * mapping sequence, not the next one. We handle this with the
@@ -1087,9 +1107,13 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 			_Bool filename_is_consistent = 
 					(!filename && !cur->filename) // both anonymous -- continue sequence
 					|| (cur->nused == 0) // can always begin afresh
+					|| (prot == PROT_NONE && !filename) // anonymous guard-page regions can always be added
 					|| /* can contiguous-append at most one anonymous (memsz > filesz) at the end 
 						* (I had said "maybe >1 of them" -- WHY?) 
-						* and provided that caller is in the same object (i.e. both ldso, say). */ 
+						* and provided that caller is in the same object (i.e. both ldso, say).
+						* One point of this rule is to avoid swallowing anonymous mappings
+						* that happen to be placed in memory following a loaded file.
+						*/
 						(!filename && cur->filename && !(cur->mappings[cur->nused - 1].is_anon)
 						&& ((!caller && !cur->mappings[cur->nused - 1].caller) ||
 							get_highest_loaded_object_below(caller)

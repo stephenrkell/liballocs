@@ -828,12 +828,10 @@ _Bool is_meta_object_for_lib(struct link_map *maybe_meta, struct link_map *l)
 	else return 0;
 }
 
-
-
 int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
 	void *meta_handle = NULL;
-	void *maybe_out_handle = data;
+	void **maybe_out_handle = (void**) data;
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
@@ -874,7 +872,7 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 		return 0;
 	}
 	debug_printf(3, "loaded meta object: %s\n", libfile_name);
-	if (maybe_out_handle) *(void**) maybe_out_handle = meta_handle;
+	if (maybe_out_handle) *maybe_out_handle = meta_handle;
 
 	// HACK: scan it for lazy-heap-alloc types
 	if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(meta_handle);
@@ -948,41 +946,6 @@ static void print_exit_summary(void)
 		}
 		else fprintf(stream_err, "Couldn't read from smaps!\n");
 	}
-}
-
-int biggest_vaddr_cb(struct dl_phdr_info *info, size_t size, void *load_addr)
-{
-	int biggest_seen = 0;
-	
-	if (info && (void*) info->dlpi_addr == load_addr && info->dlpi_phdr)
-	{
-		/* This is the object we want; iterate over its phdrs. */
-		for (int i = 0; i < info->dlpi_phnum; ++i)
-		{
-			if (info->dlpi_phdr[i].p_type == PT_LOAD)
-			{
-				/* We can round down to int because vaddrs *within* an object 
-				 * will not be more than 2^31 from the object base. */
-				uintptr_t max_plus_one = (int) (info->dlpi_phdr[i].p_vaddr + info->dlpi_phdr[i].p_memsz);
-				if (max_plus_one > biggest_seen) biggest_seen = max_plus_one;
-			}
-		}
-		/* Return the biggest we saw. */
-		return biggest_seen;
-	}
-	
-	/* keep going */
-	return 0;
-}
-
-void *biggest_vaddr_in_obj(void *handle)
-{
-	/* Get the phdrs of the object. */
-	struct link_map *lm = handle;
-	
-	int seen = dl_iterate_phdr(biggest_vaddr_cb, (void*) lm->l_addr);
-			
-	return (void*)(uintptr_t)seen;
 }
 
 /* We're allowed to malloc, thanks to __private_malloc(), but we 
