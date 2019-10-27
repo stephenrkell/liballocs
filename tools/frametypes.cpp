@@ -25,6 +25,7 @@
 
 #include "stickyroot.hpp"
 #include "uniqtypes.hpp"
+#include "relf.h"
 
 using std::cin;
 using std::cout;
@@ -919,9 +920,9 @@ int main(int argc, char **argv)
 					if (offset_after_fixup > *highest_unused_offset)
 					{
 						unsigned hole_size = offset_after_fixup - *highest_unused_offset;
-						unsigned align = el_type->get_alignment();
+						unsigned align = el_type.enclosing_cu()->alignment_of_type(el_type);
 						unsigned highest_unused_offset_rounded_to_align
-						 = ROUND_UP_TO(align, highest_unused_offset);
+						 = ROUND_UP(highest_unused_offset, align);
 						comment_s << " (preceded by ";
 						if (hole_size ==
 							highest_unused_offset_rounded_to_align - highest_unused_offset)
@@ -952,7 +953,8 @@ int main(int argc, char **argv)
 				if (el_type_size)
 				{
 					prev_offset_plus_size = offset_after_fixup + *el_type_size;
-					highest_unused_offset = MAX(offset_after_fixup + *el_type_size, highest_unused_offset);
+					highest_unused_offset = std::max<unsigned>(
+						offset_after_fixup + *el_type_size, highest_unused_offset);
 				}
 				else
 				{
