@@ -20,6 +20,10 @@ extern "C" {
 // go with 1/4 of the address space if we're not sure (x86-64 is special)
 #endif
 
+/* In contexts where generating a reference to mmap would be problematic,
+ * e.g. if it's wrapped, we support a hack to lightly disguise it. Within
+ * liballocs I don't think we need this, because we catch mmaps via syscall
+ * rewriting, and we don't rewrite ourselves. */
 #ifdef USE_SYSCALL_FOR_MMAP
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -41,8 +45,25 @@ extern "C" {
 #include "bitmap.h"
 
 #ifndef MAP_NORESERVE
-#define MAP_NORESERVE
+#if defined(__linux__)
+#define MAP_NORESERVE 0x04000
+#elif defined(__FreeBSD__)
+#define MAP_NORESERVE 0
+#else
 #warning "No MAP_NORESERVE, so assuming any memory mapping will be unreserved"
+#define MAP_NORESERVE 0
+#endif
+#endif
+
+#ifndef MAP_ANONYMOUS
+#if defined(__linux__)
+#define MAP_ANONYMOUS 0x20
+#elif defined(__FreeBSD__)
+#define MAP_ANONYMOUS 0 /* FIXME */
+#else
+#warning "No MAP_ANONYMOUS, so fd == -1 will map anonymous memory"
+#define MAP_ANONYMOUS 0
+#endif
 #endif
 
 static inline size_t memtable_mapping_size(
@@ -86,7 +107,7 @@ static inline void *memtable_new_at_addr(
 		entry_coverage_in_bytes, addr_begin, addr_end);
 	assert(mapping_size <= BIGGEST_MMAP_ALLOWED);
 	void *ret = MEMTABLE_MMAP((void*) placement_addr, mapping_size, PROT_READ|PROT_WRITE, 
-		MAP_PRIVATE|MAP_ANON|MAP_NORESERVE|
+		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|
 			(placement_addr ? MAP_FIXED : 0), -1, 0);
 	return ret; /* MAP_FAILED on error */
 }
@@ -138,7 +159,7 @@ static inline char *memtable_new_l1_page_bitmap(
  */
 	size_t bitmap_mapping_size = table_mapping_size / (sysconf(_SC_PAGE_SIZE) << 3);
 	void *ret = MEMTABLE_MMAP(NULL, bitmap_mapping_size, PROT_READ|PROT_WRITE, 
-		MAP_PRIVATE|MAP_ANON|MAP_NORESERVE, -1, 0);
+		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
 	return (char*) ret; /* MAP_FAILED on error */
 }
 #define MEMTABLE_NEW_L1_PAGE_BITMAP_WITH_TYPE(t, range, addr_begin, addr_end) \
@@ -162,7 +183,7 @@ static inline char *memtable_new_l2_page_bitmap(
  *    For smaller memtables, this might be a nice size e.g. a few dozens of bytes.
  */
 	void *ret = MEMTABLE_MMAP(NULL, l2_bitmap_mapping_size, PROT_READ|PROT_WRITE, 
-		MAP_PRIVATE|MAP_ANON|MAP_NORESERVE, -1, 0);
+		MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0);
 	return (char*) ret; /* MAP_FAILED on error */
 }
 #define MEMTABLE_NEW_L2_PAGE_BITMAP_WITH_TYPE(t, range, addr_begin, addr_end) \
