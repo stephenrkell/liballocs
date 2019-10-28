@@ -1,4 +1,4 @@
-cases ?= $(wildcard [a-z]*)
+cases ?= $(basename $(wildcard [a-z]*.[ch]))
 
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 LIBALLOCS_BASE := $(realpath $(dir $(THIS_MAKEFILE))/../..)
@@ -13,8 +13,9 @@ LDFLAGS += -Wl,--export-dynamic
 
 # FIXME: this is fine for a single-file unit test, but hwat about unit
 # tests that need other stuff from liballocs to work properly? Maybe
-# they're not unit tests, by definition. Still, I would like to unify
-# this with the existing approach to testing the mmap allocator.
+# they're not unit tests, by definition. Still, it may make sense to unify
+# this with the existing approach to testing the mmap allocator. That
+# uses the liballocs_test.so: test cases run in its constructor.
 
 .PHONY: build-% run-% cleanbuild-% gdbrun-% gdbcleanrun-% clean-%
 build-%: %
@@ -30,3 +31,10 @@ default:
 
 run-%: %
 	./$*
+
+clean-%:
+	rm -f $* $*.o $*.s
+
+cleanrun-%:
+	$(MAKE) clean-$*
+	$(MAKE) run-$*
