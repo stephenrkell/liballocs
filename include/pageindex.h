@@ -82,8 +82,27 @@ struct big_allocation
 	struct allocator *allocated_by; // should always be parent->suballocator
 	struct allocator *suballocator; // ... suballocated bigallocs may have only small children
 	struct meta_info meta;          // metadata for use by the `allocated_by' allocator
-	void *suballocator_meta;        // metadata for use by the suballocator, if any
-	void (*suballocator_free_func)(void*);
+	void *suballocator_private;     // metadata for use by the suballocator, if any -- generic_small uses this to hold its chunk_rec
+	void (*suballocator_private_free)(void*);
+	/* Contemplating adding some common suballocator helpers -- if
+	 * we fix these, we gain some potential for fast paths later.
+	 * But shortcut vectors only really make sense for static
+	 * allocations -- too expensive to recompute on changes.
+
+	bitmap ptr
+	"delta" to bitmap/shortcut base
+	min alignment          a.k.a. granularity of bitmap
+	biggest live/seen suballocation (<=)  i.e. to bound backward search for object bases
+	shortcut vector ptr    -- 
+	shortcut scale factor
+
+	These feel a bit wrong. We are losing our generality by baking
+	this into the big_allocation abstraction. But if we had bitmaps
+	as a fast path, we could do fast pointer normalization (or at least
+	a fast check for this) which might help with... libcrunch-style
+	queries when we have inline caching of allocators, say (a common-case
+	"normalized" heap query could be inlined into the caller).
+	 */
 };
 #define BIGALLOC_IN_USE(b) ((b)->begin && (b)->end)
 #define NBIGALLOCS 1024

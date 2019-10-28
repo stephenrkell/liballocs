@@ -17,6 +17,7 @@
 #include "uniqtypes.hpp"
 #include "allocsites-info.hpp"
 #include "metavec.h"
+#include "relf.h" /* for ROUND_* */
 
 using std::cin;
 using std::cout;
@@ -27,6 +28,8 @@ using std::ifstream;
 using std::ostringstream;
 using std::set;
 using std::make_pair;
+using std::setfill;
+using std::setw;
 using namespace dwarf;
 //using boost::filesystem::path;
 using dwarf::core::iterator_base;
@@ -157,6 +160,7 @@ int main(int argc, char **argv)
 	std::vector< sym_or_reloc_rec_to_generate > recs = generate_recs(root);
 
 	std::cout << "#include \"allocmeta-defs.h\"" << std::endl;
+	std::cout << "#include \"bitmap.h\"" << std::endl;
 	std::cout << "#define STRx(s) #s" << std::endl;
 	std::cout << "#define STR(s) STRx(s)" << std::endl;
 	// for each LOAD phdr
@@ -391,17 +395,6 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 		// FIXME: don't iterate n times for n segments; be smarter
 		if (i_rec->vaddr >= base_addr && i_rec->vaddr < limit_addr)
 		{
-#if 0
-			cout << "STR(SYM_OR_RELOC_REC_WORD("
-				<< "/* alloc at 0x" << std::hex << i_rec->vaddr < std::dec
-				<< " of kind (based on priority kind " << i_rec->priority_k << ") */ " << i_rec->k
-				<< ",\n"
-				<< "\t/* idx in relevant sym or reloc table */ " << i_rec->idx_in_per_kind_table << ",\n"
-				<< "\t/* type_ptr_as_integer_incl_lowbits */ ";
-			if (i_rec->maybe_uniqtype) cout << "(unsigned long) &" << mangle_typename(*i_rec->maybe_uniqtype);
-			else cout << "0UL";
-				<< "),\n";
-#endif
 			cout << ".8byte \"STR(SYM_OR_RELOC_REC_WORD(" << (int) i_rec->k << ", "
 				<< i_rec->idx_in_per_kind_table << ", "
 				<< ((i_rec->maybe_uniqtype) ? mangle_typename(*i_rec->maybe_uniqtype) : "0")
@@ -412,57 +405,102 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 	}
 	// std::cout << "};" << std::endl;
 	std::cout << "\");" << std::endl;
-#if 0
-	// start at begin + 1, because the first entry is a dummy
-	unsigned idx = 1;
-	for (auto i_sym_pair = extrasyms.begin() + 1; i_sym_pair != extrasyms.end(); ++i_sym_pair, ++idx)
+
+	/* Also output the bitmap. The bitmap's start address is the segment
+	 * start address, rounded down to a 64-byte boundary. */
+	uintptr_t bitmap_base_addr = ROUND_DOWN(ph->p_vaddr, BITMAP_WORD_NBITS);
+	uintptr_t bitmap_limit_addr = ROUND_UP(limit_addr, BITMAP_WORD_NBITS);
+	uintptr_t bitmap_nwords = ROUND_UP((bitmap_limit_addr - bitmap_base_addr), BITMAP_WORD_NBITS) /
+		BITMAP_WORD_NBITS;
+	/* We simply build the bitmap here, then output it. */
+	bitmap_word_t bitmap[bitmap_nwords];
+	bzero(bitmap, sizeof (bitmap_word_t) * bitmap_nwords);
+	unsigned nbits_set = 0;
+	for (auto i_rec = recs.begin(); i_rec != recs.end(); ++i_rec)
 	{
-		struct sym_or_reloc_rec r = {
-			/* kind:3 */ REC_EXTRASYM,
-			/* uniqtype_ptr_bits_no_lowbits */ ,
-			/* idx:17 */ idx
-		};
-		recs.push_back(r);
-	}
-
-	for (auto i_int_pair = statics.begin(); i_int_pair != statics.end(); ++i_int_pair)
-	{   // FIXME: we can walk over the relevant ranges directly?
-		if (i_int_pair->first.lower() >= base_addr && i_int_pair->first.upper() < limit_addr)
+		// FIXME: don't iterate n times for n segments; be smarter
+		if (i_rec->vaddr >= base_addr && i_rec->vaddr < limit_addr)
 		{
-			//std::cerr << "In segment beginning at 0x" << std::hex << base_addr << std::dec
-			//	<< ", saw a static described by (among others) " << *i_int_pair->second.begin() << std::endl;
-			// we need a kind, a symind and a typename
-			if (static_is_extrasym(i_int_pair->first, i_int_pair->second))
-			{
-
-			}
-			else
-			{
-
-			}
-			auto i_descr = i_int_pair->second.begin();
-			// choose the highest-priority descr that isn't DWARF
-			while (i_descr != i_int_pair->second.end()
-				&& i_descr->k != sticky_root_die::static_descr::DWARF) ++i_descr;
-			if (i_descr == i_int_pair->second.end())
-			{
-				std::cerr << "Internal error: static has only a DWARF descr" << std::endl;
-				abort();
-			}
-			unsigned kind = descr.kind;
-			unsigned idx; /* index into the table denoted by `kind' */
-			switch (kind)
-			{
-				case EXTRASYM:
-
-
-
-			}
-
+			uintptr_t bit_idx = i_rec->vaddr - bitmap_base_addr;
+			assert(bit_idx < (bitmap_limit_addr - bitmap_base_addr));
+			bitmap_set_b(bitmap, bit_idx);
+			++nbits_set;
 		}
 	}
-#endif
+	cout << "// Now a bitmap spanning " << (bitmap_limit_addr - bitmap_base_addr)
+		 << " bytes, with " << nbits_set << " bits set" << std::endl;
+	cout << "bitmap_word_t bitmap_0x" << std::hex << base_addr << std::dec << "[] = {" << std::endl;
+	cout << "/*               |-00      |-08      |-10      |-18      |-20      |-28      |-30      |-38      |-40      |-48      |-50      |-58      |-60      |-68      |-70      |-78      |-80      |-88      |-90      |-98      |-a0      |-a8      |-b0      |-b8      |-c0      |-c8      |-d0      |-d8      |-e0      |-e8      |-f0      |-f8 ff-|  */" << std::endl;
+//  cout << "/* 0b0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 
+	/* To make this readable, we format this as follows.
+	 * (Remember that our bitmap is big-endian. 
+	 * - 256 binary digits per line
+	 * - prefix with an address 
+	 * - hex digits along the top
+	 * - indent the first line if it doesn't start at a 256-byte boundary*/
+	uintptr_t base_addr_of_current_word = bitmap_base_addr;
+	unsigned printed_words_up_to_idx = 0;
+	const int line_nbytes = 256;
+	
+	auto flush_content_up_to = [&bitmap, bitmap_nwords, bitmap_base_addr, line_nbytes,
+		&base_addr_of_current_word, &printed_words_up_to_idx](unsigned idx, bool start_new_line) {
+		// either we've hit the end (so won't start a new line), of we are at a line boundary
+		assert(start_new_line || (idx == bitmap_nwords));
+		assert(!start_new_line ||
+			(base_addr_of_current_word % line_nbytes == 0));
+		cout << " */ ";
+		for (unsigned j = printed_words_up_to_idx; j < idx; ++j)
+		{
+			// actually print the bitmap words as words
+			cout << "0x" << setw(BITMAP_WORD_NBITS / 4) << setfill('0')
+				<< std::hex << bitmap[j] << std::dec;
+			if (idx != bitmap_nwords || j+1 != idx) cout << ", ";
+		}
+		if (start_new_line)
+		{
+			cout << "\n/* 0x" << std::hex << setw(8) << setfill('0')
+				<< ROUND_DOWN(base_addr_of_current_word, line_nbytes) << std::dec
+				<< ": 0b";
+		}
+		printed_words_up_to_idx = idx; 
+	};
 
+	// we may need to add a starting indent
+	unsigned nbytes_to_boundary = ROUND_UP(base_addr_of_current_word, line_nbytes) - base_addr_of_current_word;
+	assert(nbytes_to_boundary % (BITMAP_WORD_NBITS/8) == 0);
+	// we write 5 bytes per 4 addresses
+	cout << "/* 0x" << std::hex << setw(8) << setfill('0') 
+		<< ROUND_DOWN(base_addr_of_current_word, line_nbytes) << std::dec << ": ";
+	for (unsigned j = 0; j < nbytes_to_boundary / 4; ++j)
+	{
+		cout << "     ";
+	}
+	cout << "0b";
+	unsigned digits_printed = 0;
+	unsigned i = 0;
+	for (; i < bitmap_nwords; base_addr_of_current_word += BITMAP_WORD_NBITS, ++i)
+	{
+		// do we need to start a new line? if we're at an addr that's a multiple of BITMAP_WORD_NBITS
+		if (i != 0 && base_addr_of_current_word % line_nbytes == 0)
+		{
+			flush_content_up_to(i, true);
+		}
+		
+		// actually print the binary digits of the current word, from bit 63 down to 0
+		for (unsigned j = 0; j < BITMAP_WORD_NBITS; ++j)
+		{
+			if (j != 0 && j % 4 == 0) cout << " ";
+			cout << ((bitmap[i] & (1ul<<BITMAP_WORD_NBITS-1-j)) ? '1' : '0');
+			++digits_printed;
+			assert(digits_printed <= (bitmap_limit_addr - bitmap_base_addr));
+		}
+		cout << " ";
+	}
+	// now we've flushed all the line-sized boundaries we've crossed,
+	// but we may have a final line to flush
+	assert(digits_printed == (bitmap_limit_addr - bitmap_base_addr));
+	flush_content_up_to(i, false);
+	cout << std:: endl << "};" << std::endl;
 }
 
 

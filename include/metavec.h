@@ -126,7 +126,7 @@ tag ## _set_bit_for_addr(void *addr_at_0, size_t addr_range_sz, \
 	/* In our case, we're searching/counting forwards, so a "<" test can tell us */ \
 	/* whether any bits higher (more significant; higher-address) are set. That's */ \
 	/* what we want, so the convention is good for us. */ \
-	bitmap_set(outbuf_bitmap, bit_n); \
+	bitmap_set_l(outbuf_bitmap, bit_n); \
 } \
 static inline meta * \
 tag ## _generate_meta(void *addr_at_0, size_t addr_range_sz, \
@@ -202,7 +202,7 @@ static inline unsigned tag ## _meta_idx_le_addr(void *addr, void *addr_at_0, siz
 	else if ((char*) shortcut_entry_addr > (char*) addr) return startidx - 1; \
 	else if ((char*) shortcut_entry_addr == (char*) addr) return startidx; \
 	void *bitmap_base_addr = round_addr_down_to(TAG ## _BITMAP_UNIT, addr_at_0); \
-	unsigned count = bitmap_count_set(bitmap, (bitmap_word_t *) ((char*) bitmap + tag ## _bitmap_size_bytes(addr_at_0, addr_range_size)), \
+	unsigned count = bitmap_count_set_l(bitmap, (bitmap_word_t *) ((char*) bitmap + tag ## _bitmap_size_bytes(addr_at_0, addr_range_size)), \
 		(char*) shortcut_entry_addr - (char*) bitmap_base_addr + 1 /* start at +1 i.e. excluding the shortcut entry itself */, \
 		(char*) addr - (char*) bitmap_base_addr + 1 /* search up to +1 i.e. up to and including the test addr */); \
 	return startidx + count; \
@@ -227,20 +227,6 @@ struct meta
 {
 	unsigned symind;
 };
-
-#if 0
-/* Old version showing how to build and use the ELF ## end ## _ST_TYPE macro from __ELF_NATIVE_CLASS */
-#define test_metaval_from_raw_x(p, gettype) \
-	((struct meta) { gettype(((p)->st_info)), test_addr_from_raw(p) - addr_at_0 })
-#define test_metaval_from_raw_y(p, enc) \
-	test_metaval_from_raw_x(p, ELF ## enc ## _ST_TYPE)
-// pass-through dummy to actually substitute the "64" or "32", not paste tokens as given
-#define test_metaval_from_raw_z(p, enc) \
-	test_metaval_from_raw_y(p, enc)
-// the actual macro we wanted to define
-#define test_metaval_from_raw(p) \
-	test_metaval_from_raw_z(p, __ELF_NATIVE_CLASS)
-#endif
 
 /* _metaval_from_raw builds the meta-vector value given a raw pointer.
  * For us, a raw pointer is a pointer to an Elf64_Sym structure */

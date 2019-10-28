@@ -855,7 +855,7 @@ void write_master_relation(master_relation_t& r,
 			
 			if (bit_size_delta)
 			{
-				unsigned highest_po2_ordinal = 8 * sizeof (unsigned long) - nlz1(bit_size_delta) - 1;
+				unsigned highest_po2_ordinal = 8 * sizeof (unsigned long) - nlz(bit_size_delta) - 1;
 				unsigned next_lower_po2 = (1u<<highest_po2_ordinal);
 				unsigned next_higher_po2 = (1u<<(1+highest_po2_ordinal));
 				signed diff_lower = bit_size_delta - next_lower_po2; // will be positive

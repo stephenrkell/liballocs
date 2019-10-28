@@ -265,11 +265,11 @@ struct file_metadata
 	   If we see multiple spans covering the same address, we discard one
 	   of them heuristically.
 	   The end result is a list of spans, in address order, with distinct starts.
-	   Our sorted_meta_vec has one record per indexed span.
+	   Our sorted metavector has one record per indexed span.
 	   Logically the content is a pointer to its ELF metadata *and* its type.
 	   For spans that are in dynsym, it points to their dynsym entry.
 	*/
-	struct sym_or_reloc_rec *sorted_meta_vec; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
+	struct sym_or_reloc_rec *metavector; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
 #define UNIQTYPE_OF_SPAN(s) (struct uniqtype*)(((unsigned long) ((s).t))<<3)
 	unsigned long (*starts_bitmaps)[];
 };

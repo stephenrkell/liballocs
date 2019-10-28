@@ -295,7 +295,7 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 		.extrasym = (meta_handle ? dlsym(meta_handle, "extrasym") : NULL),
 		.phdrs = NULL, /* for now... filled in by add_all_loaded_segments_for_one_file_only_cb */
 		.phnum = -1, /* ditto */
-		.sorted_meta_vec = (meta_handle ? dlsym(meta_handle, "sortedmeta") : NULL),
+		.metavector = (meta_handle ? dlsym(meta_handle, "sortedmeta") : NULL),
 		.starts_bitmaps = (meta_handle ? dlsym(meta_handle, "starts_bitmaps") : NULL)
 	};
 	/* We want to create a single "big allocation" for the whole file. 

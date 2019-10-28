@@ -225,17 +225,17 @@ static int index_small_alloc_internal(void *ptr, unsigned size_bytes,
 	if (!container) abort();
 	
 	/* This chunk already records a suballocated region. */
-	struct chunk_rec *p_chunk_rec = container->suballocator_meta;
+	struct chunk_rec *p_chunk_rec = container->suballocator_private;
 	assert(p_chunk_rec);
 #ifdef HEAP_INDEX_SMALL_BITMAP_ONLY
 	/* Just maintain the bitmap. Set the first bit and clear up to the size of the object. */
-	bitmap_set(p_chunk_rec->starts_bitmap, (char*) ptr - (char*) existing_object_start);
+	bitmap_set_le(p_chunk_rec->starts_bitmap, (char*) ptr - (char*) existing_object_start);
 // 	/* We clear in three phases.
 // 	 * 1. bytes from start + 1 */
 // 	unsigned nbyte = 1;
 // 	while (nbyte < size_bytes && nbyte < 8) 
 // 	{
-// 		bitmap_clear(p_chunk_rec->starts_bitmap, 
+// 		bitmap_clear_le(p_chunk_rec->starts_bitmap, 
 // 			((char*) ptr - (char*) existing_object_start) + nbyte);
 // 		nbyte++;
 // 	}
@@ -248,7 +248,7 @@ static int index_small_alloc_internal(void *ptr, unsigned size_bytes,
 // 	/* 3. remaining bytes at the end */
 // 	while (nbyte < size_bytes)
 // 	{
-// 		bitmap_clear(p_chunk_rec->starts_bitmap, 
+// 		bitmap_clear_le(p_chunk_rec->starts_bitmap, 
 // 			((char*) ptr - (char*) existing_object_start) + nbyte);
 // 		nbyte++;
 // 	}
@@ -435,7 +435,7 @@ int __index_small_alloc(void *ptr, int level, unsigned size_bytes)
 	{
 		/* We hit an allocation of our own, which we'd like to silently delete
 		 * (this is a HACK to deal with GCs that don't notify us on free). */
-		struct chunk_rec *chunk_rec = container->suballocator_meta;
+		struct chunk_rec *chunk_rec = container->suballocator_private;
 		// HACK: do the unindexing
 		unindex_all_overlapping(ptr, (char*) ptr + size_bytes, chunk_rec, container);
 	}
@@ -460,7 +460,7 @@ int __index_small_alloc(void *ptr, int level, unsigned size_bytes)
 	if (__builtin_expect(!container->suballocator, 0))
 	{
 		container->suballocator = &__generic_small_allocator;
-		container->suballocator_meta = make_suballocated_chunk(container->begin, 
+		container->suballocator_private = make_suballocated_chunk(container->begin, 
 				(char*) container->end - (char*) container->begin, 
 				/* guessed_average_size */ size_bytes);
 	}
@@ -755,7 +755,7 @@ void __unindex_small_alloc(void *ptr)
 		b = b->parent;
 	if (!b) abort();
 	
-	unindex_small_alloc_internal(ptr, (struct chunk_rec *) b->suballocator_meta, b);
+	unindex_small_alloc_internal(ptr, (struct chunk_rec *) b->suballocator_private, b);
 	
 	BIG_UNLOCK
 }
@@ -769,7 +769,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 		? b->parent
 		 : __lookup_deepest_bigalloc(obj);
 	
-	struct insert *heap_info = lookup_small_alloc(obj, container->suballocator_meta,
+	struct insert *heap_info = lookup_small_alloc(obj, container->suballocator_private,
 		container, out_base, out_size);
 	if (!heap_info)
 	{
