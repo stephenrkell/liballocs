@@ -2,8 +2,9 @@ ACLOCAL_AMFLAGS = -I m4
 
 SUBDIRS = tools/lang . src lib
 
-# NOTE: being C++, these only affect build of the tools, not the liballocs core.
-AM_CXXFLAGS = -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions -O2 -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -I$(LIBRUNT)/include
+# HACK to disable -O2 if DEBUG is set (to anything) -- thanks for nothing, automake
+AM_CXXFLAGS = -O2 $(DEBUG:%=-O0) -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) $(DWARFIDL_CFLAGS) -I$(LIBRUNT)/include
+
 AM_CPPFLAGS =
 AM_CFLAGS = -Wall -std=gnu99 -ggdb -O3 -flto -Iinclude -fPIC -Wp,-w
 AM_LDFLAGS =
