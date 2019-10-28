@@ -93,9 +93,37 @@ void __static_segment_allocator_notify_define_segment(
 			}
 		},
 		containing_file,
-		&__static_segment_allocator
+		&__static_segment_allocator /* allocated_by */
 	);
-	b->suballocator = &__static_section_allocator; // HMM: what if we have syms directly underneath?
+	/* What's the suballocator? For the executable's data segment,
+	 * a malloc will be the suballocator. But sections will be
+	 * child bigallocs so that is OK -- we still only have one true
+	 * suballocator. FIXME: what if we have syms directly underneath?
+	 * Syms may or may not be part of a section... the not-part case
+	 * may be tricky with this arrangement. */
+	if ((uintptr_t) segment_start_addr == executable_data_segment_start_addr)
+	{
+		/* Here we rely on both sections and segments always being bigallocs,
+		 * so the only suballocator of the data segment is the generic malloc.
+		 * Of course the sections may themselves have suballocators (the symbol
+		 * allocator). This may be a problem when we start to hang the bitmaps
+		 * on places, because we want the bitmaps to be per-segment not
+		 * per-section. It might be better to invert this: create a brk bigalloc,
+		 * and the malloc becomes the suballocator under there while the
+		 * segment is suballocated by the symbols (?). */
+		executable_data_segment_bigalloc = b;
+		// the data segment always extends as far as the file+mapping do (should be the same)
+		assert(b->parent);
+		assert(b->parent->parent);
+		assert(b->parent->parent->end == b->parent->end);
+		__adjust_bigalloc_end(b, b->parent->end);
+		b->suballocator = &__generic_malloc_allocator;
+	}
+}
+void __static_segment_allocator_notify_brk(void *new_curbrk)
+{
+	if (!initialized) return;
+	__adjust_bigalloc_end(executable_data_segment_bigalloc, new_curbrk);
 }
 
 void __static_segment_allocator_notify_destroy_segment(

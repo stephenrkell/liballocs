@@ -273,6 +273,8 @@ struct file_metadata
 #define UNIQTYPE_OF_SPAN(s) (struct uniqtype*)(((unsigned long) ((s).t))<<3)
 	unsigned long (*starts_bitmaps)[];
 };
+#define FILE_META_DESCRIBES_EXECUTABLE(meta) \
+	((meta)->l->l_name && (meta)->l->l_name[0] == '\0') /* FIXME: better test? */
 #define STARTS_BITMAP_NWORDS_FOR_PHDR(ph) \
     (ROUND_UP((ph)->p_vaddr + (ph)->p_memsz, sizeof (void*)) - ROUND_DOWN((ph)->p_vaddr, sizeof (void*)) \
     / (sizeof (void*)))

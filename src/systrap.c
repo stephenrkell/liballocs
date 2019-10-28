@@ -34,6 +34,8 @@ void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length
 void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)
 			__attribute__((weak));
 void __mmap_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
+void __static_file_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
+void __static_segment_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
 extern _Bool __liballocs_is_initialized __attribute__((weak));
 int __liballocs_global_init(void);
 _Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, const char *meta_suffix)
@@ -58,6 +60,8 @@ void brk_replacement(struct generic_syscall *s, post_handler *post)
 	long int ret = do_syscall1(s);
 	void *brk_returned = (void*) ret;
 	if (&__mmap_allocator_notify_brk) __mmap_allocator_notify_brk(brk_returned);
+	if (&__static_file_allocator_notify_brk) __static_file_allocator_notify_brk(brk_returned);
+	if (&__static_segment_allocator_notify_brk) __static_segment_allocator_notify_brk(brk_returned);
 	
 	/* Do the post-handling. */
 	post(s, ret);

@@ -16,6 +16,8 @@ int open(const char *, int, ...);
 #include "raw-syscalls.h"
 #include "dlbind.h"
 
+uintptr_t executable_data_segment_start_addr __attribute__((visibility("hidden")));
+
 /* We talk about "allocators" but in the case of retrofitted 
  * allocators, they actually come in up to three parts:
  * 
@@ -439,16 +441,19 @@ report_problem:
 	if (existing_seq)
 	{
 		write_string("Nuking any overlapping bigallocs and attempting continue...\n");
-		/* If we're about to nuke the data segment mapping, clear our pointer to it.
-		 * Note that a change in the program break is the big reason for hitting
-		 * this case in the first place. */
-		if (executable_data_segment_mapping_bigalloc
-				&& (char*) executable_data_segment_mapping_bigalloc->end
-					> (char*) existing_seq->begin
-				&& (char*) executable_data_segment_mapping_bigalloc->begin
+		/* If we're about to nuke any mapping sequence crossing the data segment start,
+		 * clear our pointers to those bigallocs. Note that a change in the program break
+		 * is the big reason for hitting this case in the first place. FIXME: so why
+		 * isn't tihs entirely handled by our __*_allocator_notify_brk() logic? */
+		if (executable_data_segment_start_addr
+				&& (char*) executable_data_segment_start_addr
+					>= (char*) existing_seq->begin
+				&& (char*) executable_data_segment_start_addr
 					< (char*) existing_seq->end)
 		{
-			executable_data_segment_mapping_bigalloc = NULL; // FIXME: when will it get reinstated?
+			executable_data_segment_bigalloc = NULL; // FIXME: when will it get reinstated?
+			executable_file_bigalloc = NULL; // FIXME: when will it get reinstated?
+			executable_mapping_bigalloc = NULL; // FIXME: when will it get reinstated?
 		}
 		__liballocs_delete_all_bigallocs_overlapping_range(existing_seq->begin,
 			existing_seq->end);
@@ -833,25 +838,26 @@ static void *current_sbrk(void)
 }
 void __mmap_allocator_notify_brk(void *new_curbrk);
 
-struct big_allocation *executable_data_segment_mapping_bigalloc __attribute__((visibility("hidden")));
-static void update_data_segment_end(void *new_curbrk);
+struct big_allocation *executable_mapping_bigalloc __attribute__((visibility("hidden")));
+struct big_allocation *executable_file_bigalloc __attribute__((visibility("hidden")));
+struct big_allocation *executable_data_segment_bigalloc __attribute__((visibility("hidden")));
+void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk);
 
 _Bool __mmap_allocator_notify_unindexed_address(const void *mem)
 {
 	if (initialized) return 0;
-	if (!executable_data_segment_mapping_bigalloc) return 0; // can't do anything
+	if (!executable_data_segment_bigalloc) return 0; // can't do anything
 	void *old_sbrk = current_sbrk(); // what we *think* sbrk is
 	void *new_sbrk = sbrk(0);
-	update_data_segment_end(new_sbrk); // ... update it to what it actually is
+	__adjust_bigalloc_end(executable_mapping_bigalloc, new_sbrk); // ... update it to what it actually is
 	return ((char *) mem >= (char*) old_sbrk 
 		&& (char *) mem < (char *) new_sbrk);
 }
 
-static uintptr_t executable_data_segment_start_addr;
-static void set_executable_data_segment_mapping_bigalloc(void)
+static void set_executable_mapping_bigalloc(void)
 {
 	/* We can be called more than once. */
-	if (executable_data_segment_mapping_bigalloc) return;
+	if (executable_mapping_bigalloc) return;
 	
 	/* Can't do anything if we haven't seen the data segment yet. */
 	if (!executable_data_segment_start_addr) return;
@@ -869,17 +875,12 @@ static void set_executable_data_segment_mapping_bigalloc(void)
 			if ((uintptr_t) big_allocations[i].end >= executable_data_segment_start_addr
 					&& (uintptr_t) big_allocations[i].begin <= executable_data_segment_start_addr)
 			{
-				executable_data_segment_mapping_bigalloc = &big_allocations[i];
+				executable_mapping_bigalloc = &big_allocations[i];
 				break;
 			}
 		}
 	}
-	if (!executable_data_segment_mapping_bigalloc) abort();
-	/* We expect the data segment's suballocator to be malloc, so pre-ordain that.
-	 * NOTE that there will also be a nested allocation under it, that is the 
-	 * static allocator's segment bigalloc. We don't consider the sbrk area
-	 * to be a child of that; it's a sibling. FIXME: is this okay? */
-	executable_data_segment_mapping_bigalloc->suballocator = &__generic_malloc_allocator;
+	if (!executable_mapping_bigalloc) abort();
 }
 
 void __mmap_allocator_init(void) __attribute__((constructor(101)));
@@ -993,7 +994,7 @@ void __mmap_allocator_init(void)
 		 * anyway. */
 		add_missing_mappings_from_proc();
 		/* Also extend the data segment to account for the current brk. */
-		set_executable_data_segment_mapping_bigalloc();
+		set_executable_mapping_bigalloc();
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
 		__liballocs_post_systrap_init(); /* does the libdlbind symbol creation */
@@ -1002,7 +1003,7 @@ void __mmap_allocator_init(void)
 		// but "__brk" in glibc isn't an exportd symbol.
 		// instead, we need to walk its allocations
 		__systrap_brk_hack();
-		update_data_segment_end(sbrk(0));
+		__adjust_bigalloc_end(executable_mapping_bigalloc, sbrk(0));
 
 		initialized = 1;
 		trying_to_initialize = 0;
@@ -1385,45 +1386,60 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 	return 0; // keep going
 }
 
-static void update_data_segment_end(void *new_curbrk)
+void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk)
 {
 	/* If we haven't made the bigalloc yet, sbrk needs no action. */
-	if (!executable_data_segment_mapping_bigalloc) return;
+	if (!b) return;
 	
-	struct mapping_sequence *seq
-	 = executable_data_segment_mapping_bigalloc->meta.un.opaque_data.data_ptr;
-	char *old_end = executable_data_segment_mapping_bigalloc->end;
+	char *old_end = b->end;
 	
 	/* We also update the metadata. */
 	if ((char*) new_curbrk < (char*) old_end)
 	{
 		/* We're contracting. */
-		__liballocs_truncate_bigalloc_at_end(executable_data_segment_mapping_bigalloc, new_curbrk);
-		delete_mapping_sequence_span(seq, new_curbrk, (char*) old_end - (char*) new_curbrk);
+		__liballocs_truncate_bigalloc_at_end(b, new_curbrk);
+		if (!b->parent)
+		{
+			struct mapping_sequence *seq
+			 = b->meta.un.opaque_data.data_ptr;
+			delete_mapping_sequence_span(seq, new_curbrk, (char*) old_end - (char*) new_curbrk);
+			check_mapping_sequence_sanity(seq);
+		}
 	}
 	else if ((char*) new_curbrk > (char*) old_end)
 	{
 		/* We're expanding. */
-		seq->end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE);
-		__liballocs_extend_bigalloc(executable_data_segment_mapping_bigalloc, seq->end);
-		void *prev_mapping_end = seq->mappings[seq->nused - 1].end;
-		if (!seq->mappings[seq->nused - 1].is_anon)
+		void *new_end = new_curbrk;
+		if (!b->parent)
 		{
-			/* Most likely, the program has not yet called sbrk().
-			 * /proc/<pid>/maps does *not* necessarily list the break area.
-			 * We have to pretend an anonymous mapping is there. */
-			seq->mappings[seq->nused++] = (struct mapping_entry) {
-				.begin = prev_mapping_end,
-				.end = seq->end,
-				.prot = PROT_READ | PROT_WRITE,
-				.flags = 0,
-				.offset = 0,
-				.is_anon = 1,
-			};
+			struct mapping_sequence *seq
+			 = b->meta.un.opaque_data.data_ptr;
+			new_end = seq->end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE);
 		}
-		else seq->mappings[seq->nused - 1].end = seq->end;
+		__liballocs_extend_bigalloc(b, new_end);
+		if (!b->parent)
+		{
+			struct mapping_sequence *seq
+			 = b->meta.un.opaque_data.data_ptr;
+			void *prev_mapping_end = seq->mappings[seq->nused - 1].end;
+			if (!seq->mappings[seq->nused - 1].is_anon)
+			{
+				/* Most likely, the program has not yet called sbrk().
+				 * /proc/<pid>/maps does *not* necessarily list the break area.
+				 * We have to pretend an anonymous mapping is there. */
+				seq->mappings[seq->nused++] = (struct mapping_entry) {
+					.begin = prev_mapping_end,
+					.end = new_end,
+					.prot = PROT_READ | PROT_WRITE,
+					.flags = 0,
+					.offset = 0,
+					.is_anon = 1,
+				};
+			}
+			else seq->mappings[seq->nused - 1].end = new_end;
+			check_mapping_sequence_sanity(seq);
+		}
 	}
-	check_mapping_sequence_sanity(seq);
 }
 
 void __mmap_allocator_notify_brk(void *new_curbrk)
@@ -1437,7 +1453,7 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 		 * another mechanism to probe for brk updates. */
 		return;
 	}
-	update_data_segment_end(new_curbrk);
+	__adjust_bigalloc_end(executable_mapping_bigalloc, new_curbrk);
 }
 
 static liballocs_err_t get_info(void *obj, struct big_allocation *b, 

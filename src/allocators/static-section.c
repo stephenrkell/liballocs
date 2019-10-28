@@ -33,7 +33,7 @@ struct section_metadata
 
 struct big_allocation *__static_section_allocator_ensure_big(
 			const void *addr_spanned_by_section,
-			ElfW(Shdr) *shdr
+			const ElfW(Shdr) *shdr
 		)
 {
 	if (shdr->sh_size == 0) return NULL;
@@ -54,15 +54,15 @@ struct big_allocation *__static_section_allocator_ensure_big(
 			.what = DATA_PTR,
 			.un = {
 				opaque_data: { 
-					.data_ptr = shdr,
+					.data_ptr = (ElfW(Shdr) *) shdr,
 					.free_func = NULL
 				}
 			}
 		},
 		containing_segment,
-		&__static_section_allocator
+		&__static_section_allocator /* parent */
 	);
-	b->suballocator = &__static_symbol_allocator;
+	b->suballocator = &__static_symbol_allocator; // HMM: symbols are never(?) big, so....
 	return b;
 }
 
@@ -72,7 +72,11 @@ void __static_section_allocator_notify_define_section(
 )
 {
 	/* We simply create a bigalloc from the off, if we're nonzero-sized.
-	 * That might be a bit extravagant. */
+	 * That might be a bit extravagant. But actually it's necessary!
+	 * The data segment's suballocator needs to be a malloc allocator.
+	 * By contrast, we (the section allocator) don't need to be marked
+	 * as the suballocator of the segment allocator if our allocs are
+	 * bigallocs. */
 	if (shdr->sh_size > 0)
 	{
 		__static_section_allocator_ensure_big((char*) meta->l->l_addr + shdr->sh_addr,

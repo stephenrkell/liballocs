@@ -46,7 +46,10 @@ const char *format_symbolic_address(const void *addr) __attribute__((visibility(
 
 #include "pageindex.h"
 
-extern struct big_allocation *executable_data_segment_mapping_bigalloc __attribute__((visibility("hidden")));
+extern struct big_allocation *executable_mapping_bigalloc __attribute__((visibility("hidden")));
+extern struct big_allocation *executable_file_bigalloc __attribute__((visibility("hidden")));
+extern struct big_allocation *executable_data_segment_bigalloc __attribute__((visibility("hidden")));
+extern uintptr_t executable_data_segment_start_addr __attribute__((visibility("hidden")));
 
 void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void munmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
@@ -62,7 +65,6 @@ int dl_for_one_object_phdrs(void *handle,
 	int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
 	void *data) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
-
 /* We contain our own private malloc, and we wrap it using the linker 
  * to keep track of whether it's active on the current thread. */
 extern _Bool __thread __private_malloc_active __attribute__((visibility("hidden")));

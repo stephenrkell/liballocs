@@ -238,6 +238,11 @@ static struct dso_vaddr_bounds get_dso_vaddr_bounds(void *handle)
 	int ret = dl_for_one_object_phdrs(handle, vaddr_bounds_cb, &bounds);
 	return bounds;
 }
+void __static_file_allocator_notify_brk(void *new_curbrk)
+{
+	if (!initialized) return;
+	__adjust_bigalloc_end(executable_file_bigalloc, new_curbrk);
+}
 
 void __static_file_allocator_notify_load(void *handle, const void *load_site)
 {
@@ -266,7 +271,7 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 		(void*) (l->l_addr + bounds.lowest_mapped_vaddr),
 		&lowest_containing_mapping_bigalloc);
 	struct big_allocation *highest_containing_mapping_bigalloc = NULL;
-	m =  __liballocs_get_memory_mapping(
+	m = __liballocs_get_memory_mapping(
 		(void*) (l->l_addr + bounds.limit_vaddr - 1),
 		&highest_containing_mapping_bigalloc);
 	/* We should have seen the mmap that created the bigalloc. If we haven't,
@@ -315,6 +320,11 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 		&__static_file_allocator
 	);
 	b->suballocator = &__static_segment_allocator;
+	char dummy;
+	ElfW(auxv_t) *auxv = get_auxv(environ, &dummy);
+	assert(auxv);
+	ElfW(auxv_t) *ph_auxv = auxv_lookup(auxv, AT_PHDR);
+	if (FILE_META_DESCRIBES_EXECUTABLE(meta)) executable_file_bigalloc = b;
 	/* The only semi-portable way to get phdrs is to iterate over
 	 * *all* the phdrs. But we only want to process a single file's
 	 * phdrs now. Our callback must do the test. */
