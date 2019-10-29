@@ -15,6 +15,8 @@
 #include "liballocs_private.h"
 #include "pageindex.h"
 #include "raw-syscalls.h"
+#include "allocmeta-defs.h"
+#include "allocmeta.h"
 
 static _Bool trying_to_initialize;
 static _Bool initialized;
@@ -32,6 +34,21 @@ void __static_symbol_allocator_init(void)
 		trying_to_initialize = 0;
 	}
 }
+
+/* How to make our new static allocs work.
+ * 
+ * - write the bitmap-generating code (in metavector is fine)
+ * - make the metavector per-segment
+ * - make the metavector dump tool print out a nice summary
+ * - make the startup code below also print out a nice summary, and *test*-compare them
+ * - write a segment-level query function -- WHAT TO DO about intervening sections?
+ * - compute per-section offsets and have the section metadata point at the bitmaps
+ * - write the section metadata query functions
+ 
+ * - now that allocsmt is gone, we need packed arrays for allocsites and frametypes
+ * - ... check the allocsites code that already exists!
+ */
+
 
 /* FIXME: invalidate cache entries on dlclose(). */
 #ifndef DLADDR_CACHE_SIZE
@@ -109,7 +126,155 @@ Dl_info dladdr_with_cache(const void *addr)
    then we need 2 bytes of index vector per 512 bytes of segment.
    Even a single-word scan would give us 2 per 64, which is fine.
 
+	/* What was I doing previously with the allocsmt? That was a
+	 * memtable where the bucket contained all statics starting
+	 * within a 512-byte region. That relied on the metadata
+	 * storing explicitly its own start address. We could do
+	 * that too, at least in the symtab/dynsym/extrasym cases; rela
+	 * requires more gymnastics, but could still be OK... we
+	 * should still write the code.
+	 *
+	 * So the bitmap uses 12.5% (1/8) overhead, but has shorter metadata
+	 * records. The memtable use 8bytes per 512bytes overhead (1/64)
+	 * but has larger per-metadata-record cost (must embed address
+	 * *and* linked list pointers for the memtable bucket structure,
+	 * so an extra 3 words per static entity). The breakeven point comes
+	 * where 3 words times N (the number of symbols) equals 7/64 of the
+	 * segment size M.
+	 *
+	 *   24N == 7M / 64   =>  219N = M
+	 *
+	 * i.e. if symbols occur every 219 bytes or fewer, we have a
+	 * good trade.
+	 * In my system's glibc, 
+	 */
+	 //   while read line; do total=$(( $total + $line )); done <<<"$( readelf -WS /lib/x86_64-linux-gnu/libc.so.6 | sed 's/^[[:blank:]]*//' | sed -r 's/^(\[)[[:blank:]]+/\1/' | column -t | egrep '\[.*[[:blank:]]+[WATXI]*A[WATXI]*[[:blank:]]' | tr -s '[:blank:]' '\t' | cut -f6 | sed 's/.*/0x&/' )"; echo "$total"
+	/*
+	 * suggests that allocated sections make up 1807987 bytes,
+	 * while there are only about 2334 dynsyms
+	 * but a bunch of others owing to DWARF/relocs/... how many?
+	 * Running extrasyms suggests there are another 2326 syms,
+	 * and that does not include relocs.
+	 * Still, that gets us an average inter-sym distance of 387
+	 * bytes, so technically the bitmap wastes space.
+	 * SHOULD I be using MTBDDs here too?
+	 * We simply map addresses to a <static alloc record, base addr> pair.
+	 * This feels less good... symbols don't recur across address intervals.
+	 *
+	 * Another potential benefit of the bitmap is uniformity, if
+	 * lots of allocators are using bitmaps. 
+	 * 
+	 * Also, is this reasonable time-wise? If we initially have a
+	 * pointer to the base of the allocation, the bitmap hits
+	 * straight away. But we still have to popcount some fixed
+	 * number of words, to reach the type info.
+	 *
+	 * For size info, we could scan forwards in the bitmap...
+	 * not clear if it's better to do that or just get the
+	 * meta record and use the size info from that. Actually
+	 * scanning forwards doesn't give us a precise size (we'd
+	 * need an "ends" bitmap) so we have to do the former.
+	 *
+	 * A quick fix might be to (1) put the address in the metadata,
+	 * either in-line or in a parallel vector of 32-bit vaddrs;
+	 * (2) reinstate the memtable and measure the difference in perf
+	 * versus bitmap-based backward search?
+	 *
+   Some kind of hybrid solution like "2 bits for every 4 bytes" might
+   be a better space trade -- 00 for nothing, 01 for single object
+   starting at the 4-byte boundary, 10 for something else
+   ... then need a way to describe the "something else" in a side
+   table. Can we abuse the same mechanisms? Not easily, because
+   we were using popcount to identify the index into the metavector.
+   That fails if the count of allocations becomes ambiguous.
+   
+   HMM. Still this seems worth doing. In my glibc binary, there are *no*
+   symbols that are not at least 4-byte-aligned.
+   
+   One trick that might work is if we pad the metavector. So in our 2-bits
+   bitmap, if we see 
+                     00 it means 0 objects start here,
+                     01    means 1 object starts here,
+                     10    means 2 objects start here
+                     11    means 4 objects start here
+   and we handle the 3 case by inserting a dummy entry in the metavector
+   ("not really an object; move along"). This would happen rarely.
+   Does this all still check out? How do we get the actual offset of the
+   object start?
+   Presum that needs to be another common case, so
+                     00    means 0 objects start here,
+                     01    means 1 object starts here *and is 4-byte-aligned*,
+                     11    means "all other cases; assume 4 slots and use metavector for starts"?
+   All this will *only* work if metavector items also contain their addresses.
+   For symtab/dynsym/extrasym this is available one level of indirection away.
+   For relocs, how does it work? Need to (1) use precomputed spine to get the reloc section+idx,
+        (2) decode the r_info to get the target section/symbol + addend,
+        (3) get the symbol/section's address and do the add.
+   One solution would be to generate extrasyms for all of these, so that we
+   don't have to worry about the precomputed spine. Do syms make sense? 24 bytes each.
+   By definition we are talking about nameless/typeless quantities; size could be guessed.
+   Is it useful to have the relocs around in reloc form?
+   (An Elf64_Rela is also 24 bytes, fwiw.)
+
+   We could just forget the bitmap and do a binary search of the
+   metavector, since we can compute the address of each entry. Let's
+   do that for now.
+
  */
+
+
+static uintptr_t vaddr_from_rec(struct sym_or_reloc_rec *p,
+	struct file_metadata *file)
+{
+	ElfW(Sym) *symtab;
+	switch (p->kind)
+	{
+		case REC_DYNSYM:   symtab = file->dynsym; goto sym;
+		case REC_SYMTAB:   symtab = file->symtab; goto sym;
+		case REC_EXTRASYM: symtab = file->extrasym; goto sym;
+		sym:
+			return symtab[p->idx].st_value;
+		case REC_RELOC_DYN: symtab = file->dynsym; goto rel;
+		case REC_RELOC:     symtab = file->symtab; goto rel;
+		rel:
+			// the awkward case
+			/* (1) use precomputed spine to get the reloc section+idx,
+			   (2) decode the r_info to get the target section/symbol + addend,
+			   (3) get the symbol/section's address and do the add.
+			 */
+			{
+				// find the greatest spine element le this value
+				// the spine should have no repeated elements!
+				// FIXME: lift this out into a bsearch_le function.
+				unsigned target = p->idx;
+				unsigned *upper = file->rel_spine_idxs + file->rel_spine_len;
+				unsigned *lower = file->rel_spine_idxs;
+				if (upper - lower == 0) abort();
+				assert(lower[0] <= target);
+				while (upper - lower != 1)
+				{
+					unsigned *mid = lower + ((upper - lower) / 2);
+					if (*mid > target)
+					{
+						// we should look in the lower half
+						upper = mid;
+					}
+					else lower = mid;
+				}
+				assert(lower[0] <= target);
+				// if we didn't find the max item, assert the next one is greater
+				assert(lower == file->rel_spine_idxs + file->rel_spine_len - 1
+					 || lower[1] > target);
+				// the reloc is in the given section, at the residual index
+				unsigned residual_idx = p->idx - lower[0];
+				ElfW(Rela) *the_reloc = file->rel_spine_scns[lower[0]] + residual_idx;
+				unsigned symind = ELF64_R_SYM(the_reloc->r_info);
+				uintptr_t addend = the_reloc->r_addend;
+				return symtab[symind].st_value + addend;
+			}
+		default: abort();
+	}
+}
 
 // nasty hack
 _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
@@ -148,7 +313,6 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 
 // FIXME: we're getting rid of the memtable, in favour of
 // -- per-segment symbol/reloc sorted vectors
-//           *** OR were they per-file? CHECK. per-segment seems to make more sense
 // -- the allocation sites table we've already implemented (another sorted array)
 // -- something for stack frames
 /*          WHAT?  we could do an abstract type for each stack frame
@@ -156,57 +320,54 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
             That's a bit elaborate. What else?
             Also how would it be keyed onto the function address?
  */
-#define maximum_static_obj_size (256*1024) // HACK
-struct uniqtype *
-static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
-{
 #if 0
-	assert(__liballocs_allocsmt != NULL);
-	if (!static_addr) return NULL;
-	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)static_addr | (0x800000000000ul<<1)));
-	struct allocsite_entry **bucketpos = initial_bucketpos;
-	_Bool might_start_in_lower_bucket = 1;
-	do 
-	{
-		struct allocsite_entry *bucket = *bucketpos;
-		for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
-		{
-			/* NOTE that in this memtable, buckets are sorted by address, so 
-			 * we would ideally walk backwards. We can't, so we peek ahead at
-			 * p->next. */
-			if (p->allocsite <= static_addr && 
-				(!p->next || ((struct allocsite_entry *) p->next)->allocsite > static_addr)) 
-			{
-				/* This is the next-lower record, but does it span the address?
-				 * Note that subprograms have length 0, i.e. known length. */
-				if (p->uniqtype && UNIQTYPE_HAS_KNOWN_LENGTH(p->uniqtype) &&
-						p->uniqtype->pos_maxoff >= ((char*) static_addr - (char*) p->allocsite))
-				{
-					if (out_object_start) *out_object_start = p->allocsite;
-					return p->uniqtype;
-				} else return NULL;
-			}
-			might_start_in_lower_bucket &= (p->allocsite > static_addr);
-		}
-		/* No match? then try the next lower bucket *unless* we've seen 
-		 * an object in *this* bucket which starts *before* our target address. 
-		 * In that case, no lower-bucket object can span far enough to reach our
-		 * static_addr, because to do so would overlap the earlier-starting object. */
-		--bucketpos;
-	} while (might_start_in_lower_bucket && 
-	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_static_obj_size);
-#endif
-	return NULL;
-}
-#undef maximum_vaddr_range_size
 
+#define NOOP1(x) (void*)0
+DEFINE_META_VEC_FUNCS(sym, SYM, sym_or_reloc_rec, /* raw record -- ignored */ sym_or_reloc_rec,
+	/*log2_align*/ 0, /*log2_max*/ 32, /*log2_shortcut_scale*/ 8,
+	/* addr_from_rawptr */ addr_from_rec, /* addr_from_rawptr_arg */ NULL /* ? */,
+	/* metaval_from_raw -- ignored */ NOOP1,
+	/* addr_from_metaptr */ addr_from_rec, /* addr_from_metaptr_arg */ NULL)
+#endif
 static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc,
 	struct uniqtype **out_type, void **out_base,
 	unsigned long *out_size, const void **out_site)
 {
 	++__liballocs_hit_static_case;
-	void *object_start;
-	struct uniqtype *alloc_uniqtype = static_addr_to_uniqtype(obj, &object_start);
+	/* Search backwards in the bitmap for the first bit set
+	 * -- bounded by the biggest static object (can we do better?).
+	 * Then count backwards for bits set, down to a shortcut vector
+	 * boundary.
+	 * The index in the metavector is the shortcut vector element
+	 * plus the number of bits set. ROUGHLY! Care about boundary
+	 * conditions. The meaning of the shortcut vector element
+	 * is critical. In metavec.h I wrote "it gives us the idx of
+	 * the first entry whose address is >= the base address of its range."
+	 *
+	 * My metavec.h sketch used 2*8 as the shortcut scale, i.e.
+	 * one shortcut vector element for every 256 alignment units (bytes).
+	 * That means we would popcount at most 4 words to get the
+	 * metavector index.
+	 */
+	
+	/* If we have a bigalloc, it's either a sym (promoted to bigalloc)
+	 * or a thing that allocates syms (section or segment). Whatever
+	 * it is, it should define the bitmap we want, and also a shortcut
+	 * vector. */
+	// FIXME: not supposed to use pageindex directly
+	// FIXME: in the section case, shortcut vector needs an offset
+	maybe_bigalloc = maybe_bigalloc ? maybe_bigalloc : &big_allocations[PAGENUM(obj)];
+	struct big_allocation *b = (maybe_bigalloc->allocated_by == &__static_symbol_allocator) ?
+		maybe_bigalloc : maybe_bigalloc->parent;
+	assert(b->allocated_by == &__static_section_allocator
+			|| b->allocated_by == &__static_segment_allocator);
+
+	uintptr_t obj_addr = (uintptr_t) obj;
+	uintptr_t bitmap_base = (uintptr_t) b->begin - /* DELTA */ 0;
+	
+	uintptr_t obj_offset_from_bitmap_base = obj_addr - bitmap_base;
+	void *object_start = /* */ NULL;
+	struct uniqtype *alloc_uniqtype = /* */ NULL;
 	if (out_type) *out_type = alloc_uniqtype;
 	if (!alloc_uniqtype)
 	{

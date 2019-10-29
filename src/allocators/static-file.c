@@ -50,6 +50,13 @@ static _Bool trying_to_initialize;
 static _Bool initialized;
 
 static int add_all_loaded_segments_for_one_file_only_cb(struct dl_phdr_info *info, size_t size, void *file_metadata);
+struct segments
+{
+	const ElfW(Phdr) *phdrs;
+	ElfW(Half) phnum;
+	unsigned nload;
+};
+static int discover_segments_cb(struct dl_phdr_info *info, size_t size, void *segments_as_void);
 
 void __static_file_allocator_notify_load(void *handle, const void *load_site);
 
@@ -285,19 +292,22 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 		- (char*) lowest_containing_mapping_bigalloc->begin;
 	const char *dynobj_name = dynobj_name_from_dlpi_name(l->l_name,
 		(void*) l->l_addr);
-	struct file_metadata *meta = __private_malloc(sizeof (struct file_metadata));
+	struct segments sinfo = (struct segments) { .nload = 0 };
+	dl_for_one_object_phdrs(l, discover_segments_cb, &sinfo);
+	assert(sinfo.nload != 0);
+	size_t meta_sz = offsetof(struct file_metadata, segments)
+		+ sinfo.nload * sizeof (struct segment_metadata);
+	struct file_metadata *meta = __private_malloc(meta_sz);
 	if (!meta) abort();
-	*meta = (struct file_metadata) {
-		.load_site = load_site,
-		.filename = __liballocs_private_strdup(dynobj_name),
-		.l = l,
-		.meta_obj_handle = meta_handle,
-		.extrasym = (meta_handle ? dlsym(meta_handle, "extrasym") : NULL),
-		.phdrs = NULL, /* for now... filled in by add_all_loaded_segments_for_one_file_only_cb */
-		.phnum = -1, /* ditto */
-		.metavector = (meta_handle ? dlsym(meta_handle, "sortedmeta") : NULL),
-		.starts_bitmaps = (meta_handle ? dlsym(meta_handle, "starts_bitmaps") : NULL)
-	};
+	bzero(meta, meta_sz);
+	meta->load_site = load_site;
+	meta->filename = __liballocs_private_strdup(dynobj_name);
+	meta->l = l;
+	meta->meta_obj_handle = meta_handle;
+	meta->extrasym = (meta_handle ? dlsym(meta_handle, "extrasym") : NULL);
+	meta->phdrs = sinfo.phdrs;
+	meta->phnum = sinfo.phnum;
+	/* We still haven't filled in everything... */
 	/* We want to create a single "big allocation" for the whole file. 
 	 * However, that's a problem ta least in the case of executables
 	 * mapped by the kernel: there isn't a single mapping sequence. We
@@ -324,11 +334,15 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	ElfW(auxv_t) *auxv = get_auxv(environ, &dummy);
 	assert(auxv);
 	ElfW(auxv_t) *ph_auxv = auxv_lookup(auxv, AT_PHDR);
-	if (FILE_META_DESCRIBES_EXECUTABLE(meta)) executable_file_bigalloc = b;
+	if (FILE_META_DESCRIBES_EXECUTABLE(meta))
+	{
+		assert(!executable_file_bigalloc);
+		executable_file_bigalloc = b;
+	}
 	/* The only semi-portable way to get phdrs is to iterate over
 	 * *all* the phdrs. But we only want to process a single file's
 	 * phdrs now. Our callback must do the test. */
-	int dlpi_ret = dl_iterate_phdr(add_all_loaded_segments_for_one_file_only_cb, meta);
+	int dlpi_ret = dl_for_one_object_phdrs(l, add_all_loaded_segments_for_one_file_only_cb, meta);
 	assert(dlpi_ret != 0);
 	assert(meta->phdrs);
 	assert(meta->phnum && meta->phnum != -1);
@@ -349,8 +363,23 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 		meta->shdrs = get_or_map_file_range(meta, shdrs_sz, fd, meta->ehdr->e_shoff);
 		if (meta->shdrs)
 		{
+			unsigned nrelscn = 0; // how many rel/rela sections are there?
 			for (unsigned i = 0; i < meta->ehdr->e_shnum; ++i)
 			{
+				if (meta->shdrs[i].sh_type == SHT_REL
+						|| meta->shdrs[i].sh_type == SHT_RELA) ++nrelscn;
+			}
+			if (nrelscn > 0)
+			{
+				meta->rel_spine_idxs = __private_malloc(nrelscn * sizeof meta->rel_spine_idxs[0]);
+				meta->rel_spine_scns = __private_malloc(nrelscn * sizeof meta->rel_spine_scns[0]);
+				meta->rel_spine_len = nrelscn;
+			}
+			unsigned nrelscn_seen = 0;
+			unsigned nrelent_seen = 0;
+			for (unsigned i = 0; i < meta->ehdr->e_shnum; ++i)
+			{
+#define GET_OR_MAP_SCN(__j) get_or_map_file_range(meta, meta->shdrs[(__j)].sh_size, fd, meta->shdrs[(__j)].sh_offset)
 				if (meta->shdrs[i].sh_type == SHT_DYNSYM)
 				{
 					meta->dynsymndx = i;
@@ -359,16 +388,26 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 				if (meta->shdrs[i].sh_type == SHT_SYMTAB)
 				{
 					meta->symtabndx = i;
-					meta->symtab = get_or_map_file_range(meta, meta->shdrs[i].sh_size, fd, meta->shdrs[i].sh_offset);
+					meta->symtab = GET_OR_MAP_SCN(i);
 					meta->strtabndx = meta->shdrs[i].sh_link;
-					meta->strtab = get_or_map_file_range(meta, meta->shdrs[meta->shdrs[i].sh_link].sh_size, fd,
-							meta->shdrs[meta->shdrs[i].sh_link].sh_offset);
+					meta->strtab = GET_OR_MAP_SCN(meta->shdrs[i].sh_link);
 				}
 				if (i == meta->ehdr->e_shstrndx)
 				{
-					meta->shstrtab = get_or_map_file_range(meta, meta->shdrs[i].sh_size, fd, meta->shdrs[i].sh_offset);
+					meta->shstrtab = GET_OR_MAP_SCN(i);
 				}
+				if (meta->shdrs[i].sh_type == SHT_REL
+						|| meta->shdrs[i].sh_type == SHT_RELA)
+				{
+					unsigned nrel = meta->shdrs[i].sh_size / meta->shdrs[i].sh_entsize;
+					meta->rel_spine_idxs[nrelscn_seen] = nrelent_seen;
+					meta->rel_spine_scns[nrelscn_seen] = GET_OR_MAP_SCN(i);
+					++nrelscn_seen;
+					nrelent_seen += nrel;
+				}
+#undef GET_OR_MAP_SCN
 			}
+
 			/* Now define sections for all the allocated sections in the shdrs
 			 * which overlap this phdr. */
 			for (ElfW(Shdr) *shdr = meta->shdrs; shdr != meta->shdrs + meta->ehdr->e_shnum; ++shdr)
@@ -399,48 +438,44 @@ static void free_file_metadata(void *fm)
 				meta->extra_mappings[i].size);
 		}
 	}
+	if (meta->rel_spine_idxs) __private_free(meta->rel_spine_idxs);
+	if (meta->rel_spine_scns) __private_free(meta->rel_spine_scns);
 	__private_free(meta);
+}
+
+static int discover_segments_cb(struct dl_phdr_info *info, size_t size, void *segments_as_void)
+{
+	struct segments *out = (struct segments *) segments_as_void;
+	out->phnum = info->dlpi_phnum;
+	out->phdrs = info->dlpi_phdr;
+	unsigned nload = 0;
+	for (int i = 0; i < info->dlpi_phnum; ++i)
+	{
+		if (info->dlpi_phdr[i].p_type == PT_LOAD) ++nload;
+	}
+	out->nload = nload;
+	return 1; // can stop now
 }
 
 static int add_all_loaded_segments_for_one_file_only_cb(struct dl_phdr_info *info, size_t size, void *file_metadata)
 {
-	static _Bool running;
-	/* HACK: if we have an activation already running, quit early. */
-	int retval = 0;
-	if (running) /* return 1; */ abort(); // i.e. debug this
-	running = 1;
-	
 	/* Produce the sorted symbols vector for this file. 
 	 * We do this here because dynsym is shared across the whole file. */
-
 	struct file_metadata *meta = (struct file_metadata *) file_metadata;
-	/* Is this the file we're doing right now? */
-	if (meta->l->l_addr == info->dlpi_addr)
+	unsigned nload = 0;
+	for (unsigned i = 0; i < info->dlpi_phnum; ++i)
 	{
-		// this is the file we care about, so iterate over its phdrs
-		// -- but first, copy its phdr pointer and phnum value
-		if (!meta->phdrs)
+		// if this phdr's a LOAD
+		if (info->dlpi_phdr[i].p_type == PT_LOAD)
 		{
-			meta->phdrs = (ElfW(Phdr) *) info->dlpi_phdr;
-			meta->phnum = info->dlpi_phnum;
+			__static_segment_allocator_notify_define_segment(
+					meta,
+					i,
+					nload++
+				);
 		}
-		for (int i = 0; i < info->dlpi_phnum; ++i)
-		{
-			// if this phdr's a LOAD
-			if (info->dlpi_phdr[i].p_type == PT_LOAD)
-			{
-				__static_segment_allocator_notify_define_segment(
-						meta,
-						i
-					);
-			}
-		}
-		retval = 1;
-		goto out;
 	}
-out:
-	running = 0;
-	return retval;
+	return 1;
 }
 
 void __static_allocator_notify_unload(const char *copied_filename)

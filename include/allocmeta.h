@@ -216,6 +216,13 @@ void __static_file_allocator_init(void);
 void __static_file_allocator_notify_load(void *handle, const void *load_site);
 void __static_file_allocator_notify_unload(const char *copied_filename);
 
+struct segment_metadata
+{
+	unsigned phdr_idx;
+	struct sym_or_reloc_rec *metavector; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
+	bitmap_word_t *starts_bitmap; // maybe!
+};
+
 /* We don't actually use these constants, at least not at present,
  * but they're here to enumerate the parts of the file we care
  * about that are not necessarily mapped already. We then use MAPPING_MAX
@@ -257,6 +264,16 @@ struct file_metadata
 	unsigned char *strtab; // NOTE this is strtab, not dynstr
 	ElfW(Half) strtabndx;
 
+	/* We want to be able to identify any relocation record in the binary
+	 * using a single "index space", even though there may be many reloc
+	 * sections (e.g. if linking -q). So we maintain a "spine" with one
+	 * unsigned per (non-empty) reloc section, holding the index in the
+	 * "global" numbering of the first reloc in that section. We also
+	 * keep pointers to those sections here, which we map as needed. */
+	unsigned *rel_spine_idxs;    // the indices
+	ElfW(Rela) **rel_spine_scns; // pointers to the mapped sections
+	unsigned rel_spine_len;      // how many elements
+
 	/* We record "starts". Starts are what appear in per-segment bitmaps
 	   as the start of an object.
 	   
@@ -269,9 +286,7 @@ struct file_metadata
 	   Logically the content is a pointer to its ELF metadata *and* its type.
 	   For spans that are in dynsym, it points to their dynsym entry.
 	*/
-	struct sym_or_reloc_rec *metavector; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
-#define UNIQTYPE_OF_SPAN(s) (struct uniqtype*)(((unsigned long) ((s).t))<<3)
-	unsigned long (*starts_bitmaps)[];
+	struct segment_metadata segments[];
 };
 #define FILE_META_DESCRIBES_EXECUTABLE(meta) \
 	((meta)->l->l_name && (meta)->l->l_name[0] == '\0') /* FIXME: better test? */
@@ -288,7 +303,8 @@ ElfW(Sym) *__static_file_allocator_get_symtab_by_idx(struct file_metadata *meta,
 void __static_segment_allocator_init(void);
 void __static_segment_allocator_notify_define_segment(
 	struct file_metadata *meta,
-	int i
+	unsigned phndx,
+	unsigned loadndx
 );
 void __static_section_allocator_init(void);
 void __static_section_allocator_notify_define_section(

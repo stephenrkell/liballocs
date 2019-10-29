@@ -37,48 +37,20 @@ void __static_segment_allocator_init(void)
  * headers at all. How common is this? How can we regularise
  * this? Rather than create dummy sections, we have only one
  * bitmap per segment. */
-struct segment_metadata
-{
-	const Elf64_Phdr *phdr; /* we assume the ld.so keeps these (or a copy) in memory */
-	unsigned long *bits;
-	unsigned long *bits_limit;
-	unsigned short *alloc_idx_scaled_vec;   /* one entry per NN bytes, recording
-	                                         * the sorted_vec idx of the last-starting
-	                                         * vec entry *prior* to that range in memory.
-	                                         * (why prior?)
-	                                         * The scaled vec is per-segment. BUT
-	                                         * the sorted vec itself is maintained per-file!
-	                                         * Why? surely per-segment is better?
-	                                         * NO; remember it's not a bitmap! We maintain
-	                                         * it from per-file structures (meta-objs,
-	                                         * symtabs, etc.) so it's better to do it filewise. */
-};
-
-static void free_segment_metadata(void *sm)
-{
-	struct segment_metadata *s = (struct segment_metadata *) sm;
-	__private_free(sm);
-}
 
 void __static_segment_allocator_notify_define_segment(
 	struct file_metadata *file,
-	int i
+	unsigned phndx,
+	unsigned loadndx
 )
 {
 	if (!initialized && !trying_to_initialize) __static_segment_allocator_init();
-	ElfW(Phdr) *phdr = &file->phdrs[i];
+	ElfW(Phdr) *phdr = &file->phdrs[phndx];
 	const void *segment_start_addr = (char*) file->l->l_addr + phdr->p_vaddr;
 	size_t segment_size = phdr->p_memsz;
 	struct big_allocation *containing_file = __lookup_bigalloc(
 		segment_start_addr, &__static_file_allocator, NULL);
 	if (!containing_file) abort();
-	struct segment_metadata *m = __private_malloc(sizeof (struct segment_metadata));
-	*m = (struct segment_metadata) {
-		.phdr = phdr,
-		.bits = &(*file->starts_bitmaps)[i],
-		.bits_limit = &(*file->starts_bitmaps)[i] + STARTS_BITMAP_NWORDS_FOR_PHDR(phdr),
-		.alloc_idx_scaled_vec = NULL /* FIXME: implement this */
-	};
 
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		(void*) segment_start_addr,
@@ -87,8 +59,8 @@ void __static_segment_allocator_notify_define_segment(
 			.what = DATA_PTR,
 			.un = {
 				opaque_data: { 
-					.data_ptr = (void*) m,
-					.free_func = &free_segment_metadata
+					.data_ptr = &file->segments[loadndx],
+					.free_func = NULL
 				}
 			}
 		},
@@ -119,6 +91,12 @@ void __static_segment_allocator_notify_define_segment(
 		__adjust_bigalloc_end(b, b->parent->end);
 		b->suballocator = &__generic_malloc_allocator;
 	}
+	/* Fill in the per-segment info that is stored in the file metadata. */
+	file->segments[loadndx] = (struct segment_metadata) {
+		.phdr_idx = phndx /*,
+		.metavector = ,
+		.starts_bitmap = */
+	};
 }
 void __static_segment_allocator_notify_brk(void *new_curbrk)
 {
