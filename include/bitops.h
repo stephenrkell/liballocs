@@ -3,9 +3,11 @@
 
 #ifdef __cplusplus
 #include <cstdint>
+#include <cstddef>
 extern "C" {
 #else
 #include <stdint.h>
+#include <stddef.h>
 #endif
 
 /* We want the various inline functions in here to behave like 
@@ -22,7 +24,8 @@ extern "C" {
 // FIXME: replace these with the fast versions!
 static inline int popcount64(uint64_t x) {
 	int c = 0;
-	for (int i = 0; i < 64; i++) {
+	int i;
+	for (i = 0; i < 64; i++) {
 		c += x & 1;
 		x >>= 1;
 	}
@@ -31,7 +34,8 @@ static inline int popcount64(uint64_t x) {
 
 static inline int popcount32(uint32_t x) {
 	int c = 0;
-	for (int i = 0; i < 32; i++) {
+	int i;
+	for (i = 0; i < 32; i++) {
 		c += x & 1;
 		x >>= 1;
 	}
