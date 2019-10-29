@@ -15,7 +15,8 @@
  * The two lookups allocsites_by_id and allocsites_by_object_base_address_entry
  * are "spines" for these per-DSO arrays, sorted by "start_id" and base address.
  * FIXME: get rid of the by_object_base_address one, and just use the bigalloc
- * looking (pageindex) to get to the per-file metadata. */
+ * look-up (pageindex) to get to the per-file metadata.
+ * FIXME: this should arguably be part of file_metadata in static-file.c. */
 
 /* The two arrays for indexing allocation sites */
 struct allocsites_by_id_entry allocsites_by_id[ALLOCSITES_INDEX_SIZE] __attribute__((visibility("hidden")));
