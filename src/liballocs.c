@@ -1063,7 +1063,7 @@ int __liballocs_global_init(void)
 	/* Initialize the generic malloc thingy first, because libdl will want to malloc 
 	 * when we call it. */
 	__generic_malloc_allocator_init();
-	int ret_hook = dl_iterate_phdr(load_and_init_all_metadata_for_one_object, NULL);
+	__static_file_allocator_init();
 	
 	/* Don't do this. They all have constructors, so it's not necessary.
 	 * Moreover, the mmap allocator's constructor 

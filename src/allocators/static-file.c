@@ -98,6 +98,35 @@ void __static_file_allocator_init(void)
 				__static_file_allocator_notify_load(l, program_entry_point);
 			}
 		}
+		/* For all loaded objects... */
+		if (__liballocs_debug_level >= 10)
+		{
+			for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
+			{
+				struct big_allocation *containing_file = __lookup_bigalloc(
+					/* l_addr isn't guaranteed to be mapped, so use l_ld'*/
+					(void*) l->l_ld, &__static_file_allocator, NULL);
+				assert(containing_file);
+				struct file_metadata *file = containing_file->meta.un.opaque_data.data_ptr;	
+				for (unsigned i_seg = 0; i_seg < file->nload; ++i_seg)
+				{
+					struct sym_or_reloc_rec *metavector = file->segments[i_seg].metavector;
+					size_t metavector_size = file->segments[i_seg].metavector_size;
+					// we print the whole metavector
+					for (unsigned i = 0; i < metavector_size / sizeof *metavector; ++i)
+					{
+						fprintf(stream_err, "At %016lx there is a static alloc of kind %u, idx %08u, type %s\n",
+							file->l->l_addr + vaddr_from_rec(&metavector[i], file),
+							(unsigned) metavector[i].kind,
+							(unsigned) metavector[i].idx,
+							UNIQTYPE_NAME((struct uniqtype *)(((uintptr_t) metavector[i].uniqtype_ptr_bits_no_lowbits)<<3))
+						);
+					}
+				}
+			}
+		}
+
+		
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -307,6 +336,7 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	meta->extrasym = (meta_handle ? dlsym(meta_handle, "extrasym") : NULL);
 	meta->phdrs = sinfo.phdrs;
 	meta->phnum = sinfo.phnum;
+	meta->nload = sinfo.nload;
 	/* We still haven't filled in everything... */
 	/* We want to create a single "big allocation" for the whole file. 
 	 * However, that's a problem ta least in the case of executables
@@ -354,8 +384,13 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	 * parts of the file. */
 	/* FIXME: we'd much rather not do open() on l->l_name (race condition) --
 	 * if we had the original fd that was exec'd, that would be great. */
-	int fd = raw_open(l->l_name, O_RDONLY);
-	if (fd != -1)
+	int fd = raw_open(meta->filename, O_RDONLY);
+	if (fd < 0)
+	{
+		// warn, at a debug level that depends on whether the path looks sane
+		debug_printf((meta->filename && meta->filename[0] == '/' ? 0 : 5), "could not re-open %s\n", l->l_name);
+	}
+	else // fd >= 0
 	{
 		meta->ehdr = get_or_map_file_range(meta, PAGE_SIZE, fd, 0);
 		if (!meta->ehdr) goto out;

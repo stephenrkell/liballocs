@@ -32,21 +32,19 @@ struct section_metadata
 };
 
 struct big_allocation *__static_section_allocator_ensure_big(
-			const void *addr_spanned_by_section,
+			struct file_metadata *file_meta,
 			const ElfW(Shdr) *shdr
 		)
 {
 	if (shdr->sh_size == 0) return NULL;
-	
+	void *section_start_addr = (void*)(file_meta->l->l_addr + shdr->sh_addr);
 	struct big_allocation *section_already = __lookup_bigalloc(
-		addr_spanned_by_section, &__static_section_allocator, NULL);
+		section_start_addr, &__static_section_allocator, NULL);
 	if (section_already) return section_already;
 	struct big_allocation *containing_segment = __lookup_bigalloc(
-		addr_spanned_by_section, &__static_segment_allocator, NULL);
+		section_start_addr, &__static_segment_allocator, NULL);
 	if (!containing_segment) abort();
 
-	void *section_start_addr = (char*) containing_segment->parent->begin
-			+ shdr->sh_addr;
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		section_start_addr,
 		shdr->sh_size,
@@ -79,8 +77,7 @@ void __static_section_allocator_notify_define_section(
 	 * bigallocs. */
 	if (shdr->sh_size > 0)
 	{
-		__static_section_allocator_ensure_big((char*) meta->l->l_addr + shdr->sh_addr,
-			shdr);
+		__static_section_allocator_ensure_big(meta, shdr);
 	}
 }
 

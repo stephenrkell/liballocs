@@ -50,7 +50,9 @@ void __static_symbol_allocator_init(void)
  */
 
 
-/* FIXME: invalidate cache entries on dlclose(). */
+/* FIXME: invalidate cache entries on dlclose().
+ * FIXME: get rid of this code. Integrate the dladdr cache into the usual memrange cache
+ * and/or the new static file/symbol alloc metadata. */
 #ifndef DLADDR_CACHE_SIZE
 #define DLADDR_CACHE_SIZE 16
 #endif
@@ -219,62 +221,24 @@ Dl_info dladdr_with_cache(const void *addr)
    We could just forget the bitmap and do a binary search of the
    metavector, since we can compute the address of each entry. Let's
    do that for now.
+   
+   ALSO note that instead of the reloc section spine and so on, we can
+   exploit the fact that since relocs never have type info, we have
+   ~62 bits spare in the metavector entry. Just encode the position (32 bits)
+   and size directly? Keeping reloc sections around seems like a waste
+   of space. (Perhaps we also want it for pointer maps etc.? Though no,
+   I think we will just postprocess that away too.)
+
+   So I'm thinking
+   - try without bitmaps for now
+   - bitmaps   can have common_align and min_align; if not equal,
+   there is a secondary bitmap where there is a 1 iff that slot is
+   not a straightforward case         (takes the space overhead down to 6.25%)
+   - for relocs, ditch the spine and just encode the address+size directly
+   (size can be in units of common alignment, I think)
 
  */
 
-
-static uintptr_t vaddr_from_rec(struct sym_or_reloc_rec *p,
-	struct file_metadata *file)
-{
-	ElfW(Sym) *symtab;
-	switch (p->kind)
-	{
-		case REC_DYNSYM:   symtab = file->dynsym; goto sym;
-		case REC_SYMTAB:   symtab = file->symtab; goto sym;
-		case REC_EXTRASYM: symtab = file->extrasym; goto sym;
-		sym:
-			return symtab[p->idx].st_value;
-		case REC_RELOC_DYN: symtab = file->dynsym; goto rel;
-		case REC_RELOC:     symtab = file->symtab; goto rel;
-		rel:
-			// the awkward case
-			/* (1) use precomputed spine to get the reloc section+idx,
-			   (2) decode the r_info to get the target section/symbol + addend,
-			   (3) get the symbol/section's address and do the add.
-			 */
-			{
-				// find the greatest spine element le this value
-				// the spine should have no repeated elements!
-				// FIXME: lift this out into a bsearch_le function.
-				unsigned target = p->idx;
-				unsigned *upper = file->rel_spine_idxs + file->rel_spine_len;
-				unsigned *lower = file->rel_spine_idxs;
-				if (upper - lower == 0) abort();
-				assert(lower[0] <= target);
-				while (upper - lower != 1)
-				{
-					unsigned *mid = lower + ((upper - lower) / 2);
-					if (*mid > target)
-					{
-						// we should look in the lower half
-						upper = mid;
-					}
-					else lower = mid;
-				}
-				assert(lower[0] <= target);
-				// if we didn't find the max item, assert the next one is greater
-				assert(lower == file->rel_spine_idxs + file->rel_spine_len - 1
-					 || lower[1] > target);
-				// the reloc is in the given section, at the residual index
-				unsigned residual_idx = p->idx - lower[0];
-				ElfW(Rela) *the_reloc = file->rel_spine_scns[lower[0]] + residual_idx;
-				unsigned symind = ELF64_R_SYM(the_reloc->r_info);
-				uintptr_t addend = the_reloc->r_addend;
-				return symtab[symind].st_value + addend;
-			}
-		default: abort();
-	}
-}
 
 // nasty hack
 _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,

@@ -30,7 +30,6 @@ void __static_segment_allocator_init(void)
 		trying_to_initialize = 0;
 	}
 }
-
 /* In the most natural/direct model, children of the segment
  * may be sections or symbols, i.e. some symbols are not in
  * any section, and some ELF files do not have any section
@@ -92,9 +91,33 @@ void __static_segment_allocator_notify_define_segment(
 		b->suballocator = &__generic_malloc_allocator;
 	}
 	/* Fill in the per-segment info that is stored in the file metadata. */
+	struct sym_or_reloc_rec *metavector = NULL;
+	size_t metavector_size = 0;
+	if (file->meta_obj_handle)
+	{
+#define METAVEC_SYM_PREFIX "metavec_0x"
+		char buf[sizeof METAVEC_SYM_PREFIX+8]; // 8 bytes + NUL
+		snprintf(buf, sizeof buf, METAVEC_SYM_PREFIX "%x", (unsigned) phdr->p_vaddr);
+#undef METAVEC_SYM_PREFIX
+		void *found = fake_dlsym(file->meta_obj_handle, buf);
+		if (found && found != (void*) -1)
+		{
+			metavector = found;
+			// what about the size?
+			ElfW(Sym) *found_sym = gnu_hash_lookup(
+				get_gnu_hash(file->meta_obj_handle),
+				get_dynsym(file->meta_obj_handle),
+				get_dynstr(file->meta_obj_handle),
+				buf);
+			assert(found_sym);
+			metavector_size = found_sym->st_size;
+		}
+	}
 	file->segments[loadndx] = (struct segment_metadata) {
-		.phdr_idx = phndx /*,
-		.metavector = ,
+		.phdr_idx = phndx,
+		.metavector = metavector,
+		.metavector_size = metavector_size
+				/*,
 		.starts_bitmap = */
 	};
 }

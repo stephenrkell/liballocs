@@ -17,6 +17,7 @@ extern "C" {
 #endif
 
 #include "allocmeta-defs.h"
+#include "bitmap.h"
 
 struct liballocs_err;
 typedef struct liballocs_err *liballocs_err_t;
@@ -220,15 +221,12 @@ struct segment_metadata
 {
 	unsigned phdr_idx;
 	struct sym_or_reloc_rec *metavector; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
+	size_t metavector_size;
 	bitmap_word_t *starts_bitmap; // maybe!
 };
 
-/* We don't actually use these constants, at least not at present,
- * but they're here to enumerate the parts of the file we care
- * about that are not necessarily mapped already. We then use MAPPING_MAX
- * to size an array in file_metadata. */
-enum mapped_extra { MAPPING_EHDR, MAPPING_SHDRS, MAPPING_SHSTRTAB, MAPPING_SYMTAB,
-	MAPPING_STRTAB, MAPPING_MAX };
+/* Hmm -- with -Wl,-q we might get lots of reloc section mappings. Is this enough? */
+#define MAPPING_MAX 16
 
 struct file_metadata
 {
@@ -241,6 +239,7 @@ struct file_metadata
 
 	ElfW(Phdr) *phdrs; /* always mapped or copied by ld.so */
 	ElfW(Half) phnum;
+	unsigned nload; /* number of segments that are LOADs */
 
 	ElfW(Sym) *dynsym; /* always mapped by ld.so */
 	unsigned char *dynstr; /* always mapped by ld.so */
@@ -337,6 +336,60 @@ _Bool __auxv_get_env(const char ***out_start, const char ***out_terminator, stru
 _Bool __auxv_get_auxv(const Elf64_auxv_t **out_start, Elf64_auxv_t **out_terminator, struct uniqtype **out_uniqtype);
 void *__auxv_get_program_entry_point(void);
 
+static inline uintptr_t vaddr_from_rec(struct sym_or_reloc_rec *p,
+	struct file_metadata *file)
+{
+	ElfW(Sym) *symtab;
+	switch (p->kind)
+	{
+		case REC_DYNSYM:   symtab = file->dynsym; goto sym;
+		case REC_SYMTAB:   symtab = file->symtab; goto sym;
+		case REC_EXTRASYM: symtab = file->extrasym; goto sym;
+		sym:
+			return symtab[p->idx].st_value;
+		case REC_RELOC_DYN: symtab = file->dynsym; goto rel;
+		case REC_RELOC:     symtab = file->symtab; goto rel;
+		rel:
+			// the awkward case
+			/* (1) use precomputed spine to get the reloc section+idx,
+			   (2) decode the r_info to get the target section/symbol + addend,
+			   (3) get the symbol/section's address and do the add.
+			 */
+			{
+				// find the greatest spine element le this value
+				// the spine should have no repeated elements!
+				// FIXME: lift this out into a bsearch_le function.
+				unsigned target = p->idx;
+				unsigned *upper = file->rel_spine_idxs + file->rel_spine_len;
+				unsigned *lower = file->rel_spine_idxs;
+				if (upper - lower == 0) abort();
+				assert(lower[0] <= target);
+				while (upper - lower != 1)
+				{
+					unsigned *mid = lower + ((upper - lower) / 2);
+					if (*mid > target)
+					{
+						// we should look in the lower half
+						upper = mid;
+					}
+					else lower = mid;
+				}
+				assert(lower[0] <= target);
+				// if we didn't find the max item, assert the next one is greater
+				assert(lower == file->rel_spine_idxs + file->rel_spine_len - 1
+					 || lower[1] > target);
+				// the reloc is in the given section, at the residual index
+				unsigned residual_idx = p->idx - lower[0];
+				unsigned scn_idx = lower - file->rel_spine_idxs;
+				assert(scn_idx < file->rel_spine_len);
+				ElfW(Rela) *the_reloc = file->rel_spine_scns[scn_idx] + residual_idx;
+				unsigned symind = ELF64_R_SYM(the_reloc->r_info);
+				ElfW(Sword) addend = the_reloc->r_addend;
+				return symtab[symind].st_value + addend;
+			}
+		default: abort();
+	}
+}
 
 /* liballocs assumes some fixed structure in the first couple of levels of the hierarchy.
  * 
