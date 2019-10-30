@@ -684,6 +684,7 @@ sticky_root_die::static_descr_set::get_summary(
 				maybe_sym_name = string(i_descr->get_sym().second);
 				maybe_sym_idx = opt<unsigned>(i_descr->get_sym().first.first);
 			}
+			break;
 		}
 		else if (i_descr->k == sticky_root_die::static_descr::SYMTAB
 			&& symtab_is_external)
@@ -697,6 +698,7 @@ sticky_root_die::static_descr_set::get_summary(
 				maybe_sym_name = opt_name;
 				maybe_sym_idx = opt<unsigned>(i_descr->get_sym().first.first);
 			}
+			break;
 		}
 	}
 	if (seen_non_external_sym != end())
