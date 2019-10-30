@@ -65,16 +65,15 @@ using namespace allocs::tool;
 
 struct sym_or_reloc_rec_to_generate
 {
-	Dwarf_Addr vaddr;
 	sym_or_reloc_kind k;
 	sticky_root_die::static_descr::kind priority_k;
 	unsigned idx_in_per_kind_table;
 	opt<uniqued_name> maybe_uniqtype;
 };
-std::vector< sym_or_reloc_rec_to_generate > generate_recs(sticky_root_die& root);
+std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate > generate_recs(sticky_root_die& root);
 void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 	ElfW(Ehdr) *ehdr, sticky_root_die& root,
-	const std::vector< sym_or_reloc_rec_to_generate >& recs);
+	const std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate >& recs);
 
 int main(int argc, char **argv)
 {
@@ -157,7 +156,7 @@ int main(int argc, char **argv)
 	 * We do this for the whole DSO, then generate per-segment vectors/bitmaps.
 	 */
 	// this is our generation-time equivalent of sym_or_reloc_rec
-	std::vector< sym_or_reloc_rec_to_generate > recs = generate_recs(root);
+	std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate > recs = generate_recs(root);
 
 	std::cout << "#include \"allocmeta-defs.h\"" << std::endl;
 	std::cout << "#include \"bitmap.h\"" << std::endl;
@@ -234,7 +233,7 @@ void
 add_sane_reloc_intervals(
 	const boost::icl::interval_map< Dwarf_Addr, sticky_root_die::static_descr_set > statics,
 	const set<pair<reloc_rec_coord, pair<Dwarf_Addr, Dwarf_Addr>>>& reloc_target_addr_end_pairs,
-	std::vector< sym_or_reloc_rec_to_generate >& recs)
+	std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate >& recs)
 {
 	unsigned idx = 0;
 	for (auto i_tuple = reloc_target_addr_end_pairs.begin();
@@ -281,21 +280,21 @@ add_sane_reloc_intervals(
 				lowest_len = section_end - target_addr;
 			}
 			struct sym_or_reloc_rec_to_generate rec = {
-				/* vaddr */ i_tuple->second.first /* the addr/end pair is the itself second thing in a pair */,
 				/* kind */ REC_RELOC,
 				/* static_descr kind */ sticky_root_die::static_descr::REL,
 				/* idx_in_per_kind_table */ i_tuple->first /* the index in the linearised collection of reloc-record-containing sections */,
 				/* maybe_uniqtype */ opt<uniqued_name>()
 			};
-			recs.push_back(rec);
+			recs.insert(make_pair(i_tuple->second.first, /* the addr/end pair is the itself second thing in a pair */
+				rec));
 		}
 	}
 }
 
-std::vector< sym_or_reloc_rec_to_generate >
+std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate >
 generate_recs(sticky_root_die& root)
 {
-	std::vector< sym_or_reloc_rec_to_generate > recs;
+	std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate > recs;
 	auto statics = root.get_sanely_described_statics();
 	unsigned extrasym_idx = 1;
 	for (auto i_static = statics.begin(); i_static != statics.end(); ++i_static)
@@ -306,7 +305,6 @@ generate_recs(sticky_root_die& root)
 		{
 			++extrasym_idx; // HACK: we hope this stays in sync with the actual extrasyms table
 			sym_or_reloc_rec_to_generate rec = {
-				/* vaddr */ i_static->first.lower(),
 				/* kind */ REC_EXTRASYM,
 				/* priority kind */ summary.descr_priority_k,
 				/* idx_in_per_kind_table */ extrasym_idx,
@@ -314,7 +312,7 @@ generate_recs(sticky_root_die& root)
 					opt<uniqued_name>(canonical_key_for_type(summary.t))
 					: opt<uniqued_name>()
 			};
-			recs.push_back(rec);
+			recs.insert(make_pair(/* vaddr */ i_static->first.lower(), rec));
 		}
 	}
 	/* Now add the other symbol-y ones. */
@@ -325,7 +323,6 @@ generate_recs(sticky_root_die& root)
 		if (summary.k != REC_EXTRASYM)
 		{
 			struct sym_or_reloc_rec_to_generate rec = {
-				/* vaddr */ i_static->first.lower(),
 				/* kind */ summary.k,
 				/* priority kind */ summary.descr_priority_k,
 				/* idx_in_per_kind_table */ *summary.maybe_idx,
@@ -333,7 +330,7 @@ generate_recs(sticky_root_die& root)
 					opt<uniqued_name>(canonical_key_for_type(i_static->second.get_type()))
 					: opt<uniqued_name>()
 			};
-			recs.push_back(rec);
+			recs.insert(make_pair(/* vaddr */ i_static->first.lower(), rec));
 		}
 	}
 	/* Now add the relocs. With these, we don't have size information.
@@ -379,7 +376,7 @@ generate_recs(sticky_root_die& root)
 
 void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 	ElfW(Ehdr) *ehdr, sticky_root_die& root,
-	const std::vector< sym_or_reloc_rec_to_generate >& recs
+	const std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate >& recs
 )
 {
 	// what are the segment limits?
@@ -390,21 +387,27 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 	// cout << "unsigned long metavec_0x" << std::hex << base_addr << std::dec << "[] = {" << std::endl;
 	cout << "__asm__(\".pushsection .rodata \\n\\" << std::endl;
 	cout << ".globl metavec_0x" << std::hex << base_addr << std::dec << " \\n\\" << std::endl;
+	cout << "metavec_0x" << std::hex << base_addr << std::dec << ":\\n\\" << std::endl;
+	unsigned nrec = 0;
 	for (auto i_rec = recs.begin(); i_rec != recs.end(); ++i_rec)
 	{
 		// FIXME: don't iterate n times for n segments; be smarter
-		if (i_rec->vaddr >= base_addr && i_rec->vaddr < limit_addr)
+		if (i_rec->first >= base_addr && i_rec->first < limit_addr)
 		{
-			cout << ".8byte \"STR(SYM_OR_RELOC_REC_WORD(" << (int) i_rec->k << ", "
-				<< i_rec->idx_in_per_kind_table << ", "
-				<< ((i_rec->maybe_uniqtype) ? mangle_typename(*i_rec->maybe_uniqtype) : "0")
-				<< "))\" ; // alloc at 0x" << std::hex << i_rec->vaddr << std::dec
-				<< " of kind " << i_rec->k
-				<< " (based on priority kind " << i_rec->priority_k << ")\\n \\" << std::endl;
+			++nrec;
+			cout << ".8byte \"STR(SYM_OR_RELOC_REC_WORD(" << (int) i_rec->second.k << ", "
+				<< i_rec->second.idx_in_per_kind_table << ", "
+				<< ((i_rec->second.maybe_uniqtype) ? mangle_typename(*i_rec->second.maybe_uniqtype) : "0")
+				<< "))\" ; // alloc at 0x" << std::hex << i_rec->first << std::dec
+				<< " of kind " << i_rec->second.k
+				<< " (based on priority kind " << i_rec->second.priority_k << ")\\n \\" << std::endl;
 		};
 	}
 	// std::cout << "};" << std::endl;
 	std::cout << "\");" << std::endl;
+	// also output the metavector size
+	std::cout << "__asm__(\".size " << "metavec_0x" << std::hex << base_addr << std::dec
+		<< ", " << (nrec * sizeof (struct sym_or_reloc_rec)) << "\");" << std::endl;
 
 	/* Also output the bitmap. The bitmap's start address is the segment
 	 * start address, rounded down to a 64-byte boundary. */
@@ -419,9 +422,9 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 	for (auto i_rec = recs.begin(); i_rec != recs.end(); ++i_rec)
 	{
 		// FIXME: don't iterate n times for n segments; be smarter
-		if (i_rec->vaddr >= base_addr && i_rec->vaddr < limit_addr)
+		if (i_rec->first >= base_addr && i_rec->first < limit_addr)
 		{
-			uintptr_t bit_idx = i_rec->vaddr - bitmap_base_addr;
+			uintptr_t bit_idx = i_rec->first - bitmap_base_addr;
 			assert(bit_idx < (bitmap_limit_addr - bitmap_base_addr));
 			bitmap_set_b(bitmap, bit_idx);
 			++nbits_set;
