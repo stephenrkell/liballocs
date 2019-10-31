@@ -103,9 +103,11 @@ void __static_file_allocator_init(void)
 		{
 			for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
 			{
-				struct big_allocation *containing_file = __lookup_bigalloc(
-					/* l_addr isn't guaranteed to be mapped, so use l_ld'*/
-					(void*) l->l_ld, &__static_file_allocator, NULL);
+				/* l_addr isn't guaranteed to be mapped, so use _DYNAMIC a.k.a. l_ld'*/
+				void *query_addr = l->l_ld;
+				struct big_allocation *containing_mapping =__lookup_bigalloc_top_level(query_addr);
+				struct big_allocation *containing_file = __lookup_bigalloc_under(
+					query_addr, &__static_file_allocator, containing_mapping, NULL);
 				assert(containing_file);
 				struct file_metadata *file = containing_file->meta.un.opaque_data.data_ptr;	
 				for (unsigned i_seg = 0; i_seg < file->nload; ++i_seg)

@@ -553,7 +553,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 	while (cur < (char*) addr + length)
 	{
 		/* We're always working at level 0 */
-		struct big_allocation *b = __lookup_bigalloc(cur, &__mmap_allocator, NULL);
+		struct big_allocation *b = __lookup_bigalloc_from_root(cur, &__mmap_allocator, NULL);
 		if (!b)
 		{
 			/* Okay, no mapping present. Zoom to the next bigalloc. */
@@ -661,7 +661,7 @@ void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size
 	 * stack is a weird enough thing to do that it's not urgent to support it. */
 	// FIXME
 	remembered_old_addr = old_addr;
-	struct big_allocation *bigalloc_before = __lookup_bigalloc(old_addr,
+	struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root(old_addr,
 		&__mmap_allocator, NULL);
 	if (!bigalloc_before) abort();
 	struct mapping_sequence *seq = bigalloc_before->meta.un.opaque_data.data_ptr;
@@ -725,13 +725,13 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		 * not when asking for a free addr. */
 		
 		/* Do we abut any existing mapping? Just do the 'before' case. */
-		struct big_allocation *bigalloc_before = __lookup_bigalloc((char*) mapped_addr - 1, 
+		struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root((char*) mapped_addr - 1,
 			&__mmap_allocator, NULL);
 		if (!bigalloc_before)
 		{
-			struct big_allocation *overlap_begin = __lookup_bigalloc((char*) mapped_addr,
+			struct big_allocation *overlap_begin = __lookup_bigalloc_from_root((char*) mapped_addr,
 				&__mmap_allocator, NULL);
-			struct big_allocation *overlap_end = __lookup_bigalloc((char*) mapped_addr + mapped_length - 1, 
+			struct big_allocation *overlap_end = __lookup_bigalloc_from_root((char*) mapped_addr + mapped_length - 1,
 				&__mmap_allocator, NULL);
 			if (overlap_begin && (!overlap_end || overlap_begin == overlap_end))
 			{

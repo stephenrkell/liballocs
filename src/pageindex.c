@@ -739,9 +739,19 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 	return new_bigalloc;
 }
 
-static struct big_allocation *find_bigalloc_recursive(struct big_allocation *start, 
+static struct big_allocation *find_bigalloc_recursive(struct big_allocation *start,
 	const void *addr, struct allocator *a)
 {
+	/* If we don't have a start, start at top level. But
+	 * we can't find anywhere in the chain of bigallocs spanning
+	 * this address except via the pageindex. */
+	if (!start)
+	{
+		start = &big_allocations[pageindex[PAGENUM(addr)]];
+		if (start == &big_allocations[0]) return NULL;
+		while (start->parent) start = start->parent;
+	}
+
 	/* Is it this one? */
 	if (start->allocated_by == a) return start;
 	
@@ -761,15 +771,19 @@ static struct big_allocation *find_bigalloc_recursive(struct big_allocation *sta
 	/* We didn't find an overlapping child, so we fail. */
 	return NULL;
 }
-static struct big_allocation *find_bigalloc_nofail(const void *addr, struct allocator *a);
-static struct big_allocation *find_bigalloc(const void *addr, struct allocator *a)
+static struct big_allocation *find_bigalloc_under_pageindex_nofail(const void *addr, struct allocator *a);
+static struct big_allocation *find_bigalloc_under_pageindex(const void *addr, struct allocator *a)
 {
 	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
 	if (start_idx == 0) return NULL;
 	return find_bigalloc_recursive(&big_allocations[start_idx], addr, a);
 }
-
-static struct big_allocation *find_bigalloc_nofail(const void *addr, struct allocator *a)
+static struct big_allocation *find_bigalloc_from_root(const void *addr, struct allocator *a);
+static struct big_allocation *find_bigalloc_from_root(const void *addr, struct allocator *a)
+{
+	return find_bigalloc_recursive(NULL, addr, a);
+}
+static struct big_allocation *find_bigalloc_under_pageindex_nofail(const void *addr, struct allocator *a)
 {
 	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
 	/* We should always have something at level0 spanning the whole page. */
@@ -817,7 +831,7 @@ _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
 	int lock_ret;
 	BIG_LOCK
 	
-	struct big_allocation *b = find_bigalloc(begin, a);
+	struct big_allocation *b = find_bigalloc_under_pageindex(begin, a);
 	if (!b) { BIG_UNLOCK; return 0; }
 	
 	bigalloc_del(b);
@@ -875,24 +889,41 @@ _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, cons
 	return 1;
 }
 
-struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
-struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start)
+struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start)
 {
 	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
 	assert(a);
-	struct big_allocation *b = find_bigalloc(mem, a);
-	if (b)
-	{
-		BIG_UNLOCK
-		return b;
-	}
-	else
-	{
-		BIG_UNLOCK
-		return NULL;
-	}
+	struct big_allocation *b = find_bigalloc_under_pageindex(mem, a);
+	BIG_UNLOCK;
+	return b;
+}
+
+struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start)
+{
+	if (!pageindex) init();
+	int lock_ret;
+	BIG_LOCK
+	assert(a);
+	struct big_allocation *b = find_bigalloc_recursive(start, mem, a);
+	BIG_UNLOCK;
+	return b;
+}
+
+
+struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start)
+{
+	if (!pageindex) init();
+	int lock_ret;
+	BIG_LOCK
+	assert(a);
+	struct big_allocation *b = find_bigalloc_from_root(mem, a);
+	BIG_UNLOCK;
+	return b;
 }
 
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
@@ -902,7 +933,7 @@ struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *
 	int lock_ret;
 	BIG_LOCK
 	
-	struct big_allocation *b = find_bigalloc(mem, a);
+	struct big_allocation *b = find_bigalloc_under_pageindex(mem, a);
 	if (b && b->meta.what == INS_AND_BITS)
 	{
 		if (out_object_start) *out_object_start = b->begin;
@@ -922,7 +953,12 @@ struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 	if (!pageindex) init();
 	int lock_ret;
 	BIG_LOCK
-	struct big_allocation *b = find_deepest_bigalloc(mem);
+	bigalloc_num_t n = pageindex[PAGENUM(mem)];
+	struct big_allocation *b = NULL;
+	if (n != 0)
+	{
+		b = &big_allocations[n];
+	}
 	BIG_UNLOCK
 	while (b && b->parent) b = b->parent;
 	return b;

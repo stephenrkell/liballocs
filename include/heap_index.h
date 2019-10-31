@@ -47,9 +47,8 @@ int safe_to_call_malloc __attribute__((weak));
 
 struct allocator;
 extern struct allocator __generic_malloc_allocator;
-struct big_allocation;
-struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
-struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+
+#include "pageindex.h"
 
 struct insert *lookup_object_info(const void *mem, 
 		void **out_object_start, size_t *out_object_size, 

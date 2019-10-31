@@ -47,7 +47,7 @@ void __static_segment_allocator_notify_define_segment(
 	ElfW(Phdr) *phdr = &file->phdrs[phndx];
 	const void *segment_start_addr = (char*) file->l->l_addr + phdr->p_vaddr;
 	size_t segment_size = phdr->p_memsz;
-	struct big_allocation *containing_file = __lookup_bigalloc(
+	struct big_allocation *containing_file = __lookup_bigalloc_from_root(
 		segment_start_addr, &__static_file_allocator, NULL);
 	if (!containing_file) abort();
 

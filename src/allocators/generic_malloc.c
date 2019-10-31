@@ -451,7 +451,7 @@ static struct big_allocation *become_big(void *allocptr, size_t bigalloc_size,
 static struct big_allocation *ensure_big(void *addr)
 {
 	void *start;
-	struct big_allocation *maybe_already = __lookup_bigalloc(addr, 
+	struct big_allocation *maybe_already = __lookup_bigalloc_from_root(addr,
 		&__generic_malloc_allocator, &start);
 	if (maybe_already) return maybe_already;
 	
@@ -698,7 +698,7 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	 * kept its metadata locally, though. */
 	struct entry *index_entry = INDEX_LOC_FOR_ADDR(userptr);
 	/* Are we a bigalloc? */
-	struct big_allocation *b = __lookup_bigalloc(userptr, 
+	struct big_allocation *b = __lookup_bigalloc_from_root(userptr,
 			&__generic_malloc_allocator, NULL);
 	if (b)
 	{
@@ -876,7 +876,7 @@ void post_nonnull_nonzero_realloc(void *userptr,
 	size_t requested_size = __current_allocsz ? __current_allocsz :
 		modified_size - sizeof(struct extended_insert);
 	/* Are we a bigalloc? */
-	struct big_allocation *b = __lookup_bigalloc(userptr, 
+	struct big_allocation *b = __lookup_bigalloc_from_root(userptr,
 			&__generic_malloc_allocator, NULL);
 	if (new_allocptr && new_allocptr != userptr)
 	{
@@ -941,7 +941,7 @@ static inline unsigned char *rfind_nonzero_byte(unsigned char *one_beyond_start,
 		if (v != 0ul)
 		{
 			// HIT -- but what is the highest nonzero byte?
-			int nlzb = nlzb1(v); // in range 0..7
+			int nlzb = nlzb64(v); // in range 0..7
 			return p + SIZE - 1 - nlzb;
 		}
 	}
@@ -1108,7 +1108,7 @@ struct insert *object_insert(const void *obj, struct insert *ins)
 struct insert *__liballocs_get_insert(struct big_allocation *maybe_the_allocation, const void *mem)
 {
 	struct big_allocation *b = maybe_the_allocation ? maybe_the_allocation :
-		__lookup_bigalloc(mem,	&__generic_malloc_allocator, NULL);
+		__lookup_bigalloc_under_pageindex(mem, &__generic_malloc_allocator, NULL);
 	if (b)
 	{
 		assert(b->meta.what == INS_AND_BITS);

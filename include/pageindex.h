@@ -130,12 +130,18 @@ _Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const 
 _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin);
 struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_allocation *b, const void *split_addr);
-struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr, const void *end);
 _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, const void *end) __attribute__((visibility("hidden")));
-struct big_allocation *__lookup_bigalloc(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
-struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+
+struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr, const void *end);
+struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
+
+// FIXME: this should go away
+struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+
 struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attribute__((visibility("protected")));
 struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));
 _Bool __pages_unused(void *begin, void *end) __attribute__((visibility("hidden")));

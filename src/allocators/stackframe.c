@@ -127,7 +127,7 @@ struct big_allocation *__stackframe_allocator_find_or_create_bigalloc(
 {
 	/* Do we have a big allocation spanning the frame counter address? */
 	void *existing_frame_start;
-	struct big_allocation *found = __lookup_bigalloc(frame_counter, 
+	struct big_allocation *found = __lookup_bigalloc_from_root(frame_counter,
 		&__stackframe_allocator, &existing_frame_start);
 	if (found) return found;
 

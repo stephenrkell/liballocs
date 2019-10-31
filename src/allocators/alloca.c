@@ -23,7 +23,7 @@ struct allocator __alloca_allocator = {
 
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {
-	struct big_allocation *b = __lookup_bigalloc(bytes_counter, &__stackframe_allocator, NULL);
+	struct big_allocation *b = __lookup_bigalloc_under_pageindex(bytes_counter, &__stackframe_allocator, NULL);
 	if (*bytes_counter == 0) goto out;
 	if (!b) abort();
 	

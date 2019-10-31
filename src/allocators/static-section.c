@@ -38,10 +38,10 @@ struct big_allocation *__static_section_allocator_ensure_big(
 {
 	if (shdr->sh_size == 0) return NULL;
 	void *section_start_addr = (void*)(file_meta->l->l_addr + shdr->sh_addr);
-	struct big_allocation *section_already = __lookup_bigalloc(
+	struct big_allocation *section_already = __lookup_bigalloc_from_root(
 		section_start_addr, &__static_section_allocator, NULL);
 	if (section_already) return section_already;
-	struct big_allocation *containing_segment = __lookup_bigalloc(
+	struct big_allocation *containing_segment = __lookup_bigalloc_from_root(
 		section_start_addr, &__static_segment_allocator, NULL);
 	if (!containing_segment) abort();
 
