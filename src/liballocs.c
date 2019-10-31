@@ -860,11 +860,13 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	// FIXME BUG: dlerror can SEGFAULT if called here (why?), also appears below
 	//dlerror();
 	// load with NOLOAD first, so that duplicate loads are harmless
-	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+	/* Towards meta-completeness: use the real dlopen, so that meta-objs
+	 * are also loaded. We will fail to load their meta-obj. */
+	meta_handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
 	if (meta_handle) return 0;
 	errno = 0;
 	//dlerror();
-	meta_handle = (orig_dlopen ? orig_dlopen : dlopen)(libfile_name, RTLD_NOW | RTLD_GLOBAL);
+	meta_handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	errno = 0;
 	if (!meta_handle)
 	{
