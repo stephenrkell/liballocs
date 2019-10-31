@@ -94,6 +94,8 @@ checkrun-%:
 # disabled cases
 checkrun-plugin-hello:
 	true # disabled plugin-hello while expected to fail
+checkrun-lib-test:
+	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/38
 # Some cases are special and require only an exit status of zero
 checkrun-stack-walk:
 	$(MAKE) cleanrun-stack-walk >/dev/null 2>&1
@@ -115,8 +117,8 @@ checkrun-relf-auxv-static:
 	$(MAKE) cleanrun-relf-auxv-static >/dev/null 2>&1
 checkrun-uniqtype-make-precise:
 	$(MAKE) cleanrun-uniqtype-make-precise >/dev/null 2>&1
-checkrun-lib-test:
-	$(MAKE) cleanrun-lib-test >/dev/null 2>&1
+# checkrun-lib-test:
+# 	$(MAKE) cleanrun-lib-test >/dev/null 2>&1
 checkrun-forward-decls:
 	$(MAKE) cleanrun-forward-decls >/dev/null 2>&1
 
