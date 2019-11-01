@@ -336,6 +336,36 @@ _Bool __auxv_get_env(const char ***out_start, const char ***out_terminator, stru
 _Bool __auxv_get_auxv(const Elf64_auxv_t **out_start, Elf64_auxv_t **out_terminator, struct uniqtype **out_uniqtype);
 void *__auxv_get_program_entry_point(void);
 
+#ifdef _GNU_SOURCE
+/* Macro which open-codes a binary search over a sorted array
+ * of T, returning a pointer to the highest element that
+ * is greater than or equal to the target. To get an integer
+ * value out of a T t, we use proj(t). */
+#define /* T* */  bsearch_leq_generic(T, target_proj_val, /*  T*  */ base, /* unsigned */ n, proj) \
+	({ \
+		T *upper = base + n; \
+		T *lower = base; \
+		if (upper - lower == 0) abort(); \
+		assert(proj(lower) <= target_proj_val); \
+		/* FIXME: what if all elements are > the target? */ \
+		while (upper - lower != 1) \
+		{ \
+			T *mid = lower + ((upper - lower) / 2); \
+			if (proj(mid) > target_proj_val) \
+			{ \
+				/* we should look in the lower half */ \
+				upper = mid; \
+			} \
+			else lower = mid; \
+		} \
+		assert(proj(lower) <= target_proj_val); \
+		/* if we didn't hit the max item, assert the next one is greater */ \
+		assert(lower == base + n - 1 \
+			 || proj(lower+1) > target_proj_val); \
+		lower; \
+	})
+#endif
+
 static inline uintptr_t vaddr_from_rec(struct sym_or_reloc_rec *p,
 	struct file_metadata *file)
 {
@@ -356,6 +386,7 @@ static inline uintptr_t vaddr_from_rec(struct sym_or_reloc_rec *p,
 			   (3) get the symbol/section's address and do the add.
 			 */
 			{
+#if 1
 				// find the greatest spine element le this value
 				// the spine should have no repeated elements!
 				// FIXME: lift this out into a bsearch_le function.
@@ -379,7 +410,14 @@ static inline uintptr_t vaddr_from_rec(struct sym_or_reloc_rec *p,
 				assert(lower == file->rel_spine_idxs + file->rel_spine_len - 1
 					 || lower[1] > target);
 				// the reloc is in the given section, at the residual index
-				unsigned residual_idx = p->idx - lower[0];
+				unsigned *found = lower;
+#else /* FIXME: introduce this code and test against the vanilla non-generic version! */
+#define proj(tptr) *(tptr)
+				unsigned *found = bsearch_leq_generic(unsigned, p->idx,
+					/*  T*  */ file->rel_spine_idxs, /* unsigned */ file->rel_spine_len, proj);
+#undef proj
+#endif
+				unsigned residual_idx = p->idx - *found;
 				unsigned scn_idx = lower - file->rel_spine_idxs;
 				assert(scn_idx < file->rel_spine_len);
 				ElfW(Rela) *the_reloc = file->rel_spine_scns[scn_idx] + residual_idx;

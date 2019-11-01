@@ -321,29 +321,62 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 	// FIXME: not supposed to use pageindex directly
 	// FIXME: in the section case, shortcut vector needs an offset
 	maybe_bigalloc = maybe_bigalloc ? maybe_bigalloc : &big_allocations[PAGENUM(obj)];
-	struct big_allocation *b = (maybe_bigalloc->allocated_by == &__static_symbol_allocator) ?
+	struct big_allocation *b =
+		(maybe_bigalloc->allocated_by == &__static_symbol_allocator) ?
 		maybe_bigalloc : maybe_bigalloc->parent;
 	assert(b->allocated_by == &__static_section_allocator
 			|| b->allocated_by == &__static_segment_allocator);
+	struct big_allocation *segment_bigalloc
+	 = (b->allocated_by == &__static_section_allocator) ? b->parent
+			: b;
+	struct segment_metadata *segment = segment_bigalloc->meta.un.opaque_data.data_ptr;
 
 	uintptr_t obj_addr = (uintptr_t) obj;
-	uintptr_t bitmap_base = (uintptr_t) b->begin - /* DELTA */ 0;
-	
-	uintptr_t obj_offset_from_bitmap_base = obj_addr - bitmap_base;
-	void *object_start = /* */ NULL;
-	struct uniqtype *alloc_uniqtype = /* */ NULL;
-	if (out_type) *out_type = alloc_uniqtype;
-	if (!alloc_uniqtype)
+	struct file_metadata *file = segment_bigalloc->parent->meta.un.opaque_data.data_ptr;
+	uintptr_t file_load_addr = file->l->l_addr;
+	/* Do a binary search in the metavector,
+	 * for the highest-placed symbol starting <=
+	 * our target vaddr. */
+	uintptr_t target_vaddr = obj_addr - file_load_addr;
+	unsigned metavector_nrecs = segment->metavector_size / sizeof (struct sym_or_reloc_rec);
+#define proj(p) vaddr_from_rec(p, file)
+	struct sym_or_reloc_rec *found = bsearch_leq_generic(
+		struct sym_or_reloc_rec, target_vaddr,
+		/*  T*  */ segment->metavector, /* unsigned */ metavector_nrecs,
+		proj);
+#undef proj
+	if (found && found != segment->metavector + metavector_nrecs)
 	{
-		++__liballocs_aborted_static;
-		return &__liballocs_err_unrecognised_static_object;
+		uintptr_t found_base_vaddr = vaddr_from_rec(found, file);
+		uintptr_t found_limit_vaddr;
+		ElfW(Sym) *symtab;
+		switch (found->kind)
+		{
+			case REC_DYNSYM:   symtab = file->dynsym; goto sym;
+			case REC_SYMTAB:   symtab = file->symtab; goto sym;
+			case REC_EXTRASYM: symtab = file->extrasym; goto sym;
+			sym:
+				found_limit_vaddr = found_base_vaddr + symtab[found->idx].st_size;
+				break;
+			default:
+				/* the limit is either the next start address, or the
+				 * end of the segment */
+				if (unlikely(found == segment->metavector + metavector_nrecs - 1))
+				{
+					found_limit_vaddr = (uintptr_t) segment_bigalloc->end
+						- file_load_addr;
+				} else found_limit_vaddr = vaddr_from_rec(found+1, file);
+		}
+		if (target_vaddr > found_limit_vaddr) goto fail;
+		// else we can go ahead
+		if (out_base) *out_base = (void*)(file_load_addr + found_base_vaddr);
+		if (out_site) *out_site = file->load_site; 
+		if (out_size) *out_size = found_limit_vaddr - found_base_vaddr;
+		return NULL;
 	}
-
-	// else we can go ahead
-	if (out_base) *out_base = object_start;
-	if (out_site) *out_site = object_start;
-	if (out_size) *out_size = alloc_uniqtype->pos_maxoff;
-	return NULL;
+fail:
+	++__liballocs_aborted_static;
+	return &__liballocs_err_unrecognised_static_object;
 }
 
 liballocs_err_t __static_symbol_allocator_get_info(void *obj, struct big_allocation *maybe_bigalloc,
