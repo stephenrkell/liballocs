@@ -285,12 +285,20 @@ void __static_file_allocator_notify_brk(void *new_curbrk)
 void __static_file_allocator_notify_load(void *handle, const void *load_site)
 {
 	struct link_map *l = (struct link_map *) handle;
-	debug_printf(1, "notified of load of object at %s\n", l->l_name);
+	const char *tmp = dynobj_name_from_dlpi_name(l->l_name,
+		(void*) l->l_addr);
+	/* To avoid reentrancy problems when initializing any meta-DSO we may load,
+	 * avoid hanging on to the static buffer pointer returned by
+	 * dynobj_name_from_dlpi_namethat... do the strdup here, but we will push
+	 * this pointer into the file_metadata struct later, whose deallocator will
+	 * free it. */
+	const char *dynobj_name = __liballocs_private_strdup(tmp);
+	debug_printf(1, "notified of load of object %s\n", dynobj_name);
 	/* Load the separate meta-object for this object. */
-	void *meta_handle = NULL;
+	void *meta_obj_handle = NULL;
 	int ret_meta = dl_for_one_object_phdrs(handle,
-		load_and_init_all_metadata_for_one_object, &meta_handle);
-	// meta_handle may be null -- we continue either way
+		load_and_init_all_metadata_for_one_object, &meta_obj_handle);
+	// meta_obj_handle may be null -- we continue either way
 	/* Look up the mapping sequence for this file. Note that
 	 * although a file is notionally sparse, modern glibc's ld.so
 	 * does ensure that it is spanned by a contiguous sequence of
@@ -321,8 +329,6 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	struct big_allocation *containing_mapping_bigalloc = lowest_containing_mapping_bigalloc;
 	size_t file_size = (char*) highest_containing_mapping_bigalloc->end
 		- (char*) lowest_containing_mapping_bigalloc->begin;
-	const char *dynobj_name = dynobj_name_from_dlpi_name(l->l_name,
-		(void*) l->l_addr);
 	struct segments sinfo = (struct segments) { .nload = 0 };
 	dl_for_one_object_phdrs(l, discover_segments_cb, &sinfo);
 	assert(sinfo.nload != 0);
@@ -332,10 +338,10 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	if (!meta) abort();
 	bzero(meta, meta_sz);
 	meta->load_site = load_site;
-	meta->filename = __liballocs_private_strdup(dynobj_name);
+	meta->filename = dynobj_name;
 	meta->l = l;
-	meta->meta_obj_handle = meta_handle;
-	meta->extrasym = (meta_handle ? dlsym(meta_handle, "extrasym") : NULL);
+	meta->meta_obj_handle = meta_obj_handle;
+	meta->extrasym = (meta_obj_handle ? dlsym(meta_obj_handle, "extrasym") : NULL);
 	meta->phdrs = sinfo.phdrs;
 	meta->phnum = sinfo.phnum;
 	meta->nload = sinfo.nload;
@@ -396,10 +402,23 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	{
 		meta->ehdr = get_or_map_file_range(meta, PAGE_SIZE, fd, 0);
 		if (!meta->ehdr) goto out;
+		assert(0 == memcmp(meta->ehdr, "\177ELF", 4));
 		size_t shdrs_sz = meta->ehdr->e_shnum * meta->ehdr->e_shentsize;
+		// assert sanity
+#define MAX_SANE_SHDRS_SIZE 512*sizeof(ElfW(Shdr))
+		assert(shdrs_sz < MAX_SANE_SHDRS_SIZE);
 		meta->shdrs = get_or_map_file_range(meta, shdrs_sz, fd, meta->ehdr->e_shoff);
 		if (meta->shdrs)
 		{
+#ifndef NDEBUG /* basic sanity checks for an ELF header */
+			for (unsigned i = 0; i < meta->ehdr->e_shnum; ++i)
+			{
+				assert(i == 0 || meta->shdrs[i].sh_offset >= sizeof (ElfW(Ehdr)));
+				assert(i == 0 || meta->shdrs[i].sh_size < UINT_MAX);
+				assert(meta->shdrs[i].sh_size == 0 || meta->shdrs[i].sh_entsize == 0
+					|| meta->shdrs[i].sh_entsize <= meta->shdrs[i].sh_size);
+			}
+#endif
 			unsigned nrelscn = 0; // how many rel/rela sections are there?
 			for (unsigned i = 0; i < meta->ehdr->e_shnum; ++i)
 			{
