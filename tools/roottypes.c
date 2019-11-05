@@ -32,3 +32,14 @@ struct uniqtype __uniqtype____uninterpreted_byte __attribute__((section (".data.
 		{ { t: { (void*) 0 } } }
 	}
 };
+
+/* uniqtype for array of uninterpreted bytes */
+const char *__uniqtype____ARR___uninterpreted_byte_subobj_names[]  __attribute__((section (".data.__uniqtype____ARR___uninterpreted_byte, \"awG\", @progbits, __uniqtype____ARR___uninterpreted_byte, comdat#")))= { (void*)0 };
+struct uniqtype __uniqtype____ARR___uninterpreted_byte __attribute__((section (".data.__uniqtype____ARR___uninterpreted_byte, \"awG\", @progbits, __uniqtype____ARR___uninterpreted_byte, comdat#"))) = {
+	{ 0, 0, 0 },
+	1 /* pos_maxoff */,
+	{ array: { .is_array = 1, .nelems = UNIQTYPE_ARRAY_LENGTH_UNBOUNDED } },
+	/* make_precise */ (void*)__liballocs_make_array_precise_with_memory_bounds, /* related */ {
+		{ { t: { (void*) &__uniqtype____uninterpreted_byte } } }
+	}
+};

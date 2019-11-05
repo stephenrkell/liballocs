@@ -119,10 +119,6 @@ int main(int argc, char **argv)
 		}
 		cout << " }";
 	}
-	// output a null terminator entry
-	if (allocsites_relation.size() > 0) cout << ",";
-	cout << "\n\t{ (void*)0, (struct uniqtype *)0 }";
-	
 	// close the list
 	cout << "\n};\n";
 	

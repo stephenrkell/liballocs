@@ -55,13 +55,16 @@ namespace tool
 {
 /* FIXME: need a generic approach to adding these abstract types.
  * Probably we don't want to create them in the DWARF at all, just
- * to be able to assume that they exist. Look at what the clients
- * of these functions actually need them for.
+ * to be able to assume that they exist. For now I've refactored the
+ * code that was using them (found in this file only) to work with
+ * type names rather than DIE references, which avoids the need for
+ * these DIEs.
  *
- * If we do need to create them in the DWARF, then we should generate
- * -roottypes.c directly from that DWARF, so that any summary codes
- * etc that apply to these types are actually appearing in symnames
- * that really exist. */
+ * It might turn out advantagenous to create them in the DWARF, in
+ * which case we should generate -roottypes.c directly from that DWARF,
+ * so that any summary codes etc that apply to these types are actually
+ * appearing in symnames that really exist. */
+#if 0
 iterator_df<type_die>
 get_or_create_uninterpreted_byte_type(root_die& r)
 {
@@ -94,6 +97,7 @@ get_or_create_generic_pointer_type(root_die& r)
 	attrs.insert(make_pair(DW_AT_name, v_name));
 	return created;
 }
+#endif
 
 void merge_and_rewrite_synthetic_data_types(root_die& r, vector<allocsite>& as)
 {
@@ -180,8 +184,8 @@ void make_allocsites_relation(
 	root_die& r
 )
 {
-	auto uninterpreted_byte_t = get_or_create_uninterpreted_byte_type(r);
-	auto generic_pointer_t = get_or_create_generic_pointer_type(r);
+	//auto uninterpreted_byte_t = get_or_create_uninterpreted_byte_type(r);
+	//auto generic_pointer_t = get_or_create_generic_pointer_type(r);
 	for (auto i_alloc = allocsites_to_add.begin(); i_alloc != allocsites_to_add.end(); ++i_alloc)
 	{
 		string type_symname = i_alloc->clean_typename;
@@ -191,8 +195,10 @@ void make_allocsites_relation(
 
 		iterator_df<compile_unit_die> found_cu;
 		opt<string> found_sourcefile_path;
-		iterator_df<type_die> found_type;
-		iterator_df<type_die> second_chance_type;
+		opt<uniqued_name> found_type_name;
+		bool found_type_is_incomplete = false;
+		opt<uniqued_name> second_chance_type_name;
+		bool second_chance_type_is_incomplete = false;
 		/* Find a CU such that 
 		 - one of its source files is named sourcefile, taken relative to comp_dir if necessary;
 		 - that file defines a type of the name we want
@@ -239,13 +245,15 @@ void make_allocsites_relation(
 							(type_symname == "__uniqtype____uninterpreted_byte"
 							|| type_symname == "__uniqtype__void"))
 						{
-							found_type = uninterpreted_byte_t; // i.e. void
+							found_type_name = opt<uniqued_name>(make_pair(string(""), string("__uninterpreted_byte"))); // i.e. void
+							found_type_is_incomplete = false;
 							goto cu_loop_exit;
 						}
 						else if (type_symname.size() > 0 &&
 							(type_symname == "__uniqtype____EXISTS1___PTR__1"))
 						{
-							found_type = generic_pointer_t;
+							found_type_name = opt<uniqued_name>(make_pair(string(""), string("__EXISTS1___PTR__1")));
+							found_type_is_incomplete = false;
 							goto cu_loop_exit;
 						}
 						else if (type_symname.size() > 0)
@@ -290,9 +298,9 @@ void make_allocsites_relation(
 									if (i_found->second.enclosing_cu()
 										== i_cu)
 									{
-										found_type = i_found->second;
+										found_type_name = canonical_key_for_type(i_found->second);
+										found_type_is_incomplete = !i_found->second->calculate_byte_size();
 										// we can exit the loop now
-
 										cerr << "Success: found a type named " << i_found->first
 											<< " in a CU named "
 											<< *i_found->second.enclosing_cu().name_here()
@@ -312,7 +320,8 @@ void make_allocsites_relation(
 											<< " whereas we want one named "
 											<< *i_cu.name_here()
 											<< endl;
-										second_chance_type = i_found->second;
+										second_chance_type_name = canonical_key_for_type(i_found->second);
+										second_chance_type_is_incomplete = !i_found->second->calculate_byte_size();
 									}
 
 								}
@@ -324,14 +333,15 @@ void make_allocsites_relation(
 							 * - embodies this source file, and
 							 * - contains more DWARF types. */
 
-							found_type = iterator_base::END;
+							found_type_name = opt<uniqued_name>();
+							found_type_is_incomplete = false;
 						}
 					}
 				}
 			}
 		} // end for each CU
 	cu_loop_exit:
-		if (!found_type)
+		if (!found_type_name)
 		{
 			cerr << "Warning: no type named " << type_symname 
 				<< " in CUs embodying source file " << sourcefile
@@ -344,25 +354,24 @@ void make_allocsites_relation(
 				cerr << ") but required by allocsite: " << objname 
 				<< "<" << type_symname << "> @" << std::hex << file_addr << std::dec << ">" << endl;
 
-			if (second_chance_type)
+			if (second_chance_type_name)
 			{
 				cerr << "Warning: guessing that we can get away with " 
-					<< second_chance_type << endl;
-				found_type = second_chance_type;
+					<< second_chance_type_name << endl;
+				found_type_name = second_chance_type_name;
+				found_type_is_incomplete = second_chance_type_is_incomplete;
 			} else continue;
 		}
 		// now we found the type
 		//cerr << "SUCCESS: found type: " << *found_type << endl;
 
-		uniqued_name name_used = canonical_key_for_type(found_type);
 		/* NOTE: we can still get incomplete types used as sizeof, if the 
 		 * user did "offsetof" on a field in them. That is how we will get
 		 * them here. FIXME: if the user uses offsetof even on a *complete*
 		 * type, we should skip the ARR0 here. E.g. if we have the variable-
 		 * -length array be [1] not [0], we would ues offsetof to allocate
 		 * space for extra training elements. */
-		bool incomplete = !found_type->calculate_byte_size();
-		bool declare_as_array0 = !i_alloc->is_synthetic && i_alloc->might_be_array && !incomplete;
+		bool declare_as_array0 = !i_alloc->is_synthetic && i_alloc->might_be_array && !found_type_is_incomplete;
 
 		// add to the allocsites table too
 		// recall: this is the mapping from allocsites to uniqtype addrs
@@ -370,7 +379,7 @@ void make_allocsites_relation(
 		allocsites_relation.insert(
 			make_pair(
 				make_pair(objname, file_addr),
-				make_pair(name_used, declare_as_array0)
+				make_pair(*found_type_name, declare_as_array0)
 			)
 		);
 	} // end for allocsite
