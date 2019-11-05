@@ -56,7 +56,12 @@ namespace tool
 /* FIXME: need a generic approach to adding these abstract types.
  * Probably we don't want to create them in the DWARF at all, just
  * to be able to assume that they exist. Look at what the clients
- * of these functions actually need them for. */
+ * of these functions actually need them for.
+ *
+ * If we do need to create them in the DWARF, then we should generate
+ * -roottypes.c directly from that DWARF, so that any summary codes
+ * etc that apply to these types are actually appearing in symnames
+ * that really exist. */
 iterator_df<type_die>
 get_or_create_uninterpreted_byte_type(root_die& r)
 {

@@ -51,6 +51,8 @@ int read_allocs_line(
 	string& alloc_typename,
 	bool& might_be_array
 );
+/* The allocsites relation map a pair <objname, offset>
+ * to a pair <uniqued_name, declare_as_array0> */
 typedef std::map< pair< string, unsigned long >, pair<uniqued_name, bool> > allocsites_relation_t;
 
 void make_allocsites_relation(
