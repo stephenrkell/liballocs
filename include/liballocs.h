@@ -92,6 +92,8 @@ extern inline struct uniqtype * __attribute__((gnu_inline)) allocsite_to_uniqtyp
 	//return e->uniqtype;
 }
 struct uniqtype *__liballocs_allocsite_to_uniqtype(const void *allocsite);
+typedef unsigned short allocsite_id_t;
+const void *__liballocs_allocsite_by_id(allocsite_id_t id);
 
 extern inline _Bool 
 __attribute__((always_inline,gnu_inline))
