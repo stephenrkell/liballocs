@@ -242,6 +242,26 @@ Dl_info dladdr_with_cache(const void *addr)
 	return dummy;
 }
 
+struct allocsite_entry;
+struct allocsite_entry *__liballocs_find_allocsite_entry_at(
+	const void *allocsite)
+{
+	return NULL;
+}
+
+unsigned short __liballocs_allocsite_id(const void *allocsite)
+{ return 0; }
+
+struct allocsite_entry *__liballocs_allocsite_entry_by_id(unsigned short id,
+	unsigned long *out_file_base_addr)
+{
+	return NULL;
+}
+const void *__liballocs_allocsite_by_id(unsigned short id)
+{
+	return NULL;
+}
+
 void __notify_ptr_write(const void **dest, const void *val)
 {
 	/* Called for *dest = val; on code instrumented with trapptrwrites

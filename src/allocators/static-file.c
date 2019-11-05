@@ -16,6 +16,7 @@
 #include "relf.h"
 #include "liballocs_private.h"
 #include "pageindex.h"
+#include "allocsites.h"
 int fstat(int fd, struct stat *buf);
 int raw_open(const char *pathname, int flags); // avoid raw-syscalls.h
 
@@ -481,6 +482,7 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	out:
 		close(fd);
 	}
+	init_allocsites_info(meta);
 }
 static void free_file_metadata(void *fm)
 {

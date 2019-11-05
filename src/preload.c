@@ -293,6 +293,9 @@ extern void  __attribute__((weak)) __libcrunch_scan_lazy_typenames(void*);
 
 struct link_map *early_lib_handles[MAX_EARLY_LIBS] __attribute((visibility("hidden")));
 
+static char *our_dlerror;
+static char *call_orig_dlerror(void);
+
 void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
 void *dlopen(const char *filename, int flag)
 {
@@ -362,7 +365,19 @@ void *dlopen(const char *filename, int flag)
 		__private_free((void*) file_realname);
 	}
 	
+	/* FIXME: the logic for avoiding libdl calls is a mess here. Since we
+	 * don't have a fake dlopen, we will always call the real one. This
+	 * is an issue e.g. when loading meta-objects, which is done via
+	 * dl_iterate_phdr and so sets __avoid_libdl_calls. Since the callback
+	 * calls dlopen(), it calls us... but then it calls
+	 * dlerror, and it will look for the fake dlerror. This clearly isn't
+	 * right. As a temporary workaround, propagate dlerror to the fake dlerror
+	 * here in this case. I'm not sure what the right fix is. */
 	ret = orig_dlopen(filename, flag);
+	if (__avoid_libdl_calls && !we_set_flag && !ret)
+	{
+		our_dlerror = call_orig_dlerror();
+	}
 skip_load:
 	if (we_set_flag) __avoid_libdl_calls = 0;
 		
@@ -435,24 +450,35 @@ int dlclose(void *handle)
 	}
 }
 
-static char *our_dlerror;
-char *dlerror(void)
+static char *(*orig_dlerror)(void);
+/* This hack is provided so that we can unconditionally call the original dlerror
+ * from dlopen(). */
+static char *call_orig_dlerror(void)
 {
-	static char *(*orig_dlerror)(void);
-	_Bool we_set_flag = 0;
-	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
-	
 	if (!orig_dlerror)
 	{
-		if (__avoid_libdl_calls && !we_set_flag) orig_dlerror = fake_dlsym(RTLD_NEXT, "dlerror");
-		else orig_dlerror = dlsym(RTLD_NEXT, "dlerror");
+		char *saved_msg = our_dlerror;
+		// always use the fake dlsym, so we don't clobber the real dlerror
+		orig_dlerror = fake_dlsym(RTLD_NEXT, "dlerror");
 		if (!orig_dlerror) abort();
+		our_dlerror = saved_msg;
 	}
+	return orig_dlerror();
+}
+char *dlerror(void)
+{
+	_Bool we_set_flag = 0;
+	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
+
 	// we only call the original if our error is NULL *and*
 	// we think it's safe to call down
-	char *ret = our_dlerror ? our_dlerror : (__avoid_libdl_calls ? our_dlerror : orig_dlerror());
+	char *ret;
+	if (our_dlerror || __avoid_libdl_calls) ret = our_dlerror;
+	else /* no error is set here, and it seems safe to call down */ ret = call_orig_dlerror();
+
+	/* clear whatever error we had stored */
 	if (our_dlerror) our_dlerror = NULL;
-	
+
 	if (we_set_flag) __avoid_libdl_calls = 0;
 	return ret;
 }

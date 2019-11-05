@@ -128,7 +128,7 @@ Dl_info dladdr_with_cache(const void *addr)
    then we need 2 bytes of index vector per 512 bytes of segment.
    Even a single-word scan would give us 2 per 64, which is fine.
 
-	/* What was I doing previously with the allocsmt? That was a
+	 * What was I doing previously with the allocsmt? That was a
 	 * memtable where the bucket contained all statics starting
 	 * within a 512-byte region. That relied on the metadata
 	 * storing explicitly its own start address. We could do
@@ -370,7 +370,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		if (target_vaddr > found_limit_vaddr) goto fail;
 		// else we can go ahead
 		if (out_base) *out_base = (void*)(file_load_addr + found_base_vaddr);
-		if (out_site) *out_site = file->load_site; 
+		if (out_site) *out_site = file->load_site;
 		if (out_size) *out_size = found_limit_vaddr - found_base_vaddr;
 		return NULL;
 	}

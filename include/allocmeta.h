@@ -224,6 +224,8 @@ struct segment_metadata
 	size_t metavector_size;
 	bitmap_word_t *starts_bitmap; // maybe!
 };
+typedef unsigned short allocsite_id_t;
+struct allocsites_vectors_by_base_id_entry; // opaque here
 
 /* Hmm -- with -Wl,-q we might get lots of reloc section mappings. Is this enough? */
 #define MAPPING_MAX 16
@@ -263,6 +265,7 @@ struct file_metadata
 	unsigned char *strtab; // NOTE this is strtab, not dynstr
 	ElfW(Half) strtabndx;
 
+	// FIXME: mapping the rel sections should go away.
 	/* We want to be able to identify any relocation record in the binary
 	 * using a single "index space", even though there may be many reloc
 	 * sections (e.g. if linking -q). So we maintain a "spine" with one
@@ -273,10 +276,9 @@ struct file_metadata
 	ElfW(Rela) **rel_spine_scns; // pointers to the mapped sections
 	unsigned rel_spine_len;      // how many elements
 
-	/* We record "starts". Starts are what appear in per-segment bitmaps
-	   as the start of an object.
-	   
-	   Starts are symbols with length (spans).
+	struct allocsites_vectors_by_base_id_entry *allocsites_info;
+
+	/* "Starts" are symbols with length (spans).
 	   We don't index symbols that are not spans.
 	   If we see multiple spans covering the same address, we discard one
 	   of them heuristically.
@@ -298,6 +300,7 @@ ElfW(Sym) *__static_file_allocator_get_symtab_by_idx(struct file_metadata *meta,
 {
 	if (meta->symtab && meta->symtabndx == i) return meta->symtab;
 	else if (meta->dynsym && meta->dynsymndx == i) return meta->dynsym;
+	return NULL;
 }
 void __static_segment_allocator_init(void);
 void __static_segment_allocator_notify_define_segment(
@@ -347,7 +350,6 @@ void *__auxv_get_program_entry_point(void);
 		T *lower = base; \
 		if (upper - lower == 0) abort(); \
 		assert(proj(lower) <= target_proj_val); \
-		/* FIXME: what if all elements are > the target? */ \
 		while (upper - lower != 1) \
 		{ \
 			T *mid = lower + ((upper - lower) / 2); \
@@ -362,7 +364,8 @@ void *__auxv_get_program_entry_point(void);
 		/* if we didn't hit the max item, assert the next one is greater */ \
 		assert(lower == base + n - 1 \
 			 || proj(lower+1) > target_proj_val); \
-		lower; \
+		/* If all elements are > the target, return NULL */ \
+		proj(lower) <= target_proj_val ? lower : NULL; \
 	})
 #endif
 

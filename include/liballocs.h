@@ -701,6 +701,8 @@ void *
 __liballocs_get_alloc_base(void *obj);
 #endif
 
+const void *
+__liballocs_get_alloc_site(void *obj);
 
 void
 __liballocs_set_alloc_type(void *obj, const struct uniqtype *type);

@@ -104,8 +104,7 @@ int main(int argc, char **argv)
 		
 		cout << "\n\t/* allocsite info for " << i_site->first.first << "+"
 			<< std::hex << "0x" << i_site->first.second << std::dec << " */";
-		cout << "\n\t{ (char*) " << "0" // will fix up at load time
-			<< " + 0x" << std::hex << i_site->first.second << std::dec << "UL, " 
+		cout << "\n\t{ 0x" << std::hex << i_site->first.second << std::dec << "UL, " 
 			<< "&";
 		
 		if (i_site->second.second /* declare as array */)

@@ -4,7 +4,7 @@
 struct uniqtype;
 struct allocsite_entry
 {
-	void *allocsite;
+	unsigned long allocsite_vaddr;
 	struct uniqtype *uniqtype;
 };
 struct frame_allocsite_entry
