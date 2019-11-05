@@ -840,14 +840,15 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	_Bool is_libc = ((0 == strncmp(canon_basename, "libc", 4))
 				&& (canon_basename[4] == '-' || canon_basename[4] == '.'));
 
-	// skip objects that are themselves meta objects
+	// skip objects that are themselves meta objects (i.e. are under the meta_base path)
 	// FIXME: what about embedded meta objects?
 	if (0 == strncmp(canon_objname, meta_base, meta_base_len)) return 0;
 	
 	// get the -meta.so object's name
 	const char *libfile_name = meta_libfile_name(canon_objname);
 	if (!libfile_name) return 0;
-	// don't load if we end with "-meta.so"
+	// don't load if we end with "-meta.so", wherever we are
+	// FIXME: not sure we need *both* this test and the one above (for being under meta_base)
 	if (0 == strcmp(META_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(META_OBJ_SUFFIX)))
 	{
 		return 0;
@@ -863,14 +864,23 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	/* Towards meta-completeness: use the real dlopen, so that meta-objs
 	 * are also loaded. We will fail to load their meta-obj. */
 	meta_handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
-	if (meta_handle) return 0;
+	if (meta_handle)
+	{
+		/* That means the object is already loaded. How did that happen? */
+		debug_printf(0, "meta object unexpectedly already loaded: %s\n", libfile_name);
+		*maybe_out_handle = meta_handle;
+		dlclose(meta_handle); // decrement the refcount, but won't free the link_map
+		return 0;
+	}
 	errno = 0;
 	//dlerror();
 	meta_handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL);
 	errno = 0;
 	if (!meta_handle)
 	{
-		//debug_printf((is_exe || is_libc) ? 0 : 1, "loading meta object: %s\n", dlerror());
+		/* The dlerror message will repeat the libfile name, so no need to print it. */
+		debug_printf((is_exe || is_libc) ? 0 : 1, "error loading meta object: %s\n",
+			dlerror());
 		return 0;
 	}
 	debug_printf(3, "loaded meta object: %s\n", libfile_name);
