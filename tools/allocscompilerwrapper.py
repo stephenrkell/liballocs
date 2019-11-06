@@ -234,7 +234,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             self.debugMsg("No need to globalize\n")
             return 0
 
-    def fixupLinkedObject(self, filename, errfile):
+    def fixupLinkedRelocObject(self, filename, errfile):
         self.debugMsg("Fixing up linked output object: %s\n" % filename)
         wrappedFns = self.allWrappedSymNames()
         with (self.makeErrFile(os.path.realpath(filename) + ".fixuplog", "w+") if not errfile else errfile) as errfile:
@@ -292,7 +292,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
 #                     + [filename], stderr=errfile)
         return (0, [])
         
-    def doPostLinkMetadataBuild(self, outputFile):
+    def doPostLinkMetadataBuild(self, outputFile, stripRelocs):
         # We've just output an object, so invoke make to collect the allocsites, 
         # with our target name as the file we've just built, using META_BASE 
         # to set the appropriate prefix
@@ -313,8 +313,17 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 errfile.write("Running: " + " ".join(cmd) + "\n")
                 ret2 = subprocess.call(cmd, stderr=errfile, stdout=errfile)
                 errfile.write("Exit status was %d\n" % ret2)
+                if ret2 != 0:
+                    errfile.write("Metadata build failed, so will not strip relocs from output binary")
                 if (ret2 != 0 or "DEBUG_CC" in os.environ):
                     self.printErrors(errfile)
+            # Now if the metadata build succeeded, and if we're asked to
+            # strip relocs
+            if stripRelocs and ret2 == 0:
+                cmd = [self.getLibAllocsBaseDir() + "/tools/strip-non-dynamic-relocs.sh", \
+                    os.path.realpath(outputFile)]
+                errfile.write("Running: " + " ".join(cmd) + "\n")
+                #subprocess.call(cmd, stderr=errfile, stdout=errfile)
             return ret2
         else:
             return 1
@@ -614,10 +623,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
         # HACK: if we're linking, always link to a .o and then separately to whatever output file
         allLinkOutputOptions = {"-pie", "-shared", "--pic-executable", \
-                       "-Wl,-pie", "-Wl,-shared", "-Wl,--pic-executable", "-Wl,-r", "-Wl,--relocatable"}
+                       "-Wl,-pie", "-Wl,-shared", "-Wl,--pic-executable", \
+                       "-Wl,-r", "-Wl,--relocatable"}
+        # we will delete any options in the above set when we do the link to ".linked.o"
         thisLinkOutputOptions = set(self.phaseOptions[Phase.LINK].keys()).intersection(allLinkOutputOptions)
         finalLinkOutput = self.getOutputFilename(Phase.LINK)
         finalItemsAndOpts = []
+        stripRelocsAfterMetadataBuild = False
         if self.doingFinalLink():
             # okay, first do a via-big-.o link
             # NOTE that we can't link in any shared libraries at this stage -- ld
@@ -629,6 +641,12 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # What we want is "user code that is going into this link".
             opts = self.specialOptionsForPhases(set({Phase.LINK}), deletions=thisLinkOutputOptions.union(set(["-o"])))
             assert ("-o" not in self.flatOptions(opts))
+            if "-Wl,-q" not in self.flatOptions(opts) and \
+               "-Wl,--emit-relocs" not in self.flatOptions(opts):
+                # we want the relocs, so we will add this
+                opts += {"-Wl,-q"}
+            else:
+                stripRelocsAfterMetadataBuild = False
             relocFilename = finalLinkOutput + ".linked.o"
             extraFirstOpts = ["-Wl,-r", "-o", relocFilename, "-nostartfiles", "-nodefaultlibs", "-nostdlib"]
             if self.recognisesOption("-no-pie"):
@@ -648,7 +666,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             ret = self.runCompiler(allArgs, {FAKE_RELOC_LINK})
             if ret != 0:
                 return ret
-            ret, extraFinalLinkArgs = self.fixupLinkedObject(relocFilename, None)
+            ret, extraFinalLinkArgs = self.fixupLinkedRelocObject(relocFilename, None)
             if ret != 0:
                 return ret
             finalItemsAndOpts = self.flatOptions(opts) + [x for x in thisLinkOutputOptions] \
@@ -664,5 +682,5 @@ class AllocsCompilerWrapper(CompilerWrapper):
         ret = self.runCompiler(finalItemsAndOpts, {Phase.LINK})
         if ret != 0 or not self.doingFinalLink():
             return ret
-        return self.doPostLinkMetadataBuild(finalLinkOutput)
+        return self.doPostLinkMetadataBuild(finalLinkOutput, stripRelocsAfterMetadataBuild)
 
