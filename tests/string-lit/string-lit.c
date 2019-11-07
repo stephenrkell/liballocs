@@ -14,6 +14,7 @@ int main(void)
 	void *base = __liballocs_get_alloc_base(s);
 	assert(base);
 	size_t size = __liballocs_get_alloc_size(s);
+	printf("The string literal's size is %u\n", (unsigned) size);
 	assert(size >= sizeof THE_STRING);
 	return 0;
 }

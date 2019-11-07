@@ -338,10 +338,10 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 	 * for the highest-placed symbol starting <=
 	 * our target vaddr. */
 	uintptr_t target_vaddr = obj_addr - file_load_addr;
-	unsigned metavector_nrecs = segment->metavector_size / sizeof (struct sym_or_reloc_rec);
+	unsigned metavector_nrecs = segment->metavector_size / sizeof (union sym_or_reloc_rec);
 #define proj(p) vaddr_from_rec(p, file)
-	struct sym_or_reloc_rec *found = bsearch_leq_generic(
-		struct sym_or_reloc_rec, target_vaddr,
+	union sym_or_reloc_rec *found = bsearch_leq_generic(
+		union sym_or_reloc_rec, target_vaddr,
 		/*  T*  */ segment->metavector, /* unsigned */ metavector_nrecs,
 		proj);
 #undef proj
@@ -350,15 +350,17 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		uintptr_t found_base_vaddr = vaddr_from_rec(found, file);
 		uintptr_t found_limit_vaddr;
 		ElfW(Sym) *symtab;
-		switch (found->kind)
+		if (found->is_reloc) found_limit_vaddr = found_base_vaddr + found->reloc.size;
+		else switch (found->sym.kind)
 		{
 			case REC_DYNSYM:   symtab = file->dynsym; goto sym;
 			case REC_SYMTAB:   symtab = file->symtab; goto sym;
 			case REC_EXTRASYM: symtab = file->extrasym; goto sym;
 			sym:
-				found_limit_vaddr = found_base_vaddr + symtab[found->idx].st_size;
+				found_limit_vaddr = found_base_vaddr + symtab[found->sym.idx].st_size;
 				break;
-			default:
+			default: // the default case's `found+1' trick is cute, but not necessary
+#if 0
 				/* the limit is either the next start address, or the
 				 * end of the segment */
 				if (unlikely(found == segment->metavector + metavector_nrecs - 1))
@@ -366,6 +368,9 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 					found_limit_vaddr = (uintptr_t) segment_bigalloc->end
 						- file_load_addr;
 				} else found_limit_vaddr = vaddr_from_rec(found+1, file);
+#else
+				abort();
+#endif
 		}
 		if (target_vaddr > found_limit_vaddr) goto fail;
 		// else we can go ahead

@@ -220,7 +220,7 @@ void __static_file_allocator_notify_unload(const char *copied_filename);
 struct segment_metadata
 {
 	unsigned phdr_idx;
-	struct sym_or_reloc_rec *metavector; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
+	union sym_or_reloc_rec *metavector; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
 	size_t metavector_size;
 	bitmap_word_t *starts_bitmap; // maybe!
 };
@@ -264,17 +264,6 @@ struct file_metadata
 	ElfW(Half) symtabndx;
 	unsigned char *strtab; // NOTE this is strtab, not dynstr
 	ElfW(Half) strtabndx;
-
-	// FIXME: mapping the rel sections should go away.
-	/* We want to be able to identify any relocation record in the binary
-	 * using a single "index space", even though there may be many reloc
-	 * sections (e.g. if linking -q). So we maintain a "spine" with one
-	 * unsigned per (non-empty) reloc section, holding the index in the
-	 * "global" numbering of the first reloc in that section. We also
-	 * keep pointers to those sections here, which we map as needed. */
-	unsigned *rel_spine_idxs;    // the indices
-	ElfW(Rela) **rel_spine_scns; // pointers to the mapped sections
-	unsigned rel_spine_len;      // how many elements
 
 	struct allocsites_vectors_by_base_id_entry *allocsites_info;
 
@@ -369,65 +358,18 @@ void *__auxv_get_program_entry_point(void);
 	})
 #endif
 
-static inline uintptr_t vaddr_from_rec(struct sym_or_reloc_rec *p,
+static inline uintptr_t vaddr_from_rec(union sym_or_reloc_rec *p,
 	struct file_metadata *file)
 {
 	ElfW(Sym) *symtab;
-	switch (p->kind)
+	if (p->is_reloc) return p->reloc.base_vaddr;
+	else switch (p->sym.kind)
 	{
 		case REC_DYNSYM:   symtab = file->dynsym; goto sym;
 		case REC_SYMTAB:   symtab = file->symtab; goto sym;
 		case REC_EXTRASYM: symtab = file->extrasym; goto sym;
 		sym:
-			return symtab[p->idx].st_value;
-		case REC_RELOC_DYN: symtab = file->dynsym; goto rel;
-		case REC_RELOC:     symtab = file->symtab; goto rel;
-		rel:
-			// the awkward case
-			/* (1) use precomputed spine to get the reloc section+idx,
-			   (2) decode the r_info to get the target section/symbol + addend,
-			   (3) get the symbol/section's address and do the add.
-			 */
-			{
-#if 1
-				// find the greatest spine element le this value
-				// the spine should have no repeated elements!
-				// FIXME: lift this out into a bsearch_le function.
-				unsigned target = p->idx;
-				unsigned *upper = file->rel_spine_idxs + file->rel_spine_len;
-				unsigned *lower = file->rel_spine_idxs;
-				if (upper - lower == 0) abort();
-				assert(lower[0] <= target);
-				while (upper - lower != 1)
-				{
-					unsigned *mid = lower + ((upper - lower) / 2);
-					if (*mid > target)
-					{
-						// we should look in the lower half
-						upper = mid;
-					}
-					else lower = mid;
-				}
-				assert(lower[0] <= target);
-				// if we didn't find the max item, assert the next one is greater
-				assert(lower == file->rel_spine_idxs + file->rel_spine_len - 1
-					 || lower[1] > target);
-				// the reloc is in the given section, at the residual index
-				unsigned *found = lower;
-#else /* FIXME: introduce this code and test against the vanilla non-generic version! */
-#define proj(tptr) *(tptr)
-				unsigned *found = bsearch_leq_generic(unsigned, p->idx,
-					/*  T*  */ file->rel_spine_idxs, /* unsigned */ file->rel_spine_len, proj);
-#undef proj
-#endif
-				unsigned residual_idx = p->idx - *found;
-				unsigned scn_idx = lower - file->rel_spine_idxs;
-				assert(scn_idx < file->rel_spine_len);
-				ElfW(Rela) *the_reloc = file->rel_spine_scns[scn_idx] + residual_idx;
-				unsigned symind = ELF64_R_SYM(the_reloc->r_info);
-				ElfW(Sword) addend = the_reloc->r_addend;
-				return symtab[symind].st_value + addend;
-			}
+			return symtab[p->sym.idx].st_value;
 		default: abort();
 	}
 }

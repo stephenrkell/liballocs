@@ -113,16 +113,19 @@ void __static_file_allocator_init(void)
 				struct file_metadata *file = containing_file->meta.un.opaque_data.data_ptr;	
 				for (unsigned i_seg = 0; i_seg < file->nload; ++i_seg)
 				{
-					struct sym_or_reloc_rec *metavector = file->segments[i_seg].metavector;
+					union sym_or_reloc_rec *metavector = file->segments[i_seg].metavector;
 					size_t metavector_size = file->segments[i_seg].metavector_size;
 					// we print the whole metavector
 					for (unsigned i = 0; i < metavector_size / sizeof *metavector; ++i)
 					{
 						fprintf(stream_err, "At %016lx there is a static alloc of kind %u, idx %08u, type %s\n",
 							file->l->l_addr + vaddr_from_rec(&metavector[i], file),
-							(unsigned) metavector[i].kind,
-							(unsigned) metavector[i].idx,
-							UNIQTYPE_NAME((struct uniqtype *)(((uintptr_t) metavector[i].uniqtype_ptr_bits_no_lowbits)<<3))
+							(unsigned) (metavector[i].is_reloc ? REC_RELOC : metavector[i].sym.kind),
+							(unsigned) (metavector[i].is_reloc ? 0 : metavector[i].sym.idx),
+							UNIQTYPE_NAME(
+								metavector[i].is_reloc ? NULL :
+								(struct uniqtype *)(((uintptr_t) metavector[i].sym.uniqtype_ptr_bits_no_lowbits)<<3)
+							)
 						);
 					}
 				}
@@ -420,20 +423,6 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 					|| meta->shdrs[i].sh_entsize <= meta->shdrs[i].sh_size);
 			}
 #endif
-			unsigned nrelscn = 0; // how many rel/rela sections are there?
-			for (unsigned i = 0; i < meta->ehdr->e_shnum; ++i)
-			{
-				if (meta->shdrs[i].sh_type == SHT_REL
-						|| meta->shdrs[i].sh_type == SHT_RELA) ++nrelscn;
-			}
-			if (nrelscn > 0)
-			{
-				meta->rel_spine_idxs = __private_malloc(nrelscn * sizeof meta->rel_spine_idxs[0]);
-				meta->rel_spine_scns = __private_malloc(nrelscn * sizeof meta->rel_spine_scns[0]);
-				meta->rel_spine_len = nrelscn;
-			}
-			unsigned nrelscn_seen = 0;
-			unsigned nrelent_seen = 0;
 			for (unsigned i = 0; i < meta->ehdr->e_shnum; ++i)
 			{
 #define GET_OR_MAP_SCN(__j) get_or_map_file_range(meta, meta->shdrs[(__j)].sh_size, fd, meta->shdrs[(__j)].sh_offset)
@@ -452,15 +441,6 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 				if (i == meta->ehdr->e_shstrndx)
 				{
 					meta->shstrtab = GET_OR_MAP_SCN(i);
-				}
-				if (meta->shdrs[i].sh_type == SHT_REL
-						|| meta->shdrs[i].sh_type == SHT_RELA)
-				{
-					unsigned nrel = meta->shdrs[i].sh_size / meta->shdrs[i].sh_entsize;
-					meta->rel_spine_idxs[nrelscn_seen] = nrelent_seen;
-					meta->rel_spine_scns[nrelscn_seen] = GET_OR_MAP_SCN(i);
-					++nrelscn_seen;
-					nrelent_seen += nrel;
 				}
 #undef GET_OR_MAP_SCN
 			}
@@ -496,8 +476,6 @@ static void free_file_metadata(void *fm)
 				meta->extra_mappings[i].size);
 		}
 	}
-	if (meta->rel_spine_idxs) __private_free(meta->rel_spine_idxs);
-	if (meta->rel_spine_scns) __private_free(meta->rel_spine_scns);
 	__private_free(meta);
 }
 

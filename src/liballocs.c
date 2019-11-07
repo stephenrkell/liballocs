@@ -1403,12 +1403,9 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		 * okay because there will be very few of them. We don't want to do
 		 * a binary search on the table proper. But that's okay. We get
 		 * everything we need. */
-		struct allocsites_by_object_base_address_entry *found
-		 = __liballocs_find_allocsite_lookup_entry((const void *) alloc_site_addr);
-		if (found)
+		allocsite_id_t allocsite_id = __liballocs_allocsite_id((const void *) alloc_site_addr);
+		if (allocsite_id != (allocsite_id_t) -1)
 		{
-			unsigned short id = found->by_id->start_id + (entry - found->by_id->ptr);
-			//p_ins->un.bits = id;
 			// what to do with the id?? We have no spare bits...
 			// we could scrounge a few but certainly not 16 of them.
 			// When we're using a bitmap, we will have the space.

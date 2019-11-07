@@ -91,7 +91,7 @@ void __static_segment_allocator_notify_define_segment(
 		b->suballocator = &__generic_malloc_allocator;
 	}
 	/* Fill in the per-segment info that is stored in the file metadata. */
-	struct sym_or_reloc_rec *metavector = NULL;
+	union sym_or_reloc_rec *metavector = NULL;
 	size_t metavector_size = 0;
 	if (file->meta_obj_handle)
 	{
