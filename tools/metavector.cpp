@@ -181,7 +181,7 @@ int main(int argc, char **argv)
 	return 0;
 }
 
-static ElfW(Sxword) reloc_synthetic_addend(
+static ElfW(Sxword) reloc_distance_to_logical_target(
 						void *rel_or_rela,
 						ElfW(Half) relscntype,
 						ElfW(Sym) *symtab,
@@ -278,7 +278,7 @@ scan_reloc_target_addr_end_pairs(Elf *e,
 			Elf64_Sword referenced_vaddr
 				= symtab[symind].st_value +
 					(is_rela ? rela_base[i].r_addend : 0) +
-					reloc_synthetic_addend(
+					reloc_distance_to_logical_target(
 						is_rela ? (void*)&rela_base[i] : (void*)&rel_base[i],
 						is_rela ? SHT_RELA : SHT_REL,
 						symtab,
