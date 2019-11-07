@@ -69,6 +69,7 @@ struct sym_or_reloc_rec_to_generate
 	sticky_root_die::static_descr::kind priority_k;
 	unsigned idx_in_per_kind_table;
 	opt<uniqued_name> maybe_uniqtype;
+	std::string extra_comment;
 };
 std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate > generate_recs(sticky_root_die& root);
 void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
@@ -180,8 +181,38 @@ int main(int argc, char **argv)
 	return 0;
 }
 
+static ElfW(Sxword) reloc_synthetic_addend(
+						void *rel_or_rela,
+						ElfW(Half) relscntype,
+						ElfW(Sym) *symtab,
+						ElfW(Half) e_machine
+					)
+{
+	ElfW(Xword) r_type
+	= ELFW_R_TYPE( ((relscntype==SHT_RELA)?((ElfW(Rela)*)rel_or_rela)->r_info : ((ElfW(Rel)*)rel_or_rela)->r_info) );
+#define PAIR(mach, type)   ((((ElfW(Sxword))(mach))<<32)|((ElfW(Sxword))(type)))
+	switch (PAIR(e_machine, r_type))
+	{
+		case (PAIR(EM_386,    R_386_PC32)):
+		case (PAIR(EM_386,    R_386_PLT32)):
+		case (PAIR(EM_386,    R_386_GOTPC)):
+		case (PAIR(EM_X86_64, R_X86_64_PC32)):
+		case (PAIR(EM_X86_64, R_X86_64_PLT32)):
+		case (PAIR(EM_X86_64, R_X86_64_GOTPCREL)): // FIXME: add others
+			return 4; // the actual address is 4 greater than we have already calculated
+		default:
+			return 0;
+	}
+#undef PAIR
+}
+
 //typedef pair<ElfW(Half), unsigned> reloc_rec_coord; // section idx, idx within section
-typedef unsigned reloc_rec_coord;
+typedef pair<unsigned, string> reloc_rec_coord; // just the linearised ID + a comment
+/* Here we generate all pairs of <referenced-loc, referenced-section-end> for
+ * relocation records we fid in the file. Later we will add only the "sane"
+ * ones, i.e. the ones that don't overlap other stuff. Note that the
+ * section end is used as an upper bound on the target length; we will prune
+ * the actual length to the maximum non-overlapping length it could have. */
 set<pair<reloc_rec_coord, pair<Dwarf_Addr, Dwarf_Addr> > >
 scan_reloc_target_addr_end_pairs(Elf *e,
 	ElfW(Half) relscnidx, unsigned relscn_linear_base_idx, ElfW(Half) relscntype)
@@ -190,8 +221,24 @@ scan_reloc_target_addr_end_pairs(Elf *e,
 	_Bool is_rela = (relscntype == SHT_RELA);
 	/* Scan the relocs and find whether their target section
 	 * is within this section. */
+	GElf_Ehdr ehdr;
+	GElf_Ehdr *found = gelf_getehdr(e, &ehdr);
+	if (!found) abort();
+	Elf_Data *shstrtab_data = raw_data_by_shndx(e, ehdr.e_shstrndx);
+	auto relscn_name = get_shdr(e, relscnidx).sh_name;
+	string relscn_namestr = reinterpret_cast<char*>(shstrtab_data->d_buf) + relscn_name;
 	unsigned symtab_shndx = get_shdr(e, relscnidx).sh_link;
 	assert(symtab_shndx != 0);
+	unsigned relocated_shndx = get_shdr(e, relscnidx).sh_info;
+	if (relocated_shndx != 0)
+	{
+		/* We only count relocs whose origins are in allocatable
+		 * sections. This stops us from counting the targets of debug content,
+		 * which could reference random places like the middle of stuff
+		 * (HMM, why?) */
+		auto flags = get_shdr(e, relocated_shndx).sh_flags;
+		if (!(flags & SHF_ALLOC)) return target_addrs;
+	}
 	/* We need to get hold of the symtab content. */
 	Elf_Data *symtab_data = raw_data_by_shndx(e, symtab_shndx);
 	ElfW(Sym) *symtab = reinterpret_cast<ElfW(Sym)*>(symtab_data->d_buf);
@@ -202,26 +249,49 @@ scan_reloc_target_addr_end_pairs(Elf *e,
 	ElfW(Rel) *rel_base = is_rela ? NULL : (ElfW(Rel) *) tbl_data->d_buf;
 	for (unsigned i = 0; i < nrel; ++i)
 	{
-		/* Is this relocation referencing a section symbol?
-		 * FIXME: this is ELF64-specific. */
+		/* Is this relocation referencing a section symbol? */
 		Elf64_Xword info = is_rela ? rela_base[i].r_info : rel_base[i].r_info;
-		unsigned symind = ELF64_R_SYM(info);
-		if (symind
-				&& ELF64_ST_TYPE(symtab[symind].st_info) == STT_SECTION)
+		unsigned symind = ELFW_R_SYM(info);
+		if (symind &&   (     ELFW_ST_TYPE(symtab[symind].st_info) == STT_SECTION
+		                  || (ELFW_ST_TYPE(symtab[symind].st_info) == STT_NOTYPE
+		                      && ELFW_ST_BIND(symtab[symind].st_info) == STB_LOCAL)
+		                )
+		)
 		{
 			/* NOTE that the *referenced vaddr* is *not*
 			 * the r_offset i.e. the relocation site.
 			 * It's the vaddr of the referenced section symbol,
 			 * i.e. of the referenced section,
-			 * plus the addend if any. */
+			 * plus the addend if any.
+			 * In fact it's not even that! There is a reloc-specific
+			 * adjustment that's needed, in order to get the actual
+			 * logically referenced symbol, at least in the case of PC-relative
+			 * relocs on x86{,_x64}. That's because the referenced address
+			 * is computed relative to the *next* instruction's base, but the
+			 * linker is oblivious to this and hacks around it with a -4 addend
+			 * so that the fixed-up bytes have a displacement that is 4 bytes
+			 * lower than the displacement from the reloc site. We need to apply
+			 * knowledge of the specific relocation's effective base address on
+			 * the architecture defining the PC-relative addressing mode, so
+			 * that we can find the actual effective referenced address. */
 			unsigned shndx = symtab[symind].st_shndx;
 			Elf64_Sword referenced_vaddr
-				= get_shdr(e, shndx).sh_addr + 
-					(is_rela ? rela_base[i].r_addend : 0);
+				= symtab[symind].st_value +
+					(is_rela ? rela_base[i].r_addend : 0) +
+					reloc_synthetic_addend(
+						is_rela ? (void*)&rela_base[i] : (void*)&rel_base[i],
+						is_rela ? SHT_RELA : SHT_REL,
+						symtab,
+						ehdr.e_machine
+					);
 			GElf_Shdr shdr = get_shdr(e, shndx);
 			Elf64_Sword referenced_section_end = shdr.sh_addr + shdr.sh_size;
+			std::cerr << "Saw a reloc target at 0x" << std::hex << referenced_vaddr
+				<< " (limit: 0x" << referenced_section_end << ")"<< std::dec << std::endl;
+			ostringstream comment;
+			comment << relscn_namestr << "[" << i << "]";
 			target_addrs.insert(make_pair(
-				relscn_linear_base_idx + i,
+				make_pair(relscn_linear_base_idx + i, comment.str()),
 				make_pair(referenced_vaddr, referenced_section_end)
 			));
 		}
@@ -250,9 +320,9 @@ add_sane_reloc_intervals(
 		auto found_overlapping = statics.find(interval_overlapping);
 		if (found_overlapping == statics.end())
 		{
+			// OK, nothing currently overlaps it. What's the next-higher?
 			opt<unsigned> sane_length_to_static;
 			opt<unsigned> sane_length_to_next_reloc_target;
-			// OK, nothing currently overlaps it. What's the next-higher?
 			auto lb = statics.lower_bound(/*target_addr*/ interval_overlapping);
 			assert(lb == statics.end() || lb->first.lower() > target_addr);
 			if (lb != statics.end())
@@ -282,12 +352,17 @@ add_sane_reloc_intervals(
 			struct sym_or_reloc_rec_to_generate rec = {
 				/* kind */ REC_RELOC,
 				/* static_descr kind */ sticky_root_die::static_descr::REL,
-				/* idx_in_per_kind_table */ i_tuple->first /* the index in the linearised collection of reloc-record-containing sections */,
-				/* maybe_uniqtype */ opt<uniqued_name>()
+				/* idx_in_per_kind_table */ i_tuple->first.first /* the index in the linearised collection of reloc-record-containing sections */,
+				/* maybe_uniqtype */ opt<uniqued_name>(),
+				/* extra comment */ i_tuple->first.second
 			};
 			recs.insert(make_pair(i_tuple->second.first, /* the addr/end pair is the itself second thing in a pair */
 				rec));
 		}
+		else std::cerr << "Discarding a reloc target at 0x" << std::hex << target.first
+				<< " for overlap with static "
+				<< found_overlapping->second.get_summary(true).descr_priority_k << std::dec << std::endl;
+
 	}
 }
 
@@ -400,7 +475,9 @@ void output_one_segment_metavec(int idx, ElfW(Phdr) *ph,
 				<< ((i_rec->second.maybe_uniqtype) ? mangle_typename(*i_rec->second.maybe_uniqtype) : "0")
 				<< "))\" ; // alloc at 0x" << std::hex << i_rec->first << std::dec
 				<< " of kind " << i_rec->second.k
-				<< " (based on priority kind " << i_rec->second.priority_k << ")\\n \\" << std::endl;
+				<< " (based on priority kind " << i_rec->second.priority_k << ")"
+				<< " (" << i_rec->second.extra_comment << ")"
+				<< "\\n \\" << std::endl;
 		};
 	}
 	// std::cout << "};" << std::endl;

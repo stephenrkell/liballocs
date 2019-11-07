@@ -64,6 +64,19 @@ std::ostream& operator<<(std::ostream& s, const enum sym_or_reloc_kind& k);
 #define ELFW_ST_INFO(b, t) \
 	ELFW_ST_INFO_x(b, t, __ELF_NATIVE_CLASS)
 
+// and again
+#define ELFW_R_TYPE_y(i, enc) \
+	ELF ## enc ## _R_TYPE(i)
+#define ELFW_R_TYPE_x(i, enc) \
+	ELFW_R_TYPE_y(i, enc)
+#define ELFW_R_TYPE(i) \
+	ELFW_R_TYPE_x(i, __ELF_NATIVE_CLASS)
+#define ELFW_R_SYM_y(i, enc) \
+	ELF ## enc ## _R_SYM(i)
+#define ELFW_R_SYM_x(i, enc) \
+	ELFW_R_SYM_y(i, enc)
+#define ELFW_R_SYM(i) \
+	ELFW_R_SYM_x(i, __ELF_NATIVE_CLASS)
 
 namespace allocs
 {
