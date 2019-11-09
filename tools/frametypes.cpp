@@ -328,6 +328,7 @@ int main(int argc, char **argv)
 	using dwarf::core::with_static_location_die;
 	cout << "#include \"allocmeta-defs.h\"\n";
 	cout << "#include \"uniqtype-defs.h\"\n\n";
+	set<string> names_emitted;
 
 	for (auto i_i_subp = subprograms_list.begin(); i_i_subp != subprograms_list.end(); ++i_i_subp)
 	{
@@ -872,6 +873,20 @@ int main(int argc, char **argv)
 			assert(found_minoff != interval_minoffs.end());
 			signed interval_minoff = found_minoff->second;
 			
+			/* Before we output anything, extern-declare any that we need and haven't
+			 * declared yet. */
+			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
+			{
+				auto el_type = i_by_off->second->find_type();
+				auto name_pair = canonical_key_for_type(el_type);
+				string mangled_name = mangle_typename(name_pair);
+				if (names_emitted.find(mangled_name) == names_emitted.end())
+				{
+					emit_extern_declaration(std::cout, name_pair, /* force_weak */ false);
+					names_emitted.insert(mangled_name);
+				}
+			}
+
 			/* Output in offset order, CHECKing that there is no overlap (sanity). */
 			cout << "\n/* uniqtype for stack frame ";
 			string unmangled_typename = typename_for_vaddr_interval(i_subp, i_frame_int->first);
@@ -1004,22 +1019,17 @@ int main(int argc, char **argv)
 	{
 		unsigned offset_from_frame_base = frame_offsets_by_subprogram[i_pair->second];
 	
+		if (i_pair != sorted_intervals.begin()) cout << ",";
 		cout << "\n\t/* frame alloc record for vaddr 0x" << std::hex << i_pair->first.lower() 
 			<< "+" << i_pair->first.upper() << std::dec << " */";
 		cout << "\n\t{\t" << offset_from_frame_base << ","
-			<< "\n\t\t{ (void*)0, (void*)0, "
-			<< "(char*) " << "0" // will fix up at load time
-			<< " + " << i_pair->first.lower() << "UL, " 
+			<< "\n\t\t{ 0x" << std::hex << i_pair->first.lower() << "UL, " << std::dec
 			<< "&" << mangle_typename(make_pair(*i_pair->second.enclosing_cu().name_here(),
 				typename_for_vaddr_interval(i_pair->second, i_pair->first)))
 			<< " }"
 			<< "\n\t}";
-		cout << ",";
 		++total_emitted;
 	}
-	// output a null terminator entry
-	cout << "\n\t{ /* offset from base */ 0, { /* site */ (void*)0, /* type */ (struct uniqtype *)0 } }";
-	
 	// close the list
 	cout << "\n};\n";
 

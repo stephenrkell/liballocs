@@ -35,6 +35,9 @@ static void *main_bp; // beginning of main's stack frame
 
 struct suballocated_chunk_rec; // FIXME: remove once heap_index has been refactored
 
+static struct frame_uniqtype_and_offset
+pc_to_frame_uniqtype(const void *addr);
+
 void __stackframe_allocator_init(void) __attribute__((constructor(101)));
 void __stackframe_allocator_init(void)
 {
@@ -306,7 +309,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 		// (if our target address is *lower* than sp, we'll abandon the walk, below)
 
 		// 1. get the frame uniqtype for frame_ip
-		struct frame_uniqtype_and_offset s = vaddr_to_stack_uniqtype((void *) ip);
+		struct frame_uniqtype_and_offset s = pc_to_frame_uniqtype((void *) ip);
 		struct uniqtype *frame_desc = s.u;
 		if (!frame_desc)
 		{
@@ -364,51 +367,49 @@ abort_stack:
 }
 #define maximum_vaddr_range_size (4*1024) // HACK
 
-struct frame_uniqtype_and_offset
-vaddr_to_stack_uniqtype(const void *vaddr)
+void init_frames_info(struct file_metadata *file)
 {
-	assert(__liballocs_allocsmt != NULL);
-	if (!vaddr) return (struct frame_uniqtype_and_offset) { NULL, 0 };
-	
-	/* We chained the buckets to completely bypass the extra struct layer 
-	 * that is frame_allocsite_entry.
-	 * This means we can walk the buckets as normal.
-	 * BUT we then have to fish out the frame offset.
-	 * We do this with a "CONTAINER_OF"-style hack. 
-	 * Then we return a *pair* of pointers. */
-	
-	struct allocsite_entry **initial_bucketpos = ALLOCSMT_FUN(ADDR, (void*)((intptr_t)vaddr | (BEGINNING_OF_STACK+1ul)));
-	struct allocsite_entry **bucketpos = initial_bucketpos;
-#if 0
-	_Bool might_start_in_lower_bucket = 1;
-	do 
+	if (!file->meta_obj_handle) return;
+	ElfW(Sym) *found = gnu_hash_lookup(
+			get_gnu_hash(file->meta_obj_handle),
+			get_dynsym(file->meta_obj_handle),
+			get_dynstr(file->meta_obj_handle),
+			"frame_vaddrs");
+	if (found)
 	{
-		struct allocsite_entry *bucket = *bucketpos;
-		for (struct allocsite_entry *p = bucket; p; p = (struct allocsite_entry *) p->next)
-		{
-			/* NOTE that in this memtable, buckets are sorted by address, so 
-			 * we would ideally walk backwards. We can't, so we peek ahead at
-			 * p->next. */
-			if (p->allocsite <= vaddr && 
-				(!p->next || ((struct allocsite_entry *) p->next)->allocsite > vaddr))
-			{
-				struct frame_allocsite_entry *e = (struct frame_allocsite_entry *) (
-					(char*) p
-					- offsetof(struct frame_allocsite_entry, entry)
-				);
-				assert(&e->entry == p);
-				return (struct frame_uniqtype_and_offset) { p->uniqtype, e->offset_from_frame_base };
-			}
-			might_start_in_lower_bucket &= (p->allocsite > vaddr);
-		}
-		/* No match? then try the next lower bucket *unless* we've seen 
-		 * an object in *this* bucket which starts *before* our target address. 
-		 * In that case, no lower-bucket object can span far enough to reach our
-		 * static_addr, because to do so would overlap the earlier-starting object. */
-		--bucketpos;
-	} while (might_start_in_lower_bucket && 
-	  (initial_bucketpos - bucketpos) * allocsmt_entry_coverage < maximum_vaddr_range_size);
-#endif
+		struct frame_allocsite_entry *first_entry = sym_to_addr(found);
+		file->nframes =  found->st_size / sizeof (struct frame_allocsite_entry);
+		file->frames_info = first_entry;
+	}
+}
+
+static struct frame_uniqtype_and_offset
+pc_to_frame_uniqtype(const void *addr)
+{
+	/* First find the file. */
+	struct big_allocation *file_b = __lookup_bigalloc_from_root(addr,
+		&__static_file_allocator, NULL);
+	if (!file_b) goto fail;
+	/* Now get its frame info. */
+	struct file_metadata *file
+	 = (struct file_metadata *) file_b->meta.un.opaque_data.data_ptr;
+	assert(file);
+	if (!file->frames_info) goto fail;
+	uintptr_t target_vaddr = (uintptr_t) addr - file->l->l_addr;
+#define proj(p) ((p)->entry.allocsite_vaddr)
+	struct frame_allocsite_entry *found = bsearch_leq_generic(
+		struct frame_allocsite_entry, target_vaddr,
+		/*  T*  */ file->frames_info, /* unsigned */ file->nframes,
+		proj);
+#undef proj
+	if (found)
+	{
+		return (struct frame_uniqtype_and_offset) {
+			found->entry.uniqtype,
+			found->offset_from_frame_base
+		};
+	}
+fail:
 	return (struct frame_uniqtype_and_offset) { NULL, 0 };
 }
 #undef maximum_vaddr_range_size

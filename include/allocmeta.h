@@ -266,6 +266,8 @@ struct file_metadata
 	ElfW(Half) strtabndx;
 
 	struct allocsites_vectors_by_base_id_entry *allocsites_info;
+	struct frame_allocsite_entry *frames_info;
+	unsigned nframes;
 
 	/* "Starts" are symbols with length (spans).
 	   We don't index symbols that are not spans.
@@ -311,6 +313,8 @@ void __stack_allocator_init(void);
 _Bool __stack_allocator_notify_unindexed_address(const void *ptr);
 extern void *__top_of_initial_stack __attribute__((visibility("protected")));
 extern rlim_t __stack_lim_cur __attribute__((visibility("protected")));
+
+void init_frames_info(struct file_metadata *file) __attribute__((visibility("hidden")));
 
 void __auxv_allocator_init(void);
 void __alloca_allocator_init(void);

@@ -105,12 +105,6 @@ struct frame_uniqtype_and_offset
 	unsigned o;
 };
 
-struct frame_uniqtype_and_offset 
-vaddr_to_stack_uniqtype(const void *vaddr)
-		__attribute__((visibility("hidden")));
-struct uniqtype *
-static_addr_to_uniqtype(const void *static_addr, void **out_object_start)
-		__attribute__((visibility("hidden")));
 #define META_OBJ_SUFFIX "-meta.so"
 _Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l)
 			__attribute__((visibility("hidden")));

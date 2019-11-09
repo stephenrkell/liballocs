@@ -104,6 +104,10 @@ ifneq ($(filter allocsites-bloom,$(METADATA_KINDS)),)
 $(info Generating allocsites-bloom)
 meta_sources += $(META_BASE)/$(1)-allocsites-bloom.c
 endif
+ifneq ($(filter frametypes,$(METADATA_KINDS)),)
+$(info Generating frametypes)
+meta_sources += $(META_BASE)/$(1)-frametypes.c
+endif
 
 # for debugging, try: @echo all dependencies: $+
 $(META_BASE)/%-meta.so: /% $(call meta_sources,%)

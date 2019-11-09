@@ -463,6 +463,7 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 		close(fd);
 	}
 	init_allocsites_info(meta);
+	init_frames_info(meta);
 }
 static void free_file_metadata(void *fm)
 {
