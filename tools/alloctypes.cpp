@@ -170,6 +170,7 @@ int main(int argc, char **argv)
 		const string& codeless_array_name = i_mangled_name->second.second;
 		if (names_emitted.find(mangled_codeless_array_name) == names_emitted.end())
 		{
+			write_uniqtype_section_decl(cout, mangled_codeless_array_name);
 			write_uniqtype_open_flex_array(cout,
 				mangled_codeless_array_name,
 				/* array_codeless_name.second */ i_mangled_name->second.second
