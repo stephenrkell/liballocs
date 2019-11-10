@@ -126,7 +126,9 @@ int main(int argc, char **argv)
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	cout << "#include \"uniqtype-defs.h\"\n\n";
 	write_master_relation(master_relation, cout, cerr, false /* emit_void */, false /* emit_struct_def */, 
-		names_emitted, types_by_name, /* emit_codeless_alises */ false);
+		names_emitted, types_by_name, /* emit_codeless_alises */ true);
+	// HACK: we emit codeless aliases here, but better if it were a wrapper shell
+	// script on the -meta.so afterwards, because types don't only come from dwarftypes.
 
 	// success! 
 	return 0;
