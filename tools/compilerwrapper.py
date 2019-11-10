@@ -290,6 +290,8 @@ class CompilerWrapper:
                 self.argOption({Phase.PREPROCESS}, num, args[num], None)
             elif args[num].startswith('-L'):
                 self.argItem({Phase.LINK}, num)
+            elif args[num] in {'-flto', "-fno-lto"}:
+                self.argOption({Phase.COMPILE, Phase.LINK}, num, args[num], None)
             elif args[num].startswith('-f'):
                 self.argOption({Phase.COMPILE}, num, args[num], None)
             elif args[num].startswith('-O'):

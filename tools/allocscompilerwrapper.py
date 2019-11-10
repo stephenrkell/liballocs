@@ -641,12 +641,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # What we want is "user code that is going into this link".
             opts = self.specialOptionsForPhases(set({Phase.LINK}), deletions=thisLinkOutputOptions.union(set(["-o"])))
             assert ("-o" not in self.flatOptions(opts))
-            if "-Wl,-q" not in self.flatOptions(opts) and \
-               "-Wl,--emit-relocs" not in self.flatOptions(opts):
-                # we want the relocs, so we will add this
-                opts += {"-Wl,-q"}
-            else:
-                stripRelocsAfterMetadataBuild = False
             relocFilename = finalLinkOutput + ".linked.o"
             extraFirstOpts = ["-Wl,-r", "-o", relocFilename, "-nostartfiles", "-nodefaultlibs", "-nostdlib"]
             if self.recognisesOption("-no-pie"):
@@ -659,6 +653,14 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     linkItemsDeferred += [item]
                 else:
                     linkItemsIncluded += [item]
+            if "-Wl,-q" not in self.flatOptions(opts) and \
+               "-Wl,--emit-relocs" not in self.flatOptions(opts):
+                # we want the relocs, so we will add this
+                extraFirstOpts += ["-Wl,-q"]
+                finalLinkArgs += ["-Wl,-q"]
+                stripRelocsAfterMetadataBuild = True
+            else:
+                stripRelocsAfterMetadataBuild = False
             allArgs = self.flatOptions(opts) + extraFirstOpts + stubsLinkArgs + linkItemsIncluded
             assert("-o" not in self.flatItems(self.itemsForPhases({Phase.LINK})))
             self.debugMsg("running underlying compiler once to link with reloc output, with args: " + \
