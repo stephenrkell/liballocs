@@ -3,7 +3,6 @@
 #include "do-syscall.h"
 #include "systrap.h"
 #include "vas.h"
-#include "allocsmt.h"
 #include "maps.h"
 #include "pageindex.h"
 #define RELF_DEFINE_STRUCTURES

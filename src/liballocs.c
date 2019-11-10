@@ -19,6 +19,7 @@
 #include "raw-syscalls.h"
 #include "liballocs.h"
 #include "liballocs_private.h"
+#include "allocsites.h"
 #include "dlbind.h"
 
 #ifdef _LIBGEN_H
@@ -468,7 +469,6 @@ static unsigned meta_base_len;
 
 int __liballocs_debug_level;
 _Bool __liballocs_is_initialized;
-allocsmt_entry_type *__liballocs_allocsmt;
 
 // these two are defined in addrmap.h as weak
 unsigned long __addrmap_max_stack_size;
@@ -1057,21 +1057,6 @@ int __liballocs_global_init(void)
 	 * 
 	 * It seems that option 1 is better. 
 	 */
-#ifndef NO_MEMTABLE
-	/* Allocate the memtable. 
-	 * Assume we don't need to cover addresses >= STACK_BEGIN.
-	 * BUT we store vaddrs in the same table, with addresses ORed
-	 * with STACK_BEGIN. 
-	 * And we store static objects' addres in the same table, with addresses ORed
-	 * with STACK_BEGIN<<1. 
-	 * So quadruple up the size of the table accordingly.
-	 * To avoid the address space getting into a configuration that screws up our
-	 * shadow-space arrangement, always place this table at 0x300000000000. */
-	__liballocs_allocsmt = MEMTABLE_NEW_WITH_TYPE_AT_ADDR(allocsmt_entry_type, allocsmt_entry_coverage, 
-		(void*) 0, (void*) (0x800000000000ul << 2), (const void*) 0x300000000000ul);
-	if (__liballocs_allocsmt == MAP_FAILED) abort();
-	debug_printf(3, "allocsmt at %p\n", __liballocs_allocsmt);
-#endif
 	/* Initialize the generic malloc thingy first, because libdl will want to malloc 
 	 * when we call it. */
 	__generic_malloc_allocator_init();
@@ -1381,7 +1366,7 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		uintptr_t alloc_site_addr = p_ins->alloc_site;
 		void *alloc_site = (void*) alloc_site_addr;
 		if (out_site) *out_site = alloc_site;
-		struct allocsite_entry *entry = NULL; // FIXME: allocsite_to_entry(alloc_site/*, p_ins*/);
+		struct allocsite_entry *entry = __liballocs_find_allocsite_entry_at(alloc_site);
 		alloc_uniqtype = entry ? entry->uniqtype : NULL;
 		/* Remember the unrecog'd alloc sites we see. */
 		if (!alloc_uniqtype && alloc_site && 

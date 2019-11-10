@@ -46,7 +46,7 @@ struct allocator; // instead of allocmeta.h
 #include <libunwind.h>
 #endif
 
-#include "allocsmt.h"
+#include "vas.h"
 #include "liballocs_cil_inlines.h"
 
 extern unsigned long __liballocs_aborted_stack;

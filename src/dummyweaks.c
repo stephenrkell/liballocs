@@ -80,8 +80,6 @@ void *__liballocs_my_metaobj(void)
 	return NULL;
 }
 
-void *__liballocs_allocsmt;
-
 unsigned long __liballocs_get_alloc_size(void *obj)
 {
 	return 0;

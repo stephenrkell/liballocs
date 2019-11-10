@@ -23,7 +23,6 @@ typedef bool _Bool;
 #include <stdint.h>
 #include <link.h>
 #include "heap_index.h" /* includes memtable */
-#include "allocsmt.h"
 #include "systrap.h"
 
 #include "liballocs.h"
