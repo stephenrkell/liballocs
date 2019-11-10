@@ -121,7 +121,7 @@ int main(int argc, char **argv)
 	cout << "#include \"uniqtype-defs.h\"\n\n";
 	// write a forward declaration for every uniqtype we need
 	set<string> names_emitted;
-	/* As a pre-pass, remember any ARR0 names we need. These need special handling,
+	/* As a pre-pass, remember any ARR names we need. These need special handling,
 	 * as flexible arrays with their make_precise members set. */
 	map<string, pair<string, string> > arr0_needed_by_allocsites;
 	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
@@ -138,11 +138,11 @@ int main(int argc, char **argv)
 		if (declare_as_array0)
 		{
 			string element_mangled_name = mangle_typename(make_pair(element_name_used_code, element_name_used_ident));
-			cout << "/* Allocation site type needed: ARR0 of " 
+			cout << "/* Allocation site type needed: ARR of " 
 				<< element_mangled_name
 				<< " */" << endl;
 			
-			string codeless_array_name = string("__ARR0_") + element_name_used_ident;
+			string codeless_array_name = string("__ARR_") + element_name_used_ident;
 			string mangled_codeless_array_name
 			 = mangle_typename(make_pair(string(""), codeless_array_name));
 			arr0_needed_by_allocsites.insert(
@@ -160,7 +160,7 @@ int main(int argc, char **argv)
 		cout << "extern struct uniqtype " << mangle_typename(i_site->second.first) << ";" << endl;
 	}
 
-	// now write those pesky ARR0 ones -- any that we didn't emit earlier
+	// now write those pesky ARR ones -- any that we didn't emit earlier
 	for (auto i_mangled_name = arr0_needed_by_allocsites.begin();
 		i_mangled_name != arr0_needed_by_allocsites.end();
 		++i_mangled_name)
@@ -170,13 +170,6 @@ int main(int argc, char **argv)
 		const string& codeless_array_name = i_mangled_name->second.second;
 		if (names_emitted.find(mangled_codeless_array_name) == names_emitted.end())
 		{
-			// we were intending to forestall the emission during the master relation
-			// FIXME: there might be two cases here! want ARR0 and FLEXARR?
-			// If we introduce FLEXARR, be sure to update symname-funcs.sh / translate_symnames
-			// assert(names_emitted.find(mangled_array_name) == names_emitted.end());
-			// This OBVIOUSLY doesn't work because we added to names_emitted!
-			// Let the multiple definition error get us.
-			// compute and print destination name
 			write_uniqtype_open_flex_array(cout,
 				mangled_codeless_array_name,
 				/* array_codeless_name.second */ i_mangled_name->second.second
@@ -199,7 +192,7 @@ int main(int argc, char **argv)
 		
 		if (!declare_as_array0)
 		{
-			cout << "/* Allocation site type not needing ARR0 type: " 
+			cout << "/* Allocation site type not needing ARR type: " 
 				<< i_site->second.first.second
 				<< " */" << endl;
 		} else cout << "/* We should have emitted a type of this name earlier: "
