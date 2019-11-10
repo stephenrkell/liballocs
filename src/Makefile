@@ -31,7 +31,7 @@ else
 vpath %.c $(srcdir)
 vpath %.c $(srcdir)/allocators
 
-allocators/.%.d allocators/%.o:: allocators
+allocators/%.d allocators/%.o:: allocators
 allocators:
 	mkdir -p allocators
 
@@ -132,13 +132,23 @@ SYSTRAP_OBJS := systrap.o
 # Generate deps.
 ALL_OBJS := $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(NONSHARED_OBJS) $(PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) $(SYSTRAP_OBJS)
 # enumerate src files backwards from our .o files
-C_SRC := $(sort $(patsubst %.o,%.c,$(ALL_OBJS)))
-dep_fname = $(dir $1)$(patsubst %.c,.%.d,$(notdir $1))
-C_DEPS := $(foreach f,$(C_SRC),$(call dep_fname,$(f)))
-DEPS := $(C_DEPS)
-$(call dep_fname,%.c): %.c
-	mkdir -p $(dir $@) && $(CC) -MM $(CFLAGS) "$<" > "$@" || (rm -f "$@"; false)
--include $(DEPS)
+# -- HACK: nonshared_hooks.o is not built from .c source
+DEP_OBJS := $(filter-out $(NONSHARED_OBJS),$(ALL_OBJS))
+C_SRC := $(sort $(patsubst %.o,%.c,$(DEP_OBJS)))
+# Becuase of our vpath'd rules, we can't do patsubst on the source path to get the
+# obj path... $< will be something wacky. Instead, work from the object file.
+# All our objs are from C files, for now
+C_OBJ_DEPS := $(foreach f,$(DEP_OBJS),$(patsubst %.o,%.d,$(f)))
+DEPS := $(C_OBJ_DEPS)
+$(info C_OBJ_DEPS are $(C_OBJ_DEPS))
+# ARGH. If we define a rule verbatim inside $(foreach ), it doesn't actually get
+# defined. So we have to use eval.
+define rule-for-depfile =
+$(patsubst %.o,%.d,$(1)): $(patsubst %.o,%.c,$(1))
+	mkdir -p $$(dir $$@) && $$(CC) -MM -MT $(1) $$(CFLAGS) "$$<" > "$$@" || (rm -f "$$@"; false)
+endef
+$(foreach f,$(DEP_OBJS),$(eval $(call rule-for-depfile,$(f))))
+include $(DEPS)
 
 # event_hooks.c is macroised so that we can create special versions of it.
 # This version is used when we link an executable including its own malloc impl.
@@ -249,7 +259,7 @@ liballocs_test.so: systrap_noop.o liballocs_pic.a dlmalloc.a
 # liballocs.so is a linker script, so don't remove it
 .PHONY: clean
 clean: 
-	rm -f *.o */*.o $(filter-out liballocs.so,$(wildcard *.so)) .*.d */.*.d *.a *_fast.c
+	rm -f *.o */*.o $(filter-out liballocs.so,$(wildcard *.so)) *.d */*.d *.a *_fast.c
 	rm -r allocators
 
 .PHONY: install
