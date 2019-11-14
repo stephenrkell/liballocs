@@ -197,6 +197,7 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 #define ALLOCATOR_HANDLE_LIFETIME_INSERT(a) ((a) == &__generic_malloc_allocator)
 
 void __mmap_allocator_init(void);
+_Bool __mmap_allocator_notify_brk(void *new_curbrk);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
 	int prot, int flags, int fd, off_t offset, void *caller);
 void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, 
@@ -204,6 +205,7 @@ void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size,
 void __mmap_allocator_notify_mremap_after(void *ret_addr, void *old_addr, size_t old_size, 
 	size_t new_size, int flags, void *new_address, void *caller);
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller);
+
 _Bool __mmap_allocator_is_initialized(void) __attribute__((visibility("hidden")));
 _Bool __mmap_allocator_notify_unindexed_address(const void *ptr);
 struct mapping_entry;
@@ -214,6 +216,7 @@ struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mappi
 void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *b);
 
 void __static_file_allocator_init(void);
+_Bool __static_file_allocator_notify_brk(void *new_curbrk);
 void __static_file_allocator_notify_load(void *handle, const void *load_site);
 void __static_file_allocator_notify_unload(const char *copied_filename);
 

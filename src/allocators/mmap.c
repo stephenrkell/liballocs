@@ -836,7 +836,7 @@ static void *current_sbrk(void)
 {
 	return __curbrk;
 }
-void __mmap_allocator_notify_brk(void *new_curbrk);
+_Bool __mmap_allocator_notify_brk(void *new_curbrk);
 
 struct big_allocation *executable_mapping_bigalloc __attribute__((visibility("hidden")));
 struct big_allocation *executable_file_bigalloc __attribute__((visibility("hidden")));
@@ -1442,7 +1442,7 @@ void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk)
 	}
 }
 
-void __mmap_allocator_notify_brk(void *new_curbrk)
+_Bool __mmap_allocator_notify_brk(void *new_curbrk)
 {
 	if (!initialized)
 	{
@@ -1451,9 +1451,10 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 		 * we're initialized, so that's okay. BUT see the note in 
 		 * __mmap_allocator_init... before we're initialized, we need
 		 * another mechanism to probe for brk updates. */
-		return;
+		return 0;
 	}
 	__adjust_bigalloc_end(executable_mapping_bigalloc, new_curbrk);
+	return 1;
 }
 
 static liballocs_err_t get_info(void *obj, struct big_allocation *b, 

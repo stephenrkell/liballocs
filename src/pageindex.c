@@ -113,7 +113,7 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 #ifndef NDEBUG
 	if (old_num != (bigalloc_num_t) -1 && old_num) // FIXME: also check when old_num is zero
 	{
-		wchar_t *pageindex_end = (wchar_t *) (pageindex + PAGENUM(MAXIMUM_USER_ADDRESS + 1));
+		bigalloc_num_t *pageindex_end = pageindex + PAGENUM(MAXIMUM_USER_ADDRESS + 1);
 		// we should get zero or more of the old value
 		// ... followed by zero or one of the transitional value
 		// ... followed by zero or more of the null value
@@ -125,11 +125,15 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 		// within that part of the pageindex.
 		// We could also open-code a wchar_t-based solution, but this breaks
 		// strict aliasing rules. So just do the slower thing... we're debug.
-		bigalloc_num_t *found = begin;
-		while ((found < pageindex_end)
-					&& (!*found || *found == old_num)
-					&& (found-begin) < n) ++found;
-		assert(found - begin == n);
+		bigalloc_num_t *p;
+		// search forwards from p, checking we see zero or old_num
+		for (p = begin; p < pageindex_end && p - begin < n; ++p)
+		{
+			// either *p is uninit'd or it equals the old_num we expect to see
+			assert(!*p || *p == old_num);
+		}
+		// assert we didn't terminate early
+		assert(p - begin == n);
 	}
 #endif
 	if (n != 0) wmemset((wchar_t *) begin, wchar_val, n / 2);
@@ -138,7 +142,9 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 	if (n % 2 == 1)
 	{
 #ifndef NDEBUG
-		if (old_num != (bigalloc_num_t) -1 && *(begin + (n-1)) != old_num) abort();
+		// if we have one left over, we should have done up to n-1
+		assert(old_num == (bigalloc_num_t) -1
+				|| *(begin + (n-1)) == old_num);
 #endif
 		*(begin + (n-1)) = num;
 	}

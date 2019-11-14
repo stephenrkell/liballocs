@@ -280,10 +280,15 @@ static struct dso_vaddr_bounds get_dso_vaddr_bounds(void *handle)
 	int ret = dl_for_one_object_phdrs(handle, vaddr_bounds_cb, &bounds);
 	return bounds;
 }
-void __static_file_allocator_notify_brk(void *new_curbrk)
+_Bool __static_file_allocator_notify_brk(void *new_curbrk)
 {
-	if (!initialized) return;
+	if (!initialized) return 0;
+	if (!__mmap_allocator_notify_brk(new_curbrk)) return 0; // not ready yet
 	__adjust_bigalloc_end(executable_file_bigalloc, new_curbrk);
+	assert((char*) executable_file_bigalloc->end >= (char*) new_curbrk);
+	assert(pageindex[PAGENUM((char*) new_curbrk - 1)]
+		== executable_file_bigalloc - &big_allocations[0]);
+	return 1;
 }
 
 void __static_file_allocator_notify_load(void *handle, const void *load_site)

@@ -25,7 +25,9 @@ void __static_segment_allocator_init(void)
 	if (!initialized && !trying_to_initialize)
 	{
 		trying_to_initialize = 1;
-		/*dl_iterate_phdr(add_all_loaded_segments, NULL);*/
+		/* Initialize what we depend on. */
+		__static_file_allocator_init();
+		/* We have nothing to init ourselves. */
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -43,7 +45,8 @@ void __static_segment_allocator_notify_define_segment(
 	unsigned loadndx
 )
 {
-	if (!initialized && !trying_to_initialize) __static_segment_allocator_init();
+	if (!initialized) __static_segment_allocator_init();
+	assert(initialized || trying_to_initialize);
 	ElfW(Phdr) *phdr = &file->phdrs[phndx];
 	const void *segment_start_addr = (char*) file->l->l_addr + phdr->p_vaddr;
 	size_t segment_size = phdr->p_memsz;
@@ -121,10 +124,12 @@ void __static_segment_allocator_notify_define_segment(
 		.starts_bitmap = */
 	};
 }
-void __static_segment_allocator_notify_brk(void *new_curbrk)
+_Bool __static_segment_allocator_notify_brk(void *new_curbrk)
 {
-	if (!initialized) return;
+	if (!initialized) return 0; // not ready yet
+	if (!__static_file_allocator_notify_brk(new_curbrk)) return 0; // not ready yet
 	__adjust_bigalloc_end(executable_data_segment_bigalloc, new_curbrk);
+	return 1;
 }
 
 void __static_segment_allocator_notify_destroy_segment(
