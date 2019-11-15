@@ -317,13 +317,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     errfile.write("Metadata build failed, so will not strip relocs from output binary")
                 if (ret2 != 0 or "DEBUG_CC" in os.environ):
                     self.printErrors(errfile)
-            # Now if the metadata build succeeded, and if we're asked to
-            # strip relocs
-            if stripRelocs and ret2 == 0:
-                cmd = [self.getLibAllocsBaseDir() + "/tools/strip-non-dynamic-relocs.sh", \
-                    os.path.realpath(outputFile)]
-                errfile.write("Running: " + " ".join(cmd) + "\n")
-                #subprocess.call(cmd, stderr=errfile, stdout=errfile)
+                # Now if the metadata build succeeded, and if we're asked to
+                # strip relocs
+                if stripRelocs and ret2 == 0:
+                    cmd = [self.getLibAllocsBaseDir() + "/tools/strip-non-dynamic-relocs.sh", \
+                        os.path.realpath(outputFile)]
+                    errfile.write("Running: " + " ".join(cmd) + "\n")
+                    #subprocess.call(cmd, stderr=errfile, stdout=errfile)
             return ret2
         else:
             return 1
