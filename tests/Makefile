@@ -3,6 +3,10 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -O2 -save-temps
 
+# HACK while LTO is broken
+CFLAGS += -fno-lto
+LDFLAGS += -fno-lto
+
 ifneq ($(USE_FAKE_LIBUNWIND),)
 CFLAGS += -DUSE_FAKE_LIBUNWIND=1
 else
@@ -119,6 +123,8 @@ checkrun-lib-test:
 	$(MAKE) cleanrun-lib-test >/dev/null 2>&1
 checkrun-forward-decls:
 	$(MAKE) cleanrun-forward-decls >/dev/null 2>&1
+checkrun-metavec-layout:
+	$(MAKE) cleanrun-metavec-layout >/dev/null 2>&1
 
 _onlyrun-nopreload-%:
 	./nopreload-$*
@@ -164,7 +170,7 @@ default:
 clean: # (delete anything whose name is a prefix of a .c file's and doesn't contain a dot)
 	rm -f $(filter-out .,$(patsubst %.c,%,$(shell find -name '*.c')))
 	find -name '*.cil.*' -o -name '*.i' -o -name '*.o' -o \
-	     -name '*.s' -o -name '*.allocs' -o -name '*.so' -o \
+	     -name '*.s' -o -name '*.allocs' -o -name '*.so' -o -name '*.ltrans.out' -o \
 	     -name '*.allocstubs.c' -o -name '*.fixuplog' | xargs rm -f
 
 .PHONY: unit-tests
