@@ -131,8 +131,6 @@ void __static_file_allocator_init(void)
 				}
 			}
 		}
-
-		
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -280,16 +278,6 @@ static struct dso_vaddr_bounds get_dso_vaddr_bounds(void *handle)
 	int ret = dl_for_one_object_phdrs(handle, vaddr_bounds_cb, &bounds);
 	return bounds;
 }
-_Bool __static_file_allocator_notify_brk(void *new_curbrk)
-{
-	if (!initialized) return 0;
-	if (!__mmap_allocator_notify_brk(new_curbrk)) return 0; // not ready yet
-	__adjust_bigalloc_end(executable_file_bigalloc, new_curbrk);
-	assert((char*) executable_file_bigalloc->end >= (char*) new_curbrk);
-	assert(pageindex[PAGENUM((char*) new_curbrk - 1)]
-		== executable_file_bigalloc - &big_allocations[0]);
-	return 1;
-}
 
 void __static_file_allocator_notify_load(void *handle, const void *load_site)
 {
@@ -336,8 +324,8 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	if (!highest_containing_mapping_bigalloc) abort();
 	if (highest_containing_mapping_bigalloc != lowest_containing_mapping_bigalloc) abort();
 	struct big_allocation *containing_mapping_bigalloc = lowest_containing_mapping_bigalloc;
-	size_t file_size = (char*) highest_containing_mapping_bigalloc->end
-		- (char*) lowest_containing_mapping_bigalloc->begin;
+	size_t file_bigalloc_size = (uintptr_t)((char*) l->l_addr + bounds.limit_vaddr)
+		- (uintptr_t) lowest_containing_mapping_bigalloc->begin;
 	struct segments sinfo = (struct segments) { .nload = 0 };
 	dl_for_one_object_phdrs(l, discover_segments_cb, &sinfo);
 	assert(sinfo.nload != 0);
@@ -362,8 +350,8 @@ void __static_file_allocator_notify_load(void *handle, const void *load_site)
 	 * it PROT_NONE, and ensure the rules on extending mapping_sequences
 	 * will swallow this into the same sequence. */
 	struct big_allocation *b = __liballocs_new_bigalloc(
-		(void*) lowest_containing_mapping_bigalloc->begin,
-		file_size,
+		(void*) lowest_containing_mapping_bigalloc->begin, // the file begins at a page boundary
+		file_bigalloc_size,
 		(struct meta_info) {
 			.what = DATA_PTR,
 			.un = {

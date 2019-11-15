@@ -49,6 +49,8 @@ void sanity_check_bigalloc(struct big_allocation *b)
 #ifndef NDEBUG
 	if (BIGALLOC_IN_USE(b))
 	{
+		/* Must be non-zero-size. */
+		assert(b->end != b->begin);
 		/* The pageindex immediately before the beginning should not say
 		 * that it's this bigalloc there. */
 		assert(pageindex[PAGENUM(((char*)(b)->begin)-1)] != ((b) - &big_allocations[0]));
@@ -533,7 +535,7 @@ static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size
 		suballocator_private, suballocator_private_free);
 
 	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
-	/* For each page that this alloc spans, memset it in the page index. */
+	/* For each page that this alloc newly spans, memset it in the page index. */
 	memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) b->begin, PAGE_SIZE)),
 		b - &big_allocations[0], parent_num, 
 			PAGE_DIST(ROUND_UP((unsigned long) b->begin, PAGE_SIZE),

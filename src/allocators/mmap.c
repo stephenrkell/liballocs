@@ -451,9 +451,8 @@ report_problem:
 				&& (char*) executable_data_segment_start_addr
 					< (char*) existing_seq->end)
 		{
-			executable_data_segment_bigalloc = NULL; // FIXME: when will it get reinstated?
-			executable_file_bigalloc = NULL; // FIXME: when will it get reinstated?
 			executable_mapping_bigalloc = NULL; // FIXME: when will it get reinstated?
+			__brk_bigalloc = NULL;
 		}
 		__liballocs_delete_all_bigallocs_overlapping_range(existing_seq->begin,
 			existing_seq->end);
@@ -830,14 +829,6 @@ _Bool __mmap_allocator_is_initialized(void)
 static void *executable_end_addr;
 static void *data_segment_start_addr;
 
-// we always define a __curbrk -- it may override one in glibc, but fine
-void *__curbrk;
-static void *current_sbrk(void)
-{
-	return __curbrk;
-}
-_Bool __mmap_allocator_notify_brk(void *new_curbrk);
-
 struct big_allocation *executable_mapping_bigalloc __attribute__((visibility("hidden")));
 struct big_allocation *executable_file_bigalloc __attribute__((visibility("hidden")));
 struct big_allocation *executable_data_segment_bigalloc __attribute__((visibility("hidden")));
@@ -845,16 +836,11 @@ void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk);
 
 _Bool __mmap_allocator_notify_unindexed_address(const void *mem)
 {
-	if (initialized) return 0;
-	if (!executable_data_segment_bigalloc) return 0; // can't do anything
-	void *old_sbrk = current_sbrk(); // what we *think* sbrk is
-	void *new_sbrk = sbrk(0);
-	__adjust_bigalloc_end(executable_mapping_bigalloc, new_sbrk); // ... update it to what it actually is
-	return ((char *) mem >= (char*) old_sbrk 
-		&& (char *) mem < (char *) new_sbrk);
+	if (!initialized) return 0;
+	return __brk_allocator_notify_unindexed_address(mem);
 }
 
-static void set_executable_mapping_bigalloc(void)
+static void set_executable_mapping_bigalloc(void *real_end)
 {
 	/* We can be called more than once. */
 	if (executable_mapping_bigalloc) return;
@@ -876,6 +862,10 @@ static void set_executable_mapping_bigalloc(void)
 					&& (uintptr_t) big_allocations[i].begin <= executable_data_segment_start_addr)
 			{
 				executable_mapping_bigalloc = &big_allocations[i];
+				if ((uintptr_t) executable_mapping_bigalloc->end < (uintptr_t) real_end)
+				{
+					__liballocs_extend_bigalloc(executable_mapping_bigalloc, real_end);
+				}
 				break;
 			}
 		}
@@ -987,26 +977,28 @@ void __mmap_allocator_init(void)
 		 * move the sbrk() arbitrarily far, and by definition we won't see it
 		 * because we're not trapping sbrk() yet. We need the bigalloc lookup
 		 * (in the indexing logic, or in pageindex) to have a second-attempt
-		 * at getting the bigalloc after re-checking the sbrk().
-		 *
-		 * FIXME: I think the real way to fix this is to remove the dependency
-		 * from systrap on meta-objs. That is all just a big hack for __brk
-		 * anyway. */
+		 * at getting the bigalloc after re-checking the sbrk(). */
 		add_missing_mappings_from_proc();
 		/* Also extend the data segment to account for the current brk. */
-		set_executable_mapping_bigalloc();
+		set_executable_mapping_bigalloc(executable_end_addr);
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
+		/* From the moment we enable systrap, we need to be able to take
+		 * brk() calls. That means that the static file allocator needs
+		 * to be initialized. OR it means we factor brk out of the
+		 * file and segment stuff: the file ends at the end of the data
+		 * segment as given in the binary, and the remainder of the
+		 * mapping sequence is managed by the "brk" allocator. YES. */
 		__liballocs_post_systrap_init(); /* does the libdlbind symbol creation */
 		__liballocs_global_init(); // will add mappings; may change sbrk
 		// we want to trap syscalls in "__brk"; // glibc HACK!
 		// but "__brk" in glibc isn't an exportd symbol.
 		// instead, we need to walk its allocations
 		__systrap_brk_hack();
-		__adjust_bigalloc_end(executable_mapping_bigalloc, sbrk(0));
-
+		/* Now we are initialized. */
 		initialized = 1;
 		trying_to_initialize = 0;
+		__brk_allocator_init();
 	}
 }
 
@@ -1442,7 +1434,7 @@ void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk)
 	}
 }
 
-_Bool __mmap_allocator_notify_brk(void *new_curbrk)
+void __mmap_allocator_notify_brk(void *new_curbrk)
 {
 	if (!initialized)
 	{
@@ -1451,10 +1443,9 @@ _Bool __mmap_allocator_notify_brk(void *new_curbrk)
 		 * we're initialized, so that's okay. BUT see the note in 
 		 * __mmap_allocator_init... before we're initialized, we need
 		 * another mechanism to probe for brk updates. */
-		return 0;
+		return;
 	}
 	__adjust_bigalloc_end(executable_mapping_bigalloc, new_curbrk);
-	return 1;
 }
 
 static liballocs_err_t get_info(void *obj, struct big_allocation *b, 

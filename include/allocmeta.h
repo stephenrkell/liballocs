@@ -197,7 +197,7 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 #define ALLOCATOR_HANDLE_LIFETIME_INSERT(a) ((a) == &__generic_malloc_allocator)
 
 void __mmap_allocator_init(void);
-_Bool __mmap_allocator_notify_brk(void *new_curbrk);
+void __mmap_allocator_notify_brk(void *new_curbrk);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
 	int prot, int flags, int fd, off_t offset, void *caller);
 void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, 
@@ -216,9 +216,13 @@ struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mappi
 void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *b);
 
 void __static_file_allocator_init(void);
-_Bool __static_file_allocator_notify_brk(void *new_curbrk);
 void __static_file_allocator_notify_load(void *handle, const void *load_site);
 void __static_file_allocator_notify_unload(const char *copied_filename);
+
+void __brk_allocator_notify_brk(void *new_curbrk, const void *caller) __attribute__((visibility("hidden")));
+void __brk_allocator_init(void) __attribute__((visibility("hidden")));
+extern struct big_allocation *__brk_bigalloc __attribute__((visibility("hidden")));
+_Bool __brk_allocator_notify_unindexed_address(void *mem);
 
 struct segment_metadata
 {

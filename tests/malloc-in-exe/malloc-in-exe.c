@@ -10,6 +10,7 @@ int main(void)
 {
 	printf("about to do user malloc()\n");
 	void *a = malloc(sizeof (int));
+	printf("addr is %p\n", a);
 	
 	struct uniqtype *t = __liballocs_get_alloc_type(a);
 	printf("type is %p\n", t);

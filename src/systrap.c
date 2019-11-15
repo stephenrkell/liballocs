@@ -32,7 +32,8 @@ void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length
 			__attribute__((weak));
 void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)
 			__attribute__((weak));
-_Bool __mmap_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
+void __mmap_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
+void __brk_allocator_notify_brk(void *new_curbrk, const void *caller) __attribute__((weak));
 _Bool __static_file_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
 _Bool __static_segment_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
 extern _Bool __liballocs_is_initialized __attribute__((weak));
@@ -58,7 +59,8 @@ void brk_replacement(struct generic_syscall *s, post_handler *post)
 	void *brk_asked_for = (void*) s->args[0];
 	long int ret = do_syscall1(s);
 	void *brk_returned = (void*) ret;
-	if (&__static_segment_allocator_notify_brk) __static_segment_allocator_notify_brk(brk_returned);
+	if (&__brk_allocator_notify_brk) __brk_allocator_notify_brk(brk_returned,
+		GUESS_CALLER(s->saved_context->uc.uc_mcontext));
 	
 	/* Do the post-handling. */
 	post(s, ret);

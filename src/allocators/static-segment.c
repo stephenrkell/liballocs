@@ -16,7 +16,8 @@
 #include "pageindex.h"
 #include "raw-syscalls.h"
 
-static _Bool trying_to_initialize;
+/* static */ _Bool __static_segment_allocator_trying_to_initialize __attribute__((visibility("hidden")));
+#define trying_to_initialize __static_segment_allocator_trying_to_initialize
 static _Bool initialized;
 
 void __static_segment_allocator_init(void) __attribute__((constructor(102)));
@@ -24,10 +25,15 @@ void __static_segment_allocator_init(void)
 {
 	if (!initialized && !trying_to_initialize)
 	{
-		trying_to_initialize = 1;
-		/* Initialize what we depend on. */
+		/* Initialize what we depend on. This might do nothing if we
+		 * are already in the middle of doing this init. How do we
+		 * ensure that we always come back here to do *our* init?
+		 * Firstly, the static file allocator calls *us* when it's done.
+		 * Secondly, we don't set our "trying" flag until *it's* inited,
+		 * so that call will not give up saying "doing it". */
 		__static_file_allocator_init();
-		/* We have nothing to init ourselves. */
+		trying_to_initialize = 1;
+		/* That's all. */
 		initialized = 1;
 		trying_to_initialize = 0;
 	}
@@ -45,8 +51,12 @@ void __static_segment_allocator_notify_define_segment(
 	unsigned loadndx
 )
 {
-	if (!initialized) __static_segment_allocator_init();
-	assert(initialized || trying_to_initialize);
+	/* DON'T check initializedness.
+	 * Because the only thing we need to initialize is the data segment
+	 * bigalloc end, we can only become fully initialized once our
+	 * depended-on allocators (static file, mmap) are fully initialized.
+	 * But the file allocator calls *us* during *its* initialization.
+	 * So this function has to work even if we're not fully initialized yet. */
 	ElfW(Phdr) *phdr = &file->phdrs[phndx];
 	const void *segment_start_addr = (char*) file->l->l_addr + phdr->p_vaddr;
 	size_t segment_size = phdr->p_memsz;
@@ -87,11 +97,13 @@ void __static_segment_allocator_notify_define_segment(
 		 * segment is suballocated by the symbols (?). */
 		executable_data_segment_bigalloc = b;
 		// the data segment always extends as far as the file+mapping do (should be the same)
-		assert(b->parent);
-		assert(b->parent->parent);
-		assert(b->parent->parent->end == b->parent->end);
+		assert(b->parent); // the segment's parent is the file
+		assert(b->parent->parent); // the parent's parent is the mapping, which includes brk area
+		// with the brk area included, we may extend further than the segment
+		assert((uintptr_t) b->parent->parent->end >= (uintptr_t) b->parent->end);
+		// the end of the segment is the end of the file
 		__adjust_bigalloc_end(b, b->parent->end);
-		b->suballocator = &__generic_malloc_allocator;
+		b->suballocator = &__static_symbol_allocator;
 	}
 	/* Fill in the per-segment info that is stored in the file metadata. */
 	union sym_or_reloc_rec *metavector = NULL;
@@ -123,13 +135,6 @@ void __static_segment_allocator_notify_define_segment(
 				/*,
 		.starts_bitmap = */
 	};
-}
-_Bool __static_segment_allocator_notify_brk(void *new_curbrk)
-{
-	if (!initialized) return 0; // not ready yet
-	if (!__static_file_allocator_notify_brk(new_curbrk)) return 0; // not ready yet
-	__adjust_bigalloc_end(executable_data_segment_bigalloc, new_curbrk);
-	return 1;
 }
 
 void __static_segment_allocator_notify_destroy_segment(
