@@ -5,11 +5,11 @@
 #include "relf.h" /* for fake_dlsym, used by callee wrappers */
 
 #ifndef NO_TLS
-extern __thread void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
-extern __thread void *__current_allocfn __attribute__((weak)); // defined by heap_index_hooks
-extern __thread size_t __current_allocsz __attribute__((weak)); // defined by heap_index_hooks
-extern __thread int __currently_freeing __attribute__((weak)); // defined by heap_index_hooks
-extern __thread int __currently_allocating __attribute__((weak)); // defined by heap_index_hooks
+extern __thread void *__current_allocsite; // __attribute__((weak)); // defined by heap_index_hooks
+extern __thread void *__current_allocfn;// __attribute__((weak)); // defined by heap_index_hooks
+extern __thread size_t __current_allocsz;// __attribute__((weak)); // defined by heap_index_hooks
+extern __thread int __currently_freeing;// __attribute__((weak)); // defined by heap_index_hooks
+extern __thread int __currently_allocating;// __attribute__((weak)); // defined by heap_index_hooks
 #else // DOUBLE HACK: make weak *definitions* here
 void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
 void *__current_allocfn __attribute__((weak)); // defined by heap_index_hooks
