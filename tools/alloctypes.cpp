@@ -130,13 +130,11 @@ int main(int argc, char **argv)
 		auto file_addr = i_site->second.first.second;
 		string element_name_used_code = i_site->second.first.first;
 		string element_name_used_ident = i_site->second.first.second;
-		bool declare_as_array0 = i_site->second.second;
-		// dump the type -- FIXME: only the synthetic ones
-		// actually need emitting.
-		
+		bool declare_as_array0 = DECLARE_AS_ARRAY0(i_site->second.second);
 		
 		if (declare_as_array0)
 		{
+			/* Remember for later that we need to actually define the __ARR_ type. */
 			string element_mangled_name = mangle_typename(make_pair(element_name_used_code, element_name_used_ident));
 			cout << "/* Allocation site type needed: ARR of " 
 				<< element_mangled_name
@@ -158,6 +156,15 @@ int main(int argc, char **argv)
 		}
 		// always extern-declare the element type
 		cout << "extern struct uniqtype " << mangle_typename(i_site->second.first) << ";" << endl;
+
+		// FIXME: the synthetic ones  actually need emitting.
+		if (i_site->second.second.is_synthetic)
+		{
+			// oh dear. how do we get the DWARF type?
+			// we need to emit a uniqtype from the dwarfidl'd DIEs
+			cerr << "Warning: (FIXME) not passed any DWARF info for synthetic alloc type "
+				<< mangle_typename(i_site->second.first) << endl;
+		}
 	}
 
 	// now write those pesky ARR ones -- any that we didn't emit earlier
@@ -189,14 +196,16 @@ int main(int argc, char **argv)
 		auto file_addr = i_site->second.first.second;
 		string name_used_code = i_site->second.first.first;
 		string name_used_ident = i_site->second.first.second;
-		bool declare_as_array0 = i_site->second.second;
-		
+		auto& alloc = i_site->second.second;
+		bool declare_as_array0 = DECLARE_AS_ARRAY0(i_site->second.second);
+
 		if (!declare_as_array0)
 		{
 			cout << "/* Allocation site type not needing ARR type: " 
 				<< i_site->second.first.second
 				<< " */" << endl;
-		} else cout << "/* We should have emitted a type of this name earlier: "
+		}
+		else cout << "/* We should have emitted a type of this name earlier: "
 			<< name_used_ident << " */" << endl;
 	}
 

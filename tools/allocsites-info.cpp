@@ -179,7 +179,7 @@ read_allocsites(std::istream& in)
 }
 void make_allocsites_relation(
 	allocsites_relation_t& allocsites_relation,
-	vector<allocsite> const& allocsites_to_add,
+	vector<allocsite>& allocsites_to_add,
 	multimap<string, iterator_df<type_die> >& types_by_codeless_name,
 	root_die& r
 )
@@ -370,8 +370,16 @@ void make_allocsites_relation(
 		 * them here. FIXME: if the user uses offsetof even on a *complete*
 		 * type, we should skip the ARR0 here. E.g. if we have the variable-
 		 * -length array be [1] not [0], we would ues offsetof to allocate
-		 * space for extra training elements. */
-		bool declare_as_array0 = !i_alloc->is_synthetic && i_alloc->might_be_array && !found_type_is_incomplete;
+		 * space for extra training elements. We already have "might be
+		 * array", output by dumpallocs.ml, which required that the type is
+		 * complete. So assert that if it might be an array, it's complete. */
+		if (i_alloc->might_be_array && !found_type_is_incomplete)
+		{
+			std::cerr << "WARNING: dumpallocs thought an allocation of " << type_symname
+				<< " might be an array, but it's incomplete" << std::endl;
+			i_alloc->might_be_array = false;
+		}
+		bool declare_as_array0 = !i_alloc->is_synthetic && i_alloc->might_be_array;// && !found_type_is_incomplete;
 
 		// add to the allocsites table too
 		// recall: this is the mapping from allocsites to uniqtype addrs
@@ -379,7 +387,7 @@ void make_allocsites_relation(
 		allocsites_relation.insert(
 			make_pair(
 				make_pair(objname, file_addr),
-				make_pair(*found_type_name, declare_as_array0)
+				make_pair(*found_type_name, *i_alloc)
 			)
 		);
 	} // end for allocsite

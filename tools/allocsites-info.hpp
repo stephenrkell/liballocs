@@ -51,13 +51,17 @@ int read_allocs_line(
 	string& alloc_typename,
 	bool& might_be_array
 );
+// HACK now that this field is not explicit
+#define DECLARE_AS_ARRAY0(a) \
+(!(a).is_synthetic && (a).might_be_array)
+
 /* The allocsites relation map a pair <objname, offset>
  * to a pair <uniqued_name, declare_as_array0> */
-typedef std::map< pair< string, unsigned long >, pair<uniqued_name, bool> > allocsites_relation_t;
+typedef std::map< pair< string, unsigned long >, pair<uniqued_name, const allocsite& > > allocsites_relation_t;
 
 void make_allocsites_relation(
 	allocsites_relation_t& allocsites_relation,
-	vector<allocsite> const& allocsites_to_add,
+	vector<allocsite>& allocsites_to_add,
 	multimap<string, iterator_df<type_die> >& types_by_codeless_name,
 	root_die& r
 );
