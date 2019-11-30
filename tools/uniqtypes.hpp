@@ -54,8 +54,10 @@ void make_exhaustive_master_relation(master_relation_t& r,
 	iterator_df<> begin, 
 	iterator_df<> end);
 
+extern const char *pervasives_raw_names[];
+
 void write_master_relation(master_relation_t& r, 
-	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def, 
+	std::ostream& out, std::ostream& err,
 	std::set<std::string>& names_emitted,
 	std::map<std::string, std::set< iterator_df<type_die> > >& types_by_name,
 	bool emit_codeless_aliases,

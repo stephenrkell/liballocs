@@ -142,3 +142,6 @@ Makefile.in
 /tests/unit-tests/*.h
 
 tmp-*.txt
+
+/tools/pervasive-types
+/tools/roottypes.c

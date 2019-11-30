@@ -173,7 +173,8 @@ int main(int argc, char **argv)
 	
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	map< iterator_df<type_die>, set<string> > names_by_type;
-	write_master_relation(master_relation, cout, cerr, true /* emit_void */, true, 
+	cout << "#include \"uniqtype-defs.h\"\n\n";
+	write_master_relation(master_relation, cout, cerr,
 		names_emitted, types_by_name, true);
 	
 	/* Also write a mapping from the named elements the user requested 

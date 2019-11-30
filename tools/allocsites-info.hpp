@@ -66,6 +66,14 @@ void make_allocsites_relation(
 	root_die& r
 );
 
+iterator_df<type_die>
+get_or_create_uninterpreted_byte_type(root_die& r);
+iterator_df<type_die>
+get_or_create_generic_pointer_type(root_die& r);
+iterator_df<type_die>
+get_or_create_array_of_uninterpreted_byte_type(root_die& r);
+
+
 } // end namespace tool
 } // end namespace allocs
 #endif

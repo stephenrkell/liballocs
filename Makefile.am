@@ -19,14 +19,14 @@ CLEANFILES =
 BUILT_SOURCES =
 MOSTLYCLEANFILES =
 
-extra_DIST = liballocs.pc.in
+extra_DIST = liballocs.pc.in  tools/roottypes.c
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = liballocs.pc
 
 liballocs_includedir = $(includedir)/liballocs
 liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/uniqtype.h include/memtable.h include/fake-libunwind.h include/allocsites.h include/vas.h
 
-bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles
+bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types
 #tools/objdumpallocs-llvm
 lib_LIBRARIES = tools/liballocstool.a
 
@@ -70,6 +70,9 @@ tools_allocsites_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_usedtypes_SOURCES = tools/usedtypes.cpp $(HELPERS)
 tools_usedtypes_LDADD = $(TOOLS_LDADD)
 tools_usedtypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_pervasive_types_SOURCES = tools/pervasive-types.cpp $(HELPERS)
+tools_pervasive_types_LDADD = $(TOOLS_LDADD)
+tools_pervasive_types_CXXFLAGS = $(TOOLS_CXXFLAGS)
 # massive HACKs for ifacetypes
 tools_ifacetypes_CXXFLAGS = $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
@@ -160,7 +163,10 @@ include libltdl/ltdl.mk
 #            test -e $(abs_builddir)/tools/.libs/gold-plugin.so && \
 #            cd $(top_builddir) && \
 #            $(LN_S) $(abs_builddir)/tools/.libs/gold-plugin.so tools/gold-plugin.so || true
-#
+
+tools/roottypes.c: tools/pervasive-types
+	$< > $@ || (rm -f $@; false)
+
 #all-am: tools/gold-plugin.so
 
 clean:

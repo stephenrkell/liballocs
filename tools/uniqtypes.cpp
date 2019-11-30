@@ -361,15 +361,15 @@ void emit_extern_declaration(std::ostream& out,
 	}
 	out << ";" << endl;
 }
+const char *pervasives_raw_names[] = { "void", "__EXISTS1___PTR__1", "__uninterpreted_byte" };
+
 void write_master_relation(master_relation_t& r, 
-	std::ostream& out, std::ostream& err, bool emit_void, bool emit_struct_def,
+	std::ostream& out, std::ostream& err,
 	std::set< std::string >& names_emitted,
 	std::map< std::string, std::set< dwarf::core::iterator_df<dwarf::core::type_die> > >& types_by_name,
 	bool emit_codeless_aliases,
 	bool emit_subobject_names /* = false */)
 {
-	if (emit_struct_def) cout << UNIQTYPE_DECLSTR;
-
 	std::map< std::string, std::set< pair<string, string> > > name_pairs_by_name;
 	
 	/* Some types are too obscure to be considered for the codeless
@@ -387,74 +387,14 @@ void write_master_relation(master_relation_t& r,
 	 * FIXME: this works with gcc-generated assembly but not clang's.
 	 * Borrow glibc's somewhat-portable way of doing this, if that fixes things.
 	 * FIXME: fix the same thing elsewhere, too. */
-	if (emit_void)
+	// always declare the pervasives, at least, with weak attribute
+	for (const char **p_n = &pervasives_raw_names[0];
+		p_n != pervasives_raw_names + (sizeof pervasives_raw_names / sizeof pervasives_raw_names[0]);
+		++p_n)
 	{
-		/* DWARF doesn't reify void, but we do. So output a rec for void first of all.
-		 * We make it void so that multiple definitions in the same final link do not
-		 * cause a problem. */
-		auto emit_empty_subobject_names = [&out](const string& name) {
-			out << "const char *" << mangle_typename(make_pair(string(""), name))
-				<< "_subobj_names[] "
-				<< " __attribute__((section (\".data.__uniqtype__" << name
-				   << ", \\\"awG\\\", @progbits, __uniqtype__" << name << ", comdat#\")))"
-				<< "= { (void*)0 };\n";
-		};
-		
-		out << "\n/* uniqtype for void */\n";
-		write_uniqtype_section_decl(out, "__uniqtype__void");
-		if (emit_subobject_names) emit_empty_subobject_names("void");
-		string mangled_name = mangle_typename(make_pair(string(""), string("void")));
-		write_uniqtype_open_void(out,
-			mangled_name,
-			"void",
-			string("void")
-		);
-		write_uniqtype_related_dummy(out);
-		write_uniqtype_close(out, mangled_name);
-		
-		/* We also now emit two further "special" types: the type of
-		 * generic pointers, and the type of uninterpreted bytes. */
-		out << "\n/* uniqtype for generic pointers */\n";
-		write_uniqtype_section_decl(out, "__uniqtype____EXISTS1___PTR__1");
-		if (emit_subobject_names) emit_empty_subobject_names("__EXISTS1___PTR__1");
-		mangled_name = mangle_typename(make_pair(string(""), string("__EXISTS1___PTR__1")));
-		/* How do we model a generic pointer? */
-		write_uniqtype_open_generic(out,
-			mangled_name,
-			"__EXISTS1___PTR__1",
-			"8" /* FIXME HACK FIXME HACK */
-		);
-		out << "{ address: { .kind = ADDRESS, .genericity = 1, .indir_level = 1 } },\n\t"
-			<< "/* make_precise */ __liballocs_make_precise_identity, /* related */ {\n\t\t";
-		write_uniqtype_related_dummy(out);
-		write_uniqtype_close(out, mangled_name);
-		
-		out << "\n/* uniqtype for uninterpreted bytes */\n";
-		write_uniqtype_section_decl(out, "__uniqtype____uninterpreted_byte");
-		if (emit_subobject_names) emit_empty_subobject_names("__uninterpreted_byte");
-		mangled_name = mangle_typename(make_pair(string(""), string("__uninterpreted_byte")));
-		write_uniqtype_open_generic(out,
-			mangled_name,
-			"__uninterpreted_byte",
-			"1"
-		);
-		out << "{ base: { .kind = BASE, .enc = 0 /* no encoding */ } },\n\t"
-			<< "/* make_precise */ (void*)0, /* related */ {\n\t\t";
-		write_uniqtype_related_dummy(out);
-		write_uniqtype_close(out, mangled_name);
-		
-	}
-	else // always declare them, at least, with weak attribute
-	{
-		const char *raw_names[] = { "void", "__EXISTS1___PTR__1", "__uninterpreted_byte" };
-		for (const char **p_n = &raw_names[0];
-			p_n != raw_names + (sizeof raw_names / sizeof raw_names[0]);
-			++p_n)
-		{
-			const char *n = *p_n;
-			out << "extern struct uniqtype " << mangle_typename(make_pair(string(""), string(n)))
-				<< " __attribute__((weak));" << endl;
-		}
+		const char *n = *p_n;
+		out << "extern struct uniqtype " << mangle_typename(make_pair(string(""), string(n)))
+			<< " __attribute__((weak));" << endl;
 	}
 	
 	/* The complement relation among signed and unsigned integer types. */
@@ -752,9 +692,11 @@ void write_master_relation(master_relation_t& r,
 			auto t = i_vert->second.as_a<address_holding_type_die>();
 			pair<unsigned, iterator_df<type_die> > ultimate_pointee_pair
 			 = t.as_a<address_holding_type_die>()->find_ultimate_reached_type();
-			unsigned indir_level = ultimate_pointee_pair.first;
+			unsigned indir_level = (i_vert->first.second == string("__EXISTS1___PTR__1")) /* HACK */ ? 0
+			 : ultimate_pointee_pair.first;
 			auto ultimate_pointee = ultimate_pointee_pair.second;
-			bool is_generic = t.enclosing_cu()->is_generic_pointee_type(ultimate_pointee);
+			bool is_generic = i_vert->first.second == string("__EXISTS1___PTR__1") /* HACK */
+				|| t.enclosing_cu()->is_generic_pointee_type(ultimate_pointee);
 			unsigned machine_word_size = t.enclosing_cu()->get_address_size();
 			bool pointee_is_codeless = false;
 			if (i_vert->first.first == "") // empty summary code means we point to incomplete
@@ -1668,7 +1610,7 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
 	map< iterator_df<type_die>, set<string> > names_by_type;
-	write_master_relation(master_relation, out, cerr, true /* emit_void */, false /* emit struct def */, 
+	write_master_relation(master_relation, out, cerr,
 		names_emitted, types_by_name, /* subobject names */ true);
 	
 	// for CIL workaround: for each alias, write a one-element master relation
@@ -1692,7 +1634,7 @@ int dump_usedtypes(const vector<string>& fnames, std::ostream& out, std::ostream
 		
 		set<string> tmp_names_emitted;
 		map<string, set< iterator_df<type_die> > > tmp_types_by_name;
-		write_master_relation(tmp_master_relation, out, err, false /* emit_void */, false /* emit struct def */, 
+		write_master_relation(tmp_master_relation, out, err,
 			tmp_names_emitted, tmp_types_by_name, true /* subobject names */);
 	}
 	
