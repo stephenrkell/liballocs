@@ -74,25 +74,13 @@ using namespace allocs::tool;
 
 int main(int argc, char **argv)
 {
-	// we create a temporary output file
-	char filename[] = "/tmp/tmp.liballocstool.XXXXXX";
-	int fd = mkostemp(filename, O_RDWR|O_CREAT);
-	assert(fd != -1);
-	char *cmdstr;
-	asprintf(&cmdstr, "cc -g -c -o \"%s\" -x c - <<EOF\nint blah;\nEOF", filename);
-	int ret = system(cmdstr);
-	unlink(filename);
-	free(cmdstr);
+	dwarf::core::in_memory_root_die root;
+	auto dummy_cu = root.make_new(root.begin(), DW_TAG_compile_unit);
 
 	if (getenv("PERVASIVE_TYPES_DEBUG"))
 	{
 		debug_out = atoi(getenv("PERVASIVE_TYPES_DEBUG"));
 	}
-
-	using core::root_die;
-	shared_ptr<sticky_root_die> p_root = sticky_root_die::create(fd);
-	if (!p_root) { std::cerr << "Error opening file " << filename << std::endl; return 1; }
-	sticky_root_die& root = *p_root;
 
 	/* Ensure we have all the things we need in the DWARF.
 	 * We need to output
