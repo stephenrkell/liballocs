@@ -46,7 +46,7 @@ int main(int argc, char **argv)
 {
 	/* We read from stdin lines such as those output by dumpallocs,
 	 * prefixed by their filename. Actually they will have been 
-	 * stored in .allocsites files. */ 
+	 * stored in .allocs files. */
 	std::shared_ptr<ifstream> p_in;
 	if (argc > 1) 
 	{

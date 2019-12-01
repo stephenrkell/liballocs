@@ -384,7 +384,7 @@ void make_allocsites_relation(
 		 * array", output by dumpallocs.ml, which required that the type is
 		 * complete. So assert that if it might be an array, it's complete. */
 		bool is_incomplete = !found_type->calculate_byte_size();
-		if (i_alloc->might_be_array && !is_incomplete)
+		if (i_alloc->might_be_array && is_incomplete)
 		{
 			std::cerr << "WARNING: dumpallocs thought an allocation of " << type_symname
 				<< " might be an array, but it's incomplete" << std::endl;
