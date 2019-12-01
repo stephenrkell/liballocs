@@ -26,7 +26,7 @@ outdir:
 	rm -f outdir
 	ln -sf ../build/$(outdir) $@
 
-$(SYMLINKS): %: $(SRCROOT)/build/$(outdir)/%
+$(filter-out liballocs.so,$(SYMLINKS)): %: $(SRCROOT)/build/$(outdir)/%
 	ln -sf outdir/$(notdir $<) "$@"
 
 # the liballocs.so file lives in the srcdir
