@@ -118,8 +118,8 @@ SWAP_STDOUT_STDERR := 3>&2 2>&1 1>&3
 # We have a new taxonomy of meta-information, as follows.
 # uniqtypes that we always generate (void, existential...)
 .PRECIOUS: $(META_BASE)/%-roottypes.c
-$(META_BASE)/%-roottypes.c:
-	cat $(dir $(THIS_MAKEFILE))/roottypes.c >$@
+$(META_BASE)/%-roottypes.c: $(dir $(THIS_MAKEFILE))/roottypes.c
+	cp $(dir $(THIS_MAKEFILE))/roottypes.c $@
 # real uniqtypes
 .PRECIOUS: $(META_BASE)/%-dwarftypes.c
 $(META_BASE)/%-dwarftypes.c: /%
