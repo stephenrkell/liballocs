@@ -19,6 +19,7 @@
 #include <cxxgen/cxx_compiler.hpp>
 #include <dwarfpp/lib.hpp>
 #include <fileno.hpp>
+#include <err.h> /* for warnx */
 
 #include "uniqtypes.hpp"
 #include "bitops.h"
@@ -1683,93 +1684,120 @@ name_for_complement_base_type(iterator_df<base_type_die> base_t)
 
 	return name.str();
 }
+#define CANONICAL_NAME_FOR_TYPE(t, self_call, empty_string_type, string_concat, do_return, \
+   get_canonical, \
+   is_void, is_base, get_base_encoding, get_base_byte_size, get_base_canonical_name, \
+   is_fun, is_fun_va, for_each_fun_arg_type, for_each_fun_ret_type, \
+   is_ptr, \
+   is_array, get_array_element_type, get_array_element_count_str, \
+   is_str, get_str_element_count_str, get_str_element_size_str, \
+   is_addr, get_addr_target, get_addr_flavour_name, \
+   has_explicit_name, get_explicit_name, make_name_for_anonymous, \
+   handle_default_case, trace) \
+do { \
+	if (is_void(t) || is_void(get_canonical(t))) { trace("void"); do_return("void", t); } \
+	t = get_canonical(t); \
+	if (is_base(t)) \
+	{ \
+		trace("base"); \
+		if (get_base_encoding(t) == 0) { \
+			assert(get_base_byte_size(t) == 1); \
+			do_return("__uninterpreted_byte", t); \
+		} \
+		do_return(get_base_canonical_name(t), t); \
+	} \
+	if (is_fun(t)) \
+	{ \
+		trace("fun"); \
+		empty_string_type s; \
+		string_concat(s, "__FUN_FROM_"); \
+		/* We know we want to concat the arg insert. User tells us how to get the arg insert. */ \
+		/* ... and how to loop over args. So who writes the body of the loop? We do. */ \
+		for_each_fun_arg_type(t, __argt, __argnstr) \
+		{ string_concat(s, string_concat(string_concat(string_concat(string("__ARG"), __argnstr), "_"), self_call(__argt))); } \
+		if (is_fun_va(t)) { string_concat(s, "__VA_"); } \
+		string_concat(s, "__FUN_TO_"); \
+		for_each_fun_ret_type(t, __rett, __retnstr) { string_concat(s, self_call(__rett)); } \
+		do_return(s, t); \
+	} \
+	if (is_array(t)) \
+	{ \
+		trace("array"); \
+		do_return(string_concat( \
+		    string_concat(string_concat(string("__ARR"), get_array_element_count_str(t)), "_"), \
+		        self_call(get_array_element_type(t)) \
+		), t); \
+	} \
+	if (is_str(t)) \
+	{ \
+		trace("str"); \
+		do_return(string_concat( \
+		    string_concat(string_concat(string("__STR"), get_str_element_count_str(t)), "_"), \
+		        get_str_element_size_str(t) \
+		), t); \
+	} \
+	if (is_addr(t)) \
+	{ \
+		trace("addr"); \
+		do_return(string_concat(get_addr_flavour_name(t), self_call(get_addr_target(t))), t); \
+	} \
+	if (has_explicit_name(t)) \
+	{ \
+		trace("named"); \
+		do_return(get_explicit_name(t), t); \
+	} \
+	trace("default"); \
+	do_return(make_name_for_anonymous(t), t); \
+} while (0)
 
 string canonical_name_for_type(iterator_df<type_die> t)
 {
-	/* This is now reimplemented in libdwarfpp. But test against the old code. */
-	string libdwarfpp_said = abstract_name_for_type(t);
-	if (!t) { assert(libdwarfpp_said == "void"); return "void"; }
-	// FIXME: not the right semantics probably
-	if (t.is_a<unspecified_type_die>()) { assert(libdwarfpp_said == "void"); return "void"; }
-	t = t->get_concrete_type();
-	if (!t) { assert(libdwarfpp_said == "void"); return "void"; }
-	if (!t.is_a<address_holding_type_die>() && !t.is_a<array_type_die>() && !t.is_a<subroutine_type_die>()
-		&& !t.is_a<subprogram_die>())
-	{
-		/* for base types, the canonical key is *always* the summary code *only*, 
-		 * i.e. the name component is empty. UNLESS we can place ourselves in a C
-		 * equivalence class, in which case.... */
-		string name_to_use;
-		if (t.is_a<base_type_die>())
-		{
-			if (t.as_a<base_type_die>()->get_encoding() == 0)
-			{
-				assert(t.as_a<base_type_die>()->get_byte_size() == 1);
-				name_to_use = "__uninterpreted_byte";
-			}
-			/* For base types, we use our own language-independent naming scheme. */
-			else name_to_use = t.as_a<base_type_die>()->get_canonical_name();
-		} 
-		else
-		{
-			/* FIXME: deal with nested/qualified names also (nested data types, 
-			   local data types, C++ namespaces). */
-			/* FIXME: deal with struct/union tags also (but being sensitive to language: 
-			   don't do it with C++ CUs). */
-			if (t.name_here())
-			{
-				name_to_use = *name_for_type_die(t);
-			}
-			else
-			{
-				string offsetstr = offset_to_string(t.offset_here());
-				/* We really want to allow deduplicating anonymous structure types
-				 * that originate in the same header file but are included in multiple
-				 * compilation units. Since each gets a different offset, using that
-				 * for the fake name string is a bad idea. Instead, use the defining
-				 * source file path, if we have it. */
-				if (t->get_decl_file() && t->get_decl_line())
-				{
-					ostringstream s;
-					opt<string> maybe_fqp = t.enclosing_cu()->source_file_fq_pathname(*t->get_decl_file());
-					s << (maybe_fqp ? 
-						*maybe_fqp : 
-						t.enclosing_cu()->source_file_name(*t->get_decl_file())) 
-						<< "_" << *t->get_decl_line();
-					name_to_use = s.str();
-				}
-				else name_to_use = offsetstr;
-			}
-		}
-		assert(libdwarfpp_said == name_to_use || t.is_a<subrange_type_die>());
-		return name_to_use;
-	}
-	else if (t.is_a<subroutine_type_die>() || t.is_a<subprogram_die>())
-	{
-		// "__FUN_FROM_" ^ (labelledArgTs argTss 0) ^ (if isSpecial then "__VA_" else "") ^ "__FUN_TO_" ^ (stringFromSig returnTs) 		
-		ostringstream s;
-		s << "__FUN_FROM_";
-		auto fps = t.children().subseq_of<formal_parameter_die>();
-		unsigned argnum = 0;
-		for (auto i_fp = fps.first; i_fp != fps.second; ++i_fp, ++argnum)
-		{
-			/* args should not be void */
-			/* We're making a canonical typename, so use canonical argnames. */
-			s << "__ARG" << argnum << "_" << canonical_name_for_type(i_fp->find_type());
-		}
-		if (IS_VARIADIC(t))
-		{
-			s << "__VA_";
-		}
-		s << "__FUN_TO_";
-		iterator_df<type_die> return_t = RETURN_TYPE(t);
-		
-		s << ((!return_t || !return_t->get_concrete_type()) ? string("void") : canonical_name_for_type(return_t));
-		string result = s.str();
-		assert(libdwarfpp_said == result);
-		return result;
-	}
-	else if (t.is_a<array_type_die>())
+	/* We now have three implementations of this!
+	 * - the one in libdwarfpp
+	 *     (which got there because canonical names are useful for defining
+	 *      the strongly-connected components algorithms, and to make it easy
+	 *      to cache SCCs when computed, it made sense to put it directly on the
+	 *      DIE types)
+	 * - the "old" version here
+	 " - the "new" heavily macroised version here. The idea of the macroised
+	 *     version is to support a C implementation of the logic, implemented
+	 *     over uniqtypes, and the present C++ one implemented over DIEs.
+	 *     We will want the C version if we put any of this into the liballocs
+	 *     runtime (for dynamically generated uniqtypes). Currently we just
+	 *     use it here, and assert that it gives the same answer as libdwarfpp version..
+	 */
+	auto get_canonical = [](iterator_df<type_die> t) { return !t ? t : t->get_concrete_type(); };
+	auto is_void = [](iterator_df<type_die> t) {
+		return !t || !t->get_concrete_type() ||
+		// FIXME: not the right semantics probably
+		t.is_a<unspecified_type_die>();
+	};
+	auto is_base = [](iterator_df<type_die> t) { return t.is_a<base_type_die>(); };
+	auto get_base_encoding = [](iterator_df<type_die> t)
+	{ return t.as_a<base_type_die>()->get_encoding(); };
+	auto get_base_byte_size = [](iterator_df<type_die> t)
+	{ return t.as_a<base_type_die>()->get_byte_size(); };
+	auto get_base_canonical_name = [](iterator_df<type_die> t)
+	{ return t.as_a<base_type_die>()->get_canonical_name(); };
+	auto is_fun = [](iterator_df<type_die> t)
+	{ return (t.is_a<subroutine_type_die>() || t.is_a<subprogram_die>()); };
+	#define dwarfpp_for_each_fun_arg_type(t, __argt, __argnstr) \
+		auto fps = t.children().subseq_of<formal_parameter_die>(); \
+		unsigned argnum = 0; \
+		string __argnstr = "0"; \
+		std::ostringstream nstr; \
+		iterator_df<type_die> __argt = (fps.first != fps.second) ? (fps.first->find_type()) : iterator_df<type_die>(iterator_base::END); \
+		for (auto i_fp = fps.first; i_fp != fps.second; \
+		   ++i_fp, __argt = (i_fp != fps.second) ? (i_fp->find_type()) : iterator_df<type_die>(iterator_base::END), \
+		   ++argnum, __argnstr = (nstr.clear(), nstr.str(""), (nstr << argnum), nstr.str()))
+	#define dwarfpp_for_each_fun_ret_type(t, __rett, __retnstr) \
+	    iterator_df<type_die> __rett = (RETURN_TYPE(t)) ? (iterator_df<type_die>(RETURN_TYPE(t)))->get_concrete_type() : (iterator_base::END); \
+	    string __retnstr = "0";
+	auto is_array = [](iterator_df<type_die> t) { return t.is_a<array_type_die>(); };
+	auto get_array_element_type = [](iterator_df<type_die> t)
+	{ return t.as_a<array_type_die>()->find_type(); };
+	auto self_call = [=](iterator_df<type_die> t) { return canonical_name_for_type(t); };
+	auto get_array_element_count_str = [](iterator_df<type_die> t)
 	{
 		/* What should the type descriptor for "array of n T" look like? 
 		 * What should it be called? 
@@ -1783,72 +1811,81 @@ string canonical_name_for_type(iterator_df<type_die> t)
 		 * with a reference to the remainder (what it's an array of).
 		 * This handles multidimensional arrays too.
 		 */
-		
-		auto array_t = t.as_a<array_type_die>();
 		ostringstream array_prefix;
-		opt<Dwarf_Unsigned> element_count = array_t->element_count();
-		array_prefix << "__ARR";
+		opt<Dwarf_Unsigned> element_count = t.as_a<array_type_die>()->element_count();
 		if (element_count) array_prefix << *element_count;
-		array_prefix << "_";
-		string el_type_name = canonical_name_for_type(array_t->get_type());
-		assert(libdwarfpp_said == array_prefix.str() + el_type_name);
-		return array_prefix.str() + el_type_name;
-	}
-	else if (t.is_a<string_type_die>())
+		return array_prefix.str();
+	};
+	auto is_str = [](iterator_df<type_die> t) { return t.is_a<string_type_die>(); };
+	auto get_str_element_size_str = [](iterator_df<type_die> t) { return "1"; /* FIXME */};
+	auto get_str_element_count_str = [](iterator_df<type_die> t)
 	{
-		auto string_t = t.as_a<string_type_die>();
-		// get the name of whatever the element type is, and prepend a prefix
+		ostringstream str_prefix;
 		const Dwarf_Unsigned element_size = 1; /* FIXME: always 1? */
-		opt<Dwarf_Unsigned> opt_byte_size = string_t->fixed_length_in_bytes();
+		opt<Dwarf_Unsigned> opt_byte_size = t.as_a<string_type_die>()->fixed_length_in_bytes();
 		opt<Dwarf_Unsigned> element_count
 		 = opt_byte_size ? opt<Dwarf_Unsigned>(*opt_byte_size / element_size ) : opt<Dwarf_Unsigned>();
-		ostringstream string_prefix;
-		string_prefix << "__STR" << (element_count ? *element_count : 0) << "_"
-			<< element_size;
-
-		assert(libdwarfpp_said == string_prefix.str());
-		return string_prefix.str();
-	}
-	else // DW_TAG_pointer_type and friends
+		str_prefix << (element_count ? *element_count : 0);
+		return str_prefix.str();
+	};
+	auto is_addr = [](iterator_df<type_die> t) { return t.is_a<address_holding_type_die>(); };
+	auto get_addr_flavour_name = [](iterator_df<type_die> t) -> std::string
 	{
-		int levels_of_indirection = 0;
-		ostringstream indirection_prefix;
-		iterator_df<type_die> working_t = t->get_concrete_type(); // initially
-		while (working_t && working_t.is_a<address_holding_type_die>())
+		switch (t.tag_here())
 		{
-			++levels_of_indirection;
-			switch (working_t.tag_here())
-			{
-				case DW_TAG_pointer_type: 
-					indirection_prefix << "__PTR_"; break;
-				case DW_TAG_reference_type:
-					indirection_prefix << "__REF_"; break;
-				case DW_TAG_rvalue_reference_type:
-					indirection_prefix << "__RR_"; break;
-				default:
-					assert(false);
-			}
-			
-			// try moving on to the next in the chain
-			if (working_t.is_a<address_holding_type_die>()) 
-			{
-				working_t = working_t.as_a<address_holding_type_die>()->get_type();
-				// concretify if we got something
-				if (working_t)
-				{
-					working_t = working_t->get_concrete_type();
-				}
-			}
+			case DW_TAG_pointer_type: return "__PTR_";
+			case DW_TAG_reference_type: return "__REF_";
+			case DW_TAG_rvalue_reference_type: return "__RR_";
+			default:
+				assert(false);
 		}
-		assert(levels_of_indirection >= 1);
-		
-		ostringstream os;
-		os << indirection_prefix.str() << (!working_t ? "void" : canonical_name_for_type(working_t));
-		assert(libdwarfpp_said == os.str());
-		return os.str();
-	}
-	assert(false);
-	abort();
+	};
+	auto get_addr_target = [](iterator_df<type_die> t)
+	{ return t.as_a<address_holding_type_die>()->find_type(); };
+	auto has_explicit_name = [](iterator_df<type_die> t) -> bool { return t.name_here(); };
+	auto get_explicit_name = [](iterator_df<type_die> t) -> std::string {
+		// const char *ret = (t.name_here()) ? (*name_for_type_die(t)).c_str() : NULL;
+		// return ret;
+		// for strange reasons, the above doesn't work. I think it's a lifetime thing.
+		return string(*name_for_type_die(t));
+	};
+	auto make_name_for_anonymous = [](iterator_df<type_die> t) {
+		string name_to_use;
+		string offsetstr = offset_to_string(t.offset_here());
+		/* We really want to allow deduplicating anonymous structure types
+		 * that originate in the same header file but are included in multiple
+		 * compilation units. Since each gets a different offset, using that
+		 * for the fake name string is a bad idea. Instead, use the defining
+		 * source file path, if we have it. */
+		if (t->get_decl_file() && t->get_decl_line())
+		{
+			ostringstream s;
+			opt<string> maybe_fqp = t.enclosing_cu()->source_file_fq_pathname(*t->get_decl_file());
+			s << (maybe_fqp ? 
+				*maybe_fqp : 
+				t.enclosing_cu()->source_file_name(*t->get_decl_file())) 
+				<< "_" << *t->get_decl_line();
+			name_to_use = s.str();
+		}
+		else name_to_use = offsetstr;
+		return name_to_use;
+	};
+	#define empty_string_type std::string
+	#define string_concat(s1, s2) ((s1) += (s2))
+	#define do_return(s, t) do { string libdwarfpp_said = abstract_name_for_type(t); \
+	     if (!t.is_a<subrange_type_die>() && s != libdwarfpp_said) warnx("mismatch: %s vs libdwarfpp %s", string(s).c_str(), libdwarfpp_said.c_str()); \
+	     assert(t.is_a<subrange_type_die>() || s == libdwarfpp_said); return s; } while(0)
+	#define handle_default_case(t) do { assert(false); abort(); } while(0)
+	auto trace = [](const char *str) { /* warnx("It's: %s", str); */ };
+	CANONICAL_NAME_FOR_TYPE(t, self_call, empty_string_type, string_concat, do_return,
+		get_canonical,
+		is_void, is_base, get_base_encoding, get_base_byte_size, get_base_canonical_name,
+		is_fun, IS_VARIADIC, dwarfpp_for_each_fun_arg_type, dwarfpp_for_each_fun_ret_type, is_ptr,
+		is_array, get_array_element_type, get_array_element_count_str,
+		is_str, get_str_element_count_str, get_str_element_size_str,
+		is_addr, get_addr_target, get_addr_flavour_name,
+		has_explicit_name, get_explicit_name, make_name_for_anonymous,
+		handle_default_case, trace);
 }
 
 string canonical_codestring_for_type(iterator_df<type_die> t)

@@ -1,0 +1,59 @@
+version: 2.0
+jobs:
+  build:
+    docker:
+      - image: ubuntu:18.04
+    steps:
+      - run:
+          name: Install dependencies (binutils-gdb)
+          command: |
+            apt update
+            apt install -y bison flex texinfo git build-essential
+      - run:
+          name: Clone (binutils-gdb)
+          command: |
+            git clone https://github.com/stephenrkell/binutils-gdb.git ~/binutils-gdb
+      - run:
+          name: Configure, build, install (binutils-gdb)
+          working_directory: ~/binutils-gdb
+          command: |
+            chmod +x configure
+            CFLAGS="-fPIC -g -O2" ./configure --prefix=/usr/local \
+              --enable-gold --enable-plugins --enable-install-libiberty
+            make -j 2
+            make install
+      - run:
+          name: Install dependencies
+          command: |
+            apt update
+            apt install -y \
+              libelf-dev libdw-dev binutils-dev \
+              autoconf automake libtool pkg-config autoconf-archive \
+              g++ ocaml ocamlbuild ocaml-findlib \
+              default-jre-headless python3 python \
+              make git gawk gdb wget \
+              libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
+              libboost-iostreams-dev libboost-regex-dev \
+              libboost-serialization-dev libboost-filesystem-dev
+      - checkout
+      - run:
+          name: Update submodules
+          command: git submodule update --init --recursive
+      - run:
+          name: Build submodules
+          command: make -C contrib -j 2
+      - run:
+          name: Build project
+          command: |
+            . contrib/env.sh
+            ./autogen.sh
+            ./configure
+            make -j 2
+      - run:
+          name: Create liballocs metadata
+          command: |
+            mkdir -p /usr/lib/meta
+            make -f tools/Makefile.meta /usr/lib/meta/lib/x86_64-linux-gnu/libc-2.27.so-meta.so
+      - run:
+          name: Run tests
+          command: make -C tests -j 2

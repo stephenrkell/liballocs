@@ -302,6 +302,37 @@ bool sticky_root_die::has_dwarf(int user_fd)
 	return retval;
 }
 
+static string get_liballocs_base()
+{
+	/* HACK HACK HACK: assume we're run in place, and use auxv to get our $0's dirname.
+	 * PROBLEM: if we're libtool'd, our program is built in .libs.
+	 * FIXME: what's the right way to do this? Envvars are normal, but we don't
+	 * really like that either. Reimplementing the logic in C/C++ would also work. */
+	static opt<string> liballocs_base;
+	if (!liballocs_base)
+	{
+		int dummy_local = 0;
+		struct auxv_limits limits = get_auxv_limits(get_auxv(environ, &dummy_local));
+		string argv0 = limits.argv_vector_start[0];
+		char *argv0_dup = strdup(argv0.c_str());
+		if (!argv0_dup) abort();
+		char *argv0_dir = dirname(argv0_dup);
+		char *argv0_dir_realname = realpath(argv0_dir, NULL);
+		string argv0_dir_realstr = argv0_dir_realname;
+		liballocs_base = string(argv0_dir) + "/.." + ((
+			/* HACK for libtool: if the realpath ends with ".libs", go one further level down. */
+				argv0_dir_realstr.length() >= string("/.libs").length()
+				&& 0 == argv0_dir_realstr.compare(
+				    /* pos */ argv0_dir_realstr.length() - string("/.libs").length() /* for '/' */,
+				    /* len */ string("/.libs").length(),
+				    string("/.libs"))) ? "/.." : ""
+			);
+		free(argv0_dir_realname);
+		free(argv0_dup);
+	}
+	return (*liballocs_base).c_str();
+}
+
 int sticky_root_die::open_debuglink(int user_fd)
 {
 	/* FIXME: linux-specific big hacks here. */
@@ -310,7 +341,8 @@ int sticky_root_die::open_debuglink(int user_fd)
 	int ret = asprintf(&fdstr, "/dev/fd/%d", user_fd);
 	if (ret <= 0) throw No_entry();
 	/* HACK HACK HACK */
-	ret = asprintf(&cmdstr, "bash -c \". ${LIBALLOCS}/tools/debug-funcs.sh && read_debuglink %s | tr -d '\\n'\"", fdstr);
+	ret = asprintf(&cmdstr, "bash -c \". '%s'/tools/debug-funcs.sh && read_debuglink '%s' | tr -d '\\n'\"",
+		get_liballocs_base().c_str(), fdstr);
 	if (ret <= 0) throw No_entry();
 	assert(cmdstr != NULL);
 	FILE *p = popen(cmdstr, "r");
@@ -382,7 +414,8 @@ int sticky_root_die::open_debug_via_build_id(int user_fd)
 	int ret = asprintf(&fdstr, "/dev/fd/%d", user_fd);
 	if (ret <= 0) throw No_entry();
 	/* HACK HACK HACK */
-	ret = asprintf(&cmdstr, "bash -c \". ${LIBALLOCS}/tools/debug-funcs.sh && read_build_id %s | tr -d '\\n'\"", fdstr);
+	ret = asprintf(&cmdstr, "bash -c \". '%s'/tools/debug-funcs.sh && read_build_id '%s' | tr -d '\\n'\"",
+		get_liballocs_base().c_str(), fdstr);
 	if (ret <= 0) throw No_entry();
 	assert(cmdstr != NULL);
 	FILE *p = popen(cmdstr, "r");

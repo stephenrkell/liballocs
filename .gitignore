@@ -42,6 +42,7 @@
 
 /config.h
 /config.h.in
+/config.mk
 /include/liballocs_config.h
 
 
