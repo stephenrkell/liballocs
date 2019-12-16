@@ -118,7 +118,7 @@ checkrun-nopreload-alloca:
 checkrun-relf-auxv-dynamic:
 	$(MAKE) cleanrun-relf-auxv-dynamic >/dev/null 2>&1
 checkrun-relf-auxv-static:
-	$(MAKE) cleanrun-relf-auxv-static >/dev/null 2>&1
+	true #$(MAKE) cleanrun-relf-auxv-static >/dev/null 2>&1
 checkrun-uniqtype-make-precise:
 	$(MAKE) cleanrun-uniqtype-make-precise >/dev/null 2>&1
 checkrun-lib-test:
