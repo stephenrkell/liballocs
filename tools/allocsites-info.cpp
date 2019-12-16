@@ -44,6 +44,7 @@ using namespace dwarf;
 using dwarf::lib::Dwarf_Unsigned;
 using dwarf::core::compile_unit_die;
 using dwarf::core::iterator_df;
+using dwarf::core::iterator_bf;
 using dwarf::core::iterator_sibs;
 using dwarf::core::type_die;
 using dwarf::core::root_die;
@@ -114,50 +115,273 @@ get_or_create_array_of_uninterpreted_byte_type(root_die& r)
 	// r.print_tree(std::move(created), std::cerr);
 	return created;
 }
-
-void merge_and_rewrite_synthetic_data_types(root_die& r, vector<allocsite>& as)
+iterator_df<type_die>
+create_arr0_type_for_element_type(root_die& r, iterator_df<type_die> element_t)
 {
+	auto cu = r.get_or_create_synthetic_cu();
+	auto created = r.make_new(cu, DW_TAG_array_type);
+	auto& attrs = dynamic_cast<core::in_memory_abstract_die&>(created.dereference())
+		.attrs();
+	attrs.insert(make_pair(DW_AT_type, encap::attribute_value(
+		encap::attribute_value::weak_ref(r, element_t.offset_here(), true,
+					created.offset_here(), DW_AT_type))));
+	return created;
+}
+iterator_df<type_die> allocsite::find_named_type(root_die& r, const multimap<string, iterator_df<type_die> >& types_by_codeless_name)
+{
+	if (this->found_type) return this->found_type;
+	iterator_df<compile_unit_die> found_cu;
+	opt<string> found_sourcefile_path;
+	iterator_df<type_die> found_type;
+	iterator_df<type_die> second_chance_type;
+	/* Find a CU such that
+	 * - one of its source files is named sourcefile, taken relative to comp_dir if necessary;
+	 * - that file defines a type of the name we want
+	 * This search is necessary because
+	 * - different types of the same name might appear (in different CUs), and
+	 * - compilers are not always great about emitting DIEs if a type is used only
+	 *   lightly (e.g. we do only 'sizeof T'), so we do "second chance" name-matching
+	 */
+	std::vector<iterator_df<compile_unit_die> > embodying_cus;
+	auto cus = r.begin().children();
+	for (iterator_sibs<compile_unit_die> i_cu = cus.first; i_cu != cus.second; ++i_cu)
+	{
+		if (i_cu->get_name() && i_cu->get_comp_dir())
+		{
+			auto cu_die_name = *i_cu->get_name();
+			auto cu_comp_dir = *i_cu->get_comp_dir();
+
+			for (unsigned i_srcfile = 1; i_srcfile <= i_cu->source_file_count(); i_srcfile++)
+			{
+				/* Does this source file have a matching name? */
+				string current_sourcepath;
+				string cu_srcfile_mayberelative = i_cu->source_file_name(i_srcfile);
+				//if (!path(cu_srcfile_mayberelative).has_root_directory())
+				if (cu_srcfile_mayberelative.length() > 0 && cu_srcfile_mayberelative.at(0) != '/')
+				{
+					current_sourcepath = cu_comp_dir + '/' + cu_srcfile_mayberelative;
+				}
+				else current_sourcepath = /*path(*/cu_srcfile_mayberelative/*)*/;
+
+				//cerr << "CU " << *i_cu->get_name() << " sourcefile " << i_srcfile << " is " <<
+				//	cu_srcfile_mayberelative
+				//	<< ", sourcepath "
+				//	<< current_sourcepath
+				//	<< endl;
+
+				// FIXME: smarter search
+				// FIXME: look around a bit, since sizeof isn't enough to keep DIE in the object file
+				if (current_sourcepath == /*path(*/this->sourcefile/*)*/)
+				{
+					// YES this CU embodies the source file, so we can search for the type
+					embodying_cus.push_back(i_cu);
+
+					// void comes out in the allocsites
+					if (this->clean_typename.size() > 0 &&
+						(this->clean_typename == "__uniqtype____uninterpreted_byte"
+						|| this->clean_typename == "__uniqtype__void"))
+					{
+						found_type = get_or_create_uninterpreted_byte_type(r); // i.e. void
+						goto cu_loop_exit;
+					}
+					else if (this->clean_typename.size() > 0 &&
+						(this->clean_typename == "__uniqtype____EXISTS1___PTR__1"))
+					{
+						found_type = get_or_create_generic_pointer_type(r);
+						goto cu_loop_exit;
+					}
+					else if (clean_typename.size() > 0)
+					{
+						auto found_types = types_by_codeless_name.equal_range(this->clean_typename);
+						if (found_types.first == found_types.second)
+						{
+							cerr << "Found no types for symbol name "
+								<< this->clean_typename << "; unique symbol names were: " << endl;
+							set<string> uniques;
+							for (auto i_el = types_by_codeless_name.begin();
+								i_el != types_by_codeless_name.end(); ++i_el)
+							{
+								uniques.insert(i_el->first);
+							}
+							for (auto i_el = uniques.begin();
+								i_el != uniques.end(); ++i_el)
+							{
+								if (i_el != uniques.begin()) cerr << ", ";
+								cerr << *i_el;
+							}
+						}
+						else
+						{
+							/* Make sure we get the version that is defined in this CU. */
+							for (auto i_found = found_types.first; i_found != found_types.second; ++i_found)
+							{
+								if (i_found->second.enclosing_cu()
+									== i_cu)
+								{
+									found_type = i_found->second;
+									// we can exit the loop now
+
+									cerr << "Success: found a type named " << i_found->first
+										<< " in a CU named "
+										<< *i_found->second.enclosing_cu().name_here()
+										<< " == "
+										<< *i_cu.name_here()
+										<< endl;
+									goto cu_loop_exit;
+								}
+								else
+								{
+									assert(i_found->second.enclosing_cu().offset_here()
+										!= i_cu.offset_here());
+
+									cerr << "Found a type named " << i_found->first
+										<< " but it was defined in a CU named "
+										<< *i_found->second.enclosing_cu().name_here()
+										<< " whereas we want one named "
+										<< *i_cu.name_here()
+										<< endl;
+									second_chance_type = i_found->second;
+								}
+							}
+						}
+						// if we got here, we failed...
+						/* If we fail, we will go round again, since
+						 * we might find another CU that
+						 * - embodies this source file, and
+						 * - contains more DWARF types. */
+						found_type = iterator_base::END;
+					}
+				}
+			}
+		}
+	} // end for each CU
+cu_loop_exit:
+	if (!found_type)
+	{
+		cerr << "Warning: no type named " << clean_typename
+			<< " in CUs embodying source file " << sourcefile
+			<< " (found " << embodying_cus.size() << ":";
+			for (auto i_cu = embodying_cus.begin(); i_cu != embodying_cus.end(); ++i_cu)
+			{
+				if (i_cu != embodying_cus.begin()) cerr << ", ";
+				cerr << *(*i_cu)->get_name();
+			}
+			cerr << ") but required by allocsite: " << objname
+			<< "<" << clean_typename << "> @" << std::hex << file_addr << std::dec << ">" << endl;
+
+		if (second_chance_type)
+		{
+			cerr << "Warning: guessing that we can get away with "
+				<< second_chance_type << endl;
+			found_type = second_chance_type;
+		} // else return
+	}
+	if (!found_type) return iterator_base::END;
+	/* NOTE: we can still get incomplete types used as sizeof, if the
+	 * user did "offsetof" on a field in them. That is how we will get
+	 * them here. FIXME: if the user uses offsetof even on a *complete*
+	 * type, we should skip the ARR0 here. E.g. if we have the variable-
+	 * -length array be [1] not [0], we would ues offsetof to allocate
+	 * space for extra training elements. We already have "might be
+	 * array", output by dumpallocs.ml, which required that the type is
+	 * complete. So assert that if it might be an array, it's complete. */
+	bool is_incomplete = !found_type->calculate_byte_size();
+	if (this->might_be_array && is_incomplete)
+	{
+		std::cerr << "WARNING: dumpallocs thought an allocation of " << clean_typename
+			<< " might be an array, but it's incomplete" << std::endl;
+		this->might_be_array = false;
+	}
+	this->found_type = found_type;
+	return found_type;
+}
+
+vector<iterator_df<type_die> >
+ensure_needed_types_and_assign_to_allocsites(root_die& r, vector<allocsite>& as)
+{
+	// for fast lookup, index by codeless name
+	multimap<string, iterator_df<type_die> > types_by_codeless_name;
+	get_types_by_codeless_uniqtype_name(types_by_codeless_name,
+		r.begin(), r.end());
+	vector<iterator_df<type_die> > types_we_created;
 	for (auto i_a = as.begin(); i_a != as.end(); ++i_a)
 	{
 		if (i_a->is_synthetic)
 		{
 			cerr << "Found synthetic typename " << i_a->clean_typename;
-
 			/* Add under the last CU in the file, to avoid (for now) offset woes. */
 			auto cus_seq = r.begin().children().subseq_of<compile_unit_die>();
-
 			auto last_cu = cus_seq.first;
-
 			for (auto i_cu = cus_seq.first; 
 				i_cu != cus_seq.second; 
 				++i_cu, (i_cu != cus_seq.second && ((last_cu = i_cu), true)));
-
+			/* create_dies() may create multiple types, not just the one we asked for.
+			 * HACK: rather than modify dwarfidl to tell us what we need, use a
+			 * snapshot/difference algorithm for now. The number of synthetics is
+			 * always small, so this isn't costing us a lot. */
+			auto snapshot_types = [&last_cu]() {
+				set<iterator_df<type_die>> types_existing;
+				iterator_bf<> i = last_cu;
+				iterator_bf<> i_end = last_cu; i_end.increment_skipping_subtree();
+				for (; i != i_end; ++i)
+				{
+					if (i.is_a<type_die>()) types_existing.insert(i);
+				}
+				return types_existing;
+			};
+			auto before_snapshot = snapshot_types();
+			// if we got here, "clean_typename" is actually a dwarfidl expression
 			auto created = dwarfidl::create_dies(last_cu, i_a->clean_typename);
 			assert(created);
 			assert(created.is_a<type_die>());
-			/* We use the codeless name here, which is what dumpallocs would emit. */
-			i_a->clean_typename = mangle_typename(make_pair("", 
-				canonical_key_for_type(created.as_a<type_die>()).second));
+			auto after_snapshot = snapshot_types();
+			// difference the snapshots
+			set<iterator_df<type_die> > all_created;
+			std::set_difference(after_snapshot.begin(), after_snapshot.end(),
+				before_snapshot.begin(), before_snapshot.end(),
+				std::inserter(all_created, all_created.end()));
+			assert(all_created.size() > 0);
+			// update the allocsite record with the type we just created
+			i_a->found_type = created.as_a<type_die>();
+			// rewrite clean typename to the codeless symname, i.e. what dumpallocs would generate
+			i_a->clean_typename = mangle_typename(make_pair("", canonical_key_for_type(created).second));
+			auto add_type = [&types_we_created, &types_by_codeless_name](iterator_df<type_die> t) {
+				auto name_pair = canonical_key_for_type(t);
+				types_we_created.push_back(t);
+				auto codeless_name = mangle_typename(make_pair("", name_pair.second));
+				types_by_codeless_name.insert(make_pair(
+					codeless_name, t));
+			};
+			for (auto i_t = all_created.begin(); i_t != all_created.end(); ++i_t)
+			{
+				add_type(*i_t);
+			}
+		}
+		else
+		{
+			auto found_named_type = i_a->find_named_type(r, types_by_codeless_name);
+			if (DECLARE_AS_ARRAY0(*i_a))
+			{
+				auto codeless_arr0_name = mangle_typename(make_pair("",
+					string("__ARR_") + canonical_name_for_type(found_named_type)));
+				auto found_arr0 = types_by_codeless_name.find(codeless_arr0_name);
+				if (found_arr0 != types_by_codeless_name.end())
+				{
+					i_a->found_type = found_arr0->second;
+				}
+				else // create it
+				{
+					auto created = create_arr0_type_for_element_type(r, found_named_type);
+					i_a->found_type = created.as_a<type_die>();
+					assert(0 == strncmp(canonical_name_for_type(i_a->found_type).c_str(),
+						"__ARR_", 6));
+					types_we_created.push_back(i_a->found_type);
+				}
+			}
+			else i_a->found_type = found_named_type;
 		}
 	}
-}
-
-std::pair<std::unique_ptr<root_die>, std::unique_ptr<std::ifstream> >
-make_root_die_and_merge_synthetics(vector<allocsite>& as)
-{
-	/* what's the objname of the first entry? */
-	string seen_objname = as.begin()->objname;
-	auto p_objfile = std::unique_ptr<std::ifstream>(new std::ifstream(seen_objname));
-	if (!*p_objfile)
-	{
-		assert(false);
-	}
-	/* what's the objname of the first entry? */
-	auto p_root = std::unique_ptr<root_die>(new root_die(fileno(*p_objfile)));
-	assert(p_root);
-	/* rewrite the allocsites we were passed */
-	merge_and_rewrite_synthetic_data_types(*p_root, as);
-	return std::move(make_pair(std::move(p_root), std::move(p_objfile)));
+	return types_we_created;
 }
 
 vector<allocsite>
@@ -193,217 +417,6 @@ read_allocsites(std::istream& in)
 	cerr << "Found " << allocsites_to_add.size() << " allocation sites" << endl;
 	return allocsites_to_add;
 }
-void make_allocsites_relation(
-	allocsites_relation_t& allocsites_relation,
-	vector<allocsite>& allocsites_to_add,
-	multimap<string, iterator_df<type_die> >& types_by_codeless_name,
-	root_die& r
-)
-{
-	auto uninterpreted_byte_t = get_or_create_uninterpreted_byte_type(r);
-	auto generic_pointer_t = get_or_create_generic_pointer_type(r);
-	for (auto i_alloc = allocsites_to_add.begin(); i_alloc != allocsites_to_add.end(); ++i_alloc)
-	{
-		string type_symname = i_alloc->clean_typename;
-		string sourcefile = i_alloc->sourcefile;
-		string objname = i_alloc->objname;
-		unsigned file_addr = i_alloc->file_addr;
-
-		iterator_df<compile_unit_die> found_cu;
-		opt<string> found_sourcefile_path;
-		iterator_df<type_die> found_type;
-		iterator_df<type_die> second_chance_type;
-		/* Find a CU such that 
-		 - one of its source files is named sourcefile, taken relative to comp_dir if necessary;
-		 - that file defines a type of the name we want
-		 */
-
-		// look for a CU embodying this source file 
-		std::vector<iterator_df<compile_unit_die> > embodying_cus;
-		auto cus = r.begin().children();
-		for (iterator_sibs<compile_unit_die> i_cu = cus.first;
-			 i_cu != cus.second; ++i_cu)
-		{
-			if (i_cu->get_name() && i_cu->get_comp_dir())
-			{
-				auto cu_die_name = *i_cu->get_name();
-				auto cu_comp_dir = *i_cu->get_comp_dir();
-
-				for (unsigned i_srcfile = 1; i_srcfile <= i_cu->source_file_count(); i_srcfile++)
-				{
-					/* Does this source file have a matching name? */
-					string current_sourcepath;
-					string cu_srcfile_mayberelative = i_cu->source_file_name(i_srcfile);
-					//if (!path(cu_srcfile_mayberelative).has_root_directory())
-					if (cu_srcfile_mayberelative.length() > 0 && cu_srcfile_mayberelative.at(0) != '/')
-					{ 
-						current_sourcepath = cu_comp_dir + '/' + cu_srcfile_mayberelative;
-					}
-					else current_sourcepath = /*path(*/cu_srcfile_mayberelative/*)*/;
-
-					//cerr << "CU " << *i_cu->get_name() << " sourcefile " << i_srcfile << " is " <<
-					//	cu_srcfile_mayberelative 
-					//	<< ", sourcepath "
-					//	<< current_sourcepath
-					//	<< endl;
-
-					// FIXME: smarter search
-					// FIXME: look around a bit, since sizeof isn't enough to keep DIE in the object file
-					if (current_sourcepath == /*path(*/sourcefile/*)*/)
-					{ 
-						// YES this CU embodies the source file, so we can search for the type
-						embodying_cus.push_back(i_cu);
-
-						// void comes out in the allocsites
-						if (type_symname.size() > 0 &&
-							(type_symname == "__uniqtype____uninterpreted_byte"
-							|| type_symname == "__uniqtype__void"))
-						{
-							found_type = uninterpreted_byte_t; // i.e. void
-							goto cu_loop_exit;
-						}
-						else if (type_symname.size() > 0 &&
-							(type_symname == "__uniqtype____EXISTS1___PTR__1"))
-						{
-							found_type = generic_pointer_t;
-							goto cu_loop_exit;
-						}
-						else if (type_symname.size() > 0)
-						{
-							//auto found_type_entry = named_toplevel_types.find(clean_typename);
-							auto found_types = types_by_codeless_name.equal_range(type_symname);
-
-
-// 							if (found_type_entry != named_toplevel_types.end() /* && (
-// 										found_type->get_tag() == DW_TAG_base_type ||
-// 										(found_type->get_decl_file()
-// 											&& *found_type->get_decl_file() == i_srcfile))*/)
-// 							{
-// 								found_type = found_type_entry->second;
-// 								found_cu = i_cu;
-// 								found_sourcefile_path = current_sourcepath;
-// 								goto cu_loop_exit;
-// 							}
-
-							if (found_types.first == found_types.second)
-							{
-								cerr << "Found no types for symbol name "
-									<< type_symname << "; unique symbol names were: " << endl;
-								set<string> uniques;
-								for (auto i_el = types_by_codeless_name.begin();
-									i_el != types_by_codeless_name.end(); ++i_el)
-								{
-									uniques.insert(i_el->first);
-								}
-								for (auto i_el = uniques.begin();
-									i_el != uniques.end(); ++i_el)
-								{
-									if (i_el != uniques.begin()) cerr << ", ";
-									cerr << *i_el;
-								}
-							} 
-							else 
-							{
-								/* Make sure we get the version that is defined in this CU. */
-								for (auto i_found = found_types.first; i_found != found_types.second; ++i_found)
-								{
-									if (i_found->second.enclosing_cu()
-										== i_cu)
-									{
-										found_type = i_found->second;
-										// we can exit the loop now
-
-										cerr << "Success: found a type named " << i_found->first
-											<< " in a CU named "
-											<< *i_found->second.enclosing_cu().name_here()
-											<< " == "
-											<< *i_cu.name_here()
-											<< endl;
-										goto cu_loop_exit;
-									}
-									else 
-									{
-										assert(i_found->second.enclosing_cu().offset_here()
-											!= i_cu.offset_here());
-
-										cerr << "Found a type named " << i_found->first
-											<< " but it was defined in a CU named "
-											<< *i_found->second.enclosing_cu().name_here()
-											<< " whereas we want one named "
-											<< *i_cu.name_here()
-											<< endl;
-										second_chance_type = i_found->second;
-									}
-
-								}
-							}
-
-							// if we got here, we failed...
-							/* If we fail, we will go round again, since 
-							 * we might find another CU that 
-							 * - embodies this source file, and
-							 * - contains more DWARF types. */
-
-							found_type = iterator_base::END;
-						}
-					}
-				}
-			}
-		} // end for each CU
-	cu_loop_exit:
-		if (!found_type)
-		{
-			cerr << "Warning: no type named " << type_symname 
-				<< " in CUs embodying source file " << sourcefile
-				<< " (found " << embodying_cus.size() << ":";
-				for (auto i_cu = embodying_cus.begin(); i_cu != embodying_cus.end(); ++i_cu)
-				{
-					if (i_cu != embodying_cus.begin()) cerr << ", ";
-					cerr << *(*i_cu)->get_name();
-				}
-				cerr << ") but required by allocsite: " << objname 
-				<< "<" << type_symname << "> @" << std::hex << file_addr << std::dec << ">" << endl;
-
-			if (second_chance_type)
-			{
-				cerr << "Warning: guessing that we can get away with " 
-					<< second_chance_type << endl;
-				found_type = second_chance_type;
-			} else continue;
-		}
-		// now we found the type
-		//cerr << "SUCCESS: found type: " << *found_type << endl;
-
-		uniqued_name name_used = canonical_key_for_type(found_type);
-		/* NOTE: we can still get incomplete types used as sizeof, if the 
-		 * user did "offsetof" on a field in them. That is how we will get
-		 * them here. FIXME: if the user uses offsetof even on a *complete*
-		 * type, we should skip the ARR0 here. E.g. if we have the variable-
-		 * -length array be [1] not [0], we would ues offsetof to allocate
-		 * space for extra training elements. We already have "might be
-		 * array", output by dumpallocs.ml, which required that the type is
-		 * complete. So assert that if it might be an array, it's complete. */
-		bool is_incomplete = !found_type->calculate_byte_size();
-		if (i_alloc->might_be_array && is_incomplete)
-		{
-			std::cerr << "WARNING: dumpallocs thought an allocation of " << type_symname
-				<< " might be an array, but it's incomplete" << std::endl;
-			i_alloc->might_be_array = false;
-		}
-		bool declare_as_array0 = !i_alloc->is_synthetic && i_alloc->might_be_array;// && !found_type_is_incomplete;
-
-		// add to the allocsites table too
-		// recall: this is the mapping from allocsites to uniqtype addrs
-		// the uniqtype addrs are given as idents, so we just have to use the same name
-		allocsites_relation.insert(
-			make_pair(
-				make_pair(objname, file_addr),
-				make_pair(name_used, *i_alloc)
-			)
-		);
-	} // end for allocsite
-}	
-
 optional<vector<allocsite> > read_allocsites_for_binary(const string& s)
 {
 	/* Is there an allocsites file for the input object? */

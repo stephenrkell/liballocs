@@ -414,7 +414,11 @@ void write_master_relation(master_relation_t& r,
 		return (base_t->bit_size_and_offset().second != 0
 			|| base_t->bit_size_and_offset().first != 8 * (*base_t->calculate_byte_size()));
 	};
-	/* Emit forward declarations, building the complement relation as we go. */
+	/* Emit forward declarations, building the complement relation as we go.
+	 * We only forward-declare things in the relation; we don't traverse
+	 * dependencies, because the relation is assumed to be transitively closed.
+	 * We already hack around one issue here (below): signedness complements that
+	 * are not in the relation may nevertheless be depended on. */
 	set<string> names_previously_emitted;
 	for (auto i_pair = r.begin(); i_pair != r.end(); ++i_pair)
 	{
@@ -931,17 +935,29 @@ void write_master_relation(master_relation_t& r,
 				string mangled_name = mangle_typename(k);
 				if (names_emitted.find(mangled_name) == names_emitted.end())
 				{
-					out << "Type named " << mangled_name << ", " << i_edge->get_type()
+					cerr << "Type named " << mangled_name << ", " << i_edge->get_type()
 						<< ", concretely " << i_edge->get_type()->get_concrete_type()
 						<< " was not emitted previously." << endl;
 					for (auto i_name = names_emitted.begin(); i_name != names_emitted.end(); ++i_name)
 					{
 						if (i_name->substr(i_name->length() - k.second.length()) == k.second)
 						{
-							out << "Possible near-miss: " << *i_name << endl;
+							cerr << "Possible near-miss: " << *i_name << endl;
 						}
 					}
-					assert(false);
+					/* WHAT should we do here?
+					 * pre-scan and output a forward decl of the uniqtype?
+					 * If the caller asks for it.
+					 * Then we can add its name to the already-emitted list.
+					 * Problem: cycles!
+					 * We've been here before.
+					 * One solution was to calculate the DAG.
+					 * My "easier" solution was to forward-declare everything.
+					 * So presumably I need a pre-pass?
+					 * Maybe we're better off doing it outside this particular
+					 * function?
+					 */
+					//assert(false);
 				}
 
 				write_uniqtype_related_contained_member_type(out,

@@ -30,15 +30,18 @@ struct allocsite
 	unsigned file_addr;
 	bool is_synthetic;
 	bool might_be_array;
+	iterator_df<core::type_die> found_type;
+	iterator_df<core::type_die> find_named_type(root_die& r, const multimap<string, iterator_df<type_die> >& types_by_codeless_name);
 };
 
 vector<allocsite> read_allocsites(std::istream& in);
-optional<vector<allocsite> > read_allocsites_for_binary(const string& s);
+optional<vector<allocsite> > read_allocsites_for_binary(const string& path);
 
-void merge_and_rewrite_synthetic_data_types(core::root_die& r, vector<allocsite>& as);
+vector<iterator_df<type_die> >
+ensure_needed_types_and_assign_to_allocsites(core::root_die& r, vector<allocsite>& as);
 
 pair<std::unique_ptr<core::root_die>, std::unique_ptr<std::ifstream> >
-make_root_die_and_merge_synthetics(vector<allocsite>& as);
+make_root_die_and_ensure_needed_types(vector<allocsite>& as);
 
 int read_allocs_line(
 	const string& str,
@@ -54,17 +57,6 @@ int read_allocs_line(
 // HACK now that this field is not explicit
 #define DECLARE_AS_ARRAY0(a) \
 (!(a).is_synthetic && (a).might_be_array)
-
-/* The allocsites relation map a pair <objname, offset>
- * to a pair <uniqued_name, declare_as_array0> */
-typedef std::map< pair< string, unsigned long >, pair<uniqued_name, allocsite > > allocsites_relation_t;
-
-void make_allocsites_relation(
-	allocsites_relation_t& allocsites_relation,
-	vector<allocsite>& allocsites_to_add,
-	multimap<string, iterator_df<type_die> >& types_by_codeless_name,
-	root_die& r
-);
 
 iterator_df<type_die>
 get_or_create_uninterpreted_byte_type(root_die& r);

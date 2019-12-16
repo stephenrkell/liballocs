@@ -71,6 +71,44 @@ using dwarf::lib::Dwarf_Unsigned;
 
 using namespace allocs::tool;
 
+static set<uniqued_name>
+get_names_depended_on(vector<allocsite>::const_iterator begin, vector<allocsite>::const_iterator end)
+{
+	set<uniqued_name> retval;
+	for (auto i_a = begin; i_a != end; ++i_a)
+	{
+		auto& initial_t = i_a->found_type;
+		walk_type(initial_t, iterator_base::END,
+		[&retval](iterator_df<type_die> t, iterator_df<program_element_die> reason) -> bool {
+			/* NOTE: we will get called for every type, including void.
+			 * Our job is to decide whether we depend on this type,
+			 * and whether we need to recurse. */
+			if (reason.is_a<member_die>())
+			{
+				auto memb = reason.as_a<member_die>();
+				if (memb->get_declaration() && *memb->get_declaration()
+					 && memb->get_external() && *memb->get_external())
+				{
+					// static member vars don't get added nor recursed on
+					return false;
+				}
+				assert(memb->get_type() != iterator_base::END);
+				if (memb->get_type()->get_concrete_type() == t.parent().as_a<type_die>())
+				{
+					/* directly recursive type?! */
+					assert(false);
+				}
+			}
+			if (t && t != t->get_concrete_type()) return true; // don't add anything, but keep going
+			// we need this one
+			auto p = retval.insert(canonical_key_for_type(t));
+			if (!p.second) return false; // we've already added it; stop now
+			return true; // keep going
+		});
+	}
+	return retval;
+}
+
 int main(int argc, char **argv)
 {
 	/* We open the file named by argv[1] and dump its DWARF types. */ 
@@ -97,117 +135,38 @@ int main(int argc, char **argv)
 	shared_ptr<sticky_root_die> p_root = sticky_root_die::create(fd);
 	if (!p_root) { std::cerr << "Error opening file" << std::endl; return 1; }
 	sticky_root_die& root = *p_root;
-	assert(&root.get_frame_section());
 	
 	/* Do we have an allocsites file for this object? If so, we incorporate its 
-	 * synthetic data types. */
+	 * synthetic data types. ALSO treat arr0 as synthetic (FIXME) */
 	auto allocsites = read_allocsites_for_binary(argv[1]);
-	allocsites_relation_t allocsites_relation;
-	multimap<string, iterator_df<type_die> > types_by_codeless_name;
 	//set< pair<string, string> > to_generate_array0;
-	if (allocsites)
-	{
-		/* rewrite the allocsites we were passed */
-		merge_and_rewrite_synthetic_data_types(root, *allocsites);
-	}
-	get_types_by_codeless_uniqtype_name(types_by_codeless_name,
-		root.begin(), root.end());
-	if (allocsites)
-	{
-		make_allocsites_relation(allocsites_relation, *allocsites, types_by_codeless_name, root);
-		cerr << "Allocsites relation contains " << allocsites_relation.size() << " data types." << endl;
-	}
+	if (!allocsites) { cerr << "Error: no allocation sites for " << std::endl; return 1; }
+	/* rewrite the allocsites we were passed */
+	vector<iterator_df<type_die> > created_types = ensure_needed_types_and_assign_to_allocsites(root, *allocsites);
+	cerr << "Processing " << allocsites->size() << " allocation sites." << endl;
 
 	cout << "#include \"uniqtype-defs.h\"\n\n";
-	// write a forward declaration for every uniqtype we need
+	/* Write any necessary forward declarations. That means
+	 * anything that an emitted type might reference.
+	 * This can include things we created, and things we didn't.
+	 *  */
+	set<uniqued_name> dependencies = get_names_depended_on(allocsites->begin(), allocsites->end());
+	for (auto i_n = dependencies.begin(); i_n != dependencies.end(); ++i_n)
+	{
+		emit_extern_declaration(cout, *i_n, false);
+	}
+	master_relation_t needed;
+	for (auto i_t = created_types.begin(); i_t != created_types.end(); ++i_t)
+	{
+		// we need to emit a uniqtype from the dwarfidl'd DIEs
+		add_type(*i_t, needed);
+	}
 	set<string> names_emitted;
-	/* As a pre-pass, remember any ARR names we need. These need special handling,
-	 * as flexible arrays with their make_precise members set. */
-	map<string, pair<string, string> > arr0_needed_by_allocsites;
-	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
-	{
-		auto objname = i_site->second.first.first;
-		auto file_addr = i_site->second.first.second;
-		string element_name_used_code = i_site->second.first.first;
-		string element_name_used_ident = i_site->second.first.second;
-		bool declare_as_array0 = DECLARE_AS_ARRAY0(i_site->second.second);
-		
-		if (declare_as_array0)
-		{
-			/* Remember for later that we need to actually define the __ARR_ type. */
-			string element_mangled_name = mangle_typename(make_pair(element_name_used_code, element_name_used_ident));
-			cout << "/* Allocation site type needed: ARR of " 
-				<< element_mangled_name
-				<< " */" << endl;
-			
-			string codeless_array_name = string("__ARR_") + element_name_used_ident;
-			string mangled_codeless_array_name
-			 = mangle_typename(make_pair(string(""), codeless_array_name));
-			arr0_needed_by_allocsites.insert(
-				make_pair(mangled_codeless_array_name, 
-					make_pair(element_mangled_name, codeless_array_name)
-				)
-			);
-			
-			// /* forward-declare it right now; we'll define it after everything else */
-			// cout << "extern struct uniqtype " << mangled_codeless_array_name << ";" << endl;
-			// /* pretend we've already emitted it... */
-			// names_emitted.insert(mangled_codeless_array_name);
-		}
-		// always extern-declare the element type
-		cout << "extern struct uniqtype " << mangle_typename(i_site->second.first) << ";" << endl;
-
-		// FIXME: the synthetic ones  actually need emitting.
-		if (i_site->second.second.is_synthetic)
-		{
-			// oh dear. how do we get the DWARF type?
-			// we need to emit a uniqtype from the dwarfidl'd DIEs
-			cerr << "Warning: (FIXME) not passed any DWARF info for synthetic alloc type "
-				<< mangle_typename(i_site->second.first) << endl;
-		}
-	}
-
-	// now write those pesky ARR ones -- any that we didn't emit earlier
-	for (auto i_mangled_name = arr0_needed_by_allocsites.begin();
-		i_mangled_name != arr0_needed_by_allocsites.end();
-		++i_mangled_name)
-	{
-		const string& mangled_codeless_array_name = i_mangled_name->first;
-		const string& element_mangled_name = i_mangled_name->second.first;
-		const string& codeless_array_name = i_mangled_name->second.second;
-		if (names_emitted.find(mangled_codeless_array_name) == names_emitted.end())
-		{
-			write_uniqtype_section_decl(cout, mangled_codeless_array_name);
-			write_uniqtype_open_flex_array(cout,
-				mangled_codeless_array_name,
-				/* array_codeless_name.second */ i_mangled_name->second.second
-			);
-			write_uniqtype_related_array_element_type(cout,
-				i_mangled_name->second.first // i.e. the element type
-			);
-			write_uniqtype_close(cout, mangled_codeless_array_name);
-		}
-	}
-	
-	cerr << "Allocsites relation has " << allocsites_relation.size() << " members." << endl;
-	for (auto i_site = allocsites_relation.begin(); i_site != allocsites_relation.end(); ++i_site)
-	{
-		auto objname = i_site->second.first.first;
-		auto file_addr = i_site->second.first.second;
-		string name_used_code = i_site->second.first.first;
-		string name_used_ident = i_site->second.first.second;
-		auto& alloc = i_site->second.second;
-		bool declare_as_array0 = DECLARE_AS_ARRAY0(i_site->second.second);
-
-		if (!declare_as_array0)
-		{
-			cout << "/* Allocation site type not needing ARR type: " 
-				<< i_site->second.first.second
-				<< " */" << endl;
-		}
-		else cout << "/* We should have emitted a type of this name earlier: "
-			<< name_used_ident << " */" << endl;
-	}
+	map<string, set< iterator_df<type_die> > > types_by_name;
+	write_master_relation(needed, std::cout, std::cerr,
+		names_emitted, types_by_name,
+		/* emit_codeless_aliases */ true,
+		/* emit_subobject_names */ true);
 
 	return 0;
 }
