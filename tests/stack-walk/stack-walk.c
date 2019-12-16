@@ -5,12 +5,9 @@
 
 static int cb(void *ip, void *sp, void *bp, void *arg)
 {
-	const char *sname;
-	int ret = fake_dladdr(ip, NULL, NULL, &sname, NULL);
-	if (ret)
-	{
-		printf("%s\n", sname);
-	} else printf("(unknown)\n");
+	const char *sname = ip ? "(unknown)" : "(no active function)";
+	int ret = ip ? fake_dladdr(ip, NULL, NULL, &sname, NULL) : 0;
+	printf("%s\n", sname);
 	return 0; // keep going
 }
 
