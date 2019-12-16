@@ -146,3 +146,23 @@ tmp-*.txt
 
 /tools/pervasive-types
 /tools/roottypes.c
+
+/tests/alloca/-ldl.res
+/tests/allocsite-id/allocsite-id
+.tests/bit-fields/bit-fields
+/tests/char-allocs/char-allocs
+/tests/lib-test/lib-test
+/tests/malloc-in-exe/malloc-in-exe
+/tests/metavec-layout/metavec-layout
+/tests/no-unbind-self/no-unbind-self
+/tests/nopreload-alloca/nopreload-alloca
+/tests/ptr-to-opaque/ptr-to-opaque
+/tests/realloc-multi-union/realloc-multi-union
+/tests/relf-auxv-dynamic/relf-auxv-dynamic
+/tests/sizeof-subtract/sizeof-subtract
+/tests/stack-types/stack-types
+/tests/stack-walk/stack-walk
+/tests/string-lit/string-lit
+/tests/uniqtype-make-precise/uniqtype-make-precise
+/tests/uniqtype-walk/uniqtype-walk
+
