@@ -15,9 +15,11 @@ endif
 
 UNIQTYPES_BASE ?= /usr/lib/meta
 META_BASE ?= /usr/lib/meta
+LIBALLOCS_BUILD ?= $(dir $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_preload.so))
 
 export UNIQTYPES_BASE
 export META_BASE
+export LIBALLOCS_BUILD
 
 CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
