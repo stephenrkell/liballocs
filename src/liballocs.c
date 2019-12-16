@@ -1642,7 +1642,12 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 	struct uniqtype *old_type = NULL;
 	void *base;
 	size_t sz;
-	liballocs_err_t err = a->get_info(/* a, */ block, b, &old_type, &base, &sz, NULL);
+	/* CARE: the bigalloc 'b' is not necessarily the allocation. It might
+	 * be the containing bigalloc (test: b->allocated_by == a). Some calls
+	 * want the bigalloc whether or not it's the allocation, and some
+	 * calls are happy with NULL and want it only if it *is* the allocation.
+	 * get_info really wants the bigalloc. */
+	liballocs_err_t err = a->get_info(block, b, &old_type, &base, &sz, NULL);
 	if (!old_type) return 2;
 	if (old_type->make_precise) old_type = old_type->make_precise(old_type,
 		NULL, 0, block, block, sz, __builtin_return_address(0), NULL);
@@ -1652,7 +1657,8 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 		old_type,
 		new_type
     );
-	err = a->set_type(/*a, */ b, block, union_type);
+	/* set_type is happy with NULL */
+	err = a->set_type((b->allocated_by == a) ? b : NULL, block, union_type);
 	assert(!err);
 	struct uniqtype *got_t = __liballocs_get_alloc_type(block);
 	assert(got_t == union_type);

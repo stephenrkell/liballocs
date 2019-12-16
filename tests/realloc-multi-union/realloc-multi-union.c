@@ -42,7 +42,7 @@ int main(void)
 		new_type
 	);
 	struct allocator *a = __liballocs_leaf_allocator_for(sp, NULL);
-	liballocs_err_t err = a->set_type(/*a, */ sp, union_type);
+	liballocs_err_t err = a->set_type(NULL, sp, union_type);
 	assert(!err);
 	struct uniqtype *got_t = __liballocs_get_alloc_type(sp);
 	assert(got_t == union_type);
