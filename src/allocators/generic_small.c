@@ -444,11 +444,11 @@ int __index_small_alloc(void *ptr, int level, unsigned size_bytes)
 		/* We hit the parent bigalloc, but it's not a bigalloc that we are managing.
 		 * So we need to promote that underlying alloc. We need to get its info first. */
 		void *bigalloc_base;
-		liballocs_err_t err = a->get_info(ptr, NULL, NULL, &bigalloc_base, NULL, NULL);
+		liballocs_err_t err = a->get_info(ptr, container, NULL, &bigalloc_base, NULL, NULL);
 		if (err && err != &__liballocs_err_unrecognised_alloc_site) abort();
 		
 		container = a->ensure_big(bigalloc_base);
-		container->suballocator = &__generic_small_allocator;
+		// we will set up the chunk below
 	}
 	/* Else we hit the parent allocation, and it's already a bigalloc. */
 

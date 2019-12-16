@@ -458,7 +458,8 @@ static struct big_allocation *ensure_big(void *addr)
 	size_t size;
 	const void *site;
 	struct uniqtype *t;
-	liballocs_err_t err = __generic_heap_get_info(addr, NULL, &t, &start, &size, &site);
+	liballocs_err_t err = __generic_heap_get_info(addr, __lookup_deepest_bigalloc(addr),
+		&t, &start, &size, &site);
 	if (err && err != &__liballocs_err_unrecognised_alloc_site) abort();
 	
 	return become_big(userptr_to_allocptr(start), size, t ? (struct insert) {
