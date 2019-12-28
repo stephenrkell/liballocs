@@ -53,7 +53,7 @@ jobs:
           name: Create liballocs metadata
           command: |
             mkdir -p /usr/lib/meta
-            make -f tools/Makefile.meta /usr/lib/meta/lib/x86_64-linux-gnu/libc-2.27.so-meta.so
+            make -f tools/Makefile.meta /usr/lib/meta/`ldd /bin/true | grep 'libc.so.6' | sed -r 's/.*=> (.*) \(.*/\1/'`-meta.so
       - run:
           name: Run tests
           command: make -C tests -j 2
