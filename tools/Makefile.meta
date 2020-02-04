@@ -119,35 +119,42 @@ SWAP_STDOUT_STDERR := 3>&2 2>&1 1>&3
 # uniqtypes that we always generate (void, existential...)
 .PRECIOUS: $(META_BASE)/%-roottypes.c
 $(META_BASE)/%-roottypes.c: $(dir $(THIS_MAKEFILE))/roottypes.c
+	mkdir -p $(dir $@)
 	cp $(dir $(THIS_MAKEFILE))/roottypes.c $@
 # real uniqtypes
 .PRECIOUS: $(META_BASE)/%-dwarftypes.c
 $(META_BASE)/%-dwarftypes.c: /%
+	mkdir -p $(dir $@)
 	errs=$$( ( $(DWARFTYPES) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
 	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # synthetic heap uniqtypes: depends on real uniqtypes
 .PRECIOUS: $(META_BASE)/%-alloctypes.c
 $(META_BASE)/%-alloctypes.c: /% $(META_BASE)/%.allocs
+	mkdir -p $(dir $@)
 	errs=$$( ( $(ALLOCTYPES) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
 	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # frame uniqtypes: depends on real uniqtypes
 .PRECIOUS: $(META_BASE)/%-frametypes.c
 $(META_BASE)/%-frametypes.c: /%
+	mkdir -p $(dir $@)
 	errs=$$( ( $(FRAMETYPES) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
 	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # heap allocsites: depends on synthetic heap types
 .PRECIOUS: $(META_BASE)/%-allocsites.c
 $(META_BASE)/%-allocsites.c: $(META_BASE)/%.allocs
+	mkdir -p $(dir $@)
 	errs=$$( ( $(ALLOCSITES) < $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
 	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # heap allocsites bloom filter: depends on heap allocsites
 .PRECIOUS: $(META_BASE)/%-allocsites-bloom.c
 $(META_BASE)/%-allocsites-bloom.c: $(META_BASE)/%.allocs
+	mkdir -p $(dir $@)
 	errs=$$( ( $(ALLOCSITES_BLOOM) < $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
 	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # file extrasyms: does *not* depend on anything (just generates fake syms from debug info)
 .PRECIOUS: $(META_BASE)/%-extrasyms.c
 $(META_BASE)/%-extrasyms.c: /%
+	mkdir -p $(dir $@)
 	errs=$$( ( $(EXTRASYMS) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
 	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # file sorted meta-vector: type info is optional -- we might want to use this from librunt
@@ -156,6 +163,7 @@ $(META_BASE)/%-extrasyms.c: /%
 # file sorted meta-vector really with type info: depends on real uniqtypes
 .PRECIOUS: $(META_BASE)/%-metavector.c
 $(META_BASE)/%-metavector.c: /%
+	mkdir -p $(dir $@)
 	errs=$$( ( $(METAVECTOR) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
 	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # Given this complexity, perhaps we should
