@@ -16,10 +16,10 @@ lib_LTLIBRARIES =
 EXTRA_DIST =
 EXTRA_LTLIBRARIES =
 CLEANFILES =
-BUILT_SOURCES =
+BUILT_SOURCES = tools/roottypes.c
 MOSTLYCLEANFILES =
 
-extra_DIST = liballocs.pc.in  tools/roottypes.c
+extra_DIST = liballocs.pc.in
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = liballocs.pc
 
