@@ -336,20 +336,31 @@ static string get_liballocs_base()
 int sticky_root_die::open_debuglink(int user_fd)
 {
 	/* FIXME: linux-specific big hacks here. */
-	char *cmdstr = NULL;
-	char *fdstr = NULL;
+	char *cmdstr = nullptr;
+	char *fdstr = nullptr;
 	int ret = asprintf(&fdstr, "/dev/fd/%d", user_fd);
-	if (ret <= 0) throw No_entry();
+	if (ret <= 0) abort();
+	assert(fdstr);
+	std::vector<std::string> paths_to_try;
+	char *fd_realpath = realpath(fdstr, nullptr);
+	if (fd_realpath)
+	{
+		paths_to_try.push_back(
+			string("/usr/lib/debug")
+			+ string(fd_realpath)
+		);
+	}
 	/* HACK HACK HACK */
 	ret = asprintf(&cmdstr, "bash -c \". '%s'/tools/debug-funcs.sh && read_debuglink '%s' | tr -d '\\n'\"",
 		get_liballocs_base().c_str(), fdstr);
-	if (ret <= 0) throw No_entry();
-	assert(cmdstr != NULL);
+	if (ret <= 0) abort();
+	assert(cmdstr);
 	FILE *p = popen(cmdstr, "r");
 	char debuglink_buf[4096];
-	size_t nread = fread(debuglink_buf, 1, sizeof debuglink_buf, p);
+	size_t nread = fread(debuglink_buf, 1, sizeof debuglink_buf - 1, p);
 	int ret_fd;
-	if (nread == sizeof debuglink_buf)
+	debuglink_buf[nread > 0 ? nread : 0] = '\0';
+	if (nread == sizeof debuglink_buf - 1)
 	{
 		// basically we overflowed
 		std::cerr << "Debuglink contained too many characters" << std::endl;
@@ -366,8 +377,6 @@ int sticky_root_die::open_debuglink(int user_fd)
 		 * under each one of the global debug directories,
 		 *      in a subdirectory whose name is identical to
 		 *      the leading directories of the executable's absolute file name. */
-		std::vector<std::string> paths_to_try;
-		char *fd_realpath = realpath(fdstr, NULL);
 		if (fd_realpath)
 		{
 			// to save us from strdup'ing, construct a string
@@ -393,16 +402,16 @@ int sticky_root_die::open_debuglink(int user_fd)
 				+ "/"
 				+ debuglink_buf
 			);
-
-			free(fd_realpath);
-		}
-		for (auto i_path = paths_to_try.begin(); i_path != paths_to_try.end();
-			++i_path)
-		{
-			ret_fd = open(i_path->c_str(), O_RDONLY);
-			if (ret_fd != -1) break;
 		}
 	}
+	for (auto i_path = paths_to_try.begin(); i_path != paths_to_try.end();
+		++i_path)
+	{
+		ret_fd = open(i_path->c_str(), O_RDONLY);
+		if (ret_fd != -1) break;
+	}
+
+	if (fd_realpath) free(fd_realpath);
 	free(cmdstr);
 	return ret_fd;
 }
