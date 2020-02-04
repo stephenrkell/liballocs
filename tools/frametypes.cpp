@@ -724,11 +724,24 @@ int main(int argc, char **argv)
 						i_el_pair->first.spec_here(),
 						/* fb */ 0, 
 						initial_stack);
-					addr_from_zero = e.tos(false); // may *not* be value; must be loc
-				} 
+					switch (e.tos_state())
+					{
+						case dwarf::expr::evaluator::ADDRESS: // the good one
+							break;
+						default:
+							if (debug_out > 1)
+							{
+								cerr << "Top-of-stack indicates non-address result" << std::endl;
+							}
+					}
+					addr_from_zero = e.tos(dwarf::expr::evaluator::ADDRESS); // may *not* be value; must be loc
+				}
 				catch (dwarf::lib::No_entry)
 				{
-					/* Not sure what would cause this, since we scanned for registers. */
+					/* Not much can cause this, since we scanned for registers.
+					 * One thing would be a local whose location gives DW_OP_stack_value,
+					 * i.e. it has only a debug-time-computable value but no location in memory,
+					 * or DW_OP_implicit_pointer, i.e. it points within some such value. */
 					if (debug_out > 1)
 					{
 						cerr << "Warning: failed to locate non-register-located local/fp "
@@ -741,6 +754,19 @@ int main(int argc, char **argv)
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
 						compare_first_iter_offset<string> */ singleton_set;
 					singleton_set.insert(make_pair(*i_el, string("unknown")));
+#ifdef DEBUG
+					discarded_intervals += make_pair(i_int->first, singleton_set);
+#endif
+					continue;
+				}
+				catch (dwarf::expr::Not_supported)
+				{
+					cerr << "Warning: unsupported DWARF opcode when computing location for fp: "
+						<< *i_el;
+					//discarded.push_back(make_pair(*i_el, "register-located"));
+					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
+						compare_first_iter_offset<string> */ singleton_set;
+					singleton_set.insert(make_pair(*i_el, string("unsupported-DWARF")));
 #ifdef DEBUG
 					discarded_intervals += make_pair(i_int->first, singleton_set);
 #endif
