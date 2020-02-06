@@ -55,8 +55,8 @@ jobs:
             mkdir -p /usr/lib/meta
             make -f tools/Makefile.meta /usr/lib/meta`ldd /bin/true | grep 'libc.so.6' | sed -r 's/.*=> (.*) \(.*/\1/' | xargs readlink -f`-meta.so
       - persist_to_workspace:
-          root: ./
-          paths: liballocs
+          root: /root
+          paths: project
   test:
     requires:
       - build
@@ -64,7 +64,7 @@ jobs:
       - image: ubuntu:18.04
     steps:
       - attach_workspace:
-          at: ./
+          at: /root/project
       - run:
           name: Run tests
           command: make -C tests -j 2
