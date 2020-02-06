@@ -54,6 +54,17 @@ jobs:
           command: |
             mkdir -p /usr/lib/meta
             make -f tools/Makefile.meta /usr/lib/meta`ldd /bin/true | grep 'libc.so.6' | sed -r 's/.*=> (.*) \(.*/\1/' | xargs readlink -f`-meta.so
+      - persist_to_workspace:
+          root: ~/
+          paths: liballocs
+  test:
+    requires:
+      - build
+    docker:
+      - image: ubuntu:18.04
+    steps:
+      - attach_workspace:
+          at: ~/
       - run:
           name: Run tests
           command: make -C tests -j 2
