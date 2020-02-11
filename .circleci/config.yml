@@ -68,3 +68,9 @@ jobs:
       - run:
           name: Run tests
           command: make -C tests -j 2
+
+workflows:
+  default:
+    jobs:
+      - build
+      - test
