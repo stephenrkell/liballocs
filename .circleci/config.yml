@@ -63,6 +63,11 @@ jobs:
     docker:
       - image: ubuntu:18.04
     steps:
+      - run:
+          name: Install dependencies (ca-certificates)
+          command: |
+            apt update
+            apt install -y ca-certificates
       - attach_workspace:
           at: /root/project
       - run:
