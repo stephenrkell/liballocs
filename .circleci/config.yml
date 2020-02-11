@@ -70,7 +70,10 @@ jobs:
           command: make -C tests -j 2
 
 workflows:
+  version: 2
   default:
     jobs:
       - build
-      - test
+      - test:
+          requires:
+            - build
