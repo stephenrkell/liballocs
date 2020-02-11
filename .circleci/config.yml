@@ -64,10 +64,10 @@ jobs:
       - image: ubuntu:18.04
     steps:
       - run:
-          name: Install dependencies (ca-certificates)
+          name: Install dependencies
           command: |
             apt update
-            apt install -y ca-certificates
+            apt install -y ca-certificates make build-essential g++
       - attach_workspace:
           at: /root/project
       - run:
