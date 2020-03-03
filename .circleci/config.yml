@@ -67,7 +67,8 @@ jobs:
           name: Install dependencies
           command: |
             apt update
-            apt install -y ca-certificates make build-essential g++ autoconf automake libtool
+            apt install -y ca-certificates make build-essential g++ autoconf automake libtool \
+              libelf-dev python3 python git gawk 
       - attach_workspace:
           at: /root
       - run:
