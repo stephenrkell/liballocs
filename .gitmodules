@@ -25,3 +25,6 @@
 [submodule "contrib/libdlbind"]
 	path = contrib/libdlbind
 	url = git://github.com/stephenrkell/libdlbind.git
+[submodule "contrib/liballocstool"]
+	path = contrib/liballocstool
+	url = git://github.com/stephenrkell/liballocstool.git

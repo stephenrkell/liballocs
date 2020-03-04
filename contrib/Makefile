@@ -27,7 +27,8 @@ export LIBRUNT_BASE := $(realpath $(dir $(THIS_MAKEFILE))/librunt)
 
 default: env.sh config.mk trap-syscalls/libsystrap/libsystrap.a \
 build-dwarfidl build-libdwarfpp build-libcxxgen \
-build-libantlr3c++ build-libantlr3c build-libdlbind build-libsystrap
+build-libantlr3c++ build-libantlr3c build-libdlbind build-libsystrap \
+build-liballocstool
 
 .PHONY: clean default
 
@@ -178,6 +179,41 @@ build-libsystrap: trap-syscalls/libsystrap/libsystrap.a
 
 CONFIG_MK += \nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls\n
 CONFIG_MK += \nLIBSYSTRAP := $(CONTRIB_ROOT)/trap-syscalls/libsystrap\n
+
+# ----------------------------liballocstool
+
+liballocstool/configure:
+	cd liballocstool && git submodule init && git submodule update && ./autogen.sh
+	
+liballocstool/config.status: liballocstool/configure
+	cd liballocstool && \
+	LIBCXXFILENO_CXXFLAGS=-I$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno/include \
+	LIBCXXFILENO_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno/lib \
+        -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/contrib/libc++fileno -lc++fileno" \
+	LIBSRK31CXX_CXXFLAGS=-I$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/include \
+	LIBSRK31CXX_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/lib \
+	-Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/contrib/libsrk31c++/lib -lsrk31c++" \
+	LIBDWARFPP_CXXFLAGS=-I$(CONTRIB_ROOT)/libdwarfpp/include \
+	LIBDWARFPP_LIBS="-L$(CONTRIB_ROOT)/libdwarfpp/lib \
+        -Wl,-rpath,$(CONTRIB_ROOT)/libdwarfpp/lib -ldwarfpp" \
+	LIBCXXGEN_CXXFLAGS=-I$(CONTRIB_ROOT)/libcxxgen/include \
+	LIBCXXGEN_LIBS="-L$(CONTRIB_ROOT)/libcxxgen/lib \
+        -Wl,-rpath,$(CONTRIB_ROOT)/libcxxgen/lib -lcxxgen" \
+	LIBANTLR3CXX_CXXFLAGS=-I$(CONTRIB_ROOT)/libantlr3c++/include \
+	LIBANTLR3CXX_LIBS=-Wl,-g \
+	DWARFIDL_CXXFLAGS=-I$(CONTRIB_ROOT)/dwarfidl/include \
+	DWARFIDL_LIBS="-L$(CONTRIB_ROOT)/dwarfidl/lib \
+        -Wl,-rpath,$(CONTRIB_ROOT)/dwarfidl/lib -ldwarfidl" \
+	./configure --prefix=$(CONTRIB_ROOT)/usr \
+	--with-librunt=$(LIBRUNT_BASE)
+
+build-liballocstool: liballocstool/src/liballocstool.a
+liballocstool/src/liballocstool.a: liballocstool/config.status
+	$(MAKE) -C liballocstool
+
+CONFIG_MK += \nLIBALLOCSTOOL_CXXFLAGS += -I$(CONTRIB_ROOT)/liballocstool/include\n
+CONFIG_MK += \nLIBALLOCSTOOL_CFLAGS += -I$(CONTRIB_ROOT)/liballocstool/include\n
+CONFIG_MK += \nLIBALLOCSTOOL_LIBS += -L$(CONTRIB_ROOT)/liballocstool/lib \n
 
 # ----------------------------libdlbind
 

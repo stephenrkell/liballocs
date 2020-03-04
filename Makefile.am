@@ -28,20 +28,15 @@ liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack
 
 bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types
 #tools/objdumpallocs-llvm
-lib_LIBRARIES = tools/liballocstool.a
-
-tools_liballocstool_a_SOURCES = tools/stickyroot.cpp tools/uniqtypes.cpp tools/allocsites-info.cpp
 
 LIBELF ?= -lelf
 export LIBELF
 
-TOOLS_LDADD = tools/liballocstool.a \
+TOOLS_LDADD = $(LIBALLOCSTOOL_LIBS) \
  $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(LIBANTLR3CXX_LIBS) $(DWARFIDL_LIBS) \
 -lantlr3c $(LIBELF) -lz
 
 TOOLS_CXXFLAGS := $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)/include
-
-tools_liballocstool_a_CXXFLAGS = $(TOOLS_CXXFLAGS)
 
 tools_dwarftypes_SOURCES = tools/dwarftypes.cpp
 tools_dwarftypes_LDADD = $(TOOLS_LDADD)
