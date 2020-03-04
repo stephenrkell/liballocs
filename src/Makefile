@@ -6,6 +6,7 @@ include $(SRCROOT)/config.mk
 
 CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS) \
    -I$(LIBSYSTRAP) -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused \
+   $(LIBALLOCSTOOL_CFLAGS) \
    -flto -ffat-lto-objects
 LDFLAGS += -L$(LIBDLBIND)/lib
 

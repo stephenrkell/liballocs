@@ -3,5 +3,5 @@ LIBSYSTRAP := @libsystrap@
 LIBRUNT := @librunt@
 LIBDLBIND := @libdlbind@
 
-CFLAGS := -I@librunt@/include
+CFLAGS := -I@librunt@/include @LIBALLOCSTOOL_CFLAGS@
 export CFLAGS
