@@ -31,7 +31,7 @@ extern "C" {
 #include <link.h>
 }
 
-#include "allocmeta.h"
+#include "allocmeta-defs.h"
 /* HACK: our C enum sym_or_reloc_kind goes in the toplevel namespace, but
  * we define a C++ operator<< for it. */
 std::ostream& operator<<(std::ostream& s, const enum sym_or_reloc_kind& k);
