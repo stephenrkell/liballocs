@@ -5,16 +5,15 @@ NINJA ?= ninja
 CMAKE ?= cmake
 
 export LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
-# trap-syscalls's and libdlbind's contribs need to be able to find librunt
+# libsystrap's and libdlbind's contribs need to be able to find librunt
 export LIBRUNT_BASE := $(realpath $(dir $(THIS_MAKEFILE))/librunt)
 
 # things we need to build:
 # - libdwarfpp
 # - libcxxgen
 # - libantlr3cxx
-# - trap-syscalls's own contrib      (this needs antlr, I think)
-# - trap-syscalls/libsystrap    (*not* the main trap-syscalls, which has other deps...)
-# - dwarfidl (ignore its contrib build script)
+# - libsystrap
+# - dwarfidl
 # - libdlbind
 # - binutils-gdb?
 #
@@ -22,10 +21,10 @@ export LIBRUNT_BASE := $(realpath $(dir $(THIS_MAKEFILE))/librunt)
 # - libmallochooks
 #
 # contrib things that live elsewhere
-# - everything in trap-syscalls/contrib
+# - everything in libsystrap/contrib
 # - cil (in liballocs/tools/lang/c)
 
-default: env.sh config.mk trap-syscalls/libsystrap/libsystrap.a \
+default: env.sh config.mk libsystrap/lib/libsystrap.a \
 build-dwarfidl build-libdwarfpp build-libcxxgen \
 build-libantlr3c++ build-libantlr3c build-libdlbind build-libsystrap \
 build-liballocstool
@@ -166,19 +165,18 @@ clean::
 CONFIG_MK += \nDWARFIDL_CXXFLAGS += -I$(CONTRIB_ROOT)/dwarfidl/include\n
 CONFIG_MK += \nDWARFIDL_LIBS += -L$(CONTRIB_ROOT)/dwarfidl/lib -Wl,-rpath,$(CONTRIB_ROOT)/dwarfidl/lib -ldwarfidl\n
 
-# ----------------------------trap-syscalls
+# ----------------------------libsystrap
 
-trap-syscalls/contrib/config.mk:
-	$(MAKE) -C trap-syscalls/contrib
+libsystrap/contrib/config.mk:
+	$(MAKE) -C libsystrap/contrib
 
-trap-syscalls/libsystrap/libsystrap.a: trap-syscalls/contrib/config.mk $(wildcard trap-syscalls/libsystrap/*.[ch])
-	$(MAKE) -C trap-syscalls/libsystrap
+libsystrap/lib/libsystrap.a: libsystrap/contrib/config.mk $(wildcard libsystrap/src/*.[ch])
+	$(MAKE) -C libsystrap
 
 .PHONY: build-libsystrap
-build-libsystrap: trap-syscalls/libsystrap/libsystrap.a
+build-libsystrap: libsystrap/lib/libsystrap.a
 
-CONFIG_MK += \nTRAP_SYSCALLS := $(CONTRIB_ROOT)/trap-syscalls\n
-CONFIG_MK += \nLIBSYSTRAP := $(CONTRIB_ROOT)/trap-syscalls/libsystrap\n
+CONFIG_MK += \nLIBSYSTRAP := $(CONTRIB_ROOT)/libsystrap/lib\n
 
 # ----------------------------liballocstool
 
