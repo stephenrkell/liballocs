@@ -14,7 +14,7 @@
 	path = contrib/dwarfidl
 	url = git://github.com/stephenrkell/dwarfidl.git
 [submodule "contrib/trap-syscalls"]
-	path = contrib/trap-syscalls
+	path = contrib/libsystrap
 	url = git://github.com/stephenrkell/trap-syscalls.git
 [submodule "contrib/libantlr3c++"]
 	path = contrib/libantlr3c++
