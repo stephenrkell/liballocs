@@ -16,3 +16,6 @@
 [submodule "contrib/dwarfidl"]
 	path = contrib/dwarfidl
 	url = https://github.com/stephenrkell/dwarfidl.git
+[submodule "contrib/toolsub"]
+	path = contrib/toolsub
+	url = https://github.com/stephenrkell/toolsub.git
