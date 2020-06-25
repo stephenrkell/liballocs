@@ -155,7 +155,7 @@ AC_ARG_WITH([libsystrap],
                         AC_MSG_ERROR(--with-libsystrap expected directory name)
                 fi
             ],
-            [ac_libsystrap=$(realpath $srcdir)/contrib/trap-syscalls/libsystrap])
+            [ac_libsystrap=$(realpath $srcdir)/contrib/libsystrap])
 AC_ARG_WITH([librunt],
             [AS_HELP_STRING([--with-librunt=DIR],
               [where to find librunt (headers and source)])],
@@ -167,7 +167,7 @@ AC_ARG_WITH([librunt],
                         AC_MSG_ERROR(--with-librunt expected directory name)
                 fi
             ],
-            [ac_librunt=$(realpath $srcdir)/contrib/librunt])
+            [ac_librunt=$(realpath $srcdir)/contrib/libsystrap/contrib/librunt])
 AC_ARG_WITH([libmallochooks],
             [AS_HELP_STRING([--with-libmallochooks=DIR],
               [where to find libmallochooks (headers, source, templates)])],
