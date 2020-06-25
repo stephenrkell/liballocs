@@ -13,11 +13,15 @@
 #include <dwarfpp/regs.hpp>
 #include <fileno.hpp>
 
+extern "C" {
+#include <link.h> /* relf.h needs this, or -DRELF_DEFINE_STRUCTURES */
+}
+#include "relf.h" /* for ROUND_* */
+
 #include "stickyroot.hpp"
 #include "uniqtypes.hpp"
 #include "allocsites-info.hpp"
 #include "metavec.h"
-#include "relf.h" /* for ROUND_* */
 
 using std::cin;
 using std::cout;
