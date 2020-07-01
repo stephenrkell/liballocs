@@ -121,8 +121,9 @@ void __alloca_allocator_notify(void *new_userchunkaddr,
 	 * to the allocation. */
 	__liballocs_pre_extend_bigalloc_recursive(b, /*sp_at_caller*/ new_userchunkaddr);
 	 
-	/* index it */
-	__liballocs_index_insert(new_userchunkaddr, requested_size, caller);
+	/* index it -- FIXME FIXME FIXME NEXT PLEASE -- the starts bitmap is only
+	* part of the issue -- need to */
+	__liballocs_starts_bitmap_insert(b, new_userchunkaddr, modified_size, caller);
 	
 #undef __liballocs_get_alloc_base /* inlcache HACKaround */
 	assert(__liballocs_get_alloc_base(new_userchunkaddr));

@@ -1,25 +1,34 @@
 /* Generic heap indexing implementation.
  * This can index any malloc-like heap, and do so pretty quickly.
  *
- * FIXME: currently we use a "trailer" and thread a doubly linked list
- * through bins of chunks beginning in the same 512-byte window.
- * BUT
- * this requires a well-known malloc_usable_size call, but different
- * allocators bring different metadata.
- * Could use headers instead of trailers, but then this less extensible:
-            the user's chunk base is now different from the allocator's, so
-            other malloc API calls (mallinfo, etc.) on the same chunk no longer work
-            unless we wrap them all.
- * So instead we should probably use a bitmap instead of linked lists.
- * This is also better for thread-safety / lock-freedom.
- * 
- * Alternatively we could make malloc_usable_size be a function that the
- * containing bigalloc records. That would mean lots of indirect calls
- * in this code, which is not good.
- * 
- * Alternatively our caller could supply the chunk size? This doesn't work
- * because we don't only care about one chunk; we need to be able to walk
- * the linked lists, containing many chunks.
+ * We have two versions: a linked-list version and a bitmap version.
+ * The bitmap has one bit for every 8 or 16 bytes, so one byte per 64 or 128 bytes.
+ * The linked list has one byte for every 512 bytes.
+ *
+ * We also understand "promotion" of unusually big chunks to bigallocs
+ *      that are "allocated by" us.
+ * By default this is detected by heuristics intended to identify
+ * individually mmap'd malloc chunks.
+ * But note that this is formally orthogonal to whether we are a bigalloc.
+ * FIXME: ideally our caller would predict this, to avoid incrementing
+ * dead space in the mmap'd region -- clownshoes. It would also avoid the
+ * clutter of l01 distinction and promotion machinery, I think
+ *
+ * Plan of action:
+ *
+ * - make this a header file that "generates" a *local* allocator+index
+ *     instance, applied to global_malloc and alloca separately,
+ *     and storing the index info in the bigalloc.
+ *
+ * - get rid of index_insert and similar calls, making sure that
+ *     malloc-wrapping and suballocating clients still work
+ *
+ * - refine out the linked-list variant as a single header file
+ *
+ * - refactor the malloc hooks so that bigalloc promotion is done there.
+ *     ... our get_insert logic must split the cases, using the the pageindex
+ *
+ * - implement the bitmap variant
  *
  * If we do the bitmap, where does the metadata go? We *could* punt *that*
  * to the caller: the bitmap basically removes the linked list problem.
@@ -30,20 +39,6 @@
  * 
  * That means all we really do in this module is keep a bitmap, and handle
  * delegation to promoted bigallocs.
- *
- * Crazy alternative: link one copy of this .o file for every distinct
- * malloc[-like allocator] in the process? as specified by LIBALLOCS_ALLOC_FNS.
- * This because part of the process of instantiating 'struct allocator'
- * for that allocator; if it needs our get_info, give it its own copy
- * that is linked to the relevant size function functions. So, say, at 
- * link time, we'd rename refs to __usable_size to some function, by 
- * default malloc_usable_size.
- *
- * That probably means we no longer have a single process-wide memtable; we must
- * make smaller per-arena (i.e. per-bigalloc) memtables. That might be fine.
- * Alternatively, split the process-wide memtable into a separate file that
- * all copies use. Linking this is non-trivial; references from an executable
- * will have to reach into a shared library.
  */
 
 /* This file uses GNU C extensions */
@@ -73,11 +68,8 @@ size_t malloc_usable_size(void *ptr);
 #include "liballocs_private.h"
 #include "relf.h"
 
-static void *allocptr_to_userptr(void *allocptr);
-static void *userptr_to_allocptr(void *allocptr);
-
-#define ALLOCPTR_TO_USERPTR(p) (allocptr_to_userptr(p))
-#define USERPTR_TO_ALLOCPTR(p) (userptr_to_allocptr(p))
+// HACK for libcrunch -- please remove (similar to malloc_usable_size -> __mallochooks_*)
+void __libcrunch_uncache_all(const void *allocptr, size_t size) __attribute__((weak));
 
 #define ALLOC_EVENT_QUALIFIERS __attribute__((visibility("hidden")))
 
@@ -115,10 +107,6 @@ int __currently_freeing;
 int __currently_allocating;
 #endif
 
-#ifdef MALLOC_USABLE_SIZE_HACK
-#include "malloc_usable_size_hack.h"
-#endif
-
 #ifdef TRACE_HEAP_INDEX
 /* Size the circular buffer of recently freed chunks */
 #define RECENTLY_FREED_SIZE 100
@@ -130,58 +118,24 @@ static void *recently_freed[RECENTLY_FREED_SIZE];
 static void **next_recently_freed_to_replace = &recently_freed[0];
 #endif
 
-struct entry *index_region __attribute__((aligned(64))) /* HACK for cacheline-alignedness */;
+unsigned long bitmap_region __attribute__((aligned(64))) /* HACK for cacheline-alignedness */;
 unsigned long biggest_unpromoted_object __attribute__((visibility("protected")));
-void *index_max_address;
+void *bitmap_max_address;
 int safe_to_call_malloc;
 
-void *index_begin_addr;
-void *index_end_addr;
+void *bitmap_begin_addr;
+void *bitmap_end_addr;
 #ifndef LOOKUP_CACHE_SIZE
 #define LOOKUP_CACHE_SIZE 4
 #endif
 
-struct lookup_cache_entry;
-static void install_cache_entry(void *object_start,
-	size_t usable_size, unsigned short depth, _Bool is_deepest,
-	struct insert *insert);
-static void invalidate_cache_entries(void *object_start,
-	unsigned short depths_mask,
-	struct insert *ins, signed nentries);
-static int cache_clear_deepest_flag_and_update_ins(void *object_start,
-	unsigned short depths_mask,
-	struct insert *ins, signed nentries,
-	struct insert *new_ins);
-
-/* The (unsigned) -1 conversion here provokes a compiler warning,
- * which we suppress. There are two ways of doing this.
- * One is to turn the warning off and back on again, clobbering the former setting.
- * Another is, if the GCC version we have allows it (must be > 4.6ish),
- * to use the push/pop mechanism. If we can't pop, we leave it "on" (conservative).
- * To handle the case where we don't have push/pop, 
- * we also suppress pragma warnings, then re-enable them. :-) */
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Woverflow"
 static void check_impl_sanity(void)
 {
-	assert(PAGE_SIZE == sysconf(_SC_PAGE_SIZE));
-	assert(LOG_PAGE_SIZE == integer_log2(PAGE_SIZE));
-
-	assert(sizeof (struct entry) == 1);
-	assert(
-			entry_to_offset((struct entry){ .present = 1, .removed = 0, .distance = (unsigned) -1})
-			+ entry_to_offset((struct entry){ .present = 1, .removed = 0, .distance = 1 }) 
-		== entry_coverage_in_bytes);
+	if (!(PAGE_SIZE == sysconf(_SC_PAGE_SIZE))) abort();
+	if (!((LOG_PAGE_SIZE == integer_log2(PAGE_SIZE)))) abort();
 }
-/* First, re-enable the overflow pragma, to be conservative. */
-#pragma GCC diagnostic warning "-Woverflow"
-/* Now, if we have "pop", we will restore it to its actual former setting. */
-#pragma GCC diagnostic pop
-#pragma GCC diagnostic warning "-Wpragmas"
 
 static _Bool tried_to_init;
-
 static void
 do_init(void)
 {
@@ -196,7 +150,7 @@ do_init(void)
 	if (tried_to_init) return;
 	tried_to_init = 1;
 	
-	if (index_region) return; /* already done */
+	if (bitmap_region) return; /* already done */
 
 	/* Initialize what we depend on. */
 	// __mmap_allocator_init();
@@ -209,42 +163,8 @@ do_init(void)
 	 * ourselves to be up-and-running quite early. I don't think the mmap 
 	 * allocator is strictly necessary. If we make any bigallocs calls, the 
 	 * pageindex code should ensure that the mmap allocator is init'd. */
-	
-	index_begin_addr = (void*) 0U;
-#if defined(__x86_64__) || defined(x86_64)
-	index_end_addr = (void*)(1ULL<<47); /* it's effectively a 47-bit address space */
-#else
-	index_end_addr = (void*) 0U; /* both 0 => cover full address range */
-#endif
-	
-	size_t mapping_size = MEMTABLE_MAPPING_SIZE_WITH_TYPE(struct entry,
-		entry_coverage_in_bytes, 
-		index_begin_addr,
-		index_end_addr
-	);
 
-	if (mapping_size > BIGGEST_MMAP_ALLOWED)
-	{
-#ifndef NDEBUG
-		fprintf(stderr, "%s: warning: mapping %lld bytes not %ld\n",
-			__FILE__, BIGGEST_MMAP_ALLOWED, mapping_size);
-		fprintf(stderr, "%s: warning: only bottom 1/%lld of address space is tracked.\n",
-			__FILE__, mapping_size / BIGGEST_MMAP_ALLOWED);
-#endif
-		mapping_size = BIGGEST_MMAP_ALLOWED;
-		/* Back-calculate what address range we can cover from this mapping size. */
-		unsigned long long nentries = mapping_size / sizeof (entry_type);
-		void *one_past_max_indexed_address = index_begin_addr +
-			nentries * entry_coverage_in_bytes;
-		index_end_addr = one_past_max_indexed_address;
-	}
-	
-	/* HACK: always place at 0x400000000000, to avoid problems with shadow space. */
-	index_region = MEMTABLE_NEW_WITH_TYPE_AT_ADDR(struct entry, 
-		entry_coverage_in_bytes, index_begin_addr, index_end_addr, (const void*) 0x400000000000ul);
-	debug_printf(3, "heap_index at %p\n", index_region);
-	
-	assert(index_region != MAP_FAILED);
+	bitmap_region = 
 }
 
 void post_init(void) __attribute__((visibility("hidden")));
@@ -261,142 +181,21 @@ void __generic_malloc_allocator_init(void)
 }
 
 static inline struct insert *insert_for_chunk(void *userptr);
-static void index_delete(void *userptr);
+static void bitmap_delete(void *userptr);
 
 #ifndef NDEBUG
 /* In this newer, more space-compact implementation, we can't do as much
  * sanity checking. Check that if our entry is not present, our distance
  * is 0. */
-#define INSERT_SANITY_CHECK(p_t) assert( \
-	!(!((p_t)->un.ptrs.next.present) && !((p_t)->un.ptrs.next.removed) && (p_t)->un.ptrs.next.distance != 0) \
-	&& !(!((p_t)->un.ptrs.prev.present) && !((p_t)->un.ptrs.prev.removed) && (p_t)->un.ptrs.prev.distance != 0))
-
-static void list_sanity_check(entry_type *head, const void *should_see_chunk)
-{
-	void *head_chunk = entry_ptr_to_addr(head);
-	_Bool saw_should_see_chunk = 0;
-#ifdef TRACE_HEAP_INDEX
-	fprintf(stderr,
-		"Begin sanity check of list indexed at %p, head chunk %p\n",
-		head, head_chunk);
-#endif
-	void *cur_userchunk = head_chunk;
-	unsigned count = 0;
-	while (cur_userchunk != NULL)
-	{
-		++count;
-		if (should_see_chunk && cur_userchunk == should_see_chunk) saw_should_see_chunk = 1;
-		INSERT_SANITY_CHECK(insert_for_chunk(cur_userchunk));
-		/* If the next chunk link is null, entry_to_same_range_addr
-		 * should detect this (.present == 0) and give us NULL. */
-		void *next_userchunk
-		 = entry_to_same_range_addr(
-			insert_for_chunk(cur_userchunk)->un.ptrs.next, 
-			cur_userchunk
-		);
-#ifdef TRACE_HEAP_INDEX
-		fprintf(stderr, "List has a chunk beginning at userptr %p"
-			" (usable_size %zu, insert {next: %p, prev %p})\n",
-			cur_userchunk, 
-			malloc_usable_size(userptr_to_allocptr(cur_userchunk)),
-			next_userchunk,
-			entry_to_same_range_addr(
-				insert_for_chunk(cur_userchunk)->un.ptrs.prev, 
-				cur_userchunk
-			)
-		);
-#endif
-		assert((next_userchunk != head_chunk) && "saw head chunk again; missed a free()?");
-		assert(next_userchunk != cur_userchunk);
-
-		/* If we're not the first element, we should have a 
-		 * prev chunk. */
-		if (count > 1) assert(NULL != entry_to_same_range_addr(
-				insert_for_chunk(cur_userchunk)->un.ptrs.prev, 
-				cur_userchunk
-			));
-
-
-		cur_userchunk = next_userchunk;
-	}
-	if (should_see_chunk && !saw_should_see_chunk)
-	{
-#ifdef TRACE_HEAP_INDEX
-		fprintf(stderr, "Was expecting to find chunk at %p\n", should_see_chunk);
-#endif
-
-	}
-	assert(!should_see_chunk || saw_should_see_chunk);
-#ifdef TRACE_HEAP_INDEX
-	fprintf(stderr,
-		"Passed sanity check of list indexed at %p, head chunk %p, "
-		"length %d\n", head, head_chunk, count);
-#endif
-}
-#else /* NDEBUG */
-#define INSERT_SANITY_CHECK(p_t)
-static void list_sanity_check(entry_type *head, const void *should_see_chunk) {}
-#endif
-
-// static void memset_index_big_chunk(void *userptr, struct entry value)
-// {
-// 	void *allocptr = userptr_to_allocptr(userptr);
-// 	/* Allow allocs beginning a short distance into the entry to be 
-// 	 * treated as beginning at the start of the entry.
-// 	 * This is because the malloc header. should not prevent an initial
-// 	 * entry from being marked as belonging to the . */
-// 	_Bool covers_whole_initial_entry = ((uintptr_t) allocptr) % PAGE_SIZE
-// 		 <= MAXIMUM_MALLOC_HEADER_OVERHEAD;
-// 	char *malloc_end_address = (char*) allocptr + malloc_usable_size(allocptr);
-// 	_Bool covers_whole_final_entry = (0 == ((uintptr_t) malloc_end_address % 
-// 		entry_coverage_in_bytes));
-// 	struct entry *start_entry = covers_whole_initial_entry ? 
-// 		INDEX_LOC_FOR_ADDR(userptr)
-// 			: INDEX_LOC_FOR_ADDR(userptr) + 1;
-// 	struct entry *end_entry = covers_whole_final_entry ? 
-// 		INDEX_LOC_FOR_ADDR((char*) malloc_end_address)
-// 			: INDEX_LOC_FOR_ADDR((char*) malloc_end_address) - 1;
-// 	size_t n = (end_entry - start_entry) * sizeof (struct entry);
-// #ifndef NDEBUG
-// 	/* CHECK that we're really overwriting what we expect.*/
-// 	struct entry bigalloc_value = { 0, 1, 63 };
-// 	assert(IS_BIGALLOC_ENTRY(&bigalloc_value));
-// 	char bigalloc_accept[] = { *(char*) &bigalloc_value, '\0' };
-// 	struct entry empty_value = { 0, 0, 0 };
-// 	assert(IS_EMPTY_ENTRY(&empty_value));
-// 	if (*(char*) &bigalloc_value == *(char*) &value)
-// 	{
-// 		/* Check we see n empties */
-// 		/* We can't use strspn to compare against zero bytes. Instead, use memcmp! */
-// 		char zeroes[n];
-// 		bzero(zeroes, n);
-// 		_Bool ok = (0 == memcmp(zeroes, (char*) start_entry, n));
-// 		assert(ok);
-// 	} else if (*(char*) &empty_value == *(char*) &value)
-// 	{
-// 		size_t n_ok = strspn((char*) start_entry, bigalloc_accept);
-// 		assert(n_ok >= n);
-// 	}
-// #endif
-// 	if (end_entry > start_entry)
-// 	{
-// 		memset(start_entry, 
-// 			*(char*) &value, 
-// 			n
-// 		);
-// 	}
-// }
-
 static void 
-index_insert(void *new_userchunkaddr, size_t requested_size, const void *caller);
-
-void __liballocs_index_insert(void *new_userchunkaddr, size_t requested_size,
-		const void *caller)
+bitmap_insert(void *new_userchunkaddr, size_t modified_size, const void *caller);
+void
+__liballocs_bitmap_insert(void *new_userchunkaddr, size_t modified_size, const void *caller)
 {
-	index_insert(new_userchunkaddr, requested_size, caller);
+	bitmap_insert(new_userchunkaddr, modified_size, caller);
 }
 
-static unsigned long index_insert_count;
+static unsigned long bitmap_insert_count;
 
 #define PROMOTE_TO_BIGALLOC(userchunk) \
 	(malloc_usable_size(userptr_to_allocptr((userchunk))) \
@@ -444,7 +243,7 @@ static struct big_allocation *become_big(void *allocptr, size_t bigalloc_size,
 	struct insert ins, struct big_allocation *containing_bigalloc)
 {
 	/* It's only legal call this if allocptr is already an allocation. */
-	index_delete(allocptr_to_userptr(allocptr));
+	bitmap_delete(allocptr_to_userptr(allocptr));
 	return fresh_big(allocptr, bigalloc_size, ins, containing_bigalloc);
 }
 
@@ -470,15 +269,15 @@ static struct big_allocation *ensure_big(void *addr)
 						.alloc_site = (uintptr_t) site
 					}, __lookup_deepest_bigalloc(start));
 }
-static void index_insert(void *new_userchunkaddr, size_t requested_size, const void *caller)
+static void bitmap_insert(void *new_userchunkaddr, size_t requested_size, const void *caller)
 {
 	int lock_ret;
 	BIG_LOCK
 	
 	/* We *must* have been initialized to continue. So initialize now.
 	 * (Sometimes the initialize hook doesn't get called til after we are called.) */
-	if (!index_region) do_init();
-	assert(index_region);
+	if (!bitmap_region) do_init();
+	assert(bitmap_region);
 	
 	/* The address *must* be in our tracked range. Assert this. */
 	assert(new_userchunkaddr <= (index_end_addr ? index_end_addr : MAP_FAILED));
@@ -671,12 +470,15 @@ static void index_delete(void *userptr/*, size_t freed_usable_size*/)
 	 * realloc'd size, where the realloc happens in-place, realloc() would overwrite
 	 * our insert with its own (regular heap metadata) trailer, breaking the list.
 	 */
-
+	
 	if (userptr == NULL) return; // HACK: shouldn't be necessary; a BUG somewhere
-
-	// cache invalidation
-	void *allocptr = userptr_to_allocptr(userptr);
-	__liballocs_uncache_all(allocptr, malloc_usable_size(allocptr));
+	
+	/* HACK for libcrunch cache invalidation */
+	if (__libcrunch_uncache_all)
+	{
+		void *allocptr = userptr_to_allocptr(userptr);
+		__libcrunch_uncache_all(allocptr, malloc_usable_size(allocptr));
+	}
 	
 	int lock_ret;
 	BIG_LOCK
@@ -962,135 +764,6 @@ static inline unsigned char *rfind_nonzero_byte(unsigned char *one_beyond_start,
 	return NULL;
 #undef IS_ALIGNED
 #undef SIZE
-}
-
-static inline _Bool find_next_nonempty_bin(struct entry **p_cur, 
-		struct entry *limit,
-		size_t *p_object_minimum_size
-		)
-{
-	size_t max_nbytes_coverage_to_scan = biggest_unpromoted_object - *p_object_minimum_size;
-	size_t max_nbuckets_to_scan = 
-			(max_nbytes_coverage_to_scan % entry_coverage_in_bytes) == 0 
-		?    max_nbytes_coverage_to_scan / entry_coverage_in_bytes
-		:    (max_nbytes_coverage_to_scan / entry_coverage_in_bytes) + 1;
-	unsigned char *limit_by_size = (unsigned char *) *p_cur - max_nbuckets_to_scan;
-	unsigned char *limit_to_pass = (limit_by_size > (unsigned char *) index_region)
-			 ? limit_by_size : (unsigned char *) index_region;
-	unsigned char *found = rfind_nonzero_byte((unsigned char *) *p_cur, limit_to_pass);
-	if (!found) 
-	{ 
-		*p_object_minimum_size += (((unsigned char *) *p_cur) - limit_to_pass) * entry_coverage_in_bytes; 
-		*p_cur = (struct entry *) limit_to_pass;
-		return 0;
-	}
-	else
-	{ 
-		*p_object_minimum_size += (((unsigned char *) *p_cur) - found) * entry_coverage_in_bytes; 
-		*p_cur = (struct entry *) found; 
-		return 1;
-	}
-
-	// FIXME: adapt http://www.int80h.org/strlen/ 
-	// or memrchr.S from eglibc
-	// to do what we want.
-}
-
-#ifndef LOOKUP_CACHE_SIZE
-#define LOOKUP_CACHE_SIZE 4
-#endif
-struct lookup_cache_entry
-{
-	void *object_start;
-	size_t usable_size:60;
-	unsigned short depth:3;
-	unsigned short is_deepest:1;
-	struct insert *insert;
-} lookup_cache[LOOKUP_CACHE_SIZE];
-static struct lookup_cache_entry *next_to_evict = &lookup_cache[0];
-
-static void check_cache_sanity(void)
-{
-#ifndef NDEBUG
-	for (int i = 0; i < LOOKUP_CACHE_SIZE; ++i)
-	{
-		assert(!lookup_cache[i].object_start 
-				|| (INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert)
-					&& lookup_cache[i].depth <= 2));
-	}
-#endif
-}
-
-static void install_cache_entry(void *object_start,
-	size_t object_size,
-	unsigned short depth, 
-	_Bool is_deepest,
-	struct insert *insert)
-{
-	check_cache_sanity();
-	/* our "insert" should always be the insert that describes the object,
-	 * NOT one that chains into the suballocs table. */
-	assert(INSERT_DESCRIBES_OBJECT(insert));
-	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
-	*next_to_evict = (struct lookup_cache_entry) {
-		object_start, object_size, depth, is_deepest, insert
-	}; // FIXME: thread safety
-	// don't immediately evict the entry we just created
-	next_to_evict = &lookup_cache[(next_to_evict + 1 - &lookup_cache[0]) % LOOKUP_CACHE_SIZE];
-	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
-	check_cache_sanity();
-}
-
-static void invalidate_cache_entries(void *object_start,
-	unsigned short depths_mask,
-	struct insert *ins,
-	signed nentries)
-{
-	unsigned ninvalidated = 0;
-	check_cache_sanity();
-	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
-	{
-		if ((!object_start || object_start == lookup_cache[i].object_start)
-				&& (!ins || ins == lookup_cache[i].insert)
-				&& (0 != (1<<lookup_cache[i].depth & depths_mask))) 
-		{
-			lookup_cache[i] = (struct lookup_cache_entry) {
-				NULL, 0, 0, 0, NULL
-			};
-			next_to_evict = &lookup_cache[i];
-			check_cache_sanity();
-			++ninvalidated;
-			if (nentries > 0 && ninvalidated >= nentries) return;
-		}
-	}
-	check_cache_sanity();
-}
-
-static int cache_clear_deepest_flag_and_update_ins(void *object_start,
-	unsigned short depths_mask,
-	struct insert *ins,
-	signed nentries,
-	struct insert *new_ins)
-{
-	unsigned ncleared = 0;
-	// we might be used to restore the cache invariant, so don't check
-	// check_cache_sanity();
-	assert(ins);
-	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
-	{
-		if ((!object_start || object_start == lookup_cache[i].object_start)
-				&& (ins == lookup_cache[i].insert)
-				&& (0 != (1<<lookup_cache[i].depth & depths_mask))) 
-		{
-			lookup_cache[i].is_deepest = 0;
-			lookup_cache[i].insert = new_ins;
-			check_cache_sanity();
-			++ncleared;
-			if (nentries > 0 && ncleared >= nentries) return ncleared;
-		}
-	}
-	check_cache_sanity();
-	return ncleared;
 }
 
 static
