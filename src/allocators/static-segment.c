@@ -14,14 +14,13 @@
 #include "relf.h"
 #include "liballocs_private.h"
 #include "pageindex.h"
-#include "raw-syscalls.h"
+#include "raw-syscalls-defs.h"
 
 /* static */ _Bool __static_segment_allocator_trying_to_initialize __attribute__((visibility("hidden")));
 #define trying_to_initialize __static_segment_allocator_trying_to_initialize
 static _Bool initialized;
 
-void __static_segment_allocator_init(void) __attribute__((constructor(102)));
-void __static_segment_allocator_init(void)
+void ( __attribute__((constructor(102))) __static_segment_allocator_init)(void)
 {
 	if (!initialized && !trying_to_initialize)
 	{
@@ -45,21 +44,33 @@ void __static_segment_allocator_init(void)
  * this? Rather than create dummy sections, we have only one
  * bitmap per segment. */
 
+void __real___runt_segments_notify_define_segment(struct file_metadata *file, unsigned phndx, unsigned loadndx);
 void __static_segment_allocator_notify_define_segment(
-	struct file_metadata *file,
+	struct file_metadata *file_,
 	unsigned phndx,
 	unsigned loadndx
 )
 {
-	/* DON'T check initializedness.
+	/* To avoid confusion, don't use "file" in this function
+	 * (that's why I called it "file_"). */
+	struct allocs_file_metadata *afile = CONTAINER_OF(file_, struct allocs_file_metadata, m);
+	/* DON'T check for liballocs's global initializedness here.
 	 * Because the only thing we need to initialize is the data segment
 	 * bigalloc end, we can only become fully initialized once our
 	 * depended-on allocators (static file, mmap) are fully initialized.
 	 * But the file allocator calls *us* during *its* initialization.
 	 * So this function has to work even if we're not fully initialized yet. */
-	ElfW(Phdr) *phdr = &file->phdrs[phndx];
-	const void *segment_start_addr = (char*) file->l->l_addr + phdr->p_vaddr;
+	ElfW(Phdr) *phdr = &afile->m.phdrs[phndx];
+	const void *segment_start_addr = (char*) afile->m.l->l_addr + phdr->p_vaddr;
 	size_t segment_size = phdr->p_memsz;
+
+	/* librunt does the outcalls to set up segments, so for us to run,
+	 * we  need to be a wrapper of the librunt call. We call its __real_
+	 * one to do the basics. */
+	__real___runt_segments_notify_define_segment(&afile->m, phndx, loadndx);
+	/* Now librunt has set up a dummy segment_metadata for us; we mostly
+	 * just have to do the bigalloc stuff and fill it in the metavector. */
+
 	struct big_allocation *containing_file = __lookup_bigalloc_from_root(
 		segment_start_addr, &__static_file_allocator, NULL);
 	if (!containing_file) abort();
@@ -71,7 +82,9 @@ void __static_segment_allocator_notify_define_segment(
 			.what = DATA_PTR,
 			.un = {
 				opaque_data: { 
-					.data_ptr = &file->segments[loadndx],
+					/* HMM. This will often "overflow" the 1-element array. So we
+					 * are really trusting the compiler not to know that. */
+					.data_ptr = &afile->m.segments[loadndx],
 					.free_func = NULL
 				}
 			}
@@ -108,42 +121,41 @@ void __static_segment_allocator_notify_define_segment(
 	/* Fill in the per-segment info that is stored in the file metadata. */
 	union sym_or_reloc_rec *metavector = NULL;
 	size_t metavector_size = 0;
-	if (file->meta_obj_handle)
+	if (afile->meta_obj_handle)
 	{
 #define METAVEC_SYM_PREFIX "metavec_0x"
 		char buf[sizeof METAVEC_SYM_PREFIX+8]; // 8 bytes + NUL
 		snprintf(buf, sizeof buf, METAVEC_SYM_PREFIX "%x", (unsigned) phdr->p_vaddr);
 #undef METAVEC_SYM_PREFIX
-		void *found = fake_dlsym(file->meta_obj_handle, buf);
+		void *found = fake_dlsym(afile->meta_obj_handle, buf);
 		if (found && found != (void*) -1)
 		{
 			metavector = found;
 			// what about the size?
 			ElfW(Sym) *found_sym = gnu_hash_lookup(
-				get_gnu_hash(file->meta_obj_handle),
-				get_dynsym(file->meta_obj_handle),
-				get_dynstr(file->meta_obj_handle),
+				get_gnu_hash(afile->meta_obj_handle),
+				get_dynsym(afile->meta_obj_handle),
+				get_dynstr(afile->meta_obj_handle),
 				buf);
 			assert(found_sym);
 			metavector_size = found_sym->st_size;
 		}
 	}
-	file->segments[loadndx] = (struct segment_metadata) {
-		.phdr_idx = phndx,
-		.metavector = metavector,
-		.metavector_size = metavector_size
-				/*,
-		.starts_bitmap = */
-	};
+	assert(afile->m.segments[loadndx].phdr_idx == phndx); // librunt has already done it
+	afile->m.segments[loadndx].metavector = metavector;
+	afile->m.segments[loadndx].metavector_size = metavector_size;
 }
+void __wrap___runt_segments_notify_define_segment(struct file_metadata *file, unsigned phndx, unsigned loadndx) __attribute__((alias("__static_segment_allocator_notify_define_segment")));
 
-void __static_segment_allocator_notify_destroy_segment(
-	ElfW(Phdr) *phdr
-)
+void __real___runt_segments_notify_destroy_segment(ElfW(Phdr) *phdr);
+void __static_segment_allocator_notify_destroy_segment(ElfW(Phdr) *phdr)
 {
 	/* I think we don't have to do anything -- the usual bigalloc
-	 * teardown also tears down children and frees their metadata. */
+	 * teardown also tears down children and frees their metadata.
+	 * But call the runt version for good measure. */
+	__real___runt_segments_notify_destroy_segment(phdr);
 }
+void __wrap___runt_segments_notify_destroy_segment(ElfW(Phdr) *phdr) __attribute__((alias("__static_segment_allocator_notify_destroy_segment")));
 
 static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	struct uniqtype **out_type, void **out_base,

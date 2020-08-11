@@ -3,17 +3,17 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <stdlib.h>
-// #include <fcntl.h>     // problem with raw-syscalls conflict
-int open(const char *, int, ...);
+#include <fcntl.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
 #include <dlfcn.h>
 #include <link.h>
+#include "librunt.h"
 #include "relf.h"
 #include "maps.h"
 #include "liballocs_private.h"
-#include "raw-syscalls.h"
+#include "raw-syscalls-defs.h"
 #include "dlbind.h"
 
 uintptr_t executable_data_segment_start_addr __attribute__((visibility("hidden")));
@@ -873,12 +873,14 @@ static void set_executable_mapping_bigalloc(void *real_end)
 	if (!executable_mapping_bigalloc) abort();
 }
 
-void __mmap_allocator_init(void) __attribute__((constructor(101)));
-void __mmap_allocator_init(void)
+void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 {
 	if (!initialized && !trying_to_initialize)
 	{
 		trying_to_initialize = 1;
+
+		/* We require the pageindex to be init'd. */
+		__pageindex_init();
 
 		/* Delay start-up here if the user asked for it. We do this here
 		 * because we should run earlier than the startup code in
@@ -930,12 +932,13 @@ void __mmap_allocator_init(void)
 						(uintptr_t) phdr->p_vaddr;
 				}
 				if (last_seen_end_vaddr_rounded_up != (uintptr_t) -1
-						&& phdr->p_vaddr != last_seen_end_vaddr_rounded_up)
+						&& ROUND_DOWN(phdr->p_vaddr, PAGE_SIZE) != last_seen_end_vaddr_rounded_up)
 				{
 					/* We have a hole. Map a PROT_NONE region in the space. */
 					void* hole_base = (void*)(executable_load_addr + last_seen_end_vaddr_rounded_up);
 					size_t hole_size = ROUND_DOWN(phdr->p_vaddr, PAGE_SIZE)
 						 - last_seen_end_vaddr_rounded_up;
+					assert(hole_size > 0);
 					void *ret = raw_mmap(hole_base, hole_size,
 						PROT_NONE, MAP_FIXED|MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
 					assert(ret == hole_base);
@@ -981,14 +984,17 @@ void __mmap_allocator_init(void)
 		add_missing_mappings_from_proc();
 		/* Also extend the data segment to account for the current brk. */
 		set_executable_mapping_bigalloc(executable_end_addr);
+		/* Before we ask libsystrap to do anything, ensure the file metadata
+		 * for the early libs is in place. This will skip the meta-objects,
+		 * which we're not ready to do yet (it's a dlopen/mmap that we want
+		 * to trap). */
+		__runt_files_init();
+		assert(early_lib_handles[0]);
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
-		/* From the moment we enable systrap, we need to be able to take
-		 * brk() calls. That means that the static file allocator needs
-		 * to be initialized. OR it means we factor brk out of the
-		 * file and segment stuff: the file ends at the end of the data
-		 * segment as given in the binary, and the remainder of the
-		 * mapping sequence is managed by the "brk" allocator. YES. */
+		/* Now we can dlopen the meta-objects for the early libs, which librunt
+		 * skipped. */
+		load_meta_objects_for_early_libs();
 		__liballocs_post_systrap_init(); /* does the libdlbind symbol creation */
 		__liballocs_global_init(); // will add mappings; may change sbrk
 		// we want to trap syscalls in "__brk"; // glibc HACK!

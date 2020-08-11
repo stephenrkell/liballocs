@@ -10,28 +10,13 @@
 #include <string.h>
 #include <link.h>
 #include "relf.h"
+#include "librunt.h"
 #include "liballocs_private.h"
-#include "pageindex.h"
 
-static const char *asciiz_start;
-static const char *asciiz_end;
 static struct uniqtype *asciiz_uniqtype;
-
-static const char **env_vector_start;
-static const char **env_vector_terminator;
 static struct uniqtype *env_vector_uniqtype;
-
-static const char **argv_vector_start;
-static const char **argv_vector_terminator;
 static struct uniqtype *argv_vector_uniqtype;
-
-static ElfW(auxv_t) *auxv_array_start;
-static ElfW(auxv_t) *auxv_array_terminator;
 static struct uniqtype *auxv_array_uniqtype;
-
-static intptr_t *p_argcount;
-
-void *program_entry_point;
 
 /* Delay this bit of the init until we need it, because it depends on libdlbind
  * which is only ready fairly late (after mmap). */
@@ -39,39 +24,24 @@ static void init_uniqtypes(void)
 {
 	auxv_array_uniqtype = __liballocs_get_or_create_array_type(
 			pointer_to___uniqtype__Elf64_auxv_t,
-			auxv_array_terminator + 1 - auxv_array_start);
+			__auxv_array_terminator + 1 - __auxv_array_start);
 	env_vector_uniqtype = __liballocs_get_or_create_array_type(
 			pointer_to___uniqtype____PTR_signed_char, 
-			env_vector_terminator + 1 - env_vector_terminator);
+			__env_vector_terminator + 1 - __env_vector_terminator);
 	argv_vector_uniqtype = __liballocs_get_or_create_array_type(
-			pointer_to___uniqtype____PTR_signed_char, *p_argcount + 1);
+			pointer_to___uniqtype____PTR_signed_char, *__auxv_program_argcountp + 1);
 	asciiz_uniqtype = __liballocs_get_or_create_array_type(
-			pointer_to___uniqtype__signed_char, asciiz_end - asciiz_start);
+			pointer_to___uniqtype__signed_char, __auxv_asciiz_end - __auxv_asciiz_start);
 }
 
 static _Bool tried_to_initialize;
-void __auxv_allocator_init(void) __attribute__((constructor(101)));
-void __auxv_allocator_init(void)
+void ( __attribute__((constructor(101))) __auxv_allocator_init)(void)
 {
 	/* We might get called more than once. */
 	if (tried_to_initialize) return;
 	tried_to_initialize = 1;
 
-	auxv_array_start = get_auxv((const char **) environ, environ[0]);
-	if (!auxv_array_start) return;
-
-	struct auxv_limits lims = get_auxv_limits(auxv_array_start);
-	asciiz_start = lims.asciiz_start;
-	asciiz_end = lims.asciiz_end;
-	env_vector_start = lims.env_vector_start;
-	env_vector_terminator = lims.env_vector_terminator;
-	argv_vector_start = lims.argv_vector_start;
-	argv_vector_terminator = lims.argv_vector_terminator;
-	auxv_array_terminator = lims.auxv_array_terminator;
-	p_argcount = lims.p_argcount;
-	
-	ElfW(auxv_t) *found_at_entry = auxv_lookup(auxv_array_start, AT_ENTRY);
-	if (found_at_entry) program_entry_point = (void*) found_at_entry->a_un.a_val;
+	__runt_auxv_init();
 }
 
 static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigalloc, 
@@ -81,52 +51,52 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
 	if (!auxv_array_uniqtype) init_uniqtypes();
 	
 	/* Decide whether it falls into the asciiz, auxv_t or ptr vector parts. */
-	if ((char*) obj >= (char*) auxv_array_start
-			&& (char*) obj <= (char*) auxv_array_terminator)
+	if ((char*) obj >= (char*) __auxv_array_start
+			&& (char*) obj <= (char*) __auxv_array_terminator)
 	{
 		if (out_type) *out_type = auxv_array_uniqtype;
-		if (out_base) *out_base = auxv_array_start;
-		if (out_size) *out_size = (auxv_array_terminator + 1 - auxv_array_start) * sizeof (Elf64_auxv_t);
-		if (out_site) *out_site = program_entry_point;
+		if (out_base) *out_base = __auxv_array_start;
+		if (out_size) *out_size = (__auxv_array_terminator + 1 - __auxv_array_start) * sizeof (Elf64_auxv_t);
+		if (out_site) *out_site = __program_entry_point;
 		return NULL;
 	}
 	
-	if ((char*) obj >= (char*) argv_vector_start
-			&& (char*) obj <= (char*) argv_vector_terminator)
+	if ((char*) obj >= (char*) __argv_vector_start
+			&& (char*) obj <= (char*) __argv_vector_terminator)
 	{
 		if (out_type) *out_type = argv_vector_uniqtype;
-		if (out_base) *out_base = argv_vector_start;
-		if (out_size) *out_size = (argv_vector_terminator + 1 - argv_vector_start) * sizeof (char*);
-		if (out_site) *out_site = program_entry_point;
+		if (out_base) *out_base = __argv_vector_start;
+		if (out_size) *out_size = (__argv_vector_terminator + 1 - __argv_vector_start) * sizeof (char*);
+		if (out_site) *out_site = __program_entry_point;
 		return NULL;
 	}
 	
-	if ((char*) obj >= (char*) env_vector_start
-			&& (char*) obj <= (char*) env_vector_terminator)
+	if ((char*) obj >= (char*) __env_vector_start
+			&& (char*) obj <= (char*) __env_vector_terminator)
 	{
 		if (out_type) *out_type = env_vector_uniqtype;
-		if (out_base) *out_base = env_vector_start;
-		if (out_size) *out_size = (env_vector_terminator + 1 - env_vector_start) * sizeof (char*);
-		if (out_site) *out_site = program_entry_point;
+		if (out_base) *out_base = __env_vector_start;
+		if (out_size) *out_size = (__env_vector_terminator + 1 - __env_vector_start) * sizeof (char*);
+		if (out_site) *out_site = __program_entry_point;
 		return NULL;
 	}
 	
-	if ((char*) obj >= asciiz_start && (char*) obj <= asciiz_end)
+	if ((char*) obj >= __auxv_asciiz_start && (char*) obj <= __auxv_asciiz_end)
 	{
 		if (out_type) *out_type = asciiz_uniqtype;
-		if (out_base) *out_base = (char*) asciiz_start;
-		if (out_size) *out_size = asciiz_end - asciiz_start;
-		if (out_site) *out_site = program_entry_point;
+		if (out_base) *out_base = (char*) __auxv_asciiz_start;
+		if (out_size) *out_size = __auxv_asciiz_end - __auxv_asciiz_start;
+		if (out_site) *out_site = __program_entry_point;
 		return NULL;
 	}
 	
-	if ((char*) obj >= (char*) p_argcount 
-		&& (char*) obj <= (char*) p_argcount + sizeof (intptr_t))
+	if ((char*) obj >= (char*) __auxv_program_argcountp 
+		&& (char*) obj <= (char*) __auxv_program_argcountp + sizeof (intptr_t))
 	{
 		if (out_type) *out_type = pointer_to___uniqtype__intptr_t;
-		if (out_base) *out_base = (void*) p_argcount;
+		if (out_base) *out_base = (void*) __auxv_program_argcountp;
 		if (out_size) *out_size = sizeof (intptr_t);
-		if (out_site) *out_site = program_entry_point;
+		if (out_site) *out_site = __program_entry_point;
 		return NULL;
 	}
 	
@@ -138,12 +108,11 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *maybe_bigallo
  * we've carved out the bits holding the auxv data. */
 void __stack_allocator_notify_init_stack_region(void *begin, void *end);
 
-void *__top_of_initial_stack __attribute__((visibility("protected")));
 static struct big_allocation *our_bigalloc;
 void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *b)
 {
-	if (!auxv_array_start) __auxv_allocator_init();
-	if (!p_argcount) abort();
+	if (!__auxv_array_start) __auxv_allocator_init();
+	if (!__auxv_program_argcountp) abort();
 	void *begin = b->begin;
 	void *end = b->end;
 	
@@ -161,10 +130,10 @@ void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *
 		 * time, it's fair game. FIXME: will the next /proc-processing iteration
 		 * clobber this hard work? */
 		
-		if (asciiz_end > (const char *) our_bigalloc->end)
+		if (__auxv_asciiz_end > (const char *) our_bigalloc->end)
 		{
-			const char *new_end = RELF_ROUND_UP_PTR_(asciiz_end, PAGE_SIZE);
-			unsigned pi = pageindex[PAGENUM(asciiz_end)];
+			const char *new_end = RELF_ROUND_UP_PTR_(__auxv_asciiz_end, PAGE_SIZE);
+			unsigned pi = pageindex[PAGENUM(__auxv_asciiz_end)];
 			_Bool success;
 			if (pi)
 			{
@@ -172,7 +141,7 @@ void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *
 					&big_allocations[pi], new_end);
 				assert(success);
 			}
-			success  = __liballocs_extend_bigalloc(our_bigalloc, new_end);
+			success = __liballocs_extend_bigalloc(our_bigalloc, new_end);
 			assert(success);
 		}
 		return;
@@ -195,12 +164,16 @@ void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *
 	);
 	if (!our_bigalloc) abort();
 	
-	/* Don't do this. Queries on auxv region are on a "crack" so we don't want
-	 * to descend to the suballocator. Recording suballocators is only useful at
-	 * leaf level anyway, since the child bigalloc (which can be sized precisely,
-	 * leaving the auxv cracks excluded) fills this role at branch level. */
+	/* Don't record the stack allocator as a suballocator; child bigallocs
+	 * fill this function for us Suballocators only make sense at the leaf
+	 * level, when you can say "anything smaller than us is managed by this
+	 * allocator". Child bigallocs can be sized precisely, leaving our auxv
+	 * "crack" modelled with precise bounds, which is exactly what we need 
+	 * as the auxv is often less than a whole page. The stack will always be
+	 * a bigalloc, and having it as our child is how we carve out this
+	 * not-page-boundaried region as the auxv. */
 	// our_bigalloc->suballocator = &__stack_allocator;
-	__stack_allocator_notify_init_stack_region(begin, p_argcount);
+	__stack_allocator_notify_init_stack_region(begin, __auxv_program_argcountp);
 	/* HACK: undo the suballocation relationship created in pageindex. Ideally
 	 * it wouldn't do this. But it doesn't know any better... all bigallocs
 	 * are initially childless, so it's the right thing to do. */
@@ -215,35 +188,35 @@ struct allocator __auxv_allocator = {
 
 _Bool __auxv_get_asciiz(const char **out_start, const char **out_end, struct uniqtype **out_uniqtype)
 {
-	if (out_start) *out_start = asciiz_start;
-	if (out_end) *out_end = asciiz_end;
+	if (out_start) *out_start = __auxv_asciiz_start;
+	if (out_end) *out_end = __auxv_asciiz_end;
 	if (out_uniqtype) *out_uniqtype = asciiz_uniqtype;
 	return 1;
 }
 _Bool __auxv_get_argv(const char ***out_start, const char ***out_terminator, struct uniqtype **out_uniqtype)
 {
-	if (out_start) *out_start = argv_vector_start;
-	if (out_terminator) *out_terminator = argv_vector_terminator;
+	if (out_start) *out_start = __argv_vector_start;
+	if (out_terminator) *out_terminator = __argv_vector_terminator;
 	if (out_uniqtype) *out_uniqtype = argv_vector_uniqtype;
 	return 1;
 }
 
 _Bool __auxv_get_env(const char ***out_start, const char ***out_terminator, struct uniqtype **out_uniqtype)
 {
-	if (out_start) *out_start = env_vector_start;
-	if (out_terminator) *out_terminator = env_vector_terminator;
+	if (out_start) *out_start = __env_vector_start;
+	if (out_terminator) *out_terminator = __env_vector_terminator;
 	if (out_uniqtype) *out_uniqtype = env_vector_uniqtype;
 	return 1;
 }
 
 _Bool __auxv_get_auxv(const Elf64_auxv_t **out_start, Elf64_auxv_t **out_terminator, struct uniqtype **out_uniqtype)
 {
-	if (out_start) *out_start = auxv_array_start;
-	if (out_terminator) *out_terminator = auxv_array_terminator;
+	if (out_start) *out_start = __auxv_array_start;
+	if (out_terminator) *out_terminator = __auxv_array_terminator;
 	if (out_uniqtype) *out_uniqtype = auxv_array_uniqtype;
 	return 1;
 }
 void *__auxv_get_program_entry_point(void)
 {
-	return program_entry_point;
+	return __program_entry_point;
 }

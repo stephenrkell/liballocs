@@ -38,8 +38,7 @@ struct suballocated_chunk_rec; // FIXME: remove once heap_index has been refacto
 static struct frame_uniqtype_and_offset
 pc_to_frame_uniqtype(const void *addr);
 
-void __stackframe_allocator_init(void) __attribute__((constructor(101)));
-void __stackframe_allocator_init(void)
+void ( __attribute__((constructor(101))) __stackframe_allocator_init)(void)
 {
 	if (!initialized && !trying_to_initialize)
 	{
@@ -367,7 +366,7 @@ abort_stack:
 }
 #define maximum_vaddr_range_size (4*1024) // HACK
 
-void init_frames_info(struct file_metadata *file)
+void init_frames_info(struct allocs_file_metadata *file)
 {
 	if (!file->meta_obj_handle) return;
 	ElfW(Sym) *found = gnu_hash_lookup(
@@ -391,15 +390,15 @@ pc_to_frame_uniqtype(const void *addr)
 		&__static_file_allocator, NULL);
 	if (!file_b) goto fail;
 	/* Now get its frame info. */
-	struct file_metadata *file
-	 = (struct file_metadata *) file_b->meta.un.opaque_data.data_ptr;
-	assert(file);
-	if (!file->frames_info) goto fail;
-	uintptr_t target_vaddr = (uintptr_t) addr - file->l->l_addr;
+	struct allocs_file_metadata *afile
+	 = (struct allocs_file_metadata *) file_b->meta.un.opaque_data.data_ptr;
+	assert(afile);
+	if (!afile->frames_info) goto fail;
+	uintptr_t target_vaddr = (uintptr_t) addr - afile->m.l->l_addr;
 #define proj(p) ((p)->entry.allocsite_vaddr)
 	struct frame_allocsite_entry *found = bsearch_leq_generic(
 		struct frame_allocsite_entry, target_vaddr,
-		/*  T*  */ file->frames_info, /* unsigned */ file->nframes,
+		/*  T*  */ afile->frames_info, /* unsigned */ afile->nframes,
 		proj);
 #undef proj
 	if (found)

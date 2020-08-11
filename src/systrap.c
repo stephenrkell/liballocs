@@ -1,7 +1,12 @@
 #define _GNU_SOURCE
-#define SYSTRAP_DEFINE_FILE
-#include "do-syscall.h"
+#include <stddef.h>
+#include <alloca.h>
+#include <assert.h>
+#include <stdint.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
 #include "systrap.h"
+#include "raw-syscalls-defs.h"
 #include "vas.h"
 #include "maps.h"
 #include "pageindex.h"
@@ -46,10 +51,12 @@ int snprintf(char *str, size_t size, const char *format, ...);
 int open(const char *pathname, int flags, ...);
 int close(int fd);
 
-#define GUESS_CALLER(uc) \
-	( (&pageindex && pageindex[ ((uintptr_t) ((uc).MC_REG(rsp, RSP))) >> LOG_PAGE_SIZE ] != 0) \
-		? *(void**) ((uintptr_t) ((uc).MC_REG(rsp, RSP))) \
-		: (void*) ((uc).MC_REG(rip, RIP)) )
+#define GUESS_CALLER(s) \
+   generic_syscall_get_ip(s)
+
+/*	( (&pageindex && pageindex[ ((uintptr_t) (((s)->saved_context->uc.uc_mcontext).MC_REG(rsp, RSP))) >> LOG_PAGE_SIZE ] != 0) \
+		? *(void**) ((uintptr_t) (((s)->saved_context->uc.uc_mcontext).MC_REG(rsp, RSP))) \
+		: (void*) (((s)->saved_context->uc.uc_mcontext).MC_REG(rip, RIP)) ) */
 
 void brk_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
 void brk_replacement(struct generic_syscall *s, post_handler *post)
@@ -57,16 +64,14 @@ void brk_replacement(struct generic_syscall *s, post_handler *post)
 	/* Linux gives us the old value on failure, and the new value on success. 
 	 * In other words it always gives us the current sbrk. */
 	void *brk_asked_for = (void*) s->args[0];
-	long int ret = do_syscall1(s);
-	void *brk_returned = (void*) ret;
+	/* HMM. Can I do a raw syscall here? It's an out-of-line call, but
+	 * within DSO. So it should not be trapped. Right? */
+	void *brk_returned = raw_brk(brk_asked_for);
 	if (&__brk_allocator_notify_brk) __brk_allocator_notify_brk(brk_returned,
-		GUESS_CALLER(s->saved_context->uc.uc_mcontext));
+		GUESS_CALLER(s));
 	
-	/* Do the post-handling. */
-	post(s, ret);
-	
-	/* We need to do our own resumption also. */
-	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+	/* Do the post-handling and resume. */
+	post(s, (long) brk_returned, 1);
 }
 
 void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
@@ -79,37 +84,25 @@ void mmap_replacement(struct generic_syscall *s, post_handler *post)
 	int flags = s->args[3];
 	int fd = s->args[4];
 	off_t offset = s->args[5];
-	
+
+	void *caller = GUESS_CALLER(s);
 	/* Nudge them. */
 	__liballocs_nudge_mmap(&addr, &length, &prot, &flags, 
-			&fd, &offset, s->saved_context->pretcode);
+			&fd, &offset, caller);
 	
-	/* Re-pack them. */
-	s->args[0] = (long int) addr;
-	s->args[1] = length;
-	s->args[2] = prot;
-	s->args[3] = flags;
-	s->args[4] = fd;
-	s->args[5] = offset;
-	
-	/* Do the call. */
-	long int ret = do_syscall6(s);
-
+	void *ret = raw_mmap(addr, length, prot, flags, fd, offset);
 	/* If it did something, notify the allocator.
 	 * HACK: not sure if/where this is documented, but I've seen mmap() return
 	 * a "negative" number that is not -1. So we consider any return value that
 	 * is less than PAGE_SIZE below (void*)-1 to be an error value. */
 	if (!MMAP_RETURN_IS_ERROR(ret) && &__mmap_allocator_notify_mmap)
 	{
-		__mmap_allocator_notify_mmap((void*) ret, addr, length, prot, flags, fd, offset,
-			GUESS_CALLER(s->saved_context->uc.uc_mcontext));
+		__mmap_allocator_notify_mmap(ret, addr, length, prot, flags, fd, offset,
+			caller);
 	}
 
-	/* Do the post-handling. */
-	post(s, ret);
-	
-	/* We need to do our own resumption also. */
-	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+	/* Do the post-handling and resume. */
+	post(s, (long) ret, 1);
 }
 
 void munmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
@@ -120,17 +113,14 @@ void munmap_replacement(struct generic_syscall *s, post_handler *post)
 	size_t length = s->args[1];
 	
 	/* Do the call. */
-	long int ret = do_syscall2(s);
+	int ret = raw_munmap(addr, length);
 	
 	/* If it did something, notify the allocator. */
 	if (ret == 0 && &__mmap_allocator_notify_munmap) __mmap_allocator_notify_munmap(addr, length, 
-		GUESS_CALLER(s->saved_context->uc.uc_mcontext));
+		GUESS_CALLER(s));
 	
-	/* Do the post-handling. */
-	post(s, ret);
-	
-	/* We need to do our own resumption also. */
-	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+	/* Do the post-handling and resume. */
+	post(s, ret, 1);
 }
 
 void mremap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
@@ -146,27 +136,23 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	/* Pre-notify the allocator. This is so it can grab the "prot". */
 	if (&__mmap_allocator_notify_mremap_before)
 	{
-		__mmap_allocator_notify_mremap_before(old_addr, old_length, new_length, flags, 
-			maybe_new_address, GUESS_CALLER(s->saved_context->uc.uc_mcontext));
+		__mmap_allocator_notify_mremap_before(old_addr, old_length, new_length, flags,
+			maybe_new_address, GUESS_CALLER(s));
 	}
 	
 	/* Do the call. */
-	long int ret = do_syscall5(s);
-	
+	void *ret = raw_mremap(old_addr, old_length, new_length, flags, maybe_new_address);
 	// FIXME: also nudge mremaps
 	
 	/* Whether or not it did something, notify the allocator. */
 	if (&__mmap_allocator_notify_mremap_after)
 	{
-		__mmap_allocator_notify_mremap_after((void*) ret, old_addr, old_length, new_length, flags, 
-			maybe_new_address, GUESS_CALLER(s->saved_context->uc.uc_mcontext));
+		__mmap_allocator_notify_mremap_after(ret, old_addr, old_length, new_length, flags, 
+			maybe_new_address, GUESS_CALLER(s));
 	}
 	
-	/* Do the post-handling. */
-	post(s, ret);
-	
-	/* We need to do our own resumption also. */
-	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+	/* Do the post-handling and resume. */
+	post(s, (long) ret, 1);
 }
 
 void mprotect_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
@@ -177,15 +163,14 @@ void mprotect_replacement(struct generic_syscall *s, post_handler *post)
 	size_t length = s->args[1];
 	int prot = s->args[2];
 	
-	long int ret = do_syscall3(s);
+	int ret = raw_mprotect(addr, length, prot);
 	
 	if (ret == 0 && &__mmap_allocator_notify_mprotect)
 	{
 		__mmap_allocator_notify_mprotect(addr, length, prot);
 	}
-	
-	post(s, ret);
-	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+
+	post(s, ret, 1);
 }
 
 void open_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
@@ -197,20 +182,12 @@ void open_replacement(struct generic_syscall *s, post_handler *post)
 	mode_t mode = s->args[2];
 	
 	/* Nudge them. */
-	__liballocs_nudge_open(&path, &flags, &mode, s->saved_context->pretcode);
+	__liballocs_nudge_open(&path, &flags, &mode, GUESS_CALLER(s));
 	
-	/* Repack. */
-	s->args[0] = (long int) path;
-	s->args[1] = flags;
-	s->args[2] = mode;
+	int ret = raw_open(path, flags, mode);
 	
-	long int ret = do_syscall3(s);
-	
-	/* Do the post-handling. */
-	post(s, ret);
-	
-	/* We need to do our own resumption also. */
-	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+	/* Do the post-handling and resume. */
+	post(s, ret, 1);
 }
 
 void openat_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
@@ -223,21 +200,12 @@ void openat_replacement(struct generic_syscall *s, post_handler *post)
 	mode_t mode = s->args[3];
 
 	/* Nudge them. */
-	__liballocs_nudge_openat(&dirfd, &path, &flags, &mode, s->saved_context->pretcode);
+	__liballocs_nudge_openat(&dirfd, &path, &flags, &mode, GUESS_CALLER(s));
 
-	/* Repack. */
-	s->args[0] = dirfd;
-	s->args[1] = (long int) path;
-	s->args[2] = flags;
-	s->args[3] = mode;
+	int ret = raw_openat(dirfd, path, flags, mode);
 
-	long int ret = do_syscall4(s);
-
-	/* Do the post-handling. */
-	post(s, ret);
-
-	/* We need to do our own resumption also. */
-	resume_from_sigframe(ret, s->saved_context, /* HACK */ 2);
+	/* Do the post-handling and resume. */
+	post(s, ret, 1);
 }
 
 static int maybe_trap_map_cb(struct maps_entry *ent, char *linebuf, void *interpreter_fname_as_void)
@@ -251,6 +219,7 @@ static int maybe_trap_map_cb(struct maps_entry *ent, char *linebuf, void *interp
 			)
 #else
 		/* Just don't trap ourselves. Use this function's address to test */
+		// NOTE: yes, this is correct. If the mapping spans us, skip it.
 		&& !(
 			(unsigned char *) ent->first <= (unsigned char *) maybe_trap_map_cb
 			&& (unsigned char *) ent->second > (unsigned char *) maybe_trap_map_cb

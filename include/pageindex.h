@@ -109,6 +109,7 @@ struct big_allocation
 extern struct big_allocation big_allocations[] __attribute__((weak,visibility("protected")));
 extern struct big_allocation __liballocs_big_allocations[] __attribute__((weak));
 
+void __pageindex_init(void) __attribute__((visibility("hidden"),constructor(101)));
 typedef uint16_t bigalloc_num_t;
 
 // FIXME: protected stuff should be in private header only. This is now a public header.

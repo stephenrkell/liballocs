@@ -89,7 +89,7 @@ extern unsigned short
 allocsites_id_entry_slot_next_free __attribute__((visibility("hidden")));
 
 void
-init_allocsites_info(struct file_metadata *file) __attribute__((visibility("hidden")));
+init_allocsites_info(struct allocs_file_metadata *file) __attribute__((visibility("hidden")));
 
 struct allocsite_entry *__liballocs_find_allocsite_entry_at(
 	const void *allocsite) __attribute__((visibility("protected")));

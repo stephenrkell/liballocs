@@ -36,9 +36,6 @@ typedef bool _Bool;
   __builtin_expect( (cond), 0 )
 #endif
 
-const char *
-dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
-		__attribute__((visibility("hidden")));
 char execfile_name[4096] __attribute__((visibility("hidden")));
 char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
@@ -58,11 +55,9 @@ void __systrap_brk_hack(void);
 int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
 int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
+void load_meta_objects_for_early_libs(void) __attribute__((visibility("hidden")));
 void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
 void *(*orig_memmove)(void *, const void *, unsigned long) __attribute__((visibility("hidden")));
-int dl_for_one_object_phdrs(void *handle,
-	int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
-	void *data) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 /* We contain our own private malloc, and we wrap it using the linker 
  * to keep track of whether it's active on the current thread. */

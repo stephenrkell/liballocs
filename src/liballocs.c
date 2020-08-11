@@ -13,10 +13,11 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include "librunt.h"
 #include "maps.h"
 #include "relf.h"
 #include "systrap.h"
-#include "raw-syscalls.h"
+#include "raw-syscalls-defs.h"
 #include "liballocs.h"
 #include "liballocs_private.h"
 #include "allocsites.h"
@@ -423,43 +424,6 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 }
 #endif
 
-char *get_exe_fullname(void) __attribute__((visibility("hidden")));
-char *get_exe_fullname(void)
-{
-	static char exe_fullname[4096];
-	static _Bool tried;
-	if (!exe_fullname[0] && !tried)
-	{
-		tried = 1;
-		// grab the executable's basename; if we fail, we won't try again
-		int ret __attribute__((unused))
-		 = readlink("/proc/self/exe", exe_fullname, sizeof exe_fullname);
-		errno = 0;
-	}
-	if (exe_fullname[0]) return exe_fullname;
-	else return NULL;
-}
-
-char *get_exe_basename(void) __attribute__((visibility("hidden")));
-char *get_exe_basename(void)
-{
-	static char exe_basename[4096];
-	static _Bool tried;
-	if (!exe_basename[0] && !tried)
-	{
-		tried = 1;
-		char *exe_fullname = get_exe_fullname();
-		if (exe_fullname)
-		{
-			strncpy(exe_basename, basename(exe_fullname), sizeof exe_basename); // GNU basename
-			exe_basename[sizeof exe_basename - 1] = '\0';
-		}
-	}
-	if (exe_basename[0]) return exe_basename;
-	else return NULL;
-}
-
-const char __ldso_name[] = "/lib64/ld-linux-x86-64.so.2"; // FIXME: sysdep
 FILE *stream_err __attribute__((visibility("hidden")));
 
 struct addrlist __liballocs_unrecognised_heap_alloc_sites = { 0, 0, NULL };
@@ -499,35 +463,6 @@ struct liballocs_err __liballocs_err_object_of_unknown_storage
 const char *__liballocs_errstring(struct liballocs_err *err)
 {
 	return err->message;
-}
-
-struct dl_for_one_phdr_cb_args
-{
-	struct link_map *link_map_to_match;
-	int (*actual_callback) (struct dl_phdr_info *info, size_t size, void *data);
-	void *actual_arg;
-};
-
-static int dl_for_one_phdr_cb(struct dl_phdr_info *info, size_t size, void *data)
-{
-	struct dl_for_one_phdr_cb_args *args = (struct dl_for_one_phdr_cb_args *) data;
-	/* Only call the callback if the link map matches. */
-	if (args->link_map_to_match->l_addr == info->dlpi_addr)
-	{
-		return args->actual_callback(info, size, args->actual_arg);
-	} else return 0; // keep going
-}
-
-int dl_for_one_object_phdrs(void *handle,
-	int (*callback) (struct dl_phdr_info *info, size_t size, void *data),
-	void *data)
-{
-	struct dl_for_one_phdr_cb_args args = {
-		(struct link_map *) handle, 
-		callback,
-		data
-	};
-	return dl_iterate_phdr(dl_for_one_phdr_cb, &args);
 }
 
 static int swap_out_segment_pages(struct dl_phdr_info *info, size_t size, void *load_addr)
@@ -719,67 +654,6 @@ void __liballocs_main_init(void)
 	done_init = 1;
 }
 
-// FIXME: do better!
-char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
-char *realpath_quick(const char *arg)
-{
-	static char buf[4096];
-	errno = 0;
-	char *ret = realpath(arg, &buf[0]);
-	if (errno) { errno = 0; return NULL; }
-	return ret;
-}
-
-const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr) __attribute__((visibility("hidden")));
-const char *dynobj_name_from_dlpi_name(const char *dlpi_name, void *dlpi_addr)
-{
-	if (strlen(dlpi_name) == 0)
-	{
-		/* libdl can give us an empty name for 
-		 *
-		 * - the executable;
-		 * - itself;
-		 * - any others? vdso?
-		 */
-		if (dlpi_addr == 0) return get_exe_fullname();
-		else
-		{
-			/* HMM -- empty dlpi_name but non-zero load addr.
-			 * Is it the vdso? */
-			struct link_map *l = get_highest_loaded_object_below((char*) dlpi_addr);
-			ElfW(Dyn) *strtab_ent = dynamic_lookup(l->l_ld, DT_STRTAB);
-			if (strtab_ent && (intptr_t) strtab_ent->d_un.d_val < 0)
-			{
-				/* BUGGY vdso, but good enough for me. */
-				return "[vdso]";
-				//const char *strtab = (const char *) strtab_ent->d_un.d_ptr;
-				//ElfW(Dyn) *soname_ent = dynamic_lookup(l->l_ld, DT_SONAME);
-				//const char *soname_str = strtab + soname_ent->d_un.d_val;
-				//if (strstr(soname_str, "vdso"))
-				//{
-				//	// okay, vdso
-				//	return "[vdso]";
-				//}
-			}
-			else
-			{
-				/* This is probably a PIE executable or a shared object
-				 * being interpreted as an executable. */
-				return get_exe_fullname();
-			}
-		}
-	}
-	else
-	{
-		// we need to realpath() it
-		const char *maybe_real = realpath_quick(dlpi_name);
-		if (maybe_real) return maybe_real;
-		/* If realpath said nothing, it's a bogus non-empty filename. 
-		 * Return the filename directly. */
-		return dlpi_name;
-	}
-}
-
 static const char *meta_libfile_name(const char *objname)
 {
 	/* we must have a canonical filename */
@@ -960,8 +834,9 @@ static void print_exit_summary(void)
 	}
 }
 
-/* We're allowed to malloc, thanks to __private_malloc(), but we 
- * we shouldn't call strdup because libc will do the malloc. */
+/* __private_malloc is defined by our Makefile as __wrap_dlmalloc.
+ * Since dlmalloc does not include a strdup, we need to define
+ * that explicitly. */
 char *__liballocs_private_strdup(const char *s)
 {
 	size_t len = strlen(s) + 1;
@@ -969,6 +844,7 @@ char *__liballocs_private_strdup(const char *s)
 	if (!mem) return NULL;
 	return memcpy(mem, s, len);
 }
+char *__private_strdup(const char *s) __attribute__((alias("__liballocs_private_strdup")));
 char *__liballocs_private_strndup(const char *s, size_t n)
 {
 	size_t maxlen = strlen(s);
@@ -977,6 +853,7 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	if (!mem) return NULL;
 	return memcpy(mem, s, len);
 }
+char *__private_strndup(const char *s, size_t n) __attribute__((alias("__liballocs_private_strndup")));
 
 /* These have hidden visibility */
 struct uniqtype *pointer_to___uniqtype__void;
@@ -992,10 +869,10 @@ struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t;
 struct uniqtype *pointer_to___uniqtype____ARR0_signed_char;
 struct uniqtype *pointer_to___uniqtype__intptr_t;
 
-/* We want to be called early, but not too early, ecause it might not be safe 
+/* We want to be called early, but not too early, because it might not be safe 
  * to open the -uniqtypes.so handle yet. */
 int __liballocs_global_init(void) __attribute__((constructor(103),visibility("protected")));
-int __liballocs_global_init(void)
+int ( __attribute__((constructor(103))) __liballocs_global_init)(void)
 {
 	// write_string("Hello from liballocs global init!\n");
 	if (__liballocs_is_initialized) return 0; // we are okay
@@ -1060,6 +937,7 @@ int __liballocs_global_init(void)
 	/* Initialize the generic malloc thingy first, because libdl will want to malloc 
 	 * when we call it. */
 	__generic_malloc_allocator_init();
+	__mmap_allocator_init();
 	__static_file_allocator_init();
 	
 	/* Don't do this. They all have constructors, so it's not necessary.

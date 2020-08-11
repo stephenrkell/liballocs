@@ -23,7 +23,7 @@ allocsites_vectors_by_base_id[ALLOCSITES_INDEX_SIZE];
 /* Positions in the id array are issued sequentially */
 allocsite_id_t allocsites_id_entry_slot_next_free  __attribute__((visibility("hidden")));
 
-void init_allocsites_info(struct file_metadata *file)
+void init_allocsites_info(struct allocs_file_metadata *file)
 {
 	if (!file->meta_obj_handle) return;
 	ElfW(Sym) *found = gnu_hash_lookup(
@@ -53,26 +53,27 @@ void init_allocsites_info(struct file_metadata *file)
 		 = (struct allocsites_vectors_by_base_id_entry) {
 			.start_id = start_id,
 			.count = found->st_size / sizeof (struct allocsite_entry),
-			.file_base_addr = file->l->l_addr,
+			.file_base_addr = file->m.l->l_addr,
 			.ptr = first_entry 
 		};
 		file->allocsites_info = &allocsites_vectors_by_base_id[slot_pos];
 	}
 }
 
-static struct file_metadata *get_file(const void *allocsite)
+static struct allocs_file_metadata *get_file(const void *allocsite)
 {
 	struct big_allocation *file_bigalloc = __lookup_bigalloc_from_root(allocsite,
 		&__static_file_allocator, NULL);
-	struct file_metadata *file = file_bigalloc->meta.un.opaque_data.data_ptr;
+	assert(file_bigalloc && "file bigallocs have not been initialized");
+	struct allocs_file_metadata *file = file_bigalloc->meta.un.opaque_data.data_ptr;
 	return file;
 }
 
 struct allocsite_entry *__liballocs_find_allocsite_entry_at(
 	const void *allocsite)
 {
-	struct file_metadata *file = get_file(allocsite);
-	uintptr_t allocsite_vaddr = (uintptr_t) allocsite - file->l->l_addr;
+	struct allocs_file_metadata *file = get_file(allocsite);
+	uintptr_t allocsite_vaddr = (uintptr_t) allocsite - file->m.l->l_addr;
 	if (!file->allocsites_info) return NULL;
 	struct allocsite_entry *start = file->allocsites_info->ptr;
 	/* Now we do a binary search inside the allocsites array. */
@@ -89,7 +90,7 @@ struct allocsite_entry *__liballocs_find_allocsite_entry_at(
 
 allocsite_id_t __liballocs_allocsite_id(const void *allocsite)
 {
-	struct file_metadata *file = get_file(allocsite);
+	struct allocs_file_metadata *file = get_file(allocsite);
 	struct allocsite_entry *found_entry
 	 = __liballocs_find_allocsite_entry_at(allocsite);
 	if (!found_entry) return (allocsite_id_t) -1;

@@ -18,9 +18,13 @@ $(OCAML_DEPS): %.d: %.ml
 DEPS += $(OCAML_DEPS)
 -include $(DEPS)
 
+# PROBLEM: cil's ocamlbuild takes a significant time to re-run even in the
+# case where nothing's changed. So use a stamp to run around that.
 .PHONY: cil
-cil: cil/Makefile
-	$(MAKE) -C cil all install-local
+cil: cil.stamp
+
+cil.stamp: cil/Makefile $(shell find cil -name '*.c' -o -name '*.ml' -o -name '*.mli' -o -name '*.in' -o -name '*.mly' )
+	$(MAKE) -C cil all install-local && touch $@
 
 cil/Makefile: cil/configure
 	cd cil && ./configure INSTALL="`which install` -p"
@@ -30,9 +34,9 @@ cil/configure:
 
 %.cmxs: %.cmx 
 	$(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
-%.cmx %.cmi: %.ml cil
+%.cmx %.cmi: %.ml cil.stamp
 	$(OCAMLFIND) ocamlopt -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) -c "$<"
-%.cmo %.cmi: %.ml cil
+%.cmo %.cmi: %.ml cil.stamp
 	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -c "$<"
 %.cma: %.cmo
 	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -a $+

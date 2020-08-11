@@ -17,6 +17,7 @@ this_filename () {
 }
 
 LIBALLOCS="${LIBALLOCS:-$( dirname "$(this_filename)" )/..}"
+LIBALLOCSTOOL="${LIBALLOCSTOOL:-$( dirname "$(this_filename)" )/../contrib/liballocstool}"
 USEDTYPES=${USEDTYPES:-${LIBALLOCS}/tools/usedtypes}
 BASE_TYPES_TRANSLATION=${BASE_TYPES_TRANSLATION:-${LIBALLOCS}/tools/lang/c/bin/base-types-translation}
 CC=${CC:-$(which cc)}
@@ -31,7 +32,7 @@ compile () {
    src="$1"
    dest="$2"
    asm="$( mktemp --suffix=.s )"
-   ${META_CC} -I"${LIBALLOCS}"/include -S -o "$asm" -x c "$src" && \
+   ${META_CC} -I"${LIBALLOCSTOOL}"/include -S -o "$asm" -x c "$src" && \
    ${META_CC} -c -o "$dest" "$asm" && \
    echo "Compiler generated $dest" 1>&2
 }

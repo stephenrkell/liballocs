@@ -30,7 +30,7 @@ void abort(void) __attribute__((noreturn));
 
 /* The functions are *not* weak -- they're defined in the noop library. 
  * we would like the noop library not to be necessary. */
-int __liballocs_global_init (void);
+int (__attribute__((constructor(103))) __liballocs_global_init) (void);
 /* This is not weak. */
 void __assert_fail(const char * assertion, const char * file, unsigned int line, const char * function);
 /* Heap index hooks -- these also aren't weak, for the usual reason. */

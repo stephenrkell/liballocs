@@ -52,7 +52,7 @@ __thread _Bool __currently_allocating;
 __thread void *__current_allocsite;
 __thread size_t __current_allocsz;
 __thread int __currently_freeing;
-int __liballocs_global_init(void) { return 0; }
+int (__attribute__((constructor(103))) __liballocs_global_init)(void) { return 0; }
 
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, void *frame_addr)
 {

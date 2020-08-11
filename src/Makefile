@@ -6,9 +6,15 @@ include $(SRCROOT)/config.mk
 
 CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS) \
    -I$(LIBSYSTRAP)/include -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused \
-   $(LIBALLOCSTOOL_CFLAGS) \
-   -flto -ffat-lto-objects
+   $(LIBALLOCSTOOL_CFLAGS)
+ifeq ($(DEBUG),)
+CFLAGS += -flto -ffat-lto-objects
+endif
 LDFLAGS += -L$(LIBDLBIND)/lib
+
+CFLAGS += -no-integrated-cpp \
+-wrapper \
+$(LIBALLOCS)/contrib/toolsub/wrapper/example/constructor-priority-checker/wrapper
 
 # run-from-srcdir case:
 # if the current dir is the source dir, change to the output directory
@@ -31,13 +37,11 @@ else
 # the rest
 vpath %.c $(srcdir)
 vpath %.c $(srcdir)/allocators
+vpath dlmalloc.c $(LIBSYSTRAP)/contrib
 
 allocators/%.d allocators/%.o:: allocators
 allocators:
 	mkdir -p allocators
-
-#%.o:: %.c
-#	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 liballocs.so: $(srcdir)/liballocs.so
 	cp $< $@
@@ -61,12 +65,20 @@ TARGETS += liballocs_dummyweaks.o  # non-client solibs, that contain instrumente
                                    # (what do client solibs get? easiest is just to treat them like exes, *except* I *think* they don't get nonshared_hooks.o)
 TARGETS += liballocs_test.so       # version only usable for doing dlopen() -- runs unit tests in its constructor (see tests/lib-test)
 
+# Keep a list of all the linked binaries we produce
+LDTARGETS := $(filter-out liballocs.so,$(filter %.so,$(TARGETS)))
+$(info LDTARGETS is $(LDTARGETS))
+
 .PHONY: all
 all: $(TARGETS)
 
 ifeq ($(DEBUG),)
     # FIXME: check this is still true: -O3 -DNDEBUG is the fastest, faster than -O4!
     CFLAGS += -O3 -DNDEBUG
+    # Why do we use -Bsymbolic-functions? I think it was just for speed
+    LDFLAGS += -Bsymbolic-functions
+else
+    CFLAGS += -O0
 endif
 
 # Don't use allocscc to compile liballocs!
@@ -76,9 +88,14 @@ export CC := cc
 endif
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
-LDFLAGS += -Wl,-O2 -flto -Bsymbolic-functions -fPIC 
+# ARGH, disabling LTO for now
+# owing to GCC bug 88643 and/or binutils (gold) bug 24415
+#LDFLAGS += -Wl,-O2 -flto
+LDFLAGS += -fno-lto
+LDFLAGS += -fPIC 
 # until binutils bug 13600 is fixed, gold is the linker we need
-LDFLAGS += -Wl,-fuse-ld=gold
+# (FIXME: why? where was the bogus relocation causing problems?)
+LDFLAGS += -fuse-ld=gold
 # NOTE that our use of __private_malloc, a defsym'd symbol,
 # used to provoke a gold bug when we were generating protected-visibility
 # undefineds that were bound to it. That bug has been reported (#24286) and
@@ -86,20 +103,16 @@ LDFLAGS += -Wl,-fuse-ld=gold
 # template code). So we are still committed to using gold to link liballocs
 # owing to binutils issue 13600 is fixed.
 
-# HACK: -flto doesn't seem to work with our ld -r -generated malloc_hooks_preload_fast
-# object. It complains about __next_malloc_hook et al being undefined, even though
-# we --defsym'd them and they are clearly defined in the .o file. LTO doesn't grok --defsym.
-# So we use the preprocessor (above) to define __next_hook_*.
 export BUILD_MALLOC_HOOKS := event
+# FIXME: if/when LTO is fixed, we can revert to using ld -r
+# to create __next_hook_* aliases when composing malloc wrappers. For now we
+# use the C preprocessor.
 event_hooks.o event_hooks_nonshared.o: CFLAGS += \
 -D__next_hook_init=__terminal_hook_init \
 -D__next_hook_malloc=__terminal_hook_malloc \
 -D__next_hook_free=__terminal_hook_free \
 -D__next_hook_realloc=__terminal_hook_realloc \
 -D__next_hook_memalign=__terminal_hook_memalign 
-CFLAGS += -DTRACE_MALLOC_HOOKS -DTRACE_HEAP_INDEX #-DTRACE_DEEP_HEAP_INDEX
-event_hooks.c:
-
 # GRR. We can't include the Makerules now that we need to build the hooks by 
 # two different methods. Also, we can't get dependency information about these
 # files from the makefiles. So we always want to run these rules. HMM.
@@ -109,6 +122,8 @@ vpath event_hooks.c $(LIBMALLOCHOOKS)
 
 ifneq ($(TRACE_HEAP_INDEX),)
 CFLAGS += -DTRACE_HEAP_INDEX
+#CFLAGS += -DTRACE_MALLOC_HOOKS
+#CFLAGS += -DTRACE_DEEP_HEAP_INDEX
 endif
 CFLAGS += -I$(srcdir)
 
@@ -125,7 +140,7 @@ ALLOCATOR_OBJS := $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard 
 $(info ALLOCATORS_OBJS is $(ALLOCATOR_OBJS))
 MAIN_OBJS := liballocs.o event_hooks.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap.o
-NOPRELOAD_OBJS := uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
+NOPRELOAD_OBJS := #uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
 NONSHARED_OBJS := nonshared_hooks.o # does *not* go in liballocs.a -- FIXME: why not? recall that liballocs.a is only for static-linked client binaries (exe or solib). Otherwise we get _nonshared.a, from the liballocs.so linker script. Probably, liballocs.a should include this, e.g. a client static-linked exe needs this if it defines its own malloc.
 PRELOAD_OBJS := preload.o malloc_hook_stubs_preload.o
 SYSTRAP_OBJS := systrap.o
@@ -160,11 +175,6 @@ event_hooks_nonshared.o: event_hooks.c
 nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
 	$(LD) -r -o "$@" $+
 
-# FIXME: remove the need for this
-uniqtypes.o: uniqtypes.c
-	$(CC) -o "$@" $(filter-out -flto,$(CFLAGS)) -c "$<" && \
-	$(SRCROOT)/tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
-
 # we include our own malloc impl, for which we use dlmalloc
 # of which libsystrap already has a copy, so borrow that (HACK)
 vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: actually in trap-syscalls but should be in libsystrap
@@ -182,34 +192,61 @@ PRIVATE_MALLOC_LDFLAGS := -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
  -Wl,--defsym,__private_memalign=__wrap_dlmemalign \
  -Wl,--defsym,__private_posix_memalign=__wrap_dlposix_memalign \
  -Wl,--defsym,__real_dlmalloc_usable_size=dlmalloc_usable_size \
- -Wl,--exclude-libs=dlmalloc.a \
- -Bsymbolic # important for _etext in preload hooks
+ -Wl,--exclude-libs=dlmalloc.a
+# NOTE: __private_strdup is defined explicitly in liballocs.c
 # NOTE: we need to defsym to the __wrap_* functions, because of the way
 # --wrap and --defsym interact: references generated by --defsym are *not*
 # wrapped, unlike references that were in the file already.
 PRIVATE_MALLOC_LDLIBS := -Wl,--whole-archive dlmalloc.a  -Wl,--no-whole-archive
+$(LDTARGETS): dlmalloc.a
 
 LIBALLOCS_PRELOAD_A_OBJS := dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS)
 LIBALLOCS_NONSHARED_A_OBJS := $(NOPRELOAD_OBJS) $(NONSHARED_OBJS)
 LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(HOOKS_WRAP_OBJS)
 
-# liballocs_preload.so build rule is funky becuase dlmalloc.a is in LDFLAGS.
-# It needs to be there because it goes inside --whole-archive (and these options
-# are not files, so can't be prerequisites)
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size $(PRIVATE_MALLOC_LDFLAGS)
-liballocs_preload.so: LDLIBS += -ldlbind $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/libsystrap.a -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
-liballocs_preload.so: $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
-	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)
+liballocs_preload.so: LDFLAGS += -Wl,-Map,liballocs_preload.so.map
+liballocs_preload.so liballocs_test.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a
+liballocs_preload.so liballocs_test.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
+# also set the dependencies, for make purposes
+liballocs_preload.so liballocs_test.so: $(LIBDLBIND)/lib/libdlbind.a $(LIBSYSTRAP)/lib/libsystrap.a # anything that goes in ldlibs should be a dependency
 
 # FIXME: this is supposed to obsolete liballocs_test.so and tests/lib-test
 # ... but I'm not sure it can. Some unit tests need to run within a wider liballocs
+# (i.e. they are not really unit tests per se...)
 liballocs_preload.so-test-%: LDFLAGS += $(PRIVATE_MALLOC_LDFLAGS)
-liballocs_preload.so-test-%: LDLIBS += -ldlbind $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/libsystrap.a -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
+liballocs_preload.so-test-%: LDLIBS += -ldlbind $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 liballocs_preload.so-test-%.c.test: %.c $(filter-out %.o,$(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS)) dlmalloc.a
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DUNIT_TEST -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)
 vpath %.h $(SRCROOT)/include
 liballocs_preload.so-test-%.h.test: %.h $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DUNIT_TEST -o "$@" $(filter-out dlmalloc.a $<,$+) -x c $< -x none $(LDFLAGS) $(LDLIBS)
+
+RUNT_LDFLAGS := -Wl,--wrap,__runt_files_notify_load \
+-Wl,--wrap,__runt_files_notify_unload \
+-Wl,--wrap,__runt_files_metadata_by_addr \
+-Wl,--wrap,__runt_segments_notify_define_segment \
+-Wl,--wrap,__runt_segments_notify_destroy_segment \
+-Wl,--wrap,__runt_sections_notify_define_section # there is no 'destroy section'
+# if we don't do --whole-archive, then the wrapping of __runt_* doesn't work...
+# ... though with a behaviour that makes no sense: librunt still calls itself rather
+# than its wrapper __static_file_allocator notify_load.
+RUNT_LDLIBS := -Wl,--whole-archive $(LIBRUNT)/lib/librunt_preload.a -Wl,--no-whole-archive
+liballocs_preload.so liballocs_test.so: LDFLAGS += $(RUNT_LDFLAGS) -Wl,-O0
+liballocs_preload.so liballocs_test.so: LDLIBS += $(RUNT_LDLIBS)
+# dependency for make
+liballocs_preload.so liballocs_test.so: $(LIBRUNT)/lib/librunt_preload.a
+
+# liballocs_preload.so build rule is funky becuase dlmalloc.a is in LDFLAGS.
+# It needs to be there because it goes inside --whole-archive (and these options
+# are not files, so can't be prerequisites)
+liballocs_preload.so: $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out $(LDLIBS) dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)
+# FIXME: this should probably go away, if our .test stuff above starts working
+liballocs_test.so: systrap_noop.o  $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
+	$(CC) $(CFLAGS) -shared -o "$@" \
+	-Wl,--whole-archive $(filter-out $(LDLIBS) dlmalloc.a,$+) -Wl,--no-whole-archive \
+	$(LIBSYSTRAP)/lib/libsystrap.a $(LDFLAGS) $(LDLIBS)
 
 %.a:
 	$(AR) r "$@" $+
@@ -243,13 +280,6 @@ liballocs_dummyweaks.o: dummyweaks.o
 	$(LD) -r -o "$@" $+
 liballocs_dummyweaks.so: dummyweaks.o
 	$(CC) $(CFLAGS) -shared -o "$@" $^ $(LDFLAGS)
-
-# FIXME: this should probably go away, if our .test stuff above starts working
-liballocs_test.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
-liballocs_test.so: systrap_noop.o liballocs_pic.a dlmalloc.a
-	$(CC) $(CFLAGS) -shared -o "$@" \
-	-Wl,--whole-archive $(filter-out dlmalloc.a,$+) -Wl,--no-whole-archive \
-	$(LIBSYSTRAP)/libsystrap.a $(LDFLAGS) $(LDLIBS)
 
 # Instead of a nomemtable build (for Valgrinding)
 # can we just arrange that on a nomemtable *execution*,

@@ -26,7 +26,7 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
 # varlist is used to build env.sh (by writing a rule to config.mk)
 
-default: $(CONTRIB)/env.sh config.mk build-libsystrap build-liballocstool
+default: $(CONTRIB)/env.sh config.mk build-libsystrap build-liballocstool build-libdlbind
 
 OLD_CONTRIB := $(CONTRIB)
 include config.mk
@@ -38,9 +38,7 @@ endif
 
 .PHONY: build-libsystrap
 # HACK: should be lib
-build-libsystrap: libsystrap/src/libsystrap.a
-
-libsystrap/src/libsystrap.a: libsystrap/contrib/config.mk
+build-libsystrap: libsystrap/src/libsystrap.a libsystrap/contrib/config.mk
 	$(MAKE) -C libsystrap/src
 
 libsystrap/contrib/config.mk $(CONTRIB)/libsystrap/contrib/env.sh:
@@ -88,7 +86,7 @@ subconfigs += liballocstool/contrib/config.mk
 # ----------------------------libdlbind
 
 build-libdlbind:
-	$(MAKE) -C libdlbind
+	CFLAGS="-I$(LIBRUNT_DIR)/include" $(MAKE) -C libdlbind
 
 CONFIG_MK += \nLIBDLBIND ?= $(CONTRIB)/libdlbind\n
 varlist += LIBDLBIND

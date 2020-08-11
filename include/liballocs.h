@@ -107,7 +107,7 @@ __liballocs_first_subobject_spanning(
 extern int __liballocs_debug_level;
 extern _Bool __liballocs_is_initialized __attribute__((weak));
 
-int __liballocs_global_init(void) __attribute__((weak));
+int __liballocs_global_init(void) __attribute__((weak,constructor(103)));
 // declare as const void *-returning, to simplify trumptr
 const void *__liballocs_typestr_to_uniqtype(const char *typestr) __attribute__((weak));
 // used by section-group test case, among others
@@ -563,7 +563,7 @@ __liballocs_find_matching_subobject(unsigned target_offset_within_uniqtype,
 			{
 				// no more subobjects at the same offset, so fail
 				return 0;
-			} 
+			}
 			else
 			{
 				contained_pos = &containing_uniqtype->related[subobj_ind + 1];

@@ -16,6 +16,7 @@ extern "C" {
 #include <cstdbool>
 #endif
 
+#include "dso-meta.h"
 #include "allocmeta-defs.h"
 #include "bitmap.h"
 
@@ -62,6 +63,24 @@ typedef struct {
  * - ... but we might want to preserve some invariants about that
  */
 
+
+/* liballocs assumes some fixed structure in the first few levels of the hierarchy.
+ * Roughly it is as follows.
+ *                                   (imaginary root)
+ *                                          |
+ *                                         mmap
+ *                           _______________|______________
+ *                          /      /        |          .   \
+ *                        brk     /     static-file     .  auxv    (only present for initial stack)
+ *                        /      /          |            .   |
+ *                      mallocs...     static-segment      stack
+ *                                          |                |
+ *                                     static-symbol     stackframe
+ *                                                           |
+ *                                                         alloca
+ *
+ */
+
 typedef enum { DISCIPL_ANY, DISCIPL_BASE_ONLY, DISCIPL_ASK_FIRST } addr_discipl_t;
 /* Two concerns: 
  * - what event signifies the end of the lifetime? Ideally in a form that can be observed. 
@@ -106,7 +125,6 @@ typedef struct lifetime_policy_s
 
 struct allocated_chunk;              /* the start of an allocation, opaquely */
 struct alloc_metadata;               /* metadata associated with a chunk */
-
 /* The idealised base-level allocator protocol. These operations are mostly
    to be considered logically; some allocators (e.g. stack, GC) "inline" them
    rather than defining them as entry points. However, some allocators do define
@@ -196,7 +214,7 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 
 #define ALLOCATOR_HANDLE_LIFETIME_INSERT(a) ((a) == &__generic_malloc_allocator)
 
-void __mmap_allocator_init(void);
+void __mmap_allocator_init(void) __attribute__((constructor(101)));
 void __mmap_allocator_notify_brk(void *new_curbrk);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
 	int prot, int flags, int fd, off_t offset, void *caller);
@@ -215,115 +233,73 @@ struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mappi
 
 void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *b);
 
-void __static_file_allocator_init(void);
-void __static_file_allocator_notify_load(void *handle, const void *load_site);
+void __static_file_allocator_init(void) __attribute__((constructor(102)));
+struct file_metadata *__static_file_allocator_notify_load(void *handle, const void *load_site);
 void __static_file_allocator_notify_unload(const char *copied_filename);
 
 void __brk_allocator_notify_brk(void *new_curbrk, const void *caller) __attribute__((visibility("hidden")));
-void __brk_allocator_init(void) __attribute__((visibility("hidden")));
+void __brk_allocator_init(void) __attribute__((visibility("hidden"),constructor(101)));
 extern struct big_allocation *__brk_bigalloc __attribute__((visibility("hidden")));
-_Bool __brk_allocator_notify_unindexed_address(void *mem);
+_Bool __brk_allocator_notify_unindexed_address(const void *mem);
 
-struct segment_metadata
-{
-	unsigned phdr_idx;
-	union sym_or_reloc_rec *metavector; /* addr-sorted list of relevant dynsym/symtab/extrasym/reloc entries */
-	size_t metavector_size;
-	bitmap_word_t *starts_bitmap; // maybe!
-};
 typedef unsigned short allocsite_id_t;
 struct allocsites_vectors_by_base_id_entry; // opaque here
 
-/* Hmm -- with -Wl,-q we might get lots of reloc section mappings. Is this enough? */
-#define MAPPING_MAX 16
-
-struct file_metadata
+struct allocs_file_metadata
 {
-	const char *filename;
-	const void *load_site;
-	struct link_map *l;
-
 	void *meta_obj_handle; /* loaded by us */
 	ElfW(Sym) *extrasym;
-
-	ElfW(Phdr) *phdrs; /* always mapped or copied by ld.so */
-	ElfW(Half) phnum;
-	unsigned nload; /* number of segments that are LOADs */
-
-	ElfW(Sym) *dynsym; /* always mapped by ld.so */
-	unsigned char *dynstr; /* always mapped by ld.so */
-	unsigned char *dynstr_end;
-
-	ElfW(Half) dynsymndx; // section header idx of dynsym, or 0 if none such
-	ElfW(Half) dynstrndx;
-
-	struct extra_mapping
-	{
-		void *mapping_pagealigned;
-		off_t fileoff_pagealigned;
-		size_t size;
-	} extra_mappings[MAPPING_MAX];
-
-	ElfW(Ehdr) *ehdr;
-	ElfW(Shdr) *shdrs;
-	unsigned char *shstrtab;
-	ElfW(Sym) *symtab; // NOTE this really is symtab, not dynsym
-	ElfW(Half) symtabndx;
-	unsigned char *strtab; // NOTE this is strtab, not dynstr
-	ElfW(Half) strtabndx;
-
 	struct allocsites_vectors_by_base_id_entry *allocsites_info;
 	struct frame_allocsite_entry *frames_info;
 	unsigned nframes;
-
-	/* "Starts" are symbols with length (spans).
-	   We don't index symbols that are not spans.
-	   If we see multiple spans covering the same address, we discard one
-	   of them heuristically.
-	   The end result is a list of spans, in address order, with distinct starts.
-	   Our sorted metavector has one record per indexed span.
-	   Logically the content is a pointer to its ELF metadata *and* its type.
-	   For spans that are in dynsym, it points to their dynsym entry.
-	*/
-	struct segment_metadata segments[];
+	/* We extend the librunt structure. Since it is variable-size
+	 * at the end, we must put it at the end.
+	 * GAH. Actually this doesn't work! Not permitted in C. Need to
+	 * refactor somehow. Could just make this a char[] and rely on
+	 * effective type stuff and a nasty macro to view it with the
+	 * right type. Or could take the array out of the file_metadata
+	 * struct and macro-up only that. */
+	struct file_metadata m;
 };
-#define FILE_META_DESCRIBES_EXECUTABLE(meta) \
-	((meta)->l->l_name && (meta)->l->l_name[0] == '\0') /* FIXME: better test? */
-#define STARTS_BITMAP_NWORDS_FOR_PHDR(ph) \
-    (ROUND_UP((ph)->p_vaddr + (ph)->p_memsz, sizeof (void*)) - ROUND_DOWN((ph)->p_vaddr, sizeof (void*)) \
-    / (sizeof (void*)))
 
-inline 
-ElfW(Sym) *__static_file_allocator_get_symtab_by_idx(struct file_metadata *meta, ElfW(Half) i)
+static inline uintptr_t vaddr_from_rec(union sym_or_reloc_rec *p,
+	struct allocs_file_metadata *file)
 {
-	if (meta->symtab && meta->symtabndx == i) return meta->symtab;
-	else if (meta->dynsym && meta->dynsymndx == i) return meta->dynsym;
-	return NULL;
+	ElfW(Sym) *symtab;
+	if (p->is_reloc) return p->reloc.base_vaddr;
+	else switch (p->sym.kind)
+	{
+		case REC_DYNSYM:   symtab = file->m.dynsym; goto sym;
+		case REC_SYMTAB:   symtab = file->m.symtab; goto sym;
+		case REC_EXTRASYM: symtab = file->extrasym; goto sym;
+		sym:
+			return symtab[p->sym.idx].st_value;
+		default: abort();
+	}
 }
-void __static_segment_allocator_init(void);
+
+void __static_segment_allocator_init(void) __attribute__((constructor(102)));
 void __static_segment_allocator_notify_define_segment(
 	struct file_metadata *meta,
 	unsigned phndx,
 	unsigned loadndx
 );
-void __static_section_allocator_init(void);
+void __static_section_allocator_init(void) __attribute__((constructor(102)));
 void __static_section_allocator_notify_define_section(
 	struct file_metadata *meta,
 	const ElfW(Shdr) *shdr
 );
-void __static_symbol_allocator_init(void);
+void __static_symbol_allocator_init(void) __attribute__((constructor(102)));
 liballocs_err_t __static_symbol_allocator_get_info(void * obj, struct big_allocation *maybe_bigalloc,
 	struct uniqtype **out_type, void **out_base,
 	unsigned long *out_size, const void **out_site) __attribute__((visibility("protected")));
 
-void __stack_allocator_init(void);
+void __stack_allocator_init(void) __attribute__((constructor(101)));
 _Bool __stack_allocator_notify_unindexed_address(const void *ptr);
-extern void *__top_of_initial_stack __attribute__((visibility("protected")));
-extern rlim_t __stack_lim_cur __attribute__((visibility("protected")));
 
-void init_frames_info(struct file_metadata *file) __attribute__((visibility("hidden")));
+void init_frames_info(struct allocs_file_metadata *file) __attribute__((visibility("hidden")));
 
-void __auxv_allocator_init(void);
+void __auxv_allocator_init(void) __attribute__((constructor(101)));
 void __alloca_allocator_init(void);
 void __generic_malloc_allocator_init(void);
 void __generic_small_allocator_init(void);
@@ -339,109 +315,25 @@ _Bool __auxv_get_env(const char ***out_start, const char ***out_terminator, stru
 _Bool __auxv_get_auxv(const Elf64_auxv_t **out_start, Elf64_auxv_t **out_terminator, struct uniqtype **out_uniqtype);
 void *__auxv_get_program_entry_point(void);
 
-#ifdef _GNU_SOURCE
-/* Macro which open-codes a binary search over a sorted array
- * of T, returning a pointer to the highest element that
- * is greater than or equal to the target. To get an integer
- * value out of a T t, we use proj(t). */
-#define /* T* */  bsearch_leq_generic(T, target_proj_val, /*  T*  */ base, /* unsigned */ n, proj) \
-	({ \
-		T *upper = base + n; \
-		T *lower = base; \
-		if (upper - lower == 0) abort(); \
-		assert(proj(lower) <= target_proj_val); \
-		while (upper - lower != 1) \
-		{ \
-			T *mid = lower + ((upper - lower) / 2); \
-			if (proj(mid) > target_proj_val) \
-			{ \
-				/* we should look in the lower half */ \
-				upper = mid; \
-			} \
-			else lower = mid; \
-		} \
-		assert(proj(lower) <= target_proj_val); \
-		/* if we didn't hit the max item, assert the next one is greater */ \
-		assert(lower == base + n - 1 \
-			 || proj(lower+1) > target_proj_val); \
-		/* If all elements are > the target, return NULL */ \
-		proj(lower) <= target_proj_val ? lower : NULL; \
-	})
-#endif
-
-static inline uintptr_t vaddr_from_rec(union sym_or_reloc_rec *p,
-	struct file_metadata *file)
-{
-	ElfW(Sym) *symtab;
-	if (p->is_reloc) return p->reloc.base_vaddr;
-	else switch (p->sym.kind)
-	{
-		case REC_DYNSYM:   symtab = file->dynsym; goto sym;
-		case REC_SYMTAB:   symtab = file->symtab; goto sym;
-		case REC_EXTRASYM: symtab = file->extrasym; goto sym;
-		sym:
-			return symtab[p->sym.idx].st_value;
-		default: abort();
-	}
-}
-
-/* liballocs assumes some fixed structure in the first couple of levels of the hierarchy.
- * 
- *                           ______ (imaginary root) ______
- *                          /               |              \
- *                      sbrk               mmap             stack
- *                                          |              /    \
- *                                        static         auxv   alloca
- * 
- * (... or, more precisely, every chunk allocated by one of these allocators has
- * a parent chunk allocated by the parent allocator shown.)
- * 
- * Memory kinds: HEAP, STATIC, STACK and MAPPED_FILE attach to these as you'd expect.
- */
-
-/* liballocs default: fixed population of allocators with their own fixed metadata
- * implementations. All suballocated chunks are considered to be managed by the small
- * allocator, say, whichever SUBALLOC function created them.
- * 
- * Alternative: one allocator identity per suballoc function. But then multiple
- * "allocators" [functions] might beallocating out of the same chunk, which would
- * violate our model.
- * 
- * Obviously this doesn't match with reality. It's really an indexing scheme that
- * we're designating, not an allocator per se. But elaborating this structure faithfully
- * would require more info from the user than what LIBALLOCS_* env vars currently get. */
-
-/* Key point:
+/* Assorted notes:
  * - core liballocs implements the reflective protocol 
      for OS (incl stack) and libc (malloc) allocators
- * - "deep" indexing routines also detect and register suballoc, 
-     and provide *generic* implementation of the reflective interface
+ * - "deep" indexing routines also detect and register suballoc,
+     and provide *generic* implementation of indexing
  * - an allocator is free to register itself explicitly with
      a (more efficient) implementation of the reflective interface
  * - allocators are only obliged to handle issued addresses
      (liballocs never issues addresses for them)
  * - allocators *are* obliged to check addressing discipline of 
- *   the returned-to code
- */
-
-/* The allocator's contract with liballocs:
- * 
- * Consider TLAB / GC-nursery allocation metadata.
- * One way is to define a protocol between liballocs and the allocator 
- * on thread-local metadata buffers.
- * We could write an inline function in C which
- * records an allocation in the buffer,
- * as a ready-made helper function that most VMs could plumb in, 
- * even though the "official" protocol is defined in shared memory.
- *
- * In fact this generalises. 
- * All our link-time allocator wrappers are just an opportunity
- * to make outcalls publishing the existence of a fresh allocation.
- * We could abstract that into a metaprotocol, by which allocators must call liballocs.
- * The point about the inline function is that
- * we don't want to force them to pay the cost of a function call; 
- * we want something more local that just compiles into
- * a few instructions' work on hot/local memory.
+ *   the returned-to code ("any", base-only, "ask"),
+ *   should we ever do anything with addressing disciplines.
+ * - high-rate allocators usually want to do their own indexing,
+ *   not use the generic implementations.
+ *   E.g. the stack currently does so (even though the impl is inside
+ *   liballocs, by walking the stack and looking up frame info etc).
+ *   We don't want to force allocators to pay the cost of a function call; 
+ *   they might do something more local that just compiles into
+ *   a few instructions' work on hot/local memory.
  */
 
 #endif

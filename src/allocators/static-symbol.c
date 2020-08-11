@@ -14,14 +14,13 @@
 #include "relf.h"
 #include "liballocs_private.h"
 #include "pageindex.h"
-#include "raw-syscalls.h"
+#include "raw-syscalls-defs.h"
 #include "allocmeta-defs.h"
 #include "allocmeta.h"
 
 static _Bool trying_to_initialize;
 static _Bool initialized;
-void __static_symbol_allocator_init(void) __attribute__((constructor(102)));
-void __static_symbol_allocator_init(void)
+void ( __attribute__((constructor(102))) __static_symbol_allocator_init)(void)
 {
 	if (!initialized && !trying_to_initialize)
 	{
@@ -49,45 +48,6 @@ void __static_symbol_allocator_init(void)
  * - ... check the allocsites code that already exists!
  */
 
-
-/* FIXME: invalidate cache entries on dlclose().
- * FIXME: get rid of this code. Integrate the dladdr cache into the usual memrange cache
- * and/or the new static file/symbol alloc metadata. */
-#ifndef DLADDR_CACHE_SIZE
-#define DLADDR_CACHE_SIZE 16
-#endif
-struct dladdr_cache_rec { const void *addr; Dl_info info; };
-static struct dladdr_cache_rec dladdr_cache[DLADDR_CACHE_SIZE];
-static unsigned dladdr_cache_next_free;
-
-Dl_info dladdr_with_cache(const void *addr); // __attribute__((visibility("protected")));
-Dl_info dladdr_with_cache(const void *addr)
-{
-	for (unsigned i = 0; i < DLADDR_CACHE_SIZE; ++i)
-	{
-		if (dladdr_cache[i].addr)
-		{
-			if (dladdr_cache[i].addr == addr)
-			{
-				/* This entry is useful, so maximise #misses before we recycle it. */
-				dladdr_cache_next_free = (i + 1) % DLADDR_CACHE_SIZE;
-				return dladdr_cache[i].info;
-			}
-		}
-	}
-	Dl_info info;
-	int ret = dladdr(addr, &info);
-	assert(ret != 0);
-
-	/* always cache the dladdr result */
-	dladdr_cache[dladdr_cache_next_free++] = (struct dladdr_cache_rec) { addr, info };
-	if (dladdr_cache_next_free == DLADDR_CACHE_SIZE)
-	{
-		debug_printf(5, "dladdr cache wrapped around\n");
-		dladdr_cache_next_free = 0;
-	}
-	return info;
-}
 
 /* Three other cases: 
    (1) not-in-dynsym symbols that are in an available .symtab ("statsyms")
@@ -332,8 +292,8 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 	struct segment_metadata *segment = segment_bigalloc->meta.un.opaque_data.data_ptr;
 
 	uintptr_t obj_addr = (uintptr_t) obj;
-	struct file_metadata *file = segment_bigalloc->parent->meta.un.opaque_data.data_ptr;
-	uintptr_t file_load_addr = file->l->l_addr;
+	struct allocs_file_metadata *file = segment_bigalloc->parent->meta.un.opaque_data.data_ptr;
+	uintptr_t file_load_addr = file->m.l->l_addr;
 	/* Do a binary search in the metavector,
 	 * for the highest-placed symbol starting <=
 	 * our target vaddr. */
@@ -353,8 +313,8 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		if (found->is_reloc) found_limit_vaddr = found_base_vaddr + found->reloc.size;
 		else switch (found->sym.kind)
 		{
-			case REC_DYNSYM:   symtab = file->dynsym; goto sym;
-			case REC_SYMTAB:   symtab = file->symtab; goto sym;
+			case REC_DYNSYM:   symtab = file->m.dynsym; goto sym;
+			case REC_SYMTAB:   symtab = file->m.symtab; goto sym;
 			case REC_EXTRASYM: symtab = file->extrasym; goto sym;
 			sym:
 				found_limit_vaddr = found_base_vaddr + symtab[found->sym.idx].st_size;
@@ -375,7 +335,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		if (target_vaddr > found_limit_vaddr) goto fail;
 		// else we can go ahead
 		if (out_base) *out_base = (void*)(file_load_addr + found_base_vaddr);
-		if (out_site) *out_site = file->load_site;
+		if (out_site) *out_site = file->m.load_site;
 		if (out_size) *out_size = found_limit_vaddr - found_base_vaddr;
 		return NULL;
 	}

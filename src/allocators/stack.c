@@ -38,8 +38,7 @@ struct suballocated_chunk_rec; // FIXME: remove once heap_index has been refacto
 
 static struct big_allocation *initial_stack_bigalloc;
 
-void __stack_allocator_init(void) __attribute__((constructor(101)));
-void __stack_allocator_init(void)
+void (__attribute__((constructor(101))) __stack_allocator_init)(void)
 {
 	if (!initialized && !trying_to_initialize)
 	{

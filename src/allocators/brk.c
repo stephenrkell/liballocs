@@ -13,7 +13,7 @@ int open(const char *, int, ...);
 #include "relf.h"
 #include "maps.h"
 #include "liballocs_private.h"
-#include "raw-syscalls.h"
+#include "raw-syscalls-defs.h"
 #include "dlbind.h"
 
 // we always define a __curbrk -- it may override one in glibc, but fine
@@ -53,8 +53,8 @@ static void set_brk_bigalloc(void *curbrk)
 	// what is the actual end of the data segment PHDR?
 	struct link_map *exe_lment = get_highest_loaded_object_below(executable_mapping_bigalloc->begin);
 	assert(exe_lment);
-	ElfW(auxv_t) *at_phdr = auxv_xlookup(get_auxv((const char **) environ, &at_phdr), AT_PHDR);
-	ElfW(auxv_t) *at_phnum = auxv_xlookup(get_auxv((const char **) environ, &at_phdr), AT_PHNUM);
+	ElfW(auxv_t) *at_phdr = auxv_xlookup(get_auxv((char **) environ, &at_phdr), AT_PHDR);
+	ElfW(auxv_t) *at_phnum = auxv_xlookup(get_auxv((char **) environ, &at_phdr), AT_PHNUM);
 	ElfW(Phdr) *phdrs = (ElfW(Phdr) *) at_phdr->a_un.a_val;
 	/* Our "data segment mapping" bigalloc is really a *mapping sequence*.
 	 * It includes all segments of the executable. What is the "data segment"?
@@ -130,8 +130,7 @@ static void update_brk(void *new_curbrk)
 static _Bool initialized;
 static _Bool trying_to_initialize;
 
-void __brk_allocator_init(void) __attribute__((constructor(101)));
-void __brk_allocator_init(void)
+void (  __attribute__((constructor(101))) __brk_allocator_init)(void)
 {
 	// we are initialized by the mmap allocator
 	if (!__mmap_allocator_is_initialized()) return;
@@ -174,12 +173,12 @@ void __brk_allocator_notify_brk(void *new_curbrk, const void *caller)
 	}
 }
 
-_Bool __brk_allocator_notify_unindexed_address(void *mem)
+_Bool __brk_allocator_notify_unindexed_address(const void *mem)
 {
 	if (!__brk_bigalloc) return 0; // can't do anything
 	void *old_sbrk = current_sbrk(); // what we *think* sbrk is
 	void *new_sbrk = sbrk(0);
 	update_brk(new_sbrk); // ... update it to what it actually is
-	return ((char *) mem >= (char*) old_sbrk
-		&& (char *) mem < (char *) new_sbrk);
+	return ((uintptr_t) mem >= (uintptr_t) old_sbrk
+		&& (uintptr_t) mem < (uintptr_t) new_sbrk);
 }

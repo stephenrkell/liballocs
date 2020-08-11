@@ -8,6 +8,8 @@ space := $(nullstring) # end
 
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 LIBALLOCS ?= $(realpath $(dir $(THIS_MAKEFILE))/..)
+LIBRUNT ?= $(realpath $(dir $(THIS_MAKEFILE))/../contrib/libsystrap/librunt)
+LIBALLOCSTOOL ?= $(realpath $(dir $(THIS_MAKEFILE))/../contrib/liballocstool)
 
 META_BASE ?= /usr/lib/meta
 $(warning META_BASE is $(META_BASE))
@@ -27,6 +29,8 @@ GATHER_SRCALLOCS ?= $(dir $(THIS_MAKEFILE))/gather-srcallocs.sh
 OBJDUMPMEMACC ?= $(dir $(THIS_MAKEFILE))/objdumpmemacc
 MERGE_MEMACC ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh # FIXME: change name
 GATHER_SRCMEMACC ?= $(dir $(THIS_MAKEFILE))/gather-srcmemacc.sh
+
+CFLAGS += -I$(LIBALLOCSTOOL)/include -I$(LIBALLOCS)/include
 
 META_CC ?= $(CC)
 META_CFLAGS ?= $(CFLAGS)
@@ -111,7 +115,7 @@ endif
 
 # for debugging, try: @echo all dependencies: $+
 $(META_BASE)/%-meta.so: /% $(call meta_sources,%)
-	$(META_CC) -I$(dir $(THIS_MAKEFILE))/../include -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+)
+	$(META_CC) $(META_CFLAGS) -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+)
 
 SWAP_STDOUT_STDERR := 3>&2 2>&1 1>&3
 

@@ -166,3 +166,4 @@ tmp-*.txt
 /tests/uniqtype-make-precise/uniqtype-make-precise
 /tests/uniqtype-walk/uniqtype-walk
 
+/tools/lang/c/cil.stamp

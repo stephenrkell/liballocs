@@ -14,14 +14,13 @@
 #include "relf.h"
 #include "liballocs_private.h"
 #include "pageindex.h"
-#include "raw-syscalls.h"
+#include "raw-syscalls-defs.h"
 #include "allocmeta.h"
 
 static _Bool trying_to_initialize;
 static _Bool initialized;
 
-void __static_section_allocator_init(void) __attribute__((constructor(102)));
-void __static_section_allocator_init(void)
+void ( __attribute__((constructor(102))) __static_section_allocator_init)(void)
 {
 	/* Sections are created by the static file allocator,
 	 * so there is nothing to do.  */
@@ -64,11 +63,12 @@ struct big_allocation *__static_section_allocator_ensure_big(
 	return b;
 }
 
-void __static_section_allocator_notify_define_section(
-	struct file_metadata *meta,
-	const ElfW(Shdr) *shdr
-)
+void __static_section_allocator_notify_define_section(struct file_metadata *meta, const ElfW(Shdr) *shdr);
+void __real___runt_sections_notify_define_section(struct file_metadata *meta, const ElfW(Shdr) *shdr);
+void __wrap___runt_sections_notify_define_section(struct file_metadata *meta, const ElfW(Shdr) *shdr) __attribute__((alias("__static_section_allocator_notify_define_section")));
+void __static_section_allocator_notify_define_section(struct file_metadata *meta, const ElfW(Shdr) *shdr)
 {
+	__real___runt_sections_notify_define_section(meta, shdr);
 	/* We simply create a bigalloc from the off, if we're nonzero-sized.
 	 * That might be a bit extravagant. But actually it's necessary!
 	 * The data segment's suballocator needs to be a malloc allocator.

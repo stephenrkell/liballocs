@@ -453,11 +453,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
             extraFlags = self.getStubGenCompileArgs()
             extraFlags += ["-fPIC"]
             # WHERE do we get relf.h, in the librunt era?
-            # Bit of a hack: in the contrib.
+            # Bit of a hack: in the contrib. FIXME FIXME.
             stubs_pp_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
                 "-I" + self.getLibAllocsBaseDir() + "/tools", \
                 "-I" + self.getLibAllocsBaseDir() + "/include", \
-                "-I" + self.getLibAllocsBaseDir() + "/contrib/librunt/include", \
+                "-I" + self.getLibAllocsBaseDir() + "/contrib/libsystrap/contrib/librunt/include", \
                 "-DRELF_DEFINE_STRUCTURES"
                 ] \
                 + [arg for arg in self.phaseItems[Phase.PREPROCESS] if arg.startswith("-D")] \
