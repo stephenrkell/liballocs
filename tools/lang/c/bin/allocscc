@@ -9,7 +9,9 @@
 
 import os, sys, re, subprocess, tempfile
 # HACK
-liballocs_base = os.path.realpath(os.path.dirname(__file__) + "/../../../..")
+REAL_FILE = os.path.realpath(__file__)
+REAL_DIR = os.path.realpath(os.path.dirname(REAL_FILE))
+liballocs_base = os.path.realpath(REAL_DIR + "/../../../..")
 sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
 cilly_cmd = liballocs_base + "/tools/lang/c/cil/bin/cilly"
@@ -63,7 +65,7 @@ class AllocsCC(AllocsCompilerWrapper):
 
     def getIncludeArgs(self, sourceFiles):
         return ["-include", \
-               os.path.dirname(__file__) + "/../../../../include/liballocs_cil_inlines.h"] \
+               REAL_DIR + "/../../../../include/liballocs_cil_inlines.h"] \
                if len(sourceFiles) > 0 and self.areAllSourceFilesC(sourceFiles) else []
 
     def getCillyArgs(self, sourceFiles):
