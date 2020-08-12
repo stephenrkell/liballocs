@@ -645,7 +645,7 @@ const char *format_symbolic_address(const void *addr)
 static _Bool done_init;
 void __liballocs_main_init(void) __attribute__((constructor(101),visibility("protected")));
 // NOTE: runs *before* the constructor in preload.c
-void __liballocs_main_init(void)
+void (__attribute__((constructor(101))) __liballocs_main_init)(void)
 {
 	assert(!done_init);
 

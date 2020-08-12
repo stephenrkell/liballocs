@@ -13,10 +13,6 @@ CFLAGS += -flto -ffat-lto-objects
 endif
 LDFLAGS += -L$(LIBDLBIND)/lib
 
-CFLAGS += -no-integrated-cpp \
--wrapper \
-$(LIBALLOCS)/contrib/toolsub/wrapper/example/constructor-priority-checker/wrapper
-
 # run-from-srcdir case:
 # if the current dir is the source dir, change to the output directory
 # and re-invoke this makefile from there.
@@ -68,7 +64,7 @@ TARGETS += liballocs_test.so       # version only usable for doing dlopen() -- r
 
 # Keep a list of all the linked binaries we produce
 LDTARGETS := $(filter-out liballocs.so,$(filter %.so,$(TARGETS)))
-$(info LDTARGETS is $(LDTARGETS))
+#$(info LDTARGETS is $(LDTARGETS))
 
 .PHONY: all
 all: $(TARGETS)
@@ -81,6 +77,12 @@ ifeq ($(DEBUG),)
 else
     CFLAGS += -O0
 endif
+
+# Tell make how to build .i and .s files, for debugging
+%.i: %.c
+	$(CC) -E -o $@ $(CPPFLAGS) $(CFLAGS) $<
+%.s: %.i
+	$(CC) -S -o $@ $(CPPFLAGS) $(CFLAGS) $<
 
 # Don't use allocscc to compile liballocs!
 # if CC is allocscc, unset it
@@ -138,7 +140,7 @@ UTIL_OBJS += fake-libunwind.o
 CFLAGS += -fno-omit-frame-pointer
 endif
 ALLOCATOR_OBJS := $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
-$(info ALLOCATORS_OBJS is $(ALLOCATOR_OBJS))
+#$(info ALLOCATORS_OBJS is $(ALLOCATOR_OBJS))
 MAIN_OBJS := liballocs.o event_hooks.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap.o
 NOPRELOAD_OBJS := #uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
@@ -157,7 +159,7 @@ C_SRC := $(sort $(patsubst %.o,%.c,$(DEP_OBJS)))
 # All our objs are from C files, for now
 C_OBJ_DEPS := $(foreach f,$(DEP_OBJS),$(patsubst %.o,%.d,$(f)))
 DEPS := $(C_OBJ_DEPS)
-$(info C_OBJ_DEPS are $(C_OBJ_DEPS))
+#$(info C_OBJ_DEPS are $(C_OBJ_DEPS))
 # ARGH. If we define a rule verbatim inside $(foreach ), it doesn't actually get
 # defined. So we have to use eval.
 define rule-for-depfile =
@@ -166,6 +168,10 @@ $(patsubst %.o,%.d,$(1)): $(patsubst %.o,%.c,$(1))
 endef
 $(foreach f,$(DEP_OBJS),$(eval $(call rule-for-depfile,$(f))))
 include $(DEPS)
+
+$(ALL_OBS): CFLAGS += -no-integrated-cpp \
+-wrapper \
+$(LIBALLOCS)/contrib/toolsub/wrapper/example/constructor-priority-checker/wrapper
 
 # event_hooks.c is macroised so that we can create special versions of it.
 # This version is used when we link an executable including its own malloc impl.
