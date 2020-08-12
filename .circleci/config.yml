@@ -83,6 +83,4 @@ workflows:
   default:
     jobs:
       - build
-      - test:
-          requires:
-            - build
+      - test

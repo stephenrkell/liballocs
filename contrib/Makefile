@@ -38,7 +38,7 @@ endif
 
 .PHONY: build-libsystrap
 # HACK: should be lib
-build-libsystrap: libsystrap/src/libsystrap.a libsystrap/contrib/config.mk
+build-libsystrap: libsystrap/contrib/config.mk
 	$(MAKE) -C libsystrap/src
 
 libsystrap/contrib/config.mk $(CONTRIB)/libsystrap/contrib/env.sh:
