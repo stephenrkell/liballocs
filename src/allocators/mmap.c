@@ -1079,16 +1079,15 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 	void *caller)
 {
 	_Bool ret;
-	if (!cur) { ret = 0; goto out; }
+	const char *reason = NULL;
+	if (!cur) { ret = 0; reason = "no sequence yet"; goto out; }
 	check_mapping_sequence_sanity(cur);
 #define OVERLAPS(b1, e1, b2, e2) \
     ((char*) (b1) < (char*) (e2) \
     && (char*) (e1) >= (char*) (b2))
 	/* Can we extend the current mapping sequence?
-	 * This is tricky because ELF segments, "allocated" by __static_allocator,
-	 * must have a single parent mapping sequence.
-	 * In fact we're trying to make it even stronger: a whole mapped file
-	 * must have a single parent mapping sequence.
+	 * This is tricky because a whole mapped file (as seen by
+	 * __static_file_allocator) must have a single parent mapping sequence.
 	 * In the case of segments with memsz > filesz, we have to make sure
 	 * that the *trailing* anonymous mapping gets lumped into the preceding 
 	 * mapping sequence, not the next one. We handle this with the
@@ -1119,7 +1118,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 						  == get_highest_loaded_object_below(cur->mappings[cur->nused - 1].caller)))
 					// ... but if we're not beginning afresh, can't go from anonymous to with-name
 					|| (filename && cur->filename && 0 == strcmp(filename, cur->filename));
-			if (!filename_is_consistent) { ret = 0; goto out; }
+			if (!filename_is_consistent) { ret = 0; reason = "inconsistent filename (1)";  goto out; }
 			
 			if (!cur->begin) cur->begin = begin;
 			cur->end = end;
@@ -1209,7 +1208,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 						  == get_highest_loaded_object_below(cur->mappings[first_overlapped].caller));
 				}
 			}
-			if (!filename_is_consistent) { ret = 0; goto out; }
+			if (!filename_is_consistent) { ret = 0; reason = "inconsistent filename (2)"; goto out; }
 
 			/* If there's only one affected, *and* it's being cleanly replaced,
 			 * just update it directly. */
@@ -1234,7 +1233,7 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 					(begin_overlap_is_partial ? 1 : 0)
 				  + (end_overlap_is_partial ? 1 : 0))
 			{
-				ret = 0; goto out;
+				ret = 0; reason = "no more room in sequence structure (1)"; goto out;
 			}
 
 			/* The number of obsolete mappings is the number to be
@@ -1292,11 +1291,33 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 			ret = 1; goto out;
 			
 		}
-	} else { ret = 0; goto out; }
+	}
+	else
+	{
+		ret = 0;
+		if (!bounds_would_remain_contiguous) reason = "discontiguous bounds";
+		else if (!begin_addr_unchanged) reason = "begins before current sequence";
+		else if (!not_too_many) reason = "no more room in sequence structure (2)";
+		else assert(0);
+		goto out;
+	}
 	
 	abort();
 out:
 	if (cur) check_mapping_sequence_sanity(cur);
+	if (!ret)
+	{
+		/* Print a warning if the old not-extendable sequence
+		 * and the new mapping share a filename. It's usually
+		 * a sign of something going wrong. */
+		if (filename && cur->filename && 0 == strcmp(filename, cur->filename))
+		{
+			debug_printf(0,
+				"mapping of same file could not extend preceding sequence (reason: %s); BUG?",
+				reason
+			);
+		}
+	}
 	return ret;
 }
 
