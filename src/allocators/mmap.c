@@ -993,7 +993,7 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
 		/* Now we can dlopen the meta-objects for the early libs, which librunt
-		 * skipped. */
+		 * skipped because it couldn't catch the mmaps happening during dlopen. */
 		load_meta_objects_for_early_libs();
 		__liballocs_post_systrap_init(); /* does the libdlbind symbol creation */
 		__liballocs_global_init(); // will add mappings; may change sbrk

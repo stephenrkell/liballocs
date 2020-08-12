@@ -43,6 +43,39 @@ void ( __attribute__((constructor(102))) __static_segment_allocator_init)(void)
  * headers at all. How common is this? How can we regularise
  * this? Rather than create dummy sections, we have only one
  * bitmap per segment. */
+void __static_segment_setup_metavector(
+		struct allocs_file_metadata *afile,
+		unsigned phndx,
+		unsigned loadndx
+	)
+{
+	ElfW(Phdr) *phdr = &afile->m.phdrs[phndx];
+	union sym_or_reloc_rec *metavector = NULL;
+	size_t metavector_size = 0;
+	if (afile->meta_obj_handle)
+	{
+#define METAVEC_SYM_PREFIX "metavec_0x"
+		char buf[sizeof METAVEC_SYM_PREFIX+8]; // 8 bytes + NUL
+		snprintf(buf, sizeof buf, METAVEC_SYM_PREFIX "%x", (unsigned) phdr->p_vaddr);
+#undef METAVEC_SYM_PREFIX
+		void *found = fake_dlsym(afile->meta_obj_handle, buf);
+		if (found && found != (void*) -1)
+		{
+			metavector = found;
+			// what about the size?
+			ElfW(Sym) *found_sym = gnu_hash_lookup(
+				get_gnu_hash(afile->meta_obj_handle),
+				get_dynsym(afile->meta_obj_handle),
+				get_dynstr(afile->meta_obj_handle),
+				buf);
+			assert(found_sym);
+			metavector_size = found_sym->st_size;
+		}
+	}
+	assert(afile->m.segments[loadndx].phdr_idx == phndx); // librunt has already done it
+	afile->m.segments[loadndx].metavector = metavector;
+	afile->m.segments[loadndx].metavector_size = metavector_size;
+}
 
 void __real___runt_segments_notify_define_segment(struct file_metadata *file, unsigned phndx, unsigned loadndx);
 void __static_segment_allocator_notify_define_segment(
@@ -119,31 +152,7 @@ void __static_segment_allocator_notify_define_segment(
 		b->suballocator = &__static_symbol_allocator;
 	}
 	/* Fill in the per-segment info that is stored in the file metadata. */
-	union sym_or_reloc_rec *metavector = NULL;
-	size_t metavector_size = 0;
-	if (afile->meta_obj_handle)
-	{
-#define METAVEC_SYM_PREFIX "metavec_0x"
-		char buf[sizeof METAVEC_SYM_PREFIX+8]; // 8 bytes + NUL
-		snprintf(buf, sizeof buf, METAVEC_SYM_PREFIX "%x", (unsigned) phdr->p_vaddr);
-#undef METAVEC_SYM_PREFIX
-		void *found = fake_dlsym(afile->meta_obj_handle, buf);
-		if (found && found != (void*) -1)
-		{
-			metavector = found;
-			// what about the size?
-			ElfW(Sym) *found_sym = gnu_hash_lookup(
-				get_gnu_hash(afile->meta_obj_handle),
-				get_dynsym(afile->meta_obj_handle),
-				get_dynstr(afile->meta_obj_handle),
-				buf);
-			assert(found_sym);
-			metavector_size = found_sym->st_size;
-		}
-	}
-	assert(afile->m.segments[loadndx].phdr_idx == phndx); // librunt has already done it
-	afile->m.segments[loadndx].metavector = metavector;
-	afile->m.segments[loadndx].metavector_size = metavector_size;
+	__static_segment_setup_metavector(afile, phndx, loadndx);
 }
 void __wrap___runt_segments_notify_define_segment(struct file_metadata *file, unsigned phndx, unsigned loadndx) __attribute__((alias("__static_segment_allocator_notify_define_segment")));
 

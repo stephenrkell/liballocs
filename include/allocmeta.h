@@ -289,6 +289,8 @@ void __static_section_allocator_notify_define_section(
 	struct file_metadata *meta,
 	const ElfW(Shdr) *shdr
 );
+void __static_segment_setup_metavector(struct allocs_file_metadata *afile, unsigned phndx, unsigned loadndx);
+
 void __static_symbol_allocator_init(void) __attribute__((constructor(102)));
 liballocs_err_t __static_symbol_allocator_get_info(void * obj, struct big_allocation *maybe_bigalloc,
 	struct uniqtype **out_type, void **out_base,

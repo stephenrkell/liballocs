@@ -235,10 +235,22 @@ void load_meta_objects_for_early_libs(void)
 		if (!early_lib_handles[i]) break;
 		struct file_metadata *meta = __static_file_allocator_metadata_by_addr(
 			early_lib_handles[i]->l_ld);
-		load_metadata(CONTAINER_OF(meta, struct allocs_file_metadata, m),
-			early_lib_handles[i]);
+		struct allocs_file_metadata *ameta = CONTAINER_OF(meta, struct allocs_file_metadata, m);
+		load_metadata(ameta, early_lib_handles[i]);
+		/* The segment metavector also needs (re-)setting up. */
+		unsigned nload = 0;
+		for (unsigned i = 0; i < meta->phnum; ++i)
+		{
+			// if this phdr's a LOAD
+			if (meta->phdrs[i].p_type == PT_LOAD)
+			{
+				__static_segment_setup_metavector(ameta,
+						i,
+						nload++
+					);
+			}
+		}
 	}
-
 }
 
 struct file_metadata *__real___runt_files_notify_load(void *handle, const void *load_site);
