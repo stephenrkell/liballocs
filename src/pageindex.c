@@ -839,7 +839,7 @@ _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
 	int lock_ret;
 	BIG_LOCK
 	
-	struct big_allocation *b = find_bigalloc_under_pageindex(begin, a);
+	struct big_allocation *b = find_bigalloc_from_root(begin, a);
 	if (!b) { BIG_UNLOCK; return 0; }
 	
 	bigalloc_del(b);
