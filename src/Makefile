@@ -4,6 +4,7 @@ SRCROOT := $(dir $(THIS_MAKEFILE))../
 srcdir := $(SRCROOT)/src
 include $(SRCROOT)/config.mk
 
+CFLAGS += -DIN_LIBRUNT_DSO
 CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS) \
    -I$(LIBSYSTRAP)/include -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused \
    $(LIBALLOCSTOOL_CFLAGS)
