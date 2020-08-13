@@ -55,7 +55,7 @@ $(CONTRIB)/liballocstool/contrib/env.sh \
 $(CONTRIB)/liballocstool/contrib/config.mk:
 	$(MAKE) -C liballocstool/contrib
 
-liballocstool/config.status: liballocstool/configure liballocstool/Makefile.in
+liballocstool/config.status: liballocstool/configure
 
 liballocstool/configure: liballocstool/configure.ac
 	cd liballocstool && ./autogen.sh
