@@ -8,8 +8,7 @@ space := $(nullstring) # end
 
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 LIBALLOCS ?= $(realpath $(dir $(THIS_MAKEFILE))/..)
-LIBRUNT ?= $(realpath $(dir $(THIS_MAKEFILE))/../contrib/libsystrap/librunt)
-LIBALLOCSTOOL ?= $(realpath $(dir $(THIS_MAKEFILE))/../contrib/liballocstool)
+include $(LIBALLOCS)/config.mk
 
 META_BASE ?= /usr/lib/meta
 $(warning META_BASE is $(META_BASE))
