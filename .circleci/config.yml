@@ -14,10 +14,6 @@ jobs:
           command: |
             git clone https://github.com/stephenrkell/binutils-gdb.git ~/binutils-gdb
       - run:
-          name: Report OCaml version for debugging
-          command: |
-            dpkg -l | grep ocaml
-      - run:
           name: Configure, build, install (binutils-gdb)
           working_directory: ~/binutils-gdb
           command: |
@@ -39,6 +35,10 @@ jobs:
               libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
               libboost-iostreams-dev libboost-regex-dev \
               libboost-serialization-dev libboost-filesystem-dev
+      - run:
+          name: Report OCaml version for debugging
+          command: |
+            dpkg -l | grep ocaml
       - checkout
       - run:
           name: Update submodules
