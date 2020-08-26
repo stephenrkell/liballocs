@@ -82,7 +82,7 @@ jobs:
           name: Re-install binutils-gdb to override system binutils
           working_directory: ~/binutils-gdb
           command: |
-            make install
+            make install-binutils install-gold install-libiberty
       - run:
           name: Report OCaml version for debugging
           command: |
