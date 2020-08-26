@@ -20,8 +20,8 @@ jobs:
             chmod +x configure
             CFLAGS="-fPIC -g -O2" ./configure --prefix=/usr/local \
               --enable-gold --enable-plugins --enable-install-libiberty
-            make -j 2
-            make install
+            make -j 2 all-binutils all-gold all-libiberty
+            make install-binutils install-gold install-libiberty
       - run:
           name: Install dependencies
           command: |
