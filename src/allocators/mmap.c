@@ -55,15 +55,6 @@ static const char *filename_for_fd(int fd)
 	return out_buf;
 }
 
-#define MAPPING_SEQUENCE_MAX_LEN 8
-struct mapping_sequence
-{
-	void *begin;
-	void *end;
-	const char *filename;
-	unsigned nused;
-	struct mapping_entry mappings[MAPPING_SEQUENCE_MAX_LEN];
-};
 static void check_mapping_sequence_sanity(struct mapping_sequence *cur);
 
 /* How are we supposed to allocate the mapping sequence metadata? */
@@ -93,7 +84,7 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
 	if (!b) abort();
 	
-	/* Note that this will use early_malloc if we would otherwise be reentrant. */
+	/* Note that this will use __private_malloc if we would otherwise be reentrant. */
 	struct mapping_sequence *copy = __private_malloc(sizeof (struct mapping_sequence));
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
@@ -119,7 +110,7 @@ static struct big_allocation *add_static_mapping_sequence_bigalloc(struct mappin
 
 	assert(next_free_mapping_seq < mapping_sequence_static_pool + 64);
 
-	/* Note that this will use early_malloc if we would otherwise be reentrant. */
+	/* Note that this will use __private_malloc if we would otherwise be reentrant. */
 	struct mapping_sequence *copy = next_free_mapping_seq++;
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
@@ -1321,6 +1312,13 @@ out:
 	return ret;
 }
 
+_Bool __augment_mapping_sequence(struct mapping_sequence *cur,
+	void *begin, void *end, int prot, int flags, off_t offset, const char *filename,
+	void *caller)
+{
+	return augment_sequence(cur, begin, end, prot, flags, offset, filename, caller);
+}
+
 static _Bool extend_current(struct mapping_sequence *cur, struct maps_entry *ent)
 {
 	const char *filename;
@@ -1405,47 +1403,39 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 	return 0; // keep going
 }
 
-void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk)
+void __mmap_allocator_notify_brk(void *new_curbrk)
 {
-	/* If we haven't made the bigalloc yet, sbrk needs no action. */
-	if (!b) return;
-	
-	char *old_end = b->end;
-	
-	/* We also update the metadata. */
-	if ((char*) new_curbrk < (char*) old_end)
+	if (!initialized)
 	{
-		/* We're contracting. */
-		__liballocs_truncate_bigalloc_at_end(b, new_curbrk);
-		if (!b->parent)
-		{
-			struct mapping_sequence *seq
-			 = b->meta.un.opaque_data.data_ptr;
-			delete_mapping_sequence_span(seq, new_curbrk, (char*) old_end - (char*) new_curbrk);
-			check_mapping_sequence_sanity(seq);
-		}
+		/* HMM. This is called in a signal context so it's probably not 
+		 * safe to just do the init now. But we don't start taking traps until
+		 * we're initialized, so that's okay. BUT see the note in 
+		 * __mmap_allocator_init... before we're initialized, we need
+		 * another mechanism to probe for brk updates. */
+		return;
 	}
-	else if ((char*) new_curbrk > (char*) old_end)
+	/* If we haven't made the bigalloc yet, sbrk needs no action.
+	 * Otherwise we must update the end. */
+	if (executable_mapping_bigalloc)
 	{
-		/* We're expanding. */
-		void *new_end = new_curbrk;
-		if (!b->parent)
+		void *old_end = executable_mapping_bigalloc->end;
+		void *new_end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE);
+		__adjust_bigalloc_end(executable_mapping_bigalloc,
+			new_end);
+		struct mapping_sequence *seq
+		 = executable_mapping_bigalloc->meta.un.opaque_data.data_ptr;
+		seq->end = new_end;
+		/* If we've expanded... */
+		if ((uintptr_t) new_end > (uintptr_t) old_end)
 		{
-			struct mapping_sequence *seq
-			 = b->meta.un.opaque_data.data_ptr;
-			new_end = seq->end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE);
-		}
-		__liballocs_extend_bigalloc(b, new_end);
-		if (!b->parent)
-		{
-			struct mapping_sequence *seq
-			 = b->meta.un.opaque_data.data_ptr;
 			void *prev_mapping_end = seq->mappings[seq->nused - 1].end;
 			if (!seq->mappings[seq->nused - 1].is_anon)
 			{
 				/* Most likely, the program has not yet called sbrk().
 				 * /proc/<pid>/maps does *not* necessarily list the break area.
-				 * We have to pretend an anonymous mapping is there. */
+				 * We have to pretend an anonymous mapping is there.
+				 * FIXME: this behaviour is fine when we're called for
+				 * sbrk(), but not in other cases. */
 				seq->mappings[seq->nused++] = (struct mapping_entry) {
 					.begin = prev_mapping_end,
 					.end = new_end,
@@ -1458,21 +1448,15 @@ void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk)
 			else seq->mappings[seq->nused - 1].end = new_end;
 			check_mapping_sequence_sanity(seq);
 		}
-	}
-}
+		else if ((uintptr_t) new_end < (uintptr_t) old_end)
+		{
+			struct mapping_sequence *seq
+			 = executable_mapping_bigalloc->meta.un.opaque_data.data_ptr;
+			delete_mapping_sequence_span(seq, new_end, (uintptr_t) old_end - (uintptr_t) new_end);
+			check_mapping_sequence_sanity(seq);
+		}
 
-void __mmap_allocator_notify_brk(void *new_curbrk)
-{
-	if (!initialized)
-	{
-		/* HMM. This is called in a signal context so it's probably not 
-		 * safe to just do the init now. But we don't start taking traps until
-		 * we're initialized, so that's okay. BUT see the note in 
-		 * __mmap_allocator_init... before we're initialized, we need
-		 * another mechanism to probe for brk updates. */
-		return;
 	}
-	__adjust_bigalloc_end(executable_mapping_bigalloc, new_curbrk);
 }
 
 static liballocs_err_t get_info(void *obj, struct big_allocation *b, 

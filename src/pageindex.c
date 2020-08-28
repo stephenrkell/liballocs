@@ -635,6 +635,24 @@ _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_
 	return 1;
 }
 
+/* This helper just takes a new end, which may be an expansion or contraction. 
+ * Clients must fix up the allocator-specific metadata. */
+void __adjust_bigalloc_end(struct big_allocation *b, void *new_end)
+{
+	char *old_end = b->end;
+	
+	if ((uintptr_t) new_end < (uintptr_t) old_end)
+	{
+		/* We're contracting. */
+		__liballocs_truncate_bigalloc_at_end(b, new_end);
+	}
+	else if ((uintptr_t) new_end > (uintptr_t) old_end)
+	{
+		/* We're expanding. */
+		__liballocs_extend_bigalloc(b, new_end);
+	}
+}
+
 static _Bool bigalloc_truncate_at_end(struct big_allocation *b, const void *new_end)
 {
 	const void *old_end = b->end;

@@ -42,6 +42,21 @@ const char *format_symbolic_address(const void *addr) __attribute__((visibility(
 
 #include "pageindex.h"
 
+/* FIXME: this should probably be a flexible array member, to
+ * allow for DSOs that have tons of segments.*/
+#define MAPPING_SEQUENCE_MAX_LEN 8
+struct mapping_sequence
+{
+	void *begin;
+	void *end;
+	const char *filename;
+	unsigned nused;
+	struct mapping_entry mappings[MAPPING_SEQUENCE_MAX_LEN];
+};
+_Bool __augment_mapping_sequence(struct mapping_sequence *cur, 
+	void *begin, void *end, int prot, int flags, off_t offset, const char *filename,
+	void *caller) __attribute__((visibility("hidden")));
+
 extern struct big_allocation *executable_mapping_bigalloc __attribute__((visibility("hidden")));
 extern struct big_allocation *executable_file_bigalloc __attribute__((visibility("hidden")));
 extern struct big_allocation *executable_data_segment_bigalloc __attribute__((visibility("hidden")));
