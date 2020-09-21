@@ -1,6 +1,9 @@
 .PHONY: default
 default: allocsld.so
 
+.PHONY: all
+all: default
+
 include ../config.mk
 
 vpath %.c $(DONALD)/src
