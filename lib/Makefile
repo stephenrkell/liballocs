@@ -5,7 +5,7 @@ default: all
 
 SYMLINKS := liballocs_nonshared.a liballocs_preload.a liballocs_preload.so \
     liballocs_dummyweaks.o liballocs_dummyweaks.so liballocs.a \
-    liballocs.so
+    liballocs.so allocsld.so
 
 # Now that we build in '$(SRCROOT)/build/<outdir>', where <outdir> might
 # be 'opt' or 'debug', we have a problem -- which one do we symlink?
@@ -26,12 +26,16 @@ outdir:
 	rm -f outdir
 	ln -sf ../build/$(outdir) $@
 
-$(filter-out liballocs.so,$(SYMLINKS)): %: $(SRCROOT)/build/$(outdir)/%
+$(filter-out liballocs.so allocsld.so,$(SYMLINKS)): %: $(SRCROOT)/build/$(outdir)/%
 	ln -sf outdir/$(notdir $<) "$@"
 
 # the liballocs.so file lives in the srcdir
 liballocs.so:
 	ln -sf "$(SRCROOT)"/src/liballocs.so $@
+
+# allocsld.so lives in the allocsld dir
+allocsld.so:
+	ln -sf "$(SRCROOT)"/allocsld/$@ $@
 
 # the systrap one has a different name
 # We export this separately because libcrunch uses it, even in its

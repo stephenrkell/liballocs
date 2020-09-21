@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = tools/lang . src lib
+SUBDIRS = tools/lang . allocsld src lib
 
 # HACK to disable -O2 if DEBUG is set (to anything) -- thanks for nothing, automake
 AM_CXXFLAGS = -O2 $(DEBUG:%=-O0) -fno-omit-frame-pointer -std=c++14 -ggdb -fkeep-inline-functions \
@@ -25,6 +25,10 @@ MOSTLYCLEANFILES =
 extra_DIST = liballocs.pc.in
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = liballocs.pc
+
+# workaround -- thanks https://www.gnu.org/software/automake/manual/html_node/Uniform.html
+my_libdir = $(libdir)
+my_lib_DATA = lib/interp-pad.o
 
 liballocs_includedir = $(includedir)/liballocs
 liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/memtable.h include/fake-libunwind.h include/allocsites.h
@@ -79,6 +83,8 @@ x86_emulate.o: CFLAGS += -include $(libsystrap)/x86_defs.h
 x86_emulate.o: .depbase
 .depbase:
 	mkdir -p "$@"
+lib/interp-pad.o: tools/interp-pad.s
+	$(AS) -o $@ $<
 tools_ifacetypes_LDADD = $(TOOLS_LDADD) #x86_emulate.o
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)

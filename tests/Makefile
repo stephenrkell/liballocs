@@ -102,7 +102,13 @@ checkrun-plugin-hello:
 	true # disabled plugin-hello while expected to fail
 checkrun-lib-test:
 	true # currently fails, see https://github.com/stephenrkell/liballocs/issues/38
+
+# Some cases are special and require only to build OK
+checkrun-allocsld-as-cmd:
+	$(MAKE) cleanbuild-allocsld-as-cmd >/dev/null 2>&1
 # Some cases are special and require only an exit status of zero
+checkrun-allocsld-as-ldso:
+	$(MAKE) cleanrun-allocsld-as-ldso >/dev/null 2>&1
 checkrun-stack-walk:
 	$(MAKE) cleanrun-stack-walk >/dev/null 2>&1
 checkrun-no-unbind-self:

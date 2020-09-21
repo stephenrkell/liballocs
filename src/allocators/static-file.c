@@ -298,17 +298,24 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 			(intptr_t) lowest_containing_mapping_bigalloc->end);
 		if (0 != strcmp(l->l_name, __ldso_name))
 		{
-			debug_printf(0, "Aborting after seeing non-ld.so DSO with a hole. This is fixable....");
+			debug_printf(0, "Aborting after seeing non-ld.so DSO with a hole. This is fixable....\n");
 			abort();
+		}
+		debug_printf(0, "Saw ld.so with a hole in... checking the middle chunk is free");
+		for (unsigned long i = PAGENUM(lowest_containing_mapping_bigalloc->end);
+				i != PAGENUM(highest_containing_mapping_bigalloc->begin);
+				++i)
+		{
+			assert(pageindex[i] == 0);
 		}
 		debug_printf(0, "Saw ld.so with a hole in... mapping the middle chunk");
 		void *ret = mmap(lowest_containing_mapping_bigalloc->end,
 			(uintptr_t) highest_containing_mapping_bigalloc->begin -
 			(uintptr_t) lowest_containing_mapping_bigalloc->end,
-				PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+				PROT_NONE, MAP_FIXED|MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 		if (MMAP_RETURN_IS_ERROR(ret))
 		{
-			debug_printf(0, "Aborting after failing to plug hole in ld.so mappings");
+			debug_printf(0, "Aborting after failing to plug hole in ld.so mappings\n");
 			abort();
 		}
 		/* Now we've plugged the hole, we need to coalesce the mappings.

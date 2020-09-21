@@ -95,6 +95,11 @@ varlist += LIBDLBIND
 CONFIG_MK += \nLIBMALLOCHOOKS := $(CONTRIB)/libmallochooks\n
 varlist += LIBMALLOCHOOKS
 
+# ----------------------------donald
+
+CONFIG_MK += \nDONALD := $(CONTRIB)/donald\n
+varlist += DONALD
+
 # ----------------------------config.mk
 # If the user nukes a sub-config.mk that our config.mk depends on,
 # we'd like to be able to rebuild it. So we include a generic rule
