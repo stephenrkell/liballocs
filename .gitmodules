@@ -19,3 +19,6 @@
 [submodule "contrib/toolsub"]
 	path = contrib/toolsub
 	url = https://github.com/stephenrkell/toolsub.git
+[submodule "contrib/donald"]
+	path = contrib/donald
+	url = https://github.com/stephenrkell/donald.git
