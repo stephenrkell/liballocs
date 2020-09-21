@@ -83,8 +83,8 @@ x86_emulate.o: CFLAGS += -include $(libsystrap)/x86_defs.h
 x86_emulate.o: .depbase
 .depbase:
 	mkdir -p "$@"
-lib/interp-pad.o: tools/interp-pad.s
-	$(AS) -o $@ $<
+lib/interp-pad.o: tools/interp-pad.S
+	$(CC) -c -o $@ $<
 tools_ifacetypes_LDADD = $(TOOLS_LDADD) #x86_emulate.o
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
