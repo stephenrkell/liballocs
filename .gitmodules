@@ -3,7 +3,7 @@
 	url = https://github.com/stephenrkell/libmallochooks
 [submodule "tools/lang/c/cil"]
 	path = tools/lang/c/cil
-	url = git://github.com/stephenrkell/cil.git
+	url = git://github.com/chrisbaish/cil.git
 [submodule "contrib/libdlbind"]
 	path = contrib/libdlbind
 	url = git://github.com/stephenrkell/libdlbind.git
