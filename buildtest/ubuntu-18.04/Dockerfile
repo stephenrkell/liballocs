@@ -21,7 +21,7 @@ RUN sudo mkdir -p /usr/lib/meta && sudo chown root:staff /usr/lib/meta && \
 RUN sudo apt-get install -y libelf-dev libdw-dev binutils-dev \
        autoconf automake libtool pkg-config autoconf-archive \
        g++ ocaml ocamlbuild ocaml-findlib \
-       default-jre-headless python3 python \
+       default-jre-headless default-jdk-headless python3 python \
        make git gawk gdb wget \
        libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
        libboost-iostreams-dev libboost-regex-dev libboost-serialization-dev libboost-filesystem-dev
@@ -35,7 +35,5 @@ RUN cd /usr/local/src/liballocs && \
    make -j4
 RUN sudo mkdir -p /usr/lib/meta && sudo chown root:user /usr/lib/meta && \
    sudo chmod g+w /usr/lib/meta
-RUN cd /usr/local/src/liballocs && \
-   make -f tools/Makefile.meta /usr/lib/meta/lib/x86_64-linux-gnu/libc-2.27.so-meta.c
 RUN cd /usr/local/src/liballocs && \
    make -f tools/Makefile.meta /usr/lib/meta/lib/x86_64-linux-gnu/libc-2.27.so-meta.so
