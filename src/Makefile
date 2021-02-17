@@ -92,7 +92,7 @@ endif
 
 # regardless of fast/non-fast CFLAGS, link with -Wl,-O2 -flto
 # ARGH, disabling LTO for now
-# owing to GCC bug 88643 and/or binutils (gold) bug 24415
+# owing to GCC bug 88643 and/or binutils (gold) bug 24415 (breakage of --wrap)
 #LDFLAGS += -Wl,-O2 -flto
 LDFLAGS += -fno-lto
 LDFLAGS += -fPIC 
