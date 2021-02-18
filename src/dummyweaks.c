@@ -273,3 +273,33 @@ void __notify_copy(void *dest, const void *src, unsigned long n)
 	 * Also note that in any case, libcrunch will wrap us. */
 }
 
+
+/* GIANT HACK:
+ * This is in this file because:
+ * - librunt/liballocs_systrap clients end up needing it, including
+ *      libcrunch_stubs.so
+ * - --defsym __private_strdup=strdup doesn't work with ld.gold (internal error),
+ *      so we need to provide an implementation locally
+ */
+/* __private_malloc is defined by our Makefile as __wrap_dlmalloc.
+ * Since dlmalloc does not include a strdup, we need to define
+ * that explicitly. */
+char *__liballocs_private_strdup(const char *s) __attribute__((weak));
+char *__liballocs_private_strdup(const char *s)
+{
+	size_t len = strlen(s) + 1;
+	char *mem = __private_malloc(len);
+	if (!mem) return NULL;
+	return memcpy(mem, s, len);
+}
+char *__private_strdup(const char *s) __attribute__((weak,alias("__liballocs_private_strdup")));
+char *__liballocs_private_strndup(const char *s, size_t n) __attribute__((weak));
+char *__liballocs_private_strndup(const char *s, size_t n)
+{
+	size_t maxlen = strlen(s);
+	size_t len = (n > maxlen ? maxlen : n) + 1;
+	char *mem = __private_malloc(len);
+	if (!mem) return NULL;
+	return memcpy(mem, s, len);
+}
+char *__private_strndup(const char *s, size_t n) __attribute__((weak,alias("__liballocs_private_strndup")));
