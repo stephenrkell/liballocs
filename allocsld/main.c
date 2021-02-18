@@ -173,7 +173,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "AT_BASE is %p\n", (void*) p->a_un.a_val);
 				break;
 			case AT_EXECFN:
-				if (we_are_the_program) p->a_un.a_val = (uintptr_t) &argv[0];
+				if (we_are_the_program) p->a_un.a_val = (uintptr_t) argv[0];
 				fprintf(stderr, "AT_EXECFN is %p (%s)\n", (void*) p->a_un.a_val, (char*) p->a_un.a_val);
 				break;
 		}
