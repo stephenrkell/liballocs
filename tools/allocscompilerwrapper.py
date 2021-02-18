@@ -508,8 +508,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
         liballocsLinkArgs = ["-L" + self.getLinkPath()]
         if self.doingFinalLink() and not self.doingStaticLink() and not self.linkingSharedObject():
             # we're building a dynamically linked executable
-            liballocsLinkArgs += ["-Wl,--dynamic-linker," + self.getRunPath() + "/allocsld.so"]
-            liballocsLinkArgs += [self.getRunPath() + "/interp-pad.o"]
+            liballocsLinkArgs += ["-Wl,--dynamic-linker," + self.getLibAllocsBaseDir() + "/lib/allocsld.so"]
+            liballocsLinkArgs += [self.getLibAllocsBaseDir() + "lib/interp-pad.o"]
             liballocsLinkArgs += ["-Wl,-rpath," + self.getRunPath()]
             if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                 liballocsLinkArgs += [self.getLdLibBase()]
