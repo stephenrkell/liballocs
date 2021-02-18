@@ -44,6 +44,7 @@ void ( __attribute__((constructor(101))) __stackframe_allocator_init)(void)
 	{
 		trying_to_initialize = 1;
 
+#if 0
 		// grab the start of main's stack frame -- we'll use this 
 		// when walking the stack
 		unw_cursor_t cursor;
@@ -96,7 +97,7 @@ void ( __attribute__((constructor(101))) __stackframe_allocator_init)(void)
 				main_bp = (void*) (intptr_t) sp;
 			}
 		}
-
+#endif
 		if (main_bp == 0) 
 		{
 			// underapproximate bp as our current sp!
