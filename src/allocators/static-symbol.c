@@ -309,8 +309,13 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 	{
 		uintptr_t found_base_vaddr = vaddr_from_rec(found, file);
 		uintptr_t found_limit_vaddr;
+		struct uniqtype *found_type = NULL;
 		ElfW(Sym) *symtab;
-		if (found->is_reloc) found_limit_vaddr = found_base_vaddr + found->reloc.size;
+		if (found->is_reloc)
+		{
+			found_limit_vaddr = found_base_vaddr + found->reloc.size;
+			found_type = &__uniqtype____uninterpreted_byte;
+		}
 		else switch (found->sym.kind)
 		{
 			case REC_DYNSYM:   symtab = file->m.dynsym; goto sym;
@@ -318,6 +323,8 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 			case REC_EXTRASYM: symtab = file->extrasym; goto sym;
 			sym:
 				found_limit_vaddr = found_base_vaddr + symtab[found->sym.idx].st_size;
+				// FIXME: there should be a macro in allocmeta-defs.h for this
+				found_type = (struct uniqtype *)(((uintptr_t) found->sym.uniqtype_ptr_bits_no_lowbits) << 3);
 				break;
 			default: // the default case's `found+1' trick is cute, but not necessary
 #if 0
@@ -337,6 +344,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		if (out_base) *out_base = (void*)(file_load_addr + found_base_vaddr);
 		if (out_site) *out_site = file->m.load_site;
 		if (out_size) *out_size = found_limit_vaddr - found_base_vaddr;
+		if (out_type) *out_type = found_type;
 		return NULL;
 	}
 fail:
