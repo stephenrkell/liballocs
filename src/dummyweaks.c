@@ -284,6 +284,7 @@ void __notify_copy(void *dest, const void *src, unsigned long n)
 /* __private_malloc is defined by our Makefile as __wrap_dlmalloc.
  * Since dlmalloc does not include a strdup, we need to define
  * that explicitly. */
+void *__private_malloc(size_t len);
 char *__liballocs_private_strdup(const char *s) __attribute__((weak));
 char *__liballocs_private_strdup(const char *s)
 {
