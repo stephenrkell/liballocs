@@ -44,7 +44,9 @@ link_defining_aliases () {
   # NOTE: we used to add aliases here...
   # `nm -fposix "${our_usedtypes_obj}" | $(dirname ${USEDTYPES})/alias-linker-opts-for-base-types.sh | sed -r 's/-Wl,--defsym,/--defsym /g'`
   # but this seems wrong (and, at least, will create "multiple definition" errors at link time)
-  ${LD} -o "$temporary_out" -r "$our_objfile" "$our_usedtypes_obj" && \
+  #cp "$our_objfile" "$our_objfile".orig.o
+  #echo ${LD} -o "$temporary_out" -r "$our_objfile" "$our_usedtypes_obj" "$LIBALLOCS"/tools/libroottypes.a && \
+  ${LD} -o "$temporary_out" -r "$our_objfile" "$our_usedtypes_obj" "$LIBALLOCS"/tools/libroottypes.a && \
   echo "Linker generated ${temporary_out}, moving to ${our_objfile}" 1>&2 && \
   mv "$temporary_out" "$our_objfile"
 }

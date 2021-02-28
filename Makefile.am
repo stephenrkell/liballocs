@@ -90,11 +90,14 @@ tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HE
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
 tools_find_allocated_type_size_CXXFLAGS = $(TOOLS_CXXFLAGS)
 
-pkglib_LTLIBRARIES = tools/gold-plugin.la
+pkglib_LTLIBRARIES = tools/gold-plugin.la tools/libroottypes.la
 tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
-tools_gold_plugin_la_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_gold_plugin_la_CXXFLAGS = -I
 tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
 tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
+
+tools_libroottypes_la_SOURCES = tools/roottypes.c
+tools_libroottypes_la_CFLAGS = $(LIBALLOCSTOOL_CFLAGS)
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.
@@ -174,10 +177,15 @@ include libltdl/ltdl.mk
 #            cd $(top_builddir) && \
 #            $(LN_S) $(abs_builddir)/tools/.libs/gold-plugin.so tools/gold-plugin.so || true
 
+tools/libroottypes.a: tools/libroottypes.la
+	cd $(top_builddir) && \
+            $(LN_S) -f $(abs_builddir)/tools/.libs/libroottypes.a tools/libroottypes.a
+
 tools/roottypes.c: tools/pervasive-types
 	$< > $@ || (rm -f $@; false)
 
 #all-am: tools/gold-plugin.so
+all-am: tools/libroottypes.la
 
 clean:
 	$(MAKE) clean-recursive
