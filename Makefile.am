@@ -185,7 +185,7 @@ tools/roottypes.c: tools/pervasive-types
 	$< > $@ || (rm -f $@; false)
 
 #all-am: tools/gold-plugin.so
-all-am: tools/libroottypes.la
+all-am: tools/libroottypes.la tools/libroottypes.a
 
 clean:
 	$(MAKE) clean-recursive
