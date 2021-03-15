@@ -10,6 +10,9 @@
 #include "uniqtype.h"
 #include "uniqtype-bfs.h"
 
+// HACK while we conflict with search.h on 'struct entry'
+extern struct uniqtype *pointer_to___uniqtype__void;
+
 /* debugging */
 FILE* debug_out = NULL;
 #ifndef DEBUGGING_OUTPUT_FILENAME
@@ -102,7 +105,7 @@ static void build_adjacency_list_recursive(
 	unsigned long start_offset, struct uniqtype *t_at_offset, 
 	follow_ptr_fn *follow_ptr, void *fp_arg)
 {
-	if (t_at_offset == &__uniqtype__void) return;
+	if (t_at_offset == pointer_to___uniqtype__void) return;
 
 	assert(!t_at_offset->make_precise);
 	

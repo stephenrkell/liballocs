@@ -314,7 +314,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		if (found->is_reloc)
 		{
 			found_limit_vaddr = found_base_vaddr + found->reloc.size;
-			found_type = &__uniqtype____uninterpreted_byte;
+			found_type = pointer_to___uniqtype____uninterpreted_byte;
 		}
 		else switch (found->sym.kind)
 		{
