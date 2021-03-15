@@ -92,7 +92,7 @@ tools_find_allocated_type_size_CXXFLAGS = $(TOOLS_CXXFLAGS)
 
 pkglib_LTLIBRARIES = tools/gold-plugin.la tools/libroottypes.la
 tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
-tools_gold_plugin_la_CXXFLAGS = -I
+tools_gold_plugin_la_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
 tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
 
