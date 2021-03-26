@@ -8,7 +8,7 @@ include ../config.mk
 
 vpath %.c $(DONALD)/src
 
-CFLAGS += -std=gnu99 -g -fPIC
+CFLAGS += -std=gnu99 -g -fPIC -save-temps
 CFLAGS += -fno-stack-protector
 CFLAGS += -I$(DONALD)/src # for donald.h, for non-vpath'd .c files
 CFLAGS += -DDONALD_NAME=\"allocsld\"
@@ -22,7 +22,7 @@ CFLAGS += -DDONALD_NAME=\"allocsld\"
 LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/lib/libc.a
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-OBJS := premain.o main.o entry.o load.o
+OBJS := premain.o main.o entry.o load.o chain.o
 C_DEPS := $(patsubst %.o,.%.d,$(OBJS))
 DEPS := $(C_DEPS)
 
@@ -38,6 +38,10 @@ allocsld.so: allocsld.lds $(OBJS)
             $(filter-out %.lds,$+) \
             -Wl,-Bstatic $(LIBC_ARCHIVE) -Wl,-Bsymbolic \
             -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 
+
+main.o: CFLAGS += -DCHAIN_LOADER \
+  -DCHAIN_LOADER_COVER_TRACKS_DECLS='void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned program_phnum, const char *ldso_path);' \
+  -DCHAIN_LOADER_COVER_TRACKS='cover_tracks(we_are_the_program, program_phdrs, program_phnum, ldso_path);'
 
 # We need to ensure we don't have any pages of 'hole'
 # in between the two segments. But how? How does the
