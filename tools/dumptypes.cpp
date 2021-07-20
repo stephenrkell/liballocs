@@ -852,8 +852,10 @@ int main(int argc, char **argv)
 					do
 					{
 						// avoid exceptions for this fairly common case
-						auto maybe_addr_from_zero = e.tos_address(); // may *not* be value; must be address
-						if (maybe_addr_from_zero) addr_from_zero = *maybe_addr_from_zero;
+						Dwarf_Unsigned addr_from_zero;
+						// must be address, not value
+						if (e.tos_state() == dwarf::expr::evaluator::ADDRESS)
+						{ addr_from_zero = e.tos(dwarf::expr::evaluator::ADDRESS); }
 						else
 						{
 							// this is the "non-manifest" case -- no need to warn, I guess?
