@@ -269,3 +269,14 @@ liballocs_err_t __generic_malloc_set_type(struct big_allocation *maybe_the_alloc
 {
 	return NULL;
 }
+
+void __noop(void *arg) {}
+
+void __notify_ptr_write(const void **dest, const void *val)
+{
+}
+
+void __notify_copy(void *dest, const void *src, unsigned long n)
+{
+}
+

@@ -42,3 +42,24 @@ void __liballocs_trace_cache_eviction_ool(struct __liballocs_memrange_cache_entr
 			NAME_FOR_UNIQTYPE((struct uniqtype *)(unsigned long) new->t), (int) new->offset_to_t
 	);
 }
+
+void __noop(void *arg) {}
+
+//_Bool query_start_matches_toplevel_range(struct __liballocs_memrange_cache_entry_s *e, const void *p)
+//{ return QUERY_START_MATCHES_TOPLEVEL_RANGE(*e, p); }
+
+//_Bool query_size_matches_toplevel_range(struct __liballocs_memrange_cache_entry_s *e, const void *p, unsigned qp)
+//{ return QUERY_SIZE_MATCHES_TOPLEVEL_RANGE(*e, p, qp); }
+
+//_Bool query_type_matches_toplevel_range(struct __liballocs_memrange_cache_entry_s *e, const void *p, struct uniqtype *qt)
+//{ return QUERY_TYPE_MATCHES_TOPLEVEL_RANGE(*e, p, qt); }
+
+//_Bool query_start_matches_offset_range_singleton(struct __liballocs_memrange_cache_entry_s *e, const void *p)
+//{ return QUERY_START_MATCHES_OFFSET_RANGE_SINGLETON(*e, p); }
+
+//_Bool query_size_matches_offset_range_singleton(struct __liballocs_memrange_cache_entry_s *e, const void *p, unsigned qp)
+//{ return QUERY_SIZE_MATCHES_OFFSET_RANGE_SINGLETON(*e, p, qp); }
+
+//_Bool query_type_matches_offset_range_singleton(struct __liballocs_memrange_cache_entry_s *e, const void *p, struct uniqtype *qt)
+//{ return QUERY_TYPE_MATCHES_OFFSET_RANGE_SINGLETON(*e, p, qt); }
+

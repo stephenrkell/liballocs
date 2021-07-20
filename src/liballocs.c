@@ -977,9 +977,57 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	mem[len] = '\0';
 	return mem;
 }
+/* Benchmarking HACK. We want to test the compulsory overhead, i.e. a cautious
+ * estimate of the minimum reasonably possible cost of always saying "not refcounted".
+ * We can already argue that being out-of-line is unrealistically penalising us
+ * here. We use an IP subnet-style mask/length pair. */
+
+unsigned long mask;
+unsigned mask_len;
+
+void __notify_ptr_write(const void **dest, const void *val)
+{
+        /* Called for *dest = val; on code instrumented with trapptrwrites
+         * Only provide this weak symbol unless lifetime policies are enabled */
+        unsigned long ptr_being_written = (unsigned long) val;
+        if ((ptr_being_written ^ mask) < (1u<<mask_len))
+        {
+                /* This means we differ only in the low-order bits, so the address
+                 * is in-range.
+                 * We will run with mask == 0, meaning any nonzero address will
+                 * give an XOR of >0, so we won't hit this. */
+                __noop(val);
+        }
+}
+
 void *__notify_copy(void *dest, const void *src, unsigned long n)
 {
-	/* We do nothing here. But libcrunch will wrap us. */
+        /* Remember: memcpy is instrumented only by our preload in preload.c. */
+        // for each source word, conservatively pretend it's a pointer
+        unsigned long src_addr = (unsigned long) src;
+        unsigned long src_end_addr = src_addr + n;
+        unsigned long dest_addr = (unsigned long) dest;
+        unsigned long src_addr_aligned = 8 * ((src_addr + 7) / 8);
+        src_addr = src_addr_aligned;
+        while (src_addr + 8 <= src_end_addr)
+        {
+                unsigned offset = src_addr - (unsigned long) src;
+                //__notify_ptr_write((void**) dest_addr + offset, *(void**)src_addr);
+		/* PROBLEM: reading the src data may no longer be possible,
+                 * e.g. if we're a realloc and it's unmapped the (former) arena.
+                 * HACK: test on pageindex. */
+                unsigned long ptr_being_written = pageindex[PAGENUM((unsigned long) src_addr)] ?
+                     (unsigned long) *(void**)src_addr : 0;
+                if ((ptr_being_written ^ mask) < (1u<<mask_len))
+                {
+                        /* This means we differ only in the low-order bits, so the address
+                         * is in-range.
+                         * We will run with mask == 0, meaning any nonzero address will
+                         * give an XOR of >0, so we won't hit this. */
+                        __noop((void*) ptr_being_written);
+                }
+                src_addr += 8;
+        }
 	return dest;
 }
 
@@ -1698,10 +1746,17 @@ void **__liballocs_get_current_allocsite_tls_addr(void)
 }
 
 struct __liballocs_memrange_cache_entry_s *
-__liballocs_ool_memrange_cache_lookup(struct __liballocs_memrange_cache *cache,
-	const void *obj, struct uniqtype *t, unsigned long require_period)
+__liballocs_ool_memrange_cache_lookup_with_type(struct __liballocs_memrange_cache *cache,
+	const void *obj, struct uniqtype *t)
 {
-	return __liballocs_memrange_cache_lookup(cache, obj, t, require_period);
+	return __liballocs_memrange_cache_lookup_with_type(cache, obj, t);
+}
+
+struct __liballocs_memrange_cache_entry_s *
+__liballocs_ool_memrange_cache_lookup_with_size(struct __liballocs_memrange_cache *cache,
+	const void *obj, unsigned sz)
+{
+	return __liballocs_memrange_cache_lookup_with_size(cache, obj, sz);
 }
 
 /* Instantiate inlines from liballocs.h. */
