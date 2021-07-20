@@ -122,6 +122,7 @@ struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attri
 struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));
 _Bool __pages_unused(void *begin, void *end) __attribute__((visibility("hidden")));
 _Bool __liballocs_notify_unindexed_address(const void *);
+_Bool __brk_allocator_notify_unindexed_address(void *mem);
 
 /* mappings of 4GB or more in size are assumed to be memtables and are ignored */
 #define BIGGEST_BIGALLOC BIGGEST_SANE_USER_ALLOC
