@@ -853,10 +853,10 @@ int main(int argc, char **argv)
 					{
 						// avoid exceptions for this fairly common case
 						Dwarf_Unsigned addr_from_zero;
-						// must be address, not value
-						if (e.tos_state() == dwarf::expr::evaluator::ADDRESS)
-						{ addr_from_zero = e.tos(dwarf::expr::evaluator::ADDRESS); }
-						else
+						try { addr_from_zero = e.tos(false); } /*_address();*/ // may *not* be value; must be address
+						//if (maybe_addr_from_zero) addr_from_zero = *maybe_addr_from_zero;
+						//else
+						catch (No_entry)
 						{
 							// this is the "non-manifest" case -- no need to warn, I guess?
 							//discarded.push_back(make_pair(*i_el, "register-located"));
