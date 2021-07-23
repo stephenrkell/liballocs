@@ -296,14 +296,14 @@ extern struct uniqtype __uniqtype____EXISTS1__1;
 			assert(name ## _alloclevel == 0 || seen_alloclevel == name ## _alloclevel); \
 			if (name ## _alloclevel == 0) name ## _alloclevel = seen_alloclevel; \
 		} \
-		if (saved_caller_allocfn) \
+		if (saved_allocfn) \
 		{ \
 			/* __current_alloclevel = 0; */ \
 			/* zero the site now the alloc action is completed, even if it was already set */ \
 			__current_allocsite = (void*)0; \
 		} \
-		__current_allocfn = current_allocfn; \
-		__current_allocsz = current_allocsz; \
+		__current_allocfn = saved_allocfn; \
+		__current_allocsz = saved_allocsz; \
 		if (set_currently_allocating) __currently_allocating = 0; \
 		do_caller_wrapper_fini(name) \
 		do_ret_ ## retchar (name) \
