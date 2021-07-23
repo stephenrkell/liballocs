@@ -25,7 +25,7 @@ void __liballocs_addrlist_add(struct addrlist *l, void *addr)
 	{
 		++(l->allocsz);
 		l->allocsz *= 2;
-		l->addrs = realloc(
+		l->addrs = __private_realloc(
 			l->addrs,
 			l->allocsz * sizeof (void*));
 	}
