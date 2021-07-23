@@ -52,7 +52,9 @@ INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then
 
 default: checkall
 
-checkall: $(patsubst %,checkrun-%,$(cases))
+checkall_cases := $(shell echo $(cases) | tr -s '[:blank:]' '\n' | sed -n "/$${CHECKALL_START_AT:-.*}/"',$$ p')
+$(info checkall_cases is $(checkall_cases))
+checkall: $(patsubst %,checkrun-%,$(checkall_cases))
 
 # Some cases are expected to fail
 checkrun-fail-%:
