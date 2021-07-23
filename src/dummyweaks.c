@@ -284,3 +284,14 @@ void __notify_copy(void *dest, const void *src, unsigned long n)
 {
 }
 
+/* counters -- some clients may link against these, thanks to inline functions */
+unsigned long __liballocs_aborted_stack;
+unsigned long __liballocs_aborted_static;
+unsigned long __liballocs_aborted_unknown_storage;
+unsigned long __liballocs_hit_heap_case;
+unsigned long __liballocs_hit_stack_case;
+unsigned long __liballocs_hit_static_case;
+unsigned long __liballocs_aborted_unindexed_heap;
+unsigned long __liballocs_aborted_unrecognised_allocsite;
+
+_Bool __liballocs_notify_unindexed_address(const void *obj) { return 0; }
