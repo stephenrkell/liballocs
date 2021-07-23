@@ -113,6 +113,7 @@ contrib/config.mk
 contrib/env.sh
 libltdl/
 src/*.s
+tools/*.s
 tests/addrtaken-allocator/addrtaken-allocator
 tests/bit-fields/bit-fields
 tests/char-allocs/char-allocs
@@ -123,4 +124,11 @@ tests/nopreload-alloca/nopreload-alloca
 tests/query-inlcache/query-inlcache
 tests/realloc-multi-union/realloc-multi-union
 tests/subobject-span/subobject-span
-tools/*.s
+tests/sizeof-subtract/sizeof-subtract
+tests/stack-walk/stack-walk
+tests/uniqtype-make-precise/uniqtype-make-precise
+tests/uniqtype-walk/uniqtype-walk
+tools/cufiles
+tools/dumpptrs
+
+tools/lang/c/trapptrwrites/.merlin
