@@ -766,6 +766,10 @@ bool sticky_root_die::is_base_object(int user_fd)
 	for (unsigned i = 1; i < ehdr->e_shnum; ++i)
 	{
 		if (!(shdr[i].sh_flags & SHF_ALLOC)) continue; // skip non-allocated sections
+		if ((shdr[i].sh_flags & SHF_TLS) && (shdr[i].sh_type == SHT_NOBITS))
+		{ continue; /* skip thread-local NOBITS sections, a.k.a. .tbss, as they may overlap
+		               other stuff in vaddr-space, and indeed the GNU linker arranges that they do!
+		  https://stackoverflow.com/questions/25501044/gcc-ld-overlapping-sections-tbss-init-array-in-statically-linked-elf-bin */ }
 		std::set<ElfW(Shdr)*> singleton_set;
 		singleton_set.insert(&shdr[i]);
 		m += make_pair(
@@ -780,15 +784,19 @@ bool sticky_root_die::is_base_object(int user_fd)
 		if (found->second.size() == 0) return false;
 		if (found->second.size() > 1)
 		{
-			std::cerr << "Address 0x" << std::hex << addr << " spanned by more than"
-				" one non-empty section; indices: {";
-				
+			std::cerr << "Address range 0x" << std::hex << addr
+				  << "-0x" << std::hex << (addr + span_len)
+				  << " spanned by more than one non-empty section; indices: {";
 			for (auto i_found = found->second.begin();
 				i_found != found->second.end();
 				++i_found)
 			{
+				// FIXME: these indices, calculated by *i_found - &shdr[0], are coming
+				// out screwy, e.g. 6 too low, on one problem object I saw
+				// (liballocs/tests/section-group/lib1.so in crunchb-bench, which came out with the
+				// .tbss overlap noted above (comment the 'continue' to reproduce) )
 				if (i_found != found->second.begin()) std::cerr << ", ";
-				std::cerr << (*i_found - shdr);
+				std::cerr << (((ElfW(Shdr)*)(*i_found)) - &shdr[0]) << " (begins 0x" << std::hex << (*i_found)->sh_addr << ")";
 			}
 			std::cerr << "}" << std::endl;
 			abort();
