@@ -105,7 +105,10 @@ extern bigalloc_num_t *__liballocs_pageindex /*__attribute__((weak))*/;
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
 void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));
-void __liballocs_report_wild_address(const void *ptr) __attribute__((visibility("protected")));
+void __liballocs_report_wild_address(const void *ptr);
+// making this protected screws with clients that use inlines, and
+// isn't worth adding an alias because it's an inherently slow/uncommon path.
+// __attribute__((visibility("protected")));
 
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a) __attribute__((visibility("hidden")));
 
