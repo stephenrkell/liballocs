@@ -543,15 +543,16 @@ extern inline _Bool
 	);
 }
 
-extern inline struct uniqtype *
-( __attribute__((always_inline,gnu_inline))
- __liballocs_deepest_span)
+// was gnu_inline, but made it plain inline so I can call an out-of-line copy from debugger
+inline struct uniqtype *
+ __liballocs_deepest_span
 	(struct uniqtype *u, unsigned target_offset,
-	unsigned *out_offset, struct uniqtype_rel_info **out_ctxt)
+	unsigned *out_offset, struct uniqtype_rel_info **out_ctxt, struct uniqtype **out_containing_t)
 {
 	// FIXME: does backtracking search make sense here?
 	struct uniqtype_rel_info *contained;
 	struct uniqtype_rel_info *last_contained = NULL;
+	struct uniqtype *last_containing = NULL;
 	struct uniqtype *t_reached = u;
 	unsigned offset_reached = 0;
 	while (NULL != (contained = __liballocs_find_span(t_reached, target_offset, NULL)))
@@ -562,11 +563,13 @@ extern inline struct uniqtype *
 		struct uniqtype *subobj_type = UNIQTYPE_SUBOBJECT_TYPE(t_reached, contained);
 		offset_reached += distance_traversed;
 		target_offset -= distance_traversed;
-		t_reached = subobj_type;
+		last_containing = t_reached;
 		last_contained = contained;
+		t_reached = subobj_type;
 	}
 	if (out_offset) *out_offset = offset_reached;
 	if (out_ctxt) *out_ctxt = last_contained;
+	if (out_containing_t) *out_containing_t = last_containing;
 	return t_reached;
 }
 

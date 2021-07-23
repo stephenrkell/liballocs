@@ -984,7 +984,7 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 
 unsigned long mask;
 unsigned mask_len;
-
+void __noop(const void *arg);
 void __notify_ptr_write(const void **dest, const void *val)
 {
         /* Called for *dest = val; on code instrumented with trapptrwrites
@@ -1643,17 +1643,18 @@ __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
 	
 	/* Descend the subobject hierarchy until we can't descend any more. */
 	struct uniqtype_rel_info *contained_pos = NULL;
+	struct uniqtype *containing_t = NULL;
 	unsigned distance_traversed = 0;
 	// try to update u to the next lower
 	u = __liballocs_deepest_span(u, target_offset,
-			&distance_traversed, &contained_pos);
+			&distance_traversed, &contained_pos, &containing_t);
 	target_offset -= distance_traversed;
 	// we might not find anything starting at the target offset
 	if (target_offset != 0) goto failed;
 
-	// HACK: to map from the contained_pos to the actual uniqtye, use get_base
+	// HACK: we only support skip_at_bottom as 0 or 1
 	return (skip_at_bottom == 0) ? u
-		 : (skip_at_bottom == 1) ? (struct uniqtype *) __liballocs_get_base(contained_pos)
+		 : (skip_at_bottom == 1) ? containing_t
 		 : NULL; // HACK, horrible, FIXME etc.
 failed:
 	return NULL;
@@ -1747,9 +1748,9 @@ void **__liballocs_get_current_allocsite_tls_addr(void)
 
 struct __liballocs_memrange_cache_entry_s *
 __liballocs_ool_memrange_cache_lookup_with_type(struct __liballocs_memrange_cache *cache,
-	const void *obj, struct uniqtype *t)
+	const void *obj, struct uniqtype *t, unsigned query_period)
 {
-	return __liballocs_memrange_cache_lookup_with_type(cache, obj, t);
+	return __liballocs_memrange_cache_lookup_with_type(cache, obj, t, query_period);
 }
 
 struct __liballocs_memrange_cache_entry_s *
@@ -1777,3 +1778,8 @@ _Bool
 struct uniqtype_rel_info *
 __liballocs_find_span(struct uniqtype *u, unsigned target_offset,
 	struct uniqtype_rel_info *contained_search_start /* typically NULL */);
+
+struct uniqtype *
+ __liballocs_deepest_span
+	(struct uniqtype *u, unsigned target_offset,
+	unsigned *out_offset, struct uniqtype_rel_info **out_ctxt, struct uniqtype **out_containing_t);
