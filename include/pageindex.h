@@ -88,15 +88,19 @@ struct big_allocation
 };
 #define BIGALLOC_IN_USE(b) ((b)->begin && (b)->end)
 #define NBIGALLOCS 1024
-extern struct big_allocation big_allocations[] __attribute__((weak,visibility("protected")));
-extern struct big_allocation __liballocs_big_allocations[] __attribute__((weak));
-
 typedef uint16_t bigalloc_num_t;
 
 // FIXME: protected stuff should be in private header only. This is now a public header.
 // If I didn't want that (good arguments for a single <allocs.h>), then some refactoring to do.
-extern bigalloc_num_t *pageindex __attribute__((weak,visibility("protected")));
-extern bigalloc_num_t *__liballocs_pageindex __attribute__((weak));
+extern struct big_allocation big_allocations[] __attribute__((/*weak,*/visibility("protected")));
+extern struct big_allocation __liballocs_big_allocations[] /*__attribute__((weak))*/;
+extern bigalloc_num_t *pageindex __attribute__((/*weak,*/visibility("protected")));
+extern bigalloc_num_t *__liballocs_pageindex /*__attribute__((weak))*/;
+/* There's a basic problem here: we need to forbid clients from trying to copy-reloc
+ * the symbols that are protected.
+ * Full analysis: http://maskray.me/blog/2021-01-09-copy-relocations-canonical-plt-entries-and-protected
+ * Currently we do this by not giving non-PIC clients the inlines... see #ifs below
+ */
 
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
@@ -138,16 +142,29 @@ _Bool __brk_allocator_notify_unindexed_address(void *mem);
  * by calling into the pageindex, or we can be crude,
  * using the stack-pointer and sbrk heuristics. Opt initially 
  * to be precise. */
+/* NOTE: we *must* use __liballocs_{pageindex,big_allocations},
+ * not the protected symbols, because this function will get inlined
+ * into callers that don't have access to the protected versions. Since
+ * the protected versions are sometimes declared weak, PIE executables
+ * they just turn out as zero and we end up with references to random
+ * addresses in the 0x55555555.... range -- not fun to debug.
+ *
+ * In fact the non-PIE case is broken too. We have to enforce PICness
+ * or large-code-modelness. See note in liballocs.h. */
+#if defined(__PIC__) || defined(__code_model_large__)
 inline struct big_allocation *__liballocs_get_bigalloc_containing(const void *obj)
 {
 	// if (__builtin_expect(obj == 0, 0)) return NULL;
 	// if (__builtin_expect(obj == (void*) -1, 0)) return NULL;
 	/* More heuristics go here. */
-	bigalloc_num_t bigalloc_num = pageindex[PAGENUM(obj)];
+	bigalloc_num_t bigalloc_num = __liballocs_pageindex[PAGENUM(obj)];
 	if (bigalloc_num == 0) return NULL;
-	struct big_allocation *b = &big_allocations[bigalloc_num];
+	struct big_allocation *b = &__liballocs_big_allocations[bigalloc_num];
 	return b;
 }
+#else
+#warning "If you need __liballocs_get_bigalloc_containing , compile -fPIC"
+#endif
 
 inline
 struct allocator *__liballocs_leaf_allocator_for(const void *obj,

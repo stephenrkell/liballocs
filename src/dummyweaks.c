@@ -46,6 +46,10 @@ struct __liballocs_memrange_cache __liballocs_ool_cache; // all zeroes
 _Bool __liballocs_is_initialized;
 
 uint16_t *pageindex __attribute__((visibility("protected")));
+extern uint16_t *__liballocs_pageindex __attribute__((alias("pageindex")));
+
+char big_allocations[16*8] __attribute__((visibility("protected")));
+extern char __liballocs_big_allocations[] __attribute__((alias("big_allocations")));
 
 __thread void *__current_allocfn;
 __thread _Bool __currently_allocating;

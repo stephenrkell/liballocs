@@ -1,1 +1,2 @@
+CFLAGS += -fPIC
 LDLIBS += -lallocs

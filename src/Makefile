@@ -235,8 +235,11 @@ liballocs_nonshared.a: $(NOPRELOAD_OBJS) $(NONSHARED_OBJS)
 liballocs.a: systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ) $(HOOKS_WRAP_OBJS)
 	$(AR) r "$@" $+
 
+pageindex.o: CFLAGS += -fno-common
 # HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option.
-dummyweaks.o: CFLAGS += -fPIC 
+# -fno-common added to combat problems with {__liballocs_,}{pageindex,big_allocations}
+# though I'm not sure it works... see 'alloca' test case, or others that are liballocs clients
+dummyweaks.o: CFLAGS += -fPIC -fno-common
 liballocs_dummyweaks.o: dummyweaks.o
 	$(LD) -r -o "$@" $+
 
