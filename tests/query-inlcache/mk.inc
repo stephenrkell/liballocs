@@ -1,2 +1,2 @@
-CFLAGS += -mcmodel=large -fPIC
+CFLAGS += -mcmodel=large -fPIC -DLIBALLOCS_USE_INLCACHE
 LDFLAGS += -pie
