@@ -277,7 +277,11 @@ extern struct uniqtype __uniqtype____EXISTS1__1;
 		/* __current_alloclevel = 1; */ /* We're at least at level 1, i.e. below sbrk()/mmap(). pre_alloc increments this too */ \
 		rev_arglist_nocomma_ ## name (pre_realarg) \
 		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
+		/* Since we're also doing callee instrumentation, callee doesn't need allocsite */ \
+		/* and we don't want its inner allocator 'consuming' it */ \
+		void *saved_allocsite = __current_allocsite; __current_allocsite = NULL; \
 		void *real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
+		__current_allocsite = saved_allocsite; \
 		post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
 		arglist_nocomma_ ## name (post_realarg) \
 		if (/* __current_alloclevel > name ## _alloclevel*/ 0) \

@@ -277,6 +277,9 @@ static int index_small_alloc_internal(void *ptr, unsigned size_bytes,
 	assert(layer_num < NLAYERS(p_chunk_rec));
 	
 	/* Store the insert. The object start modulus goes in `bits'. */
+	/* This only works if we have an allocsite... it can't be NULL, I think,
+	 * because we need the insert to *not* satisfy ENTRY_IS_NULL(p_ins). */
+	assert(__current_allocsite);
 	p_ins->alloc_site = (uintptr_t) __current_allocsite;
 	p_ins->alloc_site_flag = 0;
 	
