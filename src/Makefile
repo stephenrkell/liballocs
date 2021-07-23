@@ -163,9 +163,9 @@ $(CC_DEPS): $(dir %.cc)$(patsubst %.cc,.%.d,$(notdir %.cc)) : %.cc
 	$(CC) $(CFLAGS) -c -o "$@" "$<"
 
 ifeq ($(DEBUG),1)
-systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(DEBUG_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+systrap.o systrap_noop.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(DEBUG_EXTRA_CFLAGS) # hooks have either fpic or fPIC
 else
-systrap.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(FAST_EXTRA_CFLAGS) # hooks have either fpic or fPIC
+systrap.o systrap_noop.o $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(FAKE_LIBUNWIND_OBJ): CFLAGS += -fPIC $(FAST_EXTRA_CFLAGS) # hooks have either fpic or fPIC
 endif 
 .SECONDARY: heap_index_hooks_fast.c
 heap_index_hooks_fast.o: CFLAGS += $(HOOKS_FAST_CFLAGS)
