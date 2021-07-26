@@ -1,6 +1,10 @@
 #ifndef LIBALLOCS_CIL_INLINES_H_
 #define LIBALLOCS_CIL_INLINES_H_
 
+/* We need uniqtype. See UNIQTYPE_QD_* below... tried
+ * avoiding this but it didn't end well. */
+#include "uniqtype-defs.h"
+
 #ifndef unlikely
 #define __liballocs_defined_unlikely
 #define unlikely(cond) (__builtin_expect( (cond), 0 ))
@@ -299,8 +303,8 @@ struct alloc_addr_info
 	unsigned flag:1;
 	unsigned bits:16;
 };
-#endif
 
+#error "This doesn't work! Unresolved Heisenbug!"
 #define UNIQTYPE_QD_KIND(t) \
 (*((char*)(unsigned long)(t) + 0xc) & 0xf)
 #define UNIQTYPE_QD_CACHE_WORD(t) \
@@ -313,20 +317,130 @@ struct alloc_addr_info
 ({ unsigned pos_maxoff; \
 	__builtin_memcpy((char*) &pos_maxoff, (char*)(unsigned long)(t) + 0x8, 4); \
 	pos_maxoff; })
-#define UNIQTYPE_QD_IS_ARRAY(t) \
-	(((UNIQTYPE_QD_KIND(t)) & 0x1) == 1)
+#else
+
+#define UNIQTYPE_QD_KIND(__t) \
+	((UNPACK_TYPE(__t))->un.info.kind)
+#define UNIQTYPE_QD_CACHE_WORD(__t) \
+	((UNPACK_TYPE(__t))->cache_word)
+#define UNIQTYPE_QD_RELATED0_T(__t) \
+	((UNPACK_TYPE(__t))->related[0].un.t.ptr)
+#define UNIQTYPE_QD_SIZE(__t) \
+	((UNPACK_TYPE(__t))->pos_maxoff)
+#endif
+#define UNIQTYPE_QD_ARRAY_ELEMENT_TYPE(t) \
+	(UNIQTYPE_QD_RELATED0_T(t))
 #define UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(t) \
 	(UNIQTYPE_QD_SIZE(UNIQTYPE_QD_RELATED0_T(t)))
+#define UNIQTYPE_QD_IS_ARRAY(t) \
+	(((UNIQTYPE_QD_KIND(t)) & 0x1) == 1)
+
+/* There are many memranges we can match against.
+ * (1) the top-level range of the cache entry
+ * (2a) the "offset range" described by the offset-to-t and t fields,
+ *          which may or may not be the same as the top-level range
+ *       (it is the same iff offset == 0 and period == t->pos_maxoff).
+ * (2b) the "offset range" described by offset-to-t and t fields,
+ *          if t is an array type
+ *       (sanity suggests we should only do this if offset is nonzero)
+ *       (FIXME: include this in the sanity checks)
+ *       (for types-only libcrunch we never use array types in cache entries,
+ *        but this will change for bounds checking)
+ * (3a) the "cached contained range" described by the uniqtype cache word,
+ *        in the case where the cached type is a singleton
+ * (3b) the "cached contained range"... where it's an array.
+ *
+ * When testing types we can do a match by "start",
+ * or (stronger) by size,
+ * or (stronger still) by type identity. */
+#define UNPACK_TYPE(__t) ((struct uniqtype *) (unsigned long) (__t))
+#define ENTRY_TYPE(__e) (UNPACK_TYPE((__e).t))
+#define DIFF(__e, __p) ((char*) (__p) - (char*) (__e).range_base)
+#define MODULUS(__e, __p) (DIFF(__e, __p) % (__e).period)
+
+/* The query period (target type size) must match the range period.
+ * If the range is a singleton, its period is the whole range's type's size.
+ * Note that we ignore t and offset_to_t in the simpler case.
+ * We don't necessarily know the type of the whole range.
+ * In the type-match case, we require offset to be 0 and t to be equal. */
+#define QUERY_START_MATCHES_TOPLEVEL_RANGE(__e, __p) ( \
+	(MODULUS((__e), (__p)) == 0))
+#define QUERY_SIZE_MATCHES_TOPLEVEL_RANGE(__e, __p, __qp) ( \
+	QUERY_START_MATCHES_TOPLEVEL_RANGE((__e), (__p)) && \
+	((__qp) == (__e).period))
+#define QUERY_TYPE_MATCHES_TOPLEVEL_RANGE(__e, __p, __qt) ( \
+	QUERY_SIZE_MATCHES_TOPLEVEL_RANGE((__e), (__p), UNIQTYPE_QD_SIZE(__qt)) && \
+	(ENTRY_TYPE(__e) == (__qt)) && \
+	((__e).offset_to_t == 0) \
+    )
+/* Now it's the offset range's period that must match the query period. */
+#define QUERY_START_MATCHES_OFFSET_RANGE_SINGLETON(__e, __p) ( \
+	(MODULUS((__e), (__p)) == (__e).offset_to_t))
+#define QUERY_SIZE_MATCHES_OFFSET_RANGE_SINGLETON(__e, __p, __qp) ( \
+	QUERY_START_MATCHES_OFFSET_RANGE_SINGLETON((__e), (__p)) && \
+	(UNIQTYPE_QD_SIZE(ENTRY_TYPE(__e)) == (__qp)))
+#define QUERY_TYPE_MATCHES_OFFSET_RANGE_SINGLETON(__e, __p, __qt) ( \
+	QUERY_SIZE_MATCHES_OFFSET_RANGE_SINGLETON((__e), (__p), UNIQTYPE_QD_SIZE(__qt)) && \
+	(__qt) == ENTRY_TYPE(__e))
+
+#define QUERY_START_MATCHES_OFFSET_RANGE_ARRAY(__e, __p) ( \
+		(ENTRY_TYPE(__e)) && \
+			UNIQTYPE_QD_IS_ARRAY( ENTRY_TYPE(__e) ) && \
+			((MODULUS((__e), (__p)) - (__e).offset_to_t) % \
+				UNIQTYPE_QD_ARRAY_ELEMENT_SIZE( ENTRY_TYPE(__e) ) == 0 \
+				/* (modulus - offset) is a multiple of element size */) \
+	)
+#define QUERY_SIZE_MATCHES_OFFSET_RANGE_ARRAY(__e, __p, __qp) ( \
+	QUERY_START_MATCHES_OFFSET_RANGE_ARRAY((__e), (__p)) && \
+		((__qp) == UNIQTYPE_QD_ARRAY_ELEMENT_SIZE( ENTRY_TYPE(__e) )))
+#define QUERY_TYPE_MATCHES_OFFSET_RANGE_ARRAY(__e, __p, __qt) ( \
+	QUERY_SIZE_MATCHES_OFFSET_RANGE_ARRAY((__e), (__p), UNIQTYPE_QD_SIZE(__qt)) && \
+	UNIQTYPE_QD_ARRAY_ELEMENT_TYPE( ENTRY_TYPE(__e) ) == (__qt))
+
+/* Now it's the uniqtype-cached contained range that must match. */
+#define QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON(__e, __p) ( \
+	ENTRY_TYPE(__e) && \
+	( \
+			(MODULUS(__e, __p) - (__e).offset_to_t == UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).bits /* modulus matches offset */) \
+	))
+#define QUERY_SIZE_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON(__e, __p, __qp) ( \
+	QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON((__e), (__p)) && \
+	(ENTRY_TYPE(__e)) && \
+		(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).addr)) && \
+		((__qp) == UNIQTYPE_QD_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).addr) )) \
+	)
+#define QUERY_TYPE_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON(__e, __p, __qt) ( \
+	QUERY_SIZE_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON((__e), (__p), UNIQTYPE_QD_SIZE(__qt)) && \
+	((__qt) == UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).addr)))
+
+#define QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_ARRAY(__e, __p) ( \
+	(ENTRY_TYPE(__e)) && \
+		( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).addr) && \
+			UNIQTYPE_QD_IS_ARRAY( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).addr) ) && \
+			((MODULUS(__e, __p) - (__e).offset_to_t - UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).bits) % \
+				UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).addr)) == 0 \
+				/* (modulus - offset) is a multiple of element size */) \
+		) \
+	)
+#define QUERY_SIZE_MATCHES_CACHED_CONTAINED_RANGE_ARRAY(__e, __p, __qp) ( \
+	QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_ARRAY((__e), (__p)) && \
+	UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).addr)) == (__qp) \
+)
+#define QUERY_TYPE_MATCHES_CACHED_CONTAINED_RANGE_ARRAY(__e, __p, __qt) ( \
+	QUERY_SIZE_MATCHES_CACHED_CONTAINED_RANGE_ARRAY(__e, __p, UNIQTYPE_QD_SIZE(__qt)) && \
+	UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE(__e)).addr) == (__qt))
 
 extern inline
 struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
-__liballocs_memrange_cache_lookup_with_type )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *query_t, unsigned long query_period);
+__liballocs_memrange_cache_lookup_with_type )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *query_t);
 extern inline
 struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
-__liballocs_memrange_cache_lookup_with_type )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *query_t, unsigned long query_period)
+__liballocs_memrange_cache_lookup_with_type )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *query_t)
 {
 #ifndef LIBALLOCS_NOOP_INLINES
 	__liballocs_check_cache_sanity(cache);
+	assert(query_t);
+	unsigned query_period = UNIQTYPE_QD_SIZE(query_t);
 #ifdef LIBALLOCS_CACHE_LINEAR
 	for (unsigned char i = 1; i <= cache->max_pos; ++i)
 #else
@@ -344,64 +458,17 @@ __liballocs_memrange_cache_lookup_with_type )(struct __liballocs_memrange_cache 
 			 *
 			 * Since division is probably the slowest part of the test, we
 			 * save it until last. */
-
-/* There are many memranges we can match against.
- * (1) the top-level range of the cache entry
- * (2a) the "offset range" described by the offset-to-t and t fields,
- *          which may or may not be the same as the top-level range
- *       (it is the same iff offset == 0 and period == t->pos_maxoff).
- * (2b) the "offset range" described by offset-to-t and t fields,
- *          if t is an array type
- *       (sanity suggests we should only do this if offset is nonzero)
- *       (FIXME: include this in the sanity checks)
- *       (for types-only libcrunch we never use array types in cache entries,
- *        but this will change for bounds checking)
- * (3a) the "cached contained range" described by the uniqtype cache word,
- *        in the case where the cached type is a singleton
- * (3b) the "cached contained range"... where it's an array. */
-#define UNPACK_TYPE(__t) ((struct uniqtype *) (unsigned long) (__t))
-#define ENTRY_TYPE (UNPACK_TYPE(cache->entries[i].t))
-#define MODULUS (diff % cache->entries[i].period)
-#define ENTRY_TYPE_MATCHES_TOPLEVEL_RANGE ( \
-	(ENTRY_TYPE == query_t) && \
-	(MODULUS == 0))
-#define ENTRY_TYPE_MATCHES_OFFSET_RANGE_SINGLETON ( \
-	(ENTRY_TYPE == query_t) && \
-	(MODULUS == cache->entries[i].offset_to_t))
-#define ENTRY_TYPE_MATCHES_OFFSET_RANGE_ARRAY ( \
-		( (ENTRY_TYPE) && \
-			UNIQTYPE_QD_IS_ARRAY( ENTRY_TYPE ) && \
-			((MODULUS - cache->entries[i].offset_to_t) % \
-				UNIQTYPE_QD_ARRAY_ELEMENT_SIZE( ENTRY_TYPE ) == 0 \
-				/* (modulus - offset) is a multiple of element size */) \
-		) \
-	)
-#define CACHED_CONTAINED_RANGE_TYPE_MATCHES_SINGLETON ( \
-	(ENTRY_TYPE) && \
-	( \
-		( \
-			(query_t == UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) ) && \
-			(MODULUS - cache->entries[i].offset_to_t == UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits /* modulus matches offset */) \
-		) \
-	))
-#define CACHED_CONTAINED_RANGE_TYPE_MATCHES_ARRAY ( \
-	(ENTRY_TYPE) && \
-		( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) && \
-			UNIQTYPE_QD_IS_ARRAY( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) ) && \
-			((MODULUS - cache->entries[i].offset_to_t - UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits) % \
-				UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr)) == 0 \
-				/* (modulus - offset) is a multiple of element size */) \
-		) \
-	)
-			signed long long diff = (char*) obj - (char*) cache->entries[i].range_base;
 			if ((char*) obj >= (char*)cache->entries[i].range_base
 					&& (char*) obj < (char*)cache->entries[i].range_limit
 					&& (!query_period || cache->entries[i].period == query_period)
-					&& (!query_t || ENTRY_TYPE_MATCHES_TOPLEVEL_RANGE
-						|| ENTRY_TYPE_MATCHES_OFFSET_RANGE_SINGLETON
-						|| ENTRY_TYPE_MATCHES_OFFSET_RANGE_ARRAY
-						|| CACHED_CONTAINED_RANGE_TYPE_MATCHES_SINGLETON
-						|| CACHED_CONTAINED_RANGE_TYPE_MATCHES_ARRAY))
+					&& (
+						   (QUERY_TYPE_MATCHES_TOPLEVEL_RANGE(cache->entries[i], obj, query_t))
+						|| (QUERY_TYPE_MATCHES_OFFSET_RANGE_SINGLETON(cache->entries[i], obj, query_t))
+						|| (QUERY_TYPE_MATCHES_OFFSET_RANGE_ARRAY(cache->entries[i], obj, query_t))
+						|| (QUERY_TYPE_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON(cache->entries[i], obj, query_t))
+						|| (QUERY_TYPE_MATCHES_CACHED_CONTAINED_RANGE_ARRAY(cache->entries[i], obj, query_t))
+					)
+			)
 			{
 				// hit
 				__liballocs_cache_bump(cache, i);
@@ -419,61 +486,12 @@ extern inline
 struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
 __liballocs_memrange_cache_lookup_with_size )(struct __liballocs_memrange_cache *cache, const void *obj, unsigned query_p);
 
+
 /* The query period (target type size) must match the range period.
  * If the range is a singleton, its period is the whole range's type's size.
  * Note that we ignore t and offset_to_t in the simpler case.
  * We don't necessarily know the type of the whole range.
  * In the type-match case, we require offset to be 0 and t to be equal. */
-#define QUERY_START_MATCHES_TOPLEVEL_RANGE(__e, __p) ( \
-		(MODULUS == 0))
-#define QUERY_SIZE_MATCHES_TOPLEVEL_RANGE(__e, __p, __qp) ( \
-		QUERY_START_MATCHES_TOPLEVEL_RANGE((__e), (__p)) && \
-		((__qp) == (__e).period))
-
-#define QUERY_START_MATCHES_OFFSET_RANGE_SINGLETON(__e, __p) ( \
-		(MODULUS == (__e).offset_to_t))
-#define QUERY_SIZE_MATCHES_OFFSET_RANGE_SINGLETON(__e, __p, __qp) ( \
-		QUERY_START_MATCHES_OFFSET_RANGE_SINGLETON((__e), (__p)) && \
-		(UNIQTYPE_QD_SIZE(ENTRY_TYPE) == (__qp)))
-
-#define QUERY_START_MATCHES_OFFSET_RANGE_ARRAY(__e, __p) ( \
-				(ENTRY_TYPE) && \
-						UNIQTYPE_QD_IS_ARRAY( ENTRY_TYPE ) && \
-						((MODULUS - (__e).offset_to_t) % \
-								UNIQTYPE_QD_ARRAY_ELEMENT_SIZE( ENTRY_TYPE ) == 0 \
-								/* (modulus - offset) is a multiple of element size */) \
-		)
-#define QUERY_SIZE_MATCHES_OFFSET_RANGE_ARRAY(__e, __p, __qp) ( \
-		QUERY_START_MATCHES_OFFSET_RANGE_ARRAY((__e), (__p)) && \
-				((__qp) == UNIQTYPE_QD_ARRAY_ELEMENT_SIZE( ENTRY_TYPE )))
-
-/* Now it's the uniqtype-cached contained range that must match. */
-#define QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON(__e, __p) ( \
-		ENTRY_TYPE && \
-		( \
-						(MODULUS - (__e).offset_to_t == UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits /* modulus matches offset */) \
-		))
-#define QUERY_SIZE_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON(__e, __p, __qp) ( \
-		QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON((__e), (__p)) && \
-		(ENTRY_TYPE) && \
-				(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr)) && \
-				((__qp) == UNIQTYPE_QD_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) )) \
-		)
-
-#define QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_ARRAY(__e, __p) ( \
-		(ENTRY_TYPE) && \
-				( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) && \
-						UNIQTYPE_QD_IS_ARRAY( UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr) ) && \
-						((MODULUS - (__e).offset_to_t - UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).bits) % \
-								UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr)) == 0 \
-								/* (modulus - offset) is a multiple of element size */) \
-				) \
-		)
-#define QUERY_SIZE_MATCHES_CACHED_CONTAINED_RANGE_ARRAY(__e, __p, __qp) ( \
-		QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_ARRAY((__e), (__p)) && \
-		UNIQTYPE_QD_ARRAY_ELEMENT_SIZE(UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(ENTRY_TYPE).addr)) == (__qp) \
-)
-
 
 extern inline
 struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
@@ -491,7 +509,6 @@ __liballocs_memrange_cache_lookup_with_size )(struct __liballocs_memrange_cache 
 	{
 		if (cache->validity & (1<<(i-1)))
 		{
-			signed long long diff = (char*) obj - (char*) cache->entries[i].range_base;
 			if ((char*) obj >= (char*)cache->entries[i].range_base
 					&& (char*) obj < (char*)cache->entries[i].range_limit
 					&& (QUERY_SIZE_MATCHES_TOPLEVEL_RANGE(cache->entries[i], obj, query_p)
@@ -546,12 +563,13 @@ __liballocs_memrange_cache_lookup_range )(struct __liballocs_memrange_cache *cac
 	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
 }
 
-extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr);
-extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr)
+extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *obj);
+extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *obj)
 {
+#ifdef LIBALLOCS_SIMPLE_GET_CACHED_OBJECT_TYPE
 	struct __liballocs_memrange_cache_entry_s *found = __liballocs_memrange_cache_lookup_with_type(
 		&__liballocs_ool_cache,
-		addr,
+		obj,
 		(void*)0,
 		0);
 	/* This will give us "zero-offset matches", but not contained matches. 
@@ -559,6 +577,76 @@ extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) _
 	 * cases where some cached allocation spans "addr" at a non-zero offset. */
 	if (found) return (struct uniqtype *) (unsigned long) found->t;
 	return (struct uniqtype *)(void*)0;
+#else
+#ifndef LIBALLOCS_NOOP_INLINES
+	struct __liballocs_memrange_cache *cache = &__liballocs_ool_cache;
+	__liballocs_check_cache_sanity(cache);
+	struct uniqtype *retval = (struct uniqtype *)(void*)0;
+#ifdef LIBALLOCS_CACHE_LINEAR
+	unsigned char i = 1; 
+	for (;i <= cache->max_pos; ++i)
+#else
+	unsigned char i = cache->head_mru;
+	for (; i != 0; i = cache->entries[i].next_mru)
+#endif
+	{
+		if (cache->validity & (1<<(i-1)))
+		{
+			/* We're looking for not only a range match, but a
+			 * "start match"
+			 * where we can extract the type of the thing starting at the query address. */
+			if ((char*) obj >= (char*)cache->entries[i].range_base
+					&& (char*) obj < (char*)cache->entries[i].range_limit)
+			{
+				/* We don't have a query period.
+				 * We don't care how big the pointed-to thing is, as long as it
+				 * starts at the address we gave. */
+				if (QUERY_START_MATCHES_TOPLEVEL_RANGE(cache->entries[i], obj)
+					/* Our type is the cached range's element type, but we only know that if the offset
+					 * is zero and the type is nonnull. */
+					&& cache->entries[i].offset_to_t == 0)
+				{
+					retval = UNPACK_TYPE(cache->entries[i].t);
+					break;
+				}
+				else if (QUERY_START_MATCHES_OFFSET_RANGE_SINGLETON(cache->entries[i], obj))
+				{
+					/* Our type is the offset range type */
+					retval = UNPACK_TYPE(cache->entries[i].t);
+					break;
+				}
+				else if (QUERY_START_MATCHES_OFFSET_RANGE_ARRAY(cache->entries[i], obj))
+				{
+					/* Our type is the array element type. */
+					retval = UNIQTYPE_QD_ARRAY_ELEMENT_TYPE(
+							UNPACK_TYPE(cache->entries[i].t));
+					break;
+				}
+				else if (QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_SINGLETON(cache->entries[i], obj))
+				{
+					/* Our type is the contained fact type */
+					retval = UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(UNPACK_TYPE(cache->entries[i].t)).addr);
+					break;
+				}
+				else if (QUERY_START_MATCHES_CACHED_CONTAINED_RANGE_ARRAY(cache->entries[i], obj))
+				{
+					/* Our type is the contained fact array element type. */
+					retval = UNIQTYPE_QD_ARRAY_ELEMENT_TYPE(
+						UNPACK_TYPE(UNIQTYPE_QD_CACHE_WORD(UNPACK_TYPE(cache->entries[i].t)).addr)
+						);
+					break;
+				}
+			}
+		}
+	}
+	if (retval)
+	{
+		__liballocs_cache_bump(cache, i);
+	}
+#endif /* noop inlines */
+	__liballocs_check_cache_sanity(cache);
+	return retval;
+#endif /* keeping it simple */
 }
 
 void __liballocs_uncache_all(const void *allocptr, unsigned long size);

@@ -1748,9 +1748,9 @@ void **__liballocs_get_current_allocsite_tls_addr(void)
 
 struct __liballocs_memrange_cache_entry_s *
 __liballocs_ool_memrange_cache_lookup_with_type(struct __liballocs_memrange_cache *cache,
-	const void *obj, struct uniqtype *t, unsigned query_period)
+	const void *obj, struct uniqtype *t)
 {
-	return __liballocs_memrange_cache_lookup_with_type(cache, obj, t, query_period);
+	return __liballocs_memrange_cache_lookup_with_type(cache, obj, t);
 }
 
 struct __liballocs_memrange_cache_entry_s *
