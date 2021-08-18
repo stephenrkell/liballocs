@@ -20,6 +20,7 @@ LIBALLOCS_BUILD ?= $(dir $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_pre
 export UNIQTYPES_BASE
 export META_BASE
 export LIBALLOCS_BUILD
+export LIBRUNT # needed by stubgen.h in allocscompilerwrapper.py
 
 CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include

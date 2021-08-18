@@ -2,9 +2,7 @@ LIBMALLOCHOOKS := @libmallochooks@
 LIBSYSTRAP := @libsystrap@
 LIBRUNT := @librunt@
 LIBDLBIND := @libdlbind@
-
-# temporary HACK while we use donald
-DONALD := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/contrib/donald
+DONALD := @donald@
 
 CFLAGS := -I@librunt@/include @LIBALLOCSTOOL_CFLAGS@
 export CFLAGS

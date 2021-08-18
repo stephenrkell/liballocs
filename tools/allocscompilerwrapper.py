@@ -332,7 +332,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
         return self.getLibAllocsBaseDir() + "/tools/stubgen.h"
 
     def getStubGenCompileArgs(self):
-        return []
+        if "LIBRUNT" in os.environ:
+            include_dir = os.environ["LIBRUNT"] + "/include"
+        else:
+            include_dir = self.getLibAllocsBaseDir() + "/contrib/libsystrap/contrib/librunt/include"
+        return ["-I" + include_dir, "-DRELF_DEFINE_STRUCTURES"]
             
     def generateAllocStubsObject(self):
         # make a temporary file for the stubs
@@ -457,8 +461,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
             stubs_pp_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
                 "-I" + self.getLibAllocsBaseDir() + "/tools", \
                 "-I" + self.getLibAllocsBaseDir() + "/include", \
-                "-I" + self.getLibAllocsBaseDir() + "/contrib/libsystrap/contrib/librunt/include", \
-                "-DRELF_DEFINE_STRUCTURES"
                 ] \
                 + [arg for arg in self.phaseItems[Phase.PREPROCESS] if arg.startswith("-D")] \
                 + [stubsfile.name]

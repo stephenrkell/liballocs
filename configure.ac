@@ -54,13 +54,16 @@ AC_CHECK_HEADERS([set sstream stdarg.h stdbool.h stddef.h stdint.h stdio.h stdli
 AC_CHECK_HEADERS([sys/mman.h sys/resource.h sys/stat.h sys/syscall.h sys/time.h sys/types.h unistd.h vector wchar.h], [], [AC_MSG_FAILURE(Failed to find required header)])
 AC_CHECK_HEADERS([alloca.h], [], [AC_MSG_FAILURE(Failed to find required header)])
 AC_CHECK_HEADERS([libelf.h libelf/libelf.h gelf.h libelf/gelf.h], [], [], [])
-AC_CHECK_HEADERS([dwarf.h], [], [AC_MSG_FAILURE(Failed to find required header)])
 AC_CHECK_HEADERS([plugin-api.h], [], [AC_MSG_FAILURE([Failed to find required header, try installing `binutils-dev` or a similar package])])
 
 AX_BOOST_BASE
 
 AC_CHECK_HEADER([boost/regex/concepts.hpp], [], [AC_MSG_FAILURE([boost::regex is required])])
 AC_HAVE_LIBRARY(boost_regex, [], [AC_MSG_FAILURE([boost::regex is required])])
+AC_CHECK_HEADER([boost/system/config.hpp], [], [AC_MSG_FAILURE([boost::system is required])])
+AC_HAVE_LIBRARY(boost_system, [], [AC_MSG_FAILURE([boost::system is required])])
+AC_CHECK_HEADER([boost/filesystem/config.hpp], [], [AC_MSG_FAILURE([boost::filesystem is required])])
+AC_HAVE_LIBRARY(boost_filesystem, [], [AC_MSG_FAILURE([boost::filesystem is required])])
 
 CPPFLAGS=$OLD_CPPFLAGS
 
@@ -107,6 +110,7 @@ AC_SUBST(TRAP_SYSCALLS, $TRAP_SYSCALLS)
 AC_SUBST(MALLOC_HOOKS, $MALLOC_HOOKS)
 AC_SUBST(LIBDLBIND, $LIBDLBIND)
 AC_SUBST(LIBRUNT, $LIBRUNT)
+AC_SUBST(DONALD, $DONALD)
 
 AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [Enable debug mode]),
               [enable_debug=${enableval}])
@@ -168,6 +172,18 @@ AC_ARG_WITH([librunt],
                 fi
             ],
             [ac_librunt=$(realpath $srcdir)/contrib/libsystrap/contrib/librunt])
+AC_ARG_WITH([donald],
+            [AS_HELP_STRING([--with-donald=DIR],
+              [where to find donald (headers and source)])],
+            [
+                if test -d "$withval"
+                then
+                        ac_donald="$withval"
+                else
+                        AC_MSG_ERROR(--with-donald expected directory name)
+                fi
+            ],
+            [ac_donald=$(realpath $srcdir)/contrib/donald])
 AC_ARG_WITH([libmallochooks],
             [AS_HELP_STRING([--with-libmallochooks=DIR],
               [where to find libmallochooks (headers, source, templates)])],
