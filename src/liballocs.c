@@ -9,7 +9,12 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <link.h>
-#include <dwarf.h> /* for DW_ATE_* */
+/* Bit of a hack: we don't assume a system-wide 'dwarf.h' and instead vendor
+ * our chosen libdwarf. The best way to get at it is still via libdwarfpp. */
+#ifndef DWARF_H
+#define DWARF_H "dwarf.h"
+#endif
+#include DWARF_H
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
