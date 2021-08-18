@@ -10,7 +10,6 @@
 #include "vas.h"
 #include "maps.h"
 #include "pageindex.h"
-#define RELF_DEFINE_STRUCTURES
 #include "relf.h"
 
 /* Our secret private channel with libdlbind. This must always be linked in,
