@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <link.h>
 #include "systrap.h"
 #include "raw-syscalls-defs.h"
 #include "vas.h"
