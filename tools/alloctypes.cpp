@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <memory>
 #include <boost/regex.hpp>
+#include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
 #include <srk31/algorithm.hpp>
 #include <srk31/ordinal.hpp>
@@ -118,10 +119,11 @@ int main(int argc, char **argv)
 		cerr << "Please name an input file." << endl;
 		exit(1);
 	}
-	std::ifstream infstream(argv[1]);
+	boost::filesystem::path argv1(argv[1]);
+	std::ifstream infstream(argv1.c_str());
 	if (!infstream) 
 	{
-		cerr << "Could not open file " << argv[1] << endl;
+		cerr << "Could not open file " << argv1 << endl;
 		exit(1);
 	}
 	
@@ -132,13 +134,14 @@ int main(int argc, char **argv)
 	
 	using core::root_die;
 	int fd = fileno(infstream);
-	shared_ptr<sticky_root_die> p_root = sticky_root_die::create(fd);
+	shared_ptr<sticky_root_die> p_root = sticky_root_die::create(fd,
+		argv1.is_absolute() ? argv1.string() : boost::filesystem::absolute(argv1).string());
 	if (!p_root) { std::cerr << "Error opening file" << std::endl; return 1; }
 	sticky_root_die& root = *p_root;
 	
 	/* Do we have an allocsites file for this object? If so, we incorporate its 
 	 * synthetic data types. ALSO treat arr0 as synthetic (FIXME) */
-	auto allocsites = read_allocsites_for_binary(argv[1]);
+	auto allocsites = read_allocsites_for_binary(argv1.string());
 	//set< pair<string, string> > to_generate_array0;
 	if (!allocsites) { cerr << "Error: no allocation sites for " << std::endl; return 1; }
 	/* rewrite the allocsites we were passed */

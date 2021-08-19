@@ -1710,9 +1710,11 @@ static void test_mapping_overlap(void)
 /* HACK: to integrate this with the test/ infrastructure,
  * the 'lib-test' test loads the liballocs_test.so library with dlopen.
  * This *should* run its constructors, including this function. */
+#ifdef TEST
 static void run_tests(void) __attribute__((constructor));
 static void run_tests(void)
 {
 	test_mapping_overlap();
 }
+#endif
 #endif
