@@ -9,10 +9,8 @@ int main(void)
 	/* The liballocs source code includes some unit tests.
 	 * These are run as constructors from liballocs_test.so,
 	 * so dlopening that will run them. */
-	char *path = NULL;
 	assert(getenv("LIBALLOCS_BUILD"));
-	int ret = asprintf(&path, "%s/%s", getenv("LIBALLOCS_BUILD"), "/liballocs_test.so");
-	assert(ret > 0);
+	char *path = getenv("LIBALLOCS_BUILD");
 	void *handle = dlopen(path, RTLD_NOW);
 	assert(handle);
 	free(path);

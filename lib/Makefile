@@ -11,10 +11,14 @@ SYMLINKS := liballocs_nonshared.a liballocs_preload.a liballocs_preload.so \
 # be 'opt' or 'debug', we have a problem -- which one do we symlink?
 # The answer is that we symlink the outdir, then make our symlinks point
 # under there.
+ifneq ($(TEST),)
+outdir := debug
+else
 ifneq ($(DEBUG),)
 outdir := debug
 else
 outdir := opt
+endif
 endif
 
 all: outdir $(SYMLINKS) liballocs_systrap.o
