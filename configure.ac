@@ -213,6 +213,7 @@ AC_SUBST([libmallochooks], [$ac_libmallochooks])
 AC_SUBST([librunt], [$ac_librunt])
 AC_SUBST([libsystrap], [$ac_libsystrap])
 AC_SUBST([libdlbind], [$ac_libdlbind])
+AC_SUBST([donald], [$ac_donald])
 
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])
 AM_CONDITIONAL(USE_FAKE_LIBUNWIND, [test "x$enable_fake_libunwind" = "xyes"])
