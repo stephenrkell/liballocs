@@ -13,6 +13,6 @@ int main(void)
 	char *path = getenv("LIBALLOCS_BUILD");
 	void *handle = dlopen(path, RTLD_NOW);
 	assert(handle);
-	free(path);
+	printf("Successfully constructed %s\n", path);
 	return 0;
 }

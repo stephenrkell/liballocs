@@ -158,7 +158,17 @@ NOPRELOAD_OBJS := #uniqtypes.o # never link this into a preload lib! nor include
 NONSHARED_OBJS := nonshared_hooks.o # does *not* go in liballocs.a -- FIXME: why not? recall that liballocs.a is only for static-linked client binaries (exe or solib). Otherwise we get _nonshared.a, from the liballocs.so linker script. Probably, liballocs.a should include this, e.g. a client static-linked exe needs this if it defines its own malloc.
 PRELOAD_OBJS := preload.o malloc_hook_stubs_preload.o
 ifneq ($(TEST),)
-SYSTRAP_OBJS := systrap_noop.o
+# We have a noop version of the systrap object, which
+# used to be linked into liballocs_test.so because
+# those tests didn't depend on systrapping working, and
+# starting systrapping late (on dlopening the test lib)
+# didn't work.
+# BUT two things happened: we want to run tests that do
+# depend on that, and now (tentatively) it seems we're
+# robust enough to init systrap relatively late and not
+# break horribly. So use the real systrap object.
+# SYSTRAP_OBJS := systrap_noop.o
+SYSTRAP_OBJS := systrap.o
 else
 SYSTRAP_OBJS := systrap.o
 endif

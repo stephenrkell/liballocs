@@ -981,6 +981,11 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 		 * to trap). */
 		__runt_files_init();
 		assert(early_lib_handles[0]);
+		/* We need to have generic malloc init'd by now, because we always
+		 * need to have allocated our memtables before we start getting
+		 * mmap traps. This is only important for the test lib... ordinary
+		 * builds will be preloaded, so will always hit our mmap not libc's. */
+		__generic_malloc_allocator_init();
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
 		/* Now we can dlopen the meta-objects for the early libs, which librunt
