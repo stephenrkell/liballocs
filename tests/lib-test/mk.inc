@@ -2,8 +2,16 @@
 # dlopens liballocs (test build) to run its self-test constructors.
 export CC := cc
 export CFLAGS := -fPIC -O0 -g3 -DTEST
-export LDLIBS := -ldl
-export LIBALLOCS_BUILD := $(realpath $(dir $(realpath $(THIS_MAKEFILE)))../..)/build/test/liballocs_preload.so
+srcroot := $(realpath $(dir $(realpath $(THIS_MAKEFILE)))../..)
+# One exception: we must avoid the ld.so  hole, so use allocsld for that.
+export LDFLAGS := -Wl,--dynamic-linker,$(srcroot)/allocsld/allocsld.so
+export LDLIBS := $(srcroot)/lib/interp-pad.o -ldl
+export LIBALLOCS_BUILD := $(srcroot)/build/test/liballocs_preload.so
 export LD_PRELOAD := # empty
 export PRELOAD := # empty
 export LIBALLOCS_USE_PRELOAD := no
+
+lib-test: $(LIBALLOCS_BUILD)
+
+$(LIBALLOCS_BUILD):
+	$(MAKE) -C $(srcroot) TEST=1

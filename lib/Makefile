@@ -12,25 +12,42 @@ SYMLINKS := liballocs_nonshared.a liballocs_preload.a liballocs_preload.so \
 # The answer is that we symlink the outdir, then make our symlinks point
 # under there.
 ifneq ($(TEST),)
+# we never link a 'test' build here...
+# but if run with non-empty TEST, 'libbuild' will force *both* a debug *and* a test build
 outdir := debug
+libbuild_extra := DEBUG=1
 else
 ifneq ($(DEBUG),)
 outdir := debug
+libbuild_extra := DEBUG=1
 else
 outdir := opt
+libbuild_extra :=
 endif
 endif
 
 all: outdir $(SYMLINKS) liballocs_systrap.o
 
+# For simplicity, we want to support being invoked before the relevant build
+# has been done. In particular, tests/lib-test relies on being able to trigger a build.
+target_files := $(filter-out liballocs.so allocsld.so,$(SYMLINKS))
+$(foreach f,$(target_files) systrap.o,$(SRCROOT)/build/$(outdir)/$(f)): libbuild
+.PHONY: libbuild
+libbuild:
+	$(MAKE) -C .. SUBDIRS=src $(libbuild_extra)
+ifneq ($(TEST),)
+	$(MAKE) -C .. SUBDIRS=src TEST="" $(libbuild_extra)
+endif
+
 ifneq ($(notdir $(shell readlink outdir)),$(outdir))
 .PHONY: outdir
 endif
-outdir:
+#$(foreach f,$(target_files) systrap.o,$(SRCROOT)/build/$(outdir)/$(f))
+outdir: libbuild
 	rm -f outdir
 	ln -sf ../build/$(outdir) $@
 
-$(filter-out liballocs.so allocsld.so,$(SYMLINKS)): %: $(SRCROOT)/build/$(outdir)/%
+$(target_files): %: $(SRCROOT)/build/$(outdir)/%
 	ln -sf outdir/$(notdir $<) "$@"
 
 # the liballocs.so file lives in the srcdir
