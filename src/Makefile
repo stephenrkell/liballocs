@@ -194,9 +194,12 @@ endef
 $(foreach f,$(DEP_OBJS),$(eval $(call rule-for-depfile,$(f))))
 include $(DEPS)
 
-$(ALL_OBS): CFLAGS += -no-integrated-cpp \
--wrapper \
-$(LIBALLOCS)/contrib/toolsub/wrapper/example/constructor-priority-checker/wrapper
+# Build using our special toolsub-based wrapper checks.
+# Currently this checks we don't have any cases of missing/conflicting/ignored
+# constructor priorities (see GCC bug  and my blog post:
+# ).
+$(ALL_OBJS): CFLAGS += -no-integrated-cpp \
+-wrapper $(TOOLSUB)/wrapper/example/constructor-priority-checker/wrapper
 
 # event_hooks.c is macroised so that we can create special versions of it.
 # This version is used when we link an executable including its own malloc impl.
