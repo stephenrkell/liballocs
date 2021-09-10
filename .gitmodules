@@ -13,9 +13,6 @@
 [submodule "contrib/libsystrap"]
 	path = contrib/libsystrap
 	url = git://github.com/stephenrkell/libsystrap.git
-[submodule "contrib/dwarfidl"]
-	path = contrib/dwarfidl
-	url = https://github.com/stephenrkell/dwarfidl.git
 [submodule "contrib/toolsub"]
 	path = contrib/toolsub
 	url = https://github.com/stephenrkell/toolsub.git
