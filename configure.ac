@@ -222,6 +222,18 @@ AC_ARG_WITH([toolsub],
                 fi
             ],
             [ac_toolsub=${TOOLSUB:-$(realpath $srcdir)/contrib/toolsub]})
+AC_ARG_WITH([cil-install],
+            [AS_HELP_STRING([--with-cil-install=DIR],
+              [where to find CIL libraries (cil/cil.cmxa)])],
+            [
+                if test -d "$withval"
+                then
+                        ac_toolsub="$withval"
+                else
+                        AC_MSG_ERROR(--with-cil-install expected directory name)
+                fi
+            ],
+            [ac_cil_install=${CIL_INSTALL:-$(realpath $srcdir)/contrib/cil/lib]})
 
 AC_SUBST([libmallochooks], [$ac_libmallochooks])
 AC_SUBST([librunt], [$ac_librunt])
@@ -229,6 +241,7 @@ AC_SUBST([libsystrap], [$ac_libsystrap])
 AC_SUBST([libdlbind], [$ac_libdlbind])
 AC_SUBST([donald], [$ac_donald])
 AC_SUBST([toolsub], [$ac_toolsub])
+AC_SUBST([cil_install], [$ac_cil_install])
 
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])
 AM_CONDITIONAL(USE_FAKE_LIBUNWIND, [test "x$enable_fake_libunwind" = "xyes"])

@@ -169,3 +169,8 @@ tmp-*.txt
 /tools/lang/c/cil.stamp
 
 /allocsld/allocsld.lds
+
+config.h.in
+contrib/config.mk
+contrib/env.sh
+

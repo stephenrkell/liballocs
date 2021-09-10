@@ -19,3 +19,6 @@
 [submodule "contrib/donald"]
 	path = contrib/donald
 	url = https://github.com/stephenrkell/donald.git
+[submodule "contrib/cil"]
+	path = contrib/cil
+	url = https://github.com/stephenrkell/cil.git

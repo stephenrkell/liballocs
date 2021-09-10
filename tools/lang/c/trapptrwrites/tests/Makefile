@@ -1,6 +1,7 @@
-CC = $(LIBALLOCS)/tools/lang/c/cil/bin/cilly
-CFLAGS = --load=../trapptrwrites.cmxs --dotrap-ptr-writes --save-temps -g
-TESTS = writer arrays closure
+CIL_INSTALL ?= $(LIBALLOCS)/contrib/cil/lib
+CC := $(CIL_INSTALL)/../bin/cilly
+CFLAGS := --load=../trapptrwrites.cmxs --dotrap-ptr-writes --save-temps -g
+TESTS := writer arrays closure
 
 build: $(TESTS)
 

@@ -1,10 +1,15 @@
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-
+srcroot := $(realpath $(dir $(THIS_MAKEFILE))/../../..)
+include $(srcroot)/config.mk
 OCAMLFIND ?= ocamlfind
-CILLY ?= $(dir $(THIS_MAKEFILE))/cil/bin/cilly
+
+ifeq ($(CIL_INSTALL),)
+$(error "Expected CIL_INSTALL to be set")
+endif
+CILLY ?= $(CIL_INSTALL)/../bin/cilly
 CIL_TOOLS ?= cilallocs dumpallocs monalloca dumpmemacc trapptrwrites
 OCAMLFLAGS +=  -package findlib
-OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/cil/lib/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
+OCAMLFLAGS += -I $(CIL_INSTALL)/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
 
 CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) $(realpath $(dir $(THIS_MAKEFILE)))/lib -name '*.ml') 
 
@@ -17,20 +22,6 @@ $(OCAML_DEPS): %.d: %.ml
 
 DEPS += $(OCAML_DEPS)
 -include $(DEPS)
-
-# PROBLEM: cil's ocamlbuild takes a significant time to re-run even in the
-# case where nothing's changed. So use a stamp to run around that.
-.PHONY: cil
-cil: cil.stamp
-
-cil.stamp: cil/Makefile $(shell find cil -name '*.c' -o -name '*.ml' -o -name '*.mli' -o -name '*.in' -o -name '*.mly' )
-	$(MAKE) -C cil all install-local && touch $@
-
-cil/Makefile: cil/configure
-	cd cil && ./configure INSTALL="`which install` -p"
-
-cil/configure:
-	git submodule update --init --recursive cil
 
 %.cmxs: %.cmx 
 	$(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
@@ -57,11 +48,6 @@ monalloca/monalloca.cmo: cilallocs/cilallocs.cmo
 clean:
 	for dir in $(CIL_TOOLS); do (cd $$dir && rm -f *.o *.cmo *.cma *.cmi *.cmx *.cmxa *.cmxs *.cil.c *.i ); done
 	$(MAKE) -C src clean
-#	$(MAKE) -C cil clean
-
-# .PHONY: distclean
-# distclean: clean
-# 	$(MAKE) -C cil distclean
 
 .PHONY: src
 src: 

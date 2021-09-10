@@ -27,7 +27,7 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 # varlist is used to build env.sh (by writing a rule to config.mk)
 
 default: $(CONTRIB)/env.sh config.mk build-libsystrap build-liballocstool \
-  build-libdlbind build-toolsub
+  build-libdlbind build-cil build-toolsub
 
 OLD_CONTRIB := $(CONTRIB)
 include config.mk
@@ -53,7 +53,7 @@ subconfigs += libsystrap/contrib/config.mk
 liballocstool/contrib/config.mk \
 $(CONTRIB)/liballocstool/contrib/env.sh \
 $(CONTRIB)/liballocstool/contrib/config.mk:
-	$(MAKE) -C liballocstool/contrib
+	$(MAKE) -C liballocstool/contrib config.mk env.sh
 
 liballocstool/config.status: liballocstool/configure
 
@@ -91,11 +91,27 @@ build-libdlbind:
 CONFIG_MK += \nLIBDLBIND ?= $(CONTRIB)/libdlbind\n
 varlist += LIBDLBIND
 
+# ----------------------------cil
+
+.PHONY: build-cil
+build-cil: cil.stamp
+
+# PROBLEM: cil's ocamlbuild takes a significant time to re-run even in the
+# case where nothing's changed. So use a stamp to run around that.
+cil.stamp: cil/Makefile $(shell find cil -name '*.c' -o -name '*.ml' -o -name '*.mli' -o -name '*.in' -o -name '*.mly' )
+	$(MAKE) -C cil all install-local && touch $@
+cil/Makefile: cil/configure
+	cd cil && ./configure INSTALL="`which install` -p"
+
+CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/cil/lib\n
+varlist += CIL_INSTALL
+export CIL_INSTALL
+
 # ----------------------------toolsub
 
-CIL_INSTALL ?= $(CONTRIB)/../tools/lang/c/cil/lib
-build-toolsub:
-	$(MAKE) -C toolsub CIL_INSTALL=$(CIL_INSTALL)
+.PHONY: build-toolsub
+build-toolsub: build-cil
+	$(MAKE) -C toolsub
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB
 

@@ -4,6 +4,8 @@ LIBRUNT := @librunt@
 LIBDLBIND := @libdlbind@
 DONALD := @donald@
 TOOLSUB := @toolsub@
+CIL_INSTALL := @cil_install@
+export CIL_INSTALL
 
 CFLAGS := -I@librunt@/include @LIBALLOCSTOOL_CFLAGS@
 export CFLAGS

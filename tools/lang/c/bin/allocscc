@@ -14,11 +14,16 @@ REAL_DIR = os.path.realpath(os.path.dirname(REAL_FILE))
 liballocs_base = os.path.realpath(REAL_DIR + "/../../../..")
 sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
-cilly_cmd = liballocs_base + "/tools/lang/c/cil/bin/cilly"
+existing_cil_install = os.environ.get("CIL_INSTALL")
+if existing_cil_install == None:
+    cilly_cmd = liballocs_base + "/contrib/cil/bin/cilly"
+    existing_cil_install = liballocs_base + "/contrib/cil/lib"
+else:
+    cilly_cmd = existing_cil_install + "/../bin/cilly"
 existing_ocamlpath = os.environ.get("OCAMLPATH")
 if existing_ocamlpath == None:
     existing_ocamlpath = ""
-os.putenv("OCAMLPATH", (liballocs_base + "/tools/lang/c/cil/lib:") + existing_ocamlpath)
+os.putenv("OCAMLPATH", existing_cil_install + ":" + existing_ocamlpath)
 os.putenv("LANG", "C") # Allow allocscc to be called with non-english locales
 
 class AllocsCC(AllocsCompilerWrapper):
