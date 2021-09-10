@@ -5,74 +5,65 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <err.h>
+#include <assert.h>
 #include "donald.h"
+#include <link.h>
+#include "relf.h"
 
 #define die(s, ...) do { fprintf(stderr, DONALD_NAME ": " s , ##__VA_ARGS__); exit(-1); } while(0)
 // #define die(s, ...) do { fwrite(DONALD_NAME ": " s , sizeof DONALD_NAME ": " s, 1, stderr); exit(-1); } while(0)
 
-void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned program_phnum, const char *ldso_path) __attribute__((visibility("hidden")));
-void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned program_phnum, const char *ldso_path)
+/* How do we make debugging work?
+ *
+ * If the debugger is attached after the inferior receives control,
+ * we should not have a problem. Indeed, testing confirms this.
+ *
+ * If our loader is the 'requested' dynamic linker, gdb will expect
+ * it to provide the SVr4 interface... which of course it doesn't, as
+ * that is only in the inferior ld.so. What can we do? Some random ideas:
+ *
+ * - define _r_debug_state at run time as an ABS symbol pointing at inferior?
+ *       Problem here is that gdb (at least) expects to be able to open the
+ *       ld.so fresh from disk using libbfd and scrape the value, then do
+ *       (load_addr + sym_addr) to get the breakpointable address.
+ *
+ * - define a real _r_debug_state and make the inferior's _r_debug_state jump
+ *   into it, by instrumentation?
+ *   glibc's ld.so has
+     000000000000f8f0     1 FUNC    GLOBAL DEFAULT   12 _dl_debug_state@@GLIBC_PRIVATE
+ *
+     000000000000f8f0 <_dl_debug_state@@GLIBC_PRIVATE>:
+         f8f0:       c3                      retq
+         f8f1:       66 66 2e 0f 1f 84 00    data16 nopw %cs:0x0(%rax,%rax,1)
+         f8f8:       00 00 00 00
+ *
+ *   ... which seems to work.
+ *
+ * If our loader is the program, explicitly chain-loading the inferior,
+ * we should borrow the approach from libsystrap's example/trace-syscalls-ld.so
+ * where a fake DT_DEBUG entry is created pointing at the inferior ld.so.
+ * Probably this should be pulled into donald or a libchainld library.
+ */
+
+__attribute__((visibility("hidden")))
+void _dl_debug_state(void) {}
+
+void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned program_phnum, const char *ldso_path, uintptr_t inferior_dynamic_vaddr, uintptr_t base_addr) __attribute__((visibility("hidden")));
+void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned program_phnum, const char *ldso_path, uintptr_t inferior_dynamic_vaddr, uintptr_t base_addr)
 {	
 	// FIXME: arrange for us to be unmapped and disappear
-	/* FIXME: other transparency issues:
-	(gdb) run
-Starting program: /usr/local/src/liballocs/tests/allocsld-as-ldso/allocsld-as-ldso 
-warning: Unable to find dynamic linker breakpoint function.
-GDB will be unable to debug shared library initializers
-and track explicitly loaded dynamic code.
-
-... WHAT's the problem here? It's true that we don't
-define the symbol, but the hope was that by the time a link
-map is built, ld.so will just see itself and think it was run
-directly.. Recall that the r_debug protocol bootstraps
-discovery of dynsyms by
-(1) look at the executable (probably from /proc)
-(2) find its DYNAMIC section using phdrs
-(3) look in its DT_DEBUG entry
-(4) expect this to point to the struct r_debug created by the ld.so.
-So what's not happening?
-
-The failure is reported at startup, so it can't be that the DT_DEBUG
-entry is not updated yet; that happens later.
-
-Maybe gdb is traversing the DT_NEEDEDs of the loaded DSOs, and
-because it doesn't find the ld.so, does not find the _r_debug symbol?
-If so: TRICKY! We can't use run-time mutation to help us, because
-gdb is looking offline in the symtab content of the files on disk.
-
-Luckily, gdb seems to be able to recover. If I break in 'main', i.e.
-after ld.so has set up the DT_DEBUG entry, 'info shared' works.
-But what about dynamic loading?
-
-(gdb) print ((void*(*)(void*, int))dlopen)("/lib/x86_64-linux-gnu/libz.so.1", 257)
-$13 = (void *) 0x5555555592f0
-(gdb) info shared
-From                To                  Syms Read   Shared Object Library
-0x00007ffff7dfb000  0x00007ffff7dff129  Yes         /usr/local/src/liballocs/allocsld/allocsld.so
-0x00007ffff7b9d6a0  0x00007ffff7b9db47  Yes         /usr/local/src/liballocs/tools/..//lib/liballocs_dummyweaks.so
-0x00007ffff797d700  0x00007ffff7989fb2  Yes (*)     /usr/lib/x86_64-linux-gnu/libunwind-x86_64.so.8
-0x00007ffff7762ee0  0x00007ffff776a1e2  Yes (*)     /usr/lib/x86_64-linux-gnu/libunwind.so.8
-0x00007ffff775d130  0x00007ffff775de75  Yes (*)     /lib/x86_64-linux-gnu/libdl.so.2
-0x00007ffff75bb320  0x00007ffff770139b  Yes (*)     /lib/x86_64-linux-gnu/libc.so.6
-0x00007ffff7376090  0x00007ffff738cb92  Yes (*)     /lib/x86_64-linux-gnu/liblzma.so.5
-0x00007ffff73585b0  0x00007ffff7366641  Yes         /lib/x86_64-linux-gnu/libpthread.so.0
-0x00007ffff71333d0  0x00007ffff7146a70  No          /lib/x86_64-linux-gnu/libz.so.1
-(*): Shared library is missing debugging information.
-
-OK, that seems fine. Problem though:
+	/* More debugging-related fun... a naive treatment leaves us with.
 (gdb) print _r_debug
 Missing ELF symbol "_r_debug".
 
 i.e. the real ld.so is missing from the 'info shared' list.
 What about in the r_debug that we can reach from DT_DEBUG?
-It's missing from that too! i.e. the ld.so did all the work,
+It's missing from that too! i.e. the real ld.so did all the work,
 but didn't create a link map entry for itself.
 
 And why would it? It thinks its name is allocsld.so. But
-how does it determine that? from _dl_argv[0]? Don't think
-so -- surely it's not in argv in the not-the-program case.
-AHA. It gets it from the program binary, since it must
-name its interpreter. In the .interp section, naturally,
+how does it determine that? From the program binary, since that must
+name the interpreter... in the .interp section, naturally,
 which is mapped by PT_INTERP.
 
 $16 = {
@@ -104,16 +95,14 @@ SECTIONS
         .interp : { *(.interp) ; LONG(0) ; LONG(0) ; LONG(0) }
       }
 
-
 	  and
 
 .section .interp, "aw"
     .quad 0
 
 
-gives us a writable interp. How do we get a pointer to it?
-
-	*/
+-- indeed gives us a writable interp. We get a pointer to it via PT_INTERP.
+*/
 	
 	if (!we_are_the_program)
 	{
@@ -152,7 +141,44 @@ gives us a writable interp. How do we get a pointer to it?
 			die("insufficient space for ld.so interp string (size %d)\n", interp_sz);
 		}
 		memcpy(interp_addr, ldso_path, strlen(ldso_path) + 1);
-	}
+
+		/* Now we have hoodwinked the program into thinking that the inferior
+		 * is the legit ld.so. But if we're running in a debugger, it will have
+		 * eagerly snarfed the interpreter name and will still be looking at the
+		 * file, not the memory image. So we want to define our own _dl_debug_state.
+		 * We need to get the link map... in our not-yet-initialized state, does that
+		 * even exist yet? The inferior certainly has an '_r_debug' symbol. */
+		ElfW(Dyn) *d = (ElfW(Dyn) *)(inferior_dynamic_vaddr + base_addr);
+		ElfW(Sym) *rs = symbol_lookup_in_dyn(d, base_addr, "_r_debug");
+		/* don't use sym_to_addr() because we don't have a working link map yet */
+		struct r_debug *r = (void*)(base_addr + rs->st_value);
+		ElfW(Sym) *fs = symbol_lookup_in_dyn(d, base_addr, "_dl_debug_state");
+		assert(fs);
+		/* FIXME: it might also be called any of the following
+		  "__dl_rtld_db_dlactivity",
+		  "_r_debug_state",
+		  "_rtld_debug_state",
+		  "r_debug_state",
+		  "rtld_db_dlactivity",
+		 */
+		// FIXME: the following assertion is not true (size is 1, i.e. 'retq')...
+		// assert(fs->st_size >= 16);
+		// ... but want to check that nothing interesting lives in the following 15 bytes.
+		// In theory liballocs or even librunt could easily tell us this, and it might make
+		// a useful utility call (querying the 'realloc'-available space, generalised)
+		// although for us, that's tricky (liballocs isn't running yet; librunt needs fakery).
+		void *f = (void*)(base_addr + fs->st_value);
+		// mprotect: make it writable -- HACK: use page size
+		void *page_addr = (void*) RELF_ROUND_DOWN_((uintptr_t)f, page_size);
+		int ret = mprotect(page_addr, page_size, PROT_READ|PROT_WRITE);
+		/* %rax is caller-save so we are free to clobber it */
+		char bytes[] = { 0x48, 0xb8, 0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12, /* movabs $0x123456789abcdef0,%rax */
+			0xff, 0xe0 /* jmpq   *%rax */ };
+		uintptr_t address_8bytes = (uintptr_t) &_dl_debug_state;
+		memcpy(bytes + 2, &address_8bytes, sizeof address_8bytes);
+		memcpy(f, bytes, sizeof bytes);
+		mprotect(page_addr, page_size, PROT_READ|PROT_EXEC);
+	} // end if (!we_are_the_program)
 	// FIXME: now munmap and/or mprotect some stuff:
 	// munmap ourselves, to the extent we can
 	// mprotect the interpreter string back to read-only
