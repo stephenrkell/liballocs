@@ -3,6 +3,7 @@ LIBSYSTRAP := @libsystrap@
 LIBRUNT := @librunt@
 LIBDLBIND := @libdlbind@
 DONALD := @donald@
+TOOLSUB := @toolsub@
 
 CFLAGS := -I@librunt@/include @LIBALLOCSTOOL_CFLAGS@
 export CFLAGS

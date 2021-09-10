@@ -106,11 +106,13 @@ PKG_CHECK_MODULES([DWARFIDL], [dwarfidl])
 PKG_CHECK_MODULES([LIBANTLR3CXX], [libantlr3cxx])
 PKG_CHECK_MODULES([LIBALLOCSTOOL], [liballocstool])
 
-AC_SUBST(TRAP_SYSCALLS, $TRAP_SYSCALLS)
-AC_SUBST(MALLOC_HOOKS, $MALLOC_HOOKS)
-AC_SUBST(LIBDLBIND, $LIBDLBIND)
-AC_SUBST(LIBRUNT, $LIBRUNT)
-AC_SUBST(DONALD, $DONALD)
+dnl Do these do anything? We have lowercast AC_SUBSTs for the config-time vars, below
+dnl AC_SUBST(TRAP_SYSCALLS, $TRAP_SYSCALLS)
+dnl AC_SUBST(MALLOC_HOOKS, $MALLOC_HOOKS)
+dnl AC_SUBST(LIBDLBIND, $LIBDLBIND)
+dnl AC_SUBST(TOOLSUB, $TOOLSUB)
+dnl AC_SUBST(LIBRUNT, $LIBRUNT)
+dnl AC_SUBST(DONALD, $DONALD)
 
 AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [Enable debug mode]),
               [enable_debug=${enableval}])
@@ -159,7 +161,7 @@ AC_ARG_WITH([libsystrap],
                         AC_MSG_ERROR(--with-libsystrap expected directory name)
                 fi
             ],
-            [ac_libsystrap=$(realpath $srcdir)/contrib/libsystrap])
+            [ac_libsystrap=${LIBSYSTRAP:-$(realpath $srcdir)/contrib/libsystrap]})
 AC_ARG_WITH([librunt],
             [AS_HELP_STRING([--with-librunt=DIR],
               [where to find librunt (headers and source)])],
@@ -171,7 +173,7 @@ AC_ARG_WITH([librunt],
                         AC_MSG_ERROR(--with-librunt expected directory name)
                 fi
             ],
-            [ac_librunt=$(realpath $srcdir)/contrib/libsystrap/contrib/librunt])
+            [ac_librunt=${LIBRUNT:-$(realpath $srcdir)/contrib/libsystrap/contrib/librunt]})
 AC_ARG_WITH([donald],
             [AS_HELP_STRING([--with-donald=DIR],
               [where to find donald (headers and source)])],
@@ -183,7 +185,7 @@ AC_ARG_WITH([donald],
                         AC_MSG_ERROR(--with-donald expected directory name)
                 fi
             ],
-            [ac_donald=$(realpath $srcdir)/contrib/donald])
+            [ac_donald=${DONALD:-$(realpath $srcdir)/contrib/donald]})
 AC_ARG_WITH([libmallochooks],
             [AS_HELP_STRING([--with-libmallochooks=DIR],
               [where to find libmallochooks (headers, source, templates)])],
@@ -195,7 +197,7 @@ AC_ARG_WITH([libmallochooks],
                         AC_MSG_ERROR(--with-libmallochooks expected directory name)
                 fi
             ],
-            [ac_libmallochooks=$(realpath $srcdir)/contrib/libmallochooks])
+            [ac_libmallochooks=${LIBMALLOCHOOKS:-$(realpath $srcdir)/contrib/libmallochooks]})
 AC_ARG_WITH([libdlbind],
             [AS_HELP_STRING([--with-libdlbind=DIR],
               [where to find libdlbind (headers, source)])],
@@ -207,13 +209,26 @@ AC_ARG_WITH([libdlbind],
                         AC_MSG_ERROR(--with-libdlbind expected directory name)
                 fi
             ],
-            [ac_libdlbind=$(realpath $srcdir)/contrib/libdlbind])
+            [ac_libdlbind=${LIBDLBIND:-$(realpath $srcdir)/contrib/libdlbind]})
+AC_ARG_WITH([toolsub],
+            [AS_HELP_STRING([--with-toolsub=DIR],
+              [where to find toolsub (pre-built source tree)])],
+            [
+                if test -d "$withval"
+                then
+                        ac_toolsub="$withval"
+                else
+                        AC_MSG_ERROR(--with-toolsub expected directory name)
+                fi
+            ],
+            [ac_toolsub=${TOOLSUB:-$(realpath $srcdir)/contrib/toolsub]})
 
 AC_SUBST([libmallochooks], [$ac_libmallochooks])
 AC_SUBST([librunt], [$ac_librunt])
 AC_SUBST([libsystrap], [$ac_libsystrap])
 AC_SUBST([libdlbind], [$ac_libdlbind])
 AC_SUBST([donald], [$ac_donald])
+AC_SUBST([toolsub], [$ac_toolsub])
 
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])
 AM_CONDITIONAL(USE_FAKE_LIBUNWIND, [test "x$enable_fake_libunwind" = "xyes"])

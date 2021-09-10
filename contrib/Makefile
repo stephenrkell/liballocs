@@ -15,7 +15,7 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 # - libsystrap
 # - dwarfidl
 # - libdlbind
-# - toolsub -- FIXME: build this here once we move cil from tools/... to contrib/
+# - toolsub
 #
 # things that just sit here, but we have to set config for:
 # - libmallochooks
@@ -26,7 +26,8 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
 # varlist is used to build env.sh (by writing a rule to config.mk)
 
-default: $(CONTRIB)/env.sh config.mk build-libsystrap build-liballocstool build-libdlbind
+default: $(CONTRIB)/env.sh config.mk build-libsystrap build-liballocstool \
+  build-libdlbind build-toolsub
 
 OLD_CONTRIB := $(CONTRIB)
 include config.mk
@@ -89,6 +90,13 @@ build-libdlbind:
 
 CONFIG_MK += \nLIBDLBIND ?= $(CONTRIB)/libdlbind\n
 varlist += LIBDLBIND
+
+# ----------------------------toolsub
+
+build-toolsub:
+	$(MAKE) -C toolsub
+CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
+varlist += TOOLSUB
 
 # ----------------------------malloc-hooks
 
