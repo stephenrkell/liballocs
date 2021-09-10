@@ -93,8 +93,9 @@ varlist += LIBDLBIND
 
 # ----------------------------toolsub
 
+CIL_INSTALL ?= $(CONTRIB)/../tools/lang/c/cil/lib
 build-toolsub:
-	$(MAKE) -C toolsub
+	$(MAKE) -C toolsub CIL_INSTALL=$(CIL_INSTALL)
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB
 
