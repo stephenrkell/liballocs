@@ -96,6 +96,81 @@ static void treemap_delete(void **rootp)
 /* HACK: archdep */
 #define IS_PLAUSIBLE_POINTER(p) (!(p) || ((p) == (void*) -1) || (((uintptr_t) (p)) >= 4194304 && ((uintptr_t) (p)) < 0x800000000000ul))
 
+struct adj_list_ctxt
+{
+	node_rec **p_adj_u_head;
+	node_rec **p_adj_u_tail;
+	void *obj_start;
+	struct uniqtype *obj_t;
+	unsigned long start_offset;
+	struct uniqtype *t_at_offset;
+	follow_ptr_fn *follow_ptr;
+	void *fp_arg;
+};
+static void visit_one_subobject(int i, struct uniqtype *element_type, long memb_offset,
+	struct adj_list_ctxt *ctxt)
+{
+	node_rec **p_adj_u_head = ctxt->p_adj_u_head;
+	node_rec **p_adj_u_tail = ctxt->p_adj_u_tail;
+	void *obj_start = ctxt->obj_start;
+	struct uniqtype *obj_t = ctxt->obj_t;
+	unsigned long start_offset = ctxt->start_offset;
+	struct uniqtype *t_at_offset = ctxt->t_at_offset;
+	follow_ptr_fn *follow_ptr = ctxt->follow_ptr;
+	void *fp_arg = ctxt->fp_arg;
+	/* Is it a pointer? If so, add it to the adjacency list. */
+	if (UNIQTYPE_IS_POINTER_TYPE(element_type))
+	{
+		struct uniqtype *pointed_to_static_t = UNIQTYPE_POINTEE_TYPE(element_type);
+		// get the address of the pointed-to object
+		void *pointed_to_object = *(void**)((uintptr_t) obj_start + start_offset + memb_offset);
+		/* Check sanity of the pointer. We might be reading some union'd storage
+		 * that is currently holding a non-pointer. */
+		node_rec *to_enqueue = NULL;
+		if (pointed_to_object && IS_PLAUSIBLE_POINTER(pointed_to_object))
+		{
+			/* make a node and put it in the adjacency list */
+			void *ptr = pointed_to_object;
+			struct uniqtype *t = pointed_to_static_t;
+			follow_ptr(&ptr, &t, fp_arg);
+			if (ptr)
+			{
+				to_enqueue = make_node(ptr, t);
+				__uniqtype_node_queue_push_tail(p_adj_u_head, p_adj_u_tail, to_enqueue);
+
+				DEBUG_GUARD(fprintf(debug_out, "\t%s_at_%p -> %s_at_%p;\n",
+					NAME_FOR_UNIQTYPE(obj_t), obj_start,
+					NAME_FOR_UNIQTYPE(to_enqueue->t), to_enqueue->obj));
+			}
+		}
+		else if (!pointed_to_object || pointed_to_object == (void*) -1)
+		{
+			/* null pointer */
+		}
+		else
+		{
+			fprintf(stderr, "Warning: insane pointer value %p found in field index %d in object %p, type %s\n",
+				pointed_to_object,
+				i,
+				(char*)((uintptr_t) obj_start + start_offset),
+				NAME_FOR_UNIQTYPE(t_at_offset)
+			);
+		}
+		if (to_enqueue && to_enqueue->obj) fprintf(stderr, "Found a pointed-to object at %p, statically of type %s, "
+			"added as %p of type %s\n",
+			pointed_to_object, NAME_FOR_UNIQTYPE(pointed_to_static_t),
+			to_enqueue->obj, NAME_FOR_UNIQTYPE(to_enqueue->t));
+	}
+	else if (UNIQTYPE_IS_COMPOSITE_TYPE(element_type)) /* Else is it a thing with structure? If so, recurse. */
+	{
+		build_adjacency_list_recursive(
+			p_adj_u_head, p_adj_u_tail,
+			obj_start, obj_t,
+			start_offset + memb_offset, element_type,
+			follow_ptr, fp_arg
+		);
+	}
+}
 /* This function builds an adjacency list for the current node, by adding
  * *all* nodes, not just (despite the name) those pointed to by subobjects.
  * i.e. the top-level object is a zero-degree subobject. */
@@ -119,86 +194,18 @@ static void build_adjacency_list_recursive(
 	if (!t_at_offset) return;
 	if (!UNIQTYPE_HAS_SUBOBJECTS(t_at_offset)) return;
 
-	/* The way we iterate through structs and arrays is different. */
-	struct uniqtype_rel_info *related = &t_at_offset->related[0];
-	unsigned nmemb;
-	_Bool is_array;
-
-	if (UNIQTYPE_IS_COMPOSITE_TYPE(t_at_offset))
-	{
-		is_array = 0;
-		nmemb = UNIQTYPE_COMPOSITE_MEMBER_COUNT(t_at_offset);
-		/* FIXME: toplevel of heap arrays */
-	}
-	else
-	{
-		is_array = 1;
-		nmemb = UNIQTYPE_ARRAY_LENGTH(t_at_offset);
-		assert(nmemb != UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
-	}
-
-	for (unsigned i = 0; i < nmemb; ++i, related += (is_array ? 0 : 1))
-	{
-		// if we're an array, the element type should have known length (pos_maxoff)
-		assert(!is_array || UNIQTYPE_HAS_KNOWN_LENGTH(related->un.memb.ptr));
-		struct uniqtype *element_type = is_array ? UNIQTYPE_ARRAY_ELEMENT_TYPE(t_at_offset) : 
-			related->un.memb.ptr;
-		long memb_offset = is_array ? (i * UNIQTYPE_ARRAY_ELEMENT_TYPE(t_at_offset)->pos_maxoff) 
-			: related->un.memb.off;
-		
-		/* Is it a pointer? If so, add it to the adjacency list. */
-		if (UNIQTYPE_IS_POINTER_TYPE(element_type))
-		{
-			struct uniqtype *pointed_to_static_t = UNIQTYPE_POINTEE_TYPE(element_type);
-			// get the address of the pointed-to object
-			void *pointed_to_object = *(void**)((char*) obj_start + start_offset + memb_offset);
-			/* Check sanity of the pointer. We might be reading some union'd storage
-			 * that is currently holding a non-pointer. */
-			node_rec *to_enqueue = NULL;
-			if (pointed_to_object && IS_PLAUSIBLE_POINTER(pointed_to_object))
-			{
-				/* make a node and put it in the adjacency list */
-				void *ptr = pointed_to_object;
-				struct uniqtype *t = pointed_to_static_t;
-				follow_ptr(&ptr, &t, fp_arg);
-				if (ptr)
-				{
-					to_enqueue = make_node(ptr, t);
-					__uniqtype_node_queue_push_tail(p_adj_u_head, p_adj_u_tail, to_enqueue);
-
-					DEBUG_GUARD(fprintf(debug_out, "\t%s_at_%p -> %s_at_%p;\n", 
-						NAME_FOR_UNIQTYPE(obj_t), obj_start,
-						NAME_FOR_UNIQTYPE(to_enqueue->t), to_enqueue->obj));
-				}
-			}
-			else if (!pointed_to_object || pointed_to_object == (void*) -1)
-			{
-				/* null pointer */
-			}
-			else
-			{
-				fprintf(stderr, "Warning: insane pointer value %p found in field index %d in object %p, type %s\n",
-					pointed_to_object,
-					i,
-					(char*) obj_start + start_offset,
-					NAME_FOR_UNIQTYPE(t_at_offset)
-				);
-			}
-			if (to_enqueue && to_enqueue->obj) fprintf(stderr, "Found a pointed-to object at %p, statically of type %s, "
-				"added as %p of type %s\n",
-				pointed_to_object, NAME_FOR_UNIQTYPE(pointed_to_static_t),
-				to_enqueue->obj, NAME_FOR_UNIQTYPE(to_enqueue->t));
-		}
-		else if (UNIQTYPE_IS_COMPOSITE_TYPE(element_type)) /* Else is it a thing with structure? If so, recurse. */
-		{
-			build_adjacency_list_recursive(
-				p_adj_u_head, p_adj_u_tail, 
-				obj_start, obj_t, 
-				start_offset + memb_offset, element_type,
-				follow_ptr, fp_arg
-			);
-		}
-	}
+	struct adj_list_ctxt ctxt = {
+		.p_adj_u_head = p_adj_u_head,
+		.p_adj_u_tail = p_adj_u_tail,
+		.obj_start = obj_start,
+		.obj_t = obj_t,
+		.start_offset = start_offset,
+		.t_at_offset = t_at_offset,
+		.follow_ptr = follow_ptr,
+		.fp_arg = fp_arg
+	};
+#define do_thing(_i, _t, _offs) visit_one_subobject((_i), (_t), (_offs), &ctxt)
+	UNIQTYPE_FOR_EACH_SUBOBJECT(t_at_offset, do_thing);
 }
 
 static void process_bfs_queue_and_maps(
@@ -305,8 +312,8 @@ void __uniqtype_walk_bfs_from_object(
 	__uniqtype_node_queue_push_tail(&q_head, &q_tail, to_enqueue);
 	
 	/* Sanity check: assert that our object's start is non-null and within 128MB of our pointer. */
-	assert(!to_enqueue || ((char*) to_enqueue->obj <= (char*) object
-						&& (char*) object - (char*)to_enqueue->obj < (1U<<27)));
+	assert(!to_enqueue || ((uintptr_t) to_enqueue->obj <= (uintptr_t) object
+						&& (uintptr_t) object - (uintptr_t)to_enqueue->obj < (1U<<27)));
 	
 	__uniqtype_process_bfs_queue(&q_head, &q_tail, follow_ptr, fp_arg, on_blacken, ob_arg);
 	
