@@ -92,7 +92,7 @@ void ( __attribute__((constructor(102))) __static_file_allocator_init)(void)
 					// we print the whole metavector
 					for (unsigned i = 0; i < metavector_size / sizeof *metavector; ++i)
 					{
-						fprintf(stream_err, "At %016lx there is a static alloc of kind %u, idx %08u, type %s\n",
+						fprintf(get_stream_err(), "At %016lx there is a static alloc of kind %u, idx %08u, type %s\n",
 							afile->m.l->l_addr + vaddr_from_rec(&metavector[i], afile),
 							(unsigned) (metavector[i].is_reloc ? REC_RELOC : metavector[i].sym.kind),
 							(unsigned) (metavector[i].is_reloc ? 0 : metavector[i].sym.idx),
@@ -230,6 +230,12 @@ static void load_metadata(struct allocs_file_metadata *meta, void *handle)
 void load_meta_objects_for_early_libs(void)
 {
 	assert(early_lib_handles[0]);
+	assert(!meta_base);
+	// the user can specify where we get our -meta.so
+	meta_base = getenv("META_BASE");
+	if (!meta_base) meta_base = "/usr/lib/meta";
+	meta_base_len = strlen(meta_base);
+
 	for (unsigned i = 0; i < MAX_EARLY_LIBS; ++i)
 	{
 		if (!early_lib_handles[i]) break;

@@ -63,7 +63,7 @@ void ( __attribute__((constructor(101))) __stackframe_allocator_init)(void)
 			// get bp, sp, ip and proc_name
 			ret = unw_get_proc_name(&cursor, buf, sizeof buf, NULL); have_name = (ret == 0 || ret == -UNW_ENOMEM);
 			buf[sizeof buf - 1] = '\0';
-			// if (have_name) fprintf(stream_err, "Saw frame %s\n", buf);
+			// if (have_name) fprintf(get_stream_err(), "Saw frame %s\n", buf);
 
 			ret = unw_get_reg(&cursor, UNW_REG_IP, &ip); assert(ret == 0);
 			ret = unw_get_reg(&cursor, UNW_REG_SP, &sp); assert(ret == 0);

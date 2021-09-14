@@ -364,7 +364,7 @@ void __liballocs_print_l0_to_stream_err(void)
 	if (!pageindex) __pageindex_init();
 	for (struct big_allocation *b = &big_allocations[1]; b < &big_allocations[NBIGALLOCS]; ++b)
 	{
-		if (BIGALLOC_IN_USE(b) && !b->parent) fprintf(stream_err, "%p-%p %s %s %p\n", 
+		if (BIGALLOC_IN_USE(b) && !b->parent) fprintf(get_stream_err(), "%p-%p %s %s %p\n",
 				b->begin, b->end, b->allocated_by->name, 
 				b->meta.what == DATA_PTR ? "(data ptr) " : "(insert + bits) ", 
 				b->meta.what == DATA_PTR ? b->meta.un.opaque_data.data_ptr : (void*)(uintptr_t) b->meta.un.ins_and_bits.ins.alloc_site);
@@ -383,7 +383,7 @@ void __liballocs_report_wild_address(const void *ptr)
 	}
 	else
 	{
-		fprintf(stream_err, "*** saw wild pointer %p\n", ptr);
+		fprintf(get_stream_err(), "*** saw wild pointer %p\n", ptr);
 		__liballocs_print_l0_to_stream_err();
 	}
 }

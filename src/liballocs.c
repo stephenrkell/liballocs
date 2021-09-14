@@ -433,8 +433,8 @@ FILE *stream_err __attribute__((visibility("hidden")));
 
 struct addrlist __liballocs_unrecognised_heap_alloc_sites = { 0, 0, NULL };
 
-static const char *meta_base;
-static unsigned meta_base_len;
+const char *meta_base __attribute__((visibility("hidden")));
+unsigned meta_base_len __attribute__((visibility("hidden")));
 
 int __liballocs_debug_level;
 _Bool __liballocs_is_initialized;
@@ -495,9 +495,9 @@ static int swap_out_segment_pages(struct dl_phdr_info *info, size_t size, void *
 
 static int print_type_cb(struct uniqtype *t, void *ignored)
 {
-	fprintf(stream_err, "uniqtype addr %p, name %s, size %d bytes\n", 
+	fprintf(get_stream_err(), "uniqtype addr %p, name %s, size %d bytes\n",
 		t, UNIQTYPE_NAME(t), t->pos_maxoff);
-	fflush(stream_err);
+	fflush(get_stream_err());
 	return 0;
 }
 
@@ -721,6 +721,8 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 
 	// skip objects that are themselves meta objects (i.e. are under the meta_base path)
 	// FIXME: what about embedded meta objects?
+	assert(meta_base);
+	assert(meta_base_len);
 	if (0 == strncmp(canon_objname, meta_base, meta_base_len)) return 0;
 	
 	// get the -meta.so object's name
@@ -799,26 +801,26 @@ static void print_exit_summary(void)
 	if (__liballocs_aborted_unknown_storage + __liballocs_hit_static_case + __liballocs_hit_stack_case
 			 + __liballocs_hit_heap_case > 0)
 	{
-		fprintf(stream_err, "====================================================\n");
-		fprintf(stream_err, "liballocs summary: \n");
-		fprintf(stream_err, "----------------------------------------------------\n");
-		fprintf(stream_err, "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
-		fprintf(stream_err, "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
-		fprintf(stream_err, "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
-		fprintf(stream_err, "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);
-		fprintf(stream_err, "----------------------------------------------------\n");
-		fprintf(stream_err, "queries aborted for unindexed heap:        % 9ld\n", __liballocs_aborted_unindexed_heap);
-		fprintf(stream_err, "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
-		fprintf(stream_err, "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
-		fprintf(stream_err, "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
-		fprintf(stream_err, "====================================================\n");
+		fprintf(get_stream_err(), "====================================================\n");
+		fprintf(get_stream_err(), "liballocs summary: \n");
+		fprintf(get_stream_err(), "----------------------------------------------------\n");
+		fprintf(get_stream_err(), "queries aborted for unknown storage:       % 9ld\n", __liballocs_aborted_unknown_storage);
+		fprintf(get_stream_err(), "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
+		fprintf(get_stream_err(), "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
+		fprintf(get_stream_err(), "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);
+		fprintf(get_stream_err(), "----------------------------------------------------\n");
+		fprintf(get_stream_err(), "queries aborted for unindexed heap:        % 9ld\n", __liballocs_aborted_unindexed_heap);
+		fprintf(get_stream_err(), "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
+		fprintf(get_stream_err(), "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
+		fprintf(get_stream_err(), "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
+		fprintf(get_stream_err(), "====================================================\n");
 		for (unsigned i = 0; i < __liballocs_unrecognised_heap_alloc_sites.count; ++i)
 		{
 			if (i == 0)
 			{
-				fprintf(stream_err, "Saw the following unrecognised heap alloc sites: \n");
+				fprintf(get_stream_err(), "Saw the following unrecognised heap alloc sites: \n");
 			}
-			fprintf(stream_err, "%p (%s)\n", __liballocs_unrecognised_heap_alloc_sites.addrs[i], 
+			fprintf(get_stream_err(), "%p (%s)\n", __liballocs_unrecognised_heap_alloc_sites.addrs[i], 
 					format_symbolic_address(__liballocs_unrecognised_heap_alloc_sites.addrs[i]));
 		}
 	}
@@ -832,10 +834,10 @@ static void print_exit_summary(void)
 		{
 			while (0 < (bytes = fread(buffer, 1, sizeof(buffer), smaps)))
 			{
-				fwrite(buffer, 1, bytes, stream_err);
+				fwrite(buffer, 1, bytes, get_stream_err());
 			}
 		}
-		else fprintf(stream_err, "Couldn't read from smaps!\n");
+		else fprintf(get_stream_err(), "Couldn't read from smaps!\n");
 	}
 }
 
@@ -874,6 +876,25 @@ struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t;
 struct uniqtype *pointer_to___uniqtype____ARR0_signed_char;
 struct uniqtype *pointer_to___uniqtype__intptr_t;
 
+__attribute__((visibility("hidden")))
+FILE *get_stream_err(void)
+{
+	// figure out where our output goes
+	const char *errvar = getenv("LIBALLOCS_ERR");
+	if (errvar)
+	{
+		// try opening it
+		stream_err = fopen(errvar, "w");
+		if (!stream_err)
+		{
+			stream_err = stderr;
+			debug_printf(0, "could not open %s for writing\n", errvar);
+		}
+	} else stream_err = stderr;
+	assert(stream_err);
+	return stream_err;
+}
+
 /* We want to be called early, but not too early, because it might not be safe 
  * to open the -uniqtypes.so handle yet. */
 int __liballocs_global_init(void) __attribute__((constructor(103),visibility("protected")));
@@ -893,26 +914,7 @@ int ( __attribute__((constructor(103))) __liballocs_global_init)(void)
 	
 	// print a summary when the program exits
 	atexit(print_exit_summary);
-	
-	// figure out where our output goes
-	const char *errvar = getenv("LIBALLOCS_ERR");
-	if (errvar)
-	{
-		// try opening it
-		stream_err = fopen(errvar, "w");
-		if (!stream_err)
-		{
-			stream_err = stderr;
-			debug_printf(0, "could not open %s for writing\n", errvar);
-		}
-	} else stream_err = stderr;
-	assert(stream_err);
 
-	// the user can specify where we get our -types.so and -allocsites.so
-	meta_base = getenv("META_BASE");
-	if (!meta_base) meta_base = "/usr/lib/meta";
-	meta_base_len = strlen(meta_base);
-	
 	const char *debug_level_str = getenv("LIBALLOCS_DEBUG_LEVEL");
 	if (debug_level_str) __liballocs_debug_level = atoi(debug_level_str);
 

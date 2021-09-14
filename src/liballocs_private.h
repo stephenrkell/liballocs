@@ -1,10 +1,6 @@
 #ifndef LIBALLOCS_PRIVATE_H_
 #define LIBALLOCS_PRIVATE_H_
 
-#ifndef VIS
-#define VIS(v) //__attribute__((visibility( #v )))
-#endif
-
 /* x86_64 only, for now */
 #if !defined(__x86_64__) && !defined(X86_64)
 #error Unsupported architecture.
@@ -37,6 +33,9 @@ typedef bool _Bool;
 #endif
 
 char execfile_name[4096] __attribute__((visibility("hidden")));
+extern const char *meta_base __attribute__((visibility("hidden")));
+extern unsigned meta_base_len __attribute__((visibility("hidden")));
+
 char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 
@@ -87,9 +86,10 @@ void *__private_malloc(size_t);
 void __private_free(void *);
 
 extern FILE *stream_err;
+__attribute__((visibility("hidden"))) FILE *get_stream_err(void);
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \
-      fprintf(stream_err, "%s: " fmt, get_exe_basename(), ## __VA_ARGS__ );  \
+      fprintf(get_stream_err(), "%s: " fmt, get_exe_basename(), ## __VA_ARGS__ );  \
     } \
   } while (0)
 

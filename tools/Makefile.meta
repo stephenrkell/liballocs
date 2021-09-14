@@ -32,6 +32,7 @@ GATHER_SRCMEMACC ?= $(dir $(THIS_MAKEFILE))/gather-srcmemacc.sh
 CFLAGS += -I$(LIBALLOCSTOOL)/include -I$(LIBALLOCS)/include -I$(LIBRUNT)/include
 
 META_CC ?= $(CC)
+$(info META_CC is $(META_CC))
 META_CFLAGS ?= $(CFLAGS)
 
 # By default, remake everything we have already made,
