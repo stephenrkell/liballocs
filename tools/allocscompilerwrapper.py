@@ -147,8 +147,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
             return
         
         # do we need to unbind? 
-        # MONSTER HACK: globalize a symbol if it's a named alloc fn. 
-        # This is needed e.g. for SPEC benchmark bzip2
         with (self.makeErrFile(os.path.realpath(filename) + ".fixuplog", "w+") if not errfile else errfile) as errfile:
 
             # also link the file with the uniqtypes it references
@@ -162,41 +160,77 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # Now deal with wrapped functions
             wrappedFns = self.allWrappedSymNames()
             self.debugMsg("Looking for wrapped functions that need unbinding\n")
-            toUnbind = self.listDefinedSymbolsMatching(filename, wrappedFns)
-            self.debugMsg("Got %s\n" % (str(toUnbind)))
-            if toUnbind != []:
-                # we need to unbind. We unbind the allocsite syms
+            wrappedDefs = self.listDefinedSymbolsMatching(filename, wrappedFns)
+            self.debugMsg("Got %s\n" % (str(wrappedDefs)))
+            if wrappedDefs != []:
+                # Defs are often ref'd, so we need to unbind. We unbind the allocsite syms
                 # *and* --prefer-non-section-relocs. 
                 # This will give us a file with __def_ and __ref_ symbols
                 # for the allocation function. We then rename these to 
                 # __real_ and __wrap_ respectively. 
                 backup_filename = os.path.splitext(filename)[0] + ".backup.o"
-                self.debugMsg("Found that we need to unbind symbols [%s]... making backup as %s\n" % \
-                    (", ".join(toUnbind), backup_filename))
+                self.debugMsg("Found that we may need to unbind symbols [%s]... making backup as %s\n" % \
+                    (", ".join(wrappedDefs), backup_filename))
                 cp_ret = subprocess.call(["cp", filename, backup_filename], stderr=errfile)
                 if cp_ret != 0:
                     self.printErrors(errfile)
                     return cp_ret
-                unbind_pairs = [["--unbind-sym", sym] for sym in toUnbind]
-                unbind_cmd = ["objcopy", "--prefer-non-section-relocs"] \
-                 + [opt for pair in unbind_pairs for opt in pair] \
-                 + [filename]
+                # mungings to do (the order matters!):
+                # 1. globalize any local allocation functions, and normalize relocs afterwards
+                #       MONSTER HACK: globalize a symbol if it's a named alloc fn. 
+                #       This is needed e.g. for SPEC benchmark bzip2
+                local_syms_list_cmd = [self.getLibAllocsBaseDir() + "/tools/to-globalize.sh"] \
+                 + [filename] \
+                 + [sym for sym in wrappedDefs]
+                local_syms_list = subprocess.Popen(local_syms_list_cmd, stdout=subprocess.PIPE).communicate()[0].decode()
+                self.debugMsg("Any to globalize? %s\n" % local_syms_list)
+                syms_to_globalize = local_syms_list.split("\n")
+                if syms_to_globalize != []:
+                    # do the globalize
+                    objcopy_ret = subprocess.call( \
+                     ["objcopy"] \
+                     + [opt for seq in [["--globalize-symbol", sym] for sym in syms_to_globalize if sym != ""] for opt in seq] \
+                     + [filename], stderr=errfile)
+                    if objcopy_ret != 0:
+                        self.printErrors(errfile)
+                        return objcopy_ret
+                    normrelocs_cmd = [os.environ.get("ELFTIN") + "/normrelocs/normrelocs"] \
+                     + [filename] \
+                     + [s for s in syms_to_globalize if s != ""]
+                    self.debugMsg("Did globalizing objcopy; normrelocs cmd is %s\n" % str(normrelocs_cmd))
+                    # objcopy succeeded, so do normrelocs
+                    # (instead of --prefer-non-section-relocs)
+                    normrelocs_ret = subprocess.call(normrelocs_cmd, stderr=errfile)
+                    if normrelocs_ret != 0:
+                        self.printErrors(errfile)
+                        return normrelocs_ret
+                    self.debugMsg("Did normrelocs\n")
+                # 2. unbind any defined allocation functions
+                # if we have ELFTIN set, use that to specify our abs2und
+                # PROBLEM: will ELFTIN be set? Only during liballocs build, but
+                # we are running. We need a script that will set our env.
+                # But a toolsub-based wrapper will be a good place for that.
+                unbind_cmd = ["env"] + \
+                 (["ABS2UND=" + os.environ.get("ELFTIN") + "/abs2und/abs2und"] \
+                   if "ELFTIN" in os.environ else []) + \
+                 [self.getLibAllocsBaseDir() + "/tools/objcopy-unbind-syms.sh"] \
+                 + [filename] \
+                 + [sym for sym in wrappedDefs]
                 self.debugMsg("cmdstring for objcopy (unbind) is " + " ".join(unbind_cmd) + "\n")
                 objcopy_ret = subprocess.call(unbind_cmd, stderr=errfile)
                 if objcopy_ret != 0:
                     self.debugMsg("problem doing objcopy (unbind) (ret %d)\n" % objcopy_ret)
                     self.printErrors(errfile)
                     return objcopy_ret
+                # 3. turn __def_/__ref_ symbols into unprefixed and __wrap_
                 # one more objcopy to rename the __def_ and __ref_ symbols
                 self.debugMsg("Renaming __def_ and __ref_ alloc symbols\n")
                 # instead of objcopying to replace __def_<sym> with <sym>,
                 # we use ld -r to define <sym> and __real_<sym> as *extra* symbols
                 # ... and also ensure __def_ is global, while we're at it
-                ref_args = [["--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in toUnbind]
-                def_global_args = [["--globalize-symbol", "__def_" + sym] for sym in toUnbind]
-                objcopy_ret = subprocess.call(["objcopy", "--prefer-non-section-relocs"] \
+                ref_args = [["--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in wrappedDefs]
+                objcopy_ret = subprocess.call(["objcopy"] \
                  + [opt for seq in ref_args for opt in seq] \
-                 + [opt for seq in def_global_args for opt in seq] \
                  + [filename], stderr=errfile)
                 if objcopy_ret != 0:
                     self.printErrors(errfile)
@@ -208,7 +242,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     return cp_ret
                 def_args = [["--defsym", sym + "=__def_" + sym, \
                     "--defsym", "__real_" + sym + "=__def_" + sym, \
-                    ] for sym in toUnbind]
+                    ] for sym in wrappedDefs]
                 ld_ret = subprocess.call(["ld", "-r"] \
                  + [opt for seq in def_args for opt in seq] \
                  + [tmp_filename, "-o", filename], stderr=errfile)

@@ -8,17 +8,9 @@ RUN adduser ${user:-user} && \
 RUN mkdir -p /usr/local/src && chown root:user /usr/local/src && \
    chmod g+w /usr/local/src
 USER ${user:-user}
-RUN sudo apt-get install -y bison flex texinfo git build-essential
-RUN cd /usr/local/src && git clone https://github.com/stephenrkell/binutils-gdb.git
-RUN cd /usr/local/src/binutils-gdb && \
-   chmod +x configure && \
-   CFLAGS="-fPIC -g -O2" ./configure --prefix=/usr/local \
-     --enable-gold --enable-plugins --enable-install-libiberty && \
-   make -j4 && sudo make install
-RUN cd /usr/local/bin && sudo rm -f ld && sudo ln -s ld.bfd ld
 RUN sudo mkdir -p /usr/lib/meta && sudo chown root:staff /usr/lib/meta && \
    sudo chmod g+w /usr/lib/meta
-RUN sudo apt-get install -y libelf-dev libdw-dev binutils-dev \
+RUN sudo apt-get install -y git build-essential libelf-dev libdw-dev binutils-dev \
        autoconf automake libtool pkg-config autoconf-archive \
        g++ ocaml ocamlbuild ocaml-findlib \
        default-jre-headless python3 python3-distutils python \

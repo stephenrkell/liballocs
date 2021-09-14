@@ -4,6 +4,7 @@ LIBRUNT := @librunt@
 LIBDLBIND := @libdlbind@
 DONALD := @donald@
 TOOLSUB := @toolsub@
+ELFTIN := @elftin@
 CIL_INSTALL := @cil_install@
 export CIL_INSTALL
 

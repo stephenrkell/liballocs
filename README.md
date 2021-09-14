@@ -209,7 +209,6 @@ including nested submodules. Please make sure you pull them all.
 Generic download-and-build instructions for Debian platforms
 look something like the following.
 
-    $ # step 0: FIRST optionally build my binutils-gdb repo (see below)
     $ sudo apt-get install libelf-dev libdw-dev binutils-dev \
         autoconf automake libtool pkg-config autoconf-archive \
         g++ ocaml ocamlbuild ocaml-findlib \
@@ -242,22 +241,3 @@ If you've got this far, you may as well run the tests.
 
     $ cd liballocs/tests
     $ make                        # please report failures
-
-That's almost all. But notice step 0 above: for a
-fully-functioning liballocs toolchain, you'll also want my
-*patched* binutils. You can get a long way without it, so this
-step is optional, but in some awkward cases, liballocs's
-compilers wrappers need to invoke my hacked objcopy.
-
-    $ sudo apt-get install bison flex texinfo
-    $ git clone https://github.com/stephenrkell/binutils-gdb.git
-    $ cd binutils-gdb
-    $ CFLAGS="-fPIC -g -O2" ./configure --prefix=/usr/local \
-          --enable-gold --enable-plugins --enable-install-libiberty \
-    # a PIC libbfd.a and co-lo'd libiberty helps e.g. build OProfile
-    $ make -jn                    # for your favourite n
-    $ sudo make install
-
-Now you should have my patched objcopy on your PATH... it defines an
-option --unbind-sym, if you want to check. The requirement for a patched
-binutils will go away eventually....

@@ -106,14 +106,6 @@ PKG_CHECK_MODULES([DWARFIDL], [dwarfidl])
 PKG_CHECK_MODULES([LIBANTLR3CXX], [libantlr3cxx])
 PKG_CHECK_MODULES([LIBALLOCSTOOL], [liballocstool])
 
-dnl Do these do anything? We have lowercast AC_SUBSTs for the config-time vars, below
-dnl AC_SUBST(TRAP_SYSCALLS, $TRAP_SYSCALLS)
-dnl AC_SUBST(MALLOC_HOOKS, $MALLOC_HOOKS)
-dnl AC_SUBST(LIBDLBIND, $LIBDLBIND)
-dnl AC_SUBST(TOOLSUB, $TOOLSUB)
-dnl AC_SUBST(LIBRUNT, $LIBRUNT)
-dnl AC_SUBST(DONALD, $DONALD)
-
 AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [Enable debug mode]),
               [enable_debug=${enableval}])
 AC_ARG_ENABLE([fake-libunwind],
@@ -222,6 +214,18 @@ AC_ARG_WITH([toolsub],
                 fi
             ],
             [ac_toolsub=${TOOLSUB:-$(realpath $srcdir)/contrib/toolsub]})
+AC_ARG_WITH([elftin],
+            [AS_HELP_STRING([--with-elftin=DIR],
+              [where to find elftin (pre-built source tree)])],
+            [
+                if test -d "$withval"
+                then
+                        ac_elftin="$withval"
+                else
+                        AC_MSG_ERROR(--with-elftin expected directory name)
+                fi
+            ],
+            [ac_toolsub=${TOOLSUB:-$(realpath $srcdir)/contrib/elftin]})
 AC_ARG_WITH([cil-install],
             [AS_HELP_STRING([--with-cil-install=DIR],
               [where to find CIL libraries (cil/cil.cmxa)])],
@@ -241,6 +245,7 @@ AC_SUBST([libsystrap], [$ac_libsystrap])
 AC_SUBST([libdlbind], [$ac_libdlbind])
 AC_SUBST([donald], [$ac_donald])
 AC_SUBST([toolsub], [$ac_toolsub])
+AC_SUBST([elftin], [$ac_elftin])
 AC_SUBST([cil_install], [$ac_cil_install])
 
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])

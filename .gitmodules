@@ -22,3 +22,6 @@
 [submodule "contrib/cil"]
 	path = contrib/cil
 	url = https://github.com/stephenrkell/cil.git
+[submodule "contrib/elftin"]
+	path = contrib/elftin
+	url = https://github.com/stephenrkell/elftin.git

@@ -5,28 +5,10 @@ jobs:
       - image: ubuntu:18.04
     steps:
       - run:
-          name: Install dependencies (binutils-gdb)
-          command: |
-            apt update
-            apt install -y bison flex texinfo git build-essential
-      - run:
-          name: Clone (binutils-gdb)
-          command: |
-            git clone https://github.com/stephenrkell/binutils-gdb.git ~/binutils-gdb
-      - run:
-          name: Configure, build, install (binutils-gdb)
-          working_directory: ~/binutils-gdb
-          command: |
-            chmod +x configure
-            CFLAGS="-fPIC -g -O2" ./configure --prefix=/usr/local \
-              --enable-gold --enable-plugins --enable-install-libiberty
-            make -j 2 all-binutils all-gold all-libiberty
-            make install-binutils install-gold install-libiberty
-      - run:
           name: Install dependencies
           command: |
             apt update
-            apt install -y \
+            apt install -y build-essential \
               libelf-dev libdw-dev binutils-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++ ocaml ocamlbuild ocaml-findlib \

@@ -27,7 +27,7 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 # varlist is used to build env.sh (by writing a rule to config.mk)
 
 default: $(CONTRIB)/env.sh config.mk build-libsystrap build-liballocstool \
-  build-libdlbind build-cil build-toolsub
+  build-libdlbind build-cil build-toolsub build-elftin
 
 OLD_CONTRIB := $(CONTRIB)
 include config.mk
@@ -114,6 +114,15 @@ build-toolsub: build-cil
 	$(MAKE) -C toolsub
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB
+
+# ----------------------------elftin
+
+.PHONY: build-elftin
+build-elftin:
+	$(MAKE) -C toolsub/normrelocs
+	$(MAKE) -C toolsub/abs2und
+CONFIG_MK += \nELFTIN ?= $(CONTRIB)/elftin\n
+varlist += ELFTIN
 
 # ----------------------------malloc-hooks
 
