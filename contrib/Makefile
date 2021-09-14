@@ -119,8 +119,8 @@ varlist += TOOLSUB
 
 .PHONY: build-elftin
 build-elftin:
-	$(MAKE) -C elftin/normrelocs
-	$(MAKE) -C elftin/abs2und
+	$(MAKE) -C elftin/normrelocs normrelocs
+	$(MAKE) -C elftin/abs2und abs2und
 CONFIG_MK += \nELFTIN ?= $(CONTRIB)/elftin\n
 varlist += ELFTIN
 
