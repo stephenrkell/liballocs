@@ -67,6 +67,7 @@ liballocstool/configure: liballocstool/configure.ac
 # share their dwarfidl. I think this is doable though.
 liballocstool/config.status: liballocstool/configure $(CONTRIB)/liballocstool/contrib/env.sh
 	cd liballocstool && \
+        $(MAKE) -C contrib && \
         . ./contrib/env.sh && \
         ./configure --with-librunt=$(LIBRUNT_DIR)
 
