@@ -112,7 +112,7 @@ export CIL_INSTALL
 
 .PHONY: build-toolsub
 build-toolsub: build-cil
-	$(MAKE) -C toolsub
+	$(MAKE) -C toolsub wrapper-recursive cilpp-recursive  # don't build clang-based cccppp
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB
 
