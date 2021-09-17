@@ -25,9 +25,9 @@ DEPS += $(OCAML_DEPS)
 
 %.cmxs: %.cmx 
 	$(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
-%.cmx %.cmi: %.ml cil.stamp
+%.cmx %.cmi: %.ml
 	$(OCAMLFIND) ocamlopt -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) -c "$<"
-%.cmo %.cmi: %.ml cil.stamp
+%.cmo %.cmi: %.ml
 	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -c "$<"
 %.cma: %.cmo
 	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -a $+
