@@ -13,7 +13,7 @@ OCAMLFLAGS += -I $(CIL_INSTALL)/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
 
 CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) $(realpath $(dir $(THIS_MAKEFILE)))/lib -name '*.ml') 
 
-default: cil src bin $(foreach t,$(CIL_TOOLS),$(t)/$(t).cmxs $(t)/$(t).cma)
+default: src bin $(foreach t,$(CIL_TOOLS),$(t)/$(t).cmxs $(t)/$(t).cma)
 
 OCAML_DEPS := $(patsubst %.ml,%.d,$(CIL_TOOLS_SRC))
 
