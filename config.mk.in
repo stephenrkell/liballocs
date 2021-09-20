@@ -6,7 +6,10 @@ DONALD := @donald@
 TOOLSUB := @toolsub@
 ELFTIN := @elftin@
 CIL_INSTALL := @cil_install@
+# export anything needed during build of liballocs-enabled executables
 export CIL_INSTALL
+export TOOLSUB
+export ELFTIN
 
 CFLAGS := -I@librunt@/include @LIBALLOCSTOOL_CFLAGS@
 export CFLAGS
