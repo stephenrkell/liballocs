@@ -225,7 +225,7 @@ AC_ARG_WITH([elftin],
                         AC_MSG_ERROR(--with-elftin expected directory name)
                 fi
             ],
-            [ac_toolsub=${TOOLSUB:-$(realpath $srcdir)/contrib/elftin]})
+            [ac_elftin=${TOOLSUB:-$(realpath $srcdir)/contrib/elftin]})
 AC_ARG_WITH([cil-install],
             [AS_HELP_STRING([--with-cil-install=DIR],
               [where to find CIL libraries (cil/cil.cmxa)])],
