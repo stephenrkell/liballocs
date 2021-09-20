@@ -63,15 +63,6 @@ jobs:
       - attach_workspace:
           at: /root
       - run:
-          name: Re-install binutils-gdb to override system binutils
-          working_directory: ~/binutils-gdb
-          command: |
-            make install-binutils install-gold install-libiberty
-      - run:
-          name: Report OCaml version for debugging
-          command: |
-            dpkg -l | grep ocaml
-      - run:
           name: Run tests
           command: make -C /root/project/tests -j 2
 
