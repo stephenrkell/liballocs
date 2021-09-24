@@ -143,7 +143,7 @@ _onlyrun-%:
 	LD_PRELOAD=$(PRELOAD) ./$*
 
 _onlygdbrun-%:
-	gdb --eval-command "set environment LD_PRELOAD=$(PRELOAD)" --args ./$* ./$*
+	gdb --symbols=./$* --args env LD_PRELOAD="$(PRELOAD)" ./$* ./$*
 
 build-%:
 	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" 
