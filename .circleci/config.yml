@@ -64,7 +64,7 @@ jobs:
           at: /root
       - run:
           name: Run tests
-          command: make -C /root/project/tests -j 2
+          command: make -C /root/project/tests -j 2 -k
 
 workflows:
   version: 2
