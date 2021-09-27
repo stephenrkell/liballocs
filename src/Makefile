@@ -192,7 +192,9 @@ $(patsubst %.o,%.d,$(1)): $(patsubst %.o,%.c,$(1))
 	mkdir -p $$(dir $$@) && $$(CC) -MM -MT $(1) $$(CFLAGS) "$$<" > "$$@" || (rm -f "$$@"; false)
 endef
 $(foreach f,$(DEP_OBJS),$(eval $(call rule-for-depfile,$(f))))
+ifneq ($(MAKECMDGOALS),clean)
 include $(DEPS)
+endif
 
 # Build using our special toolsub-based wrapper checks.
 # Currently this checks we don't have any cases of missing/conflicting/ignored

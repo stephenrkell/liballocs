@@ -322,6 +322,7 @@ static void bigalloc_del(struct big_allocation *b)
 	{
 		b->meta.un.opaque_data.free_func(b->meta.un.opaque_data.data_ptr);
 	}
+	if (b->suballocator_private_free) b->suballocator_private_free(b->suballocator_private);
 	struct big_allocation *parent = b->parent;
 	if (parent) unlink_child(b);
 	

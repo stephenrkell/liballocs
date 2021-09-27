@@ -150,6 +150,15 @@ fun(void,                    register_suballoc,arg(struct allocated_chunk *,star
  * the allocator itself allocated the suballoc. Either way
  * that's all the information we need. So the FIXME is: do
  * the refactoring, starting with set_type and set_size. */
+typedef int walk_alloc_cb_t(void *obj, struct uniqtype *t, const void *allocsite, void *arg);
+/* top-level walk_allocations disambiguates cases using LSB of
+ * flags_or_uniqtype, always zero for a uniqtype, so these should
+ * always have LSB 1, and otherwise have only one bit set. */
+enum
+{
+	ALLOC_WALK_CHILD_BIGALLOCS = (0x1<<1)|1,
+	ALLOC_WALK_SUBALLOCS       = (0x2<<1)|1
+};
 #define ALLOC_REFLECTIVE_API(fun, arg) \
 fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
 fun(void *             ,get_base,      arg(void *, obj))  /* base address? */ \
@@ -164,7 +173,8 @@ fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code 
 fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \
 fun(size_t             ,raw_metadata,  arg(struct allocated_chunk *,start),arg(struct alloc_metadata **, buf)) \
 fun(liballocs_err_t    ,set_type,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
-fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */
+fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
+fun(int                ,walk_allocations, arg(void *, bigalloc_or_base), arg(uintptr_t, uniqtype_or_flags), arg(walk_alloc_cb_t *, cb), arg(void *, arg))
 
 #define __allocmeta_fun_arg(argt, name) argt
 #define __allocmeta_fun_ptr(rett, name, ...) \

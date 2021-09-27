@@ -1541,7 +1541,7 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 	struct uniqtype *union_type = __liballocs_get_or_create_union_type(2,
 		old_type,
 		new_type
-    );
+	);
 	/* set_type is happy with NULL */
 	err = a->set_type((b->allocated_by == a) ? b : NULL, block, union_type);
 	assert(!err);
@@ -1550,6 +1550,94 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 	return 0;
 }
 
+static int walk_child_bigallocs(struct big_allocation *b, walk_alloc_cb_t *cb,
+	void *arg);
+/* Given a bigalloc, there are two kinds of allocation to walk:
+ * child bigallocs, and suballocator chunks. If it's the suballocator,
+ * we need to ask it to walk *its* allocations. The allocator API
+ * also uses ALLOC_REFLECTIVE_API so we need to create something
+ * uniform.
+ *
+ * Is there an invariant that says we can't have both child allocs
+ * and bigallocs? No, actually we CAN because a malloc chunk can be
+ * promoted to a bigalloc if it gets suballocated-from. So we may
+ * need to walk both.
+ *
+ * Now think ahead to a near future where we have __uniqtype_allocator.
+ * Given a uniqtype, the allocations to walk are its subobjects.
+ * There is no bigalloc; there is a uniqtype *and* a base address.
+ * So we pass two pointers; in the bigalloc case we pass some flags.
+ * Since uniqtypes are always aligned addresses, we ensure all 'flags'
+ * have LSB set, and one or more flags is compulsory, so we can
+ * disambiguate a bigalloc call even in this top-level function.
+ */
+int __liballocs_walk_allocations(
+	void */* a_as_void */ big_allocation_or_base_address,
+	uintptr_t flags_or_uniqtype,
+	walk_alloc_cb_t *cb,
+	void *arg
+)
+{
+	if (flags_or_uniqtype & 1u)
+	{
+		// we'd better have a bigalloc pointer
+		assert((uintptr_t) big_allocation_or_base_address
+			>= (uintptr_t) &big_allocations[1]);
+		assert((uintptr_t) big_allocation_or_base_address
+			< (uintptr_t) &big_allocations[NBIGALLOCS]);
+		struct big_allocation *b =
+			(struct big_allocation *) big_allocation_or_base_address;
+		uintptr_t flags = flags_or_uniqtype & ~1ul;
+		int ret = 0;
+		if (flags & (ALLOC_WALK_CHILD_BIGALLOCS & ~1ul))
+		{
+			ret = walk_child_bigallocs(b, cb, arg);
+			if (ret != 0) return ret;
+		}
+		if (flags & (ALLOC_WALK_SUBALLOCS & ~1ul))
+		{
+			ret = b->suballocator->walk_allocations(b, 0ul, cb, arg);
+			if (ret != 0) return ret;
+		}
+		return ret;
+	}
+	// eventually: delegate to the uniqtype allocator
+#if 0
+	return __uniqtype_allocator_walk_allocations(big_allocation_or_base_address,
+		flags_or_uniqtype, cb, arg);
+#else
+	// for now, use our iteration macro
+	int ret = 0;
+#define suballoc_thing(_i, _t, _offs) do { \
+	ret = cb((void*)(((uintptr_t) big_allocation_or_base_address) + (_offs)), \
+	   (_t), \
+	   NULL /* allocsite */, \
+	   arg); \
+	if (ret != 0) return ret; \
+} while (0)
+	UNIQTYPE_FOR_EACH_SUBOBJECT(((struct uniqtype *) flags_or_uniqtype), suballoc_thing);
+	return ret;
+#endif
+}
+
+int
+alloc_walk_allocations(void */* a_as_void */ big_allocation_or_base_address,
+	uintptr_t flags_or_uniqtype,
+	walk_alloc_cb_t *cb,
+	void *arg) __attribute__((alias("__liballocs_walk_allocations")));
+
+static int walk_child_bigallocs(struct big_allocation *initial_b, walk_alloc_cb_t *cb,
+	void *arg)
+{
+	int ret = 0;
+	for (struct big_allocation *b = initial_b->first_child;
+			b; b = b->next_sib)
+	{
+		ret = cb(b->begin, NULL /* FIXME: type */, NULL /* FIXME: allocsite */, arg);
+		if (ret != 0) return ret;
+	}
+	return ret;
+}
 /* Instantiate inlines from liballocs.h. */
 extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,

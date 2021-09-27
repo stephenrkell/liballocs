@@ -79,8 +79,8 @@ struct big_allocation
 	struct big_allocation *next_sib;
 	struct big_allocation *prev_sib;
 	struct big_allocation *first_child;
-	struct allocator *allocated_by; // should always be parent->suballocator
-	struct allocator *suballocator; // ... suballocated bigallocs may have only small children
+	struct allocator *allocated_by; // should always be parent->suballocator *if* parent has a suballocator -- but it needn't, because suballocation is about small stuff
+	struct allocator *suballocator; // ... suballocated bigallocs may have BOTH small and big children
 	struct meta_info meta;          // metadata for use by the `allocated_by' allocator
 	void *suballocator_private;     // metadata for use by the suballocator, if any -- generic_small uses this to hold its chunk_rec
 	void (*suballocator_private_free)(void*);
