@@ -142,24 +142,30 @@ count_represented_sections(ElfW(Shdr) *shdrs, unsigned nshdr)
 
 /* We can't use the static-allocator metavector type, because
  * it assumes a parallel symtab (or reloc entries but with no
- * type info).
+ * type info). To avoid wasting too much space, we encode the
+ * uniqtype as a small integer.
  */
-#define mkarr(t) __ARR_ ## t
 
+/* To get the array types is a problem, because the actual
+ * ElfNN_* typenames are typedefs to an anonymous struct type.
+ * In general the symbol named "__ARR_t" will not exist, because
+ * the __ARR_ typename will use the _usr_include_elf_h_NNN name
+ * that was given to the anonymous underlying definition. We
+ * encode the arrayness into the macro args. */
 #define elf_file_data_types(v) \
-v(EHDR, ElfW(Ehdr)) \
-v(SHDRS, mkarr(ElfW(Shdr))) \
-v(PHDRS, mkarr(ElfW(Phdr))) \
-v(NHDR, ElfW(Nhdr)) \
-v(SYMS, mkarr(ElfW(Sym))) \
-v(RELAS, mkarr(ElfW(Rela))) \
-v(RELS, mkarr(ElfW(Rel))) \
-v(DYNAMICS, mkarr(ElfW(Dyn))) \
-v(FUNPTRVVS, mkarr(__PTR___FUN_FROM_void__FUN_TO_void)) \
-v(BYTES, mkarr(unsigned_char$8))
+v(EHDR, ElfW(Ehdr), /* is array? */ 0) \
+v(SHDRS, ElfW(Shdr), 1) \
+v(PHDRS, ElfW(Phdr), 1) \
+v(NHDR, ElfW(Nhdr), 0) \
+v(SYMS, ElfW(Sym), 1) \
+v(RELAS, ElfW(Rela), 1) \
+v(RELS, ElfW(Rel), 1) \
+v(DYNAMICS, ElfW(Dyn), 1) \
+v(FUNPTRVVS, __PTR___FUN_FROM___FUN_TO_void, 1) \
+v(BYTES, unsigned_char$8, 1)
 
-// define an enum
-#define elf_file_data_types_enum_entry(tag, t) \
+// define an enum -- ignoring the second argument
+#define elf_file_data_types_enum_entry(tag, tfrag, tisarray) \
    ELF_DATA_ ## tag ,
 enum elf_file_data_type
 {
@@ -174,8 +180,23 @@ struct uniqtype *elf_file_type_table[ELF_DATA_NTYPES];
 __attribute__((constructor))
 static void init_elf_file_type_table(void)
 {
-#define elf_file_data_types_table_entry_init(tag, t) \
-	elf_file_type_table[ELF_DATA_ ## tag] = fake_dlsym(RTLD_DEFAULT, "__uniqtype__" #t );
+#ifndef stringify
+#define stringify(cond) #cond
+#endif
+// stringify expanded
+#ifndef stringifx
+#define stringifx(cond) stringify(cond)
+#endif
+
+#define elf_file_data_types_table_entry_init(tag, tfrag, tisarray) { \
+	elf_file_type_table[ELF_DATA_ ## tag] = (tisarray) \
+	    ? __liballocs_get_or_create_unbounded_array_type( ({ \
+	        struct uniqtype *tmp_u = fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag) ); \
+	        assert(tmp_u); assert(tmp_u != (void*)-1); tmp_u; }) ) \
+	    : fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag) ); \
+	assert(elf_file_type_table[ELF_DATA_ ## tag]); \
+	assert(elf_file_type_table[ELF_DATA_ ## tag] != (void*)-1); \
+	}
 	elf_file_data_types(elf_file_data_types_table_entry_init)
 }
 
@@ -309,6 +330,7 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 	.size = (thesize), \
 	.type_idx = ELF_DATA_ ## typetag \
 	}; \
+	assert(!(bitmap_get_b(elf_meta->bitmap, offset))); \
 	bitmap_set_b(elf_meta->bitmap, offset); \
 	} while(0)
 #define add_allocation_p(addr, size, typetag) \
@@ -321,9 +343,9 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 	if (ehdr->e_shoff)
 	{
 		ElfW(Shdr) *shdrs = (ElfW(Shdr)*)((uintptr_t) ehdr + ehdr->e_shoff);
-		add_allocation_p(ehdr, ehdr->e_shnum * ehdr->e_shentsize, SHDRS);
+		add_allocation_p(shdrs, ehdr->e_shnum * ehdr->e_shentsize, SHDRS);
 		assert(ehdr->e_shentsize == sizeof (ElfW(Shdr)));
-		for (unsigned i = 0; i < ehdr->e_shnum; ++i)
+		for (unsigned i = 1; i < ehdr->e_shnum; ++i)
 		{
 			if (SHDR_IS_MANIFEST(shdrs[i]))
 			{
@@ -515,12 +537,22 @@ static int elf_elements_walk_allocations(void *bigalloc_as_void, uintptr_t ignor
 	walk_alloc_cb_t *cb, void *arg)
 {
 	struct big_allocation *arena = (struct big_allocation *) bigalloc_as_void;
-	return cb(
-		((struct big_allocation *) bigalloc_as_void)->begin,
-		(struct uniqtype *) dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_Ehdr"),
-		arena->meta.un.opaque_data.data_ptr,
-		arg
-	);
+	struct elf_elements_metadata *elements_meta
+		 = (struct elf_elements_metadata *) arena->suballocator_private;
+	int ret = 0;
+	for (struct elf_metavector_entry *e = elements_meta->metavector;
+			e != elements_meta->metavector + elements_meta->metavector_size;
+			++e)
+	{
+		ret = cb(
+			(void*)((uintptr_t) arena->begin + e->fileoff),
+			elf_file_type_table[e->type_idx],
+			arena->meta.un.opaque_data.data_ptr /* alloc site */,
+			arg
+		);
+		if (ret != 0) return ret;
+	}
+	return ret;
 }
 
 struct allocator __elf_file_allocator = {
@@ -560,10 +592,10 @@ struct memory_asm_ctxt
 {
 	const char *overall_comment;
 	unsigned depth;
+	// FIXME: need to thread through a summary of incoming references,
+	// so that we can emit labels as we go along
 };
 
-// FIXME: need to thread through a summary of incoming references,
-// so that we can emit labels as we go along
 static int emit_memory_asm(void *base, struct uniqtype *t, const void *allocsite, void *memory_asm_ctxt_as_void)
 {
 	struct memory_asm_ctxt *ctxt = memory_asm_ctxt_as_void;
@@ -573,7 +605,7 @@ static int emit_memory_asm(void *base, struct uniqtype *t, const void *allocsite
 	{
 		uintptr_t emitted_up_to = (uintptr_t) base;
 		indent(ctxt->depth);
-		printf("# begin: %s\n", ctxt->overall_comment);
+		printf("# begin: %s of type %s\n", ctxt->overall_comment, UNIQTYPE_NAME(t));
 #define per_subobj_thing(_i, _t, _offs) \
 	{ uintptr_t this_subobj_base = (uintptr_t) base + (_offs); \
 	 /* We may need to emit some padding. */ \
@@ -592,6 +624,8 @@ static int emit_memory_asm(void *base, struct uniqtype *t, const void *allocsite
 	 emit_memory_asm((void*) this_subobj_base, (_t), allocsite, &new_ctxt); \
 	 free(field_name); \
 	 emitted_up_to += UNIQTYPE_SIZE_IN_BYTES(_t); }
+		/* What if we have an unspecified-length array? We don't need to
+		 * make-precise it. Instead we have the length in a side channel. */
 		UNIQTYPE_FOR_EACH_SUBOBJECT(t,
 			per_subobj_thing);
 #undef per_subobj_thing
@@ -771,7 +805,7 @@ static void init(void)
 	 * loaded? For now we have put a hack into lib-test, but we need to
 	 * ensure meta-objects have been loaded. */
 	__static_file_allocator_init();
-	struct memory_asm_ctxt initial_ctxt = { .overall_comment = "ELF file", .depth = 0 };
+	struct memory_asm_ctxt initial_ctxt = { .overall_comment = "ELF element", .depth = 0 };
 	/* Walk allocations. */
 	__liballocs_walk_allocations(
 		b,
@@ -779,11 +813,6 @@ static void init(void)
 		emit_memory_asm,
 		&initial_ctxt
 	);
-#if 0
-	emit_memory_asm(mapping,
-		(struct uniqtype *) dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_Ehdr"),
-		"ELF header");
-#endif
 }
 
 #endif

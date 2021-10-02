@@ -833,6 +833,9 @@ static inline void __liballocs_detach_manual_dealloc_policy(const void *obj)
 }
 #endif
 
+struct uniqtype *__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len);
+struct uniqtype *__liballocs_get_or_create_unbounded_array_type(struct uniqtype *element_t);
+
 struct uniqtype *
 __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_t, */...);
 int __liballocs_add_type_to_block(void *block, struct uniqtype *t);

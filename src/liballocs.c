@@ -70,18 +70,25 @@ get_type_from_symname(const char *precise_uniqtype_name)
 	return (struct uniqtype *) dlsym(NULL, precise_uniqtype_name);
 }
 
+static
 struct uniqtype *
-__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
+get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
 {
-	assert(element_t);
-	assert(array_len < UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
-	if (element_t->pos_maxoff == 0) return NULL;
-	if (element_t->pos_maxoff == UNIQTYPE_POS_MAXOFF_UNBOUNDED) return NULL;
-
 	char precise_uniqtype_name[4096];
 	const char *element_name = UNIQTYPE_NAME(element_t); /* gets "simple", not symbol, name */
-	snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
-			"__uniqtype____ARR%d_%s", array_len, element_name);
+	if (array_len == UNIQTYPE_ARRAY_LENGTH_UNBOUNDED)
+	{
+		snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
+				"__uniqtype____ARR_%s",
+				element_name);
+	}
+	else
+	{
+		snprintf(precise_uniqtype_name, sizeof precise_uniqtype_name,
+				"__uniqtype____ARR%d_%s",
+				array_len,
+				element_name);
+	}
 	/* FIXME: compute hash code. Should be an easy case. */
 
 	struct uniqtype *found = get_type_from_symname(precise_uniqtype_name);
@@ -92,7 +99,9 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 	void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
 	struct uniqtype *allocated_uniqtype = allocated;
 	*allocated_uniqtype = (struct uniqtype) {
-		.pos_maxoff = array_len * element_t->pos_maxoff,
+		.pos_maxoff = (array_len == UNIQTYPE_ARRAY_LENGTH_UNBOUNDED)
+				? UNIQTYPE_POS_MAXOFF_UNBOUNDED
+				: (array_len * element_t->pos_maxoff),
 		.un = {
 			array: {
 				.is_array = 1,
@@ -117,6 +126,22 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 	return allocated_uniqtype;
 }
 
+struct uniqtype *
+__liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
+{
+	assert(element_t);
+	assert(array_len < UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
+	if (element_t->pos_maxoff == 0) return NULL;
+	if (element_t->pos_maxoff == UNIQTYPE_POS_MAXOFF_UNBOUNDED) return NULL;
+	return get_or_create_array_type(element_t, array_len);
+}
+struct uniqtype *
+__liballocs_get_or_create_unbounded_array_type(struct uniqtype *element_t)
+{
+	if (element_t->pos_maxoff == 0) return NULL;
+	if (element_t->pos_maxoff == UNIQTYPE_POS_MAXOFF_UNBOUNDED) return NULL;
+	return get_or_create_array_type(element_t, UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
+}
 struct uniqtype *
 __liballocs_get_or_create_flexible_array_type(struct uniqtype *element_t)
 {
