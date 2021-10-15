@@ -13,7 +13,7 @@ RUN sudo mkdir -p /usr/lib/meta && sudo chown root:staff /usr/lib/meta && \
 RUN sudo apt-get install -y git build-essential libelf-dev libdw-dev binutils-dev \
        autoconf automake libtool pkg-config autoconf-archive \
        g++ ocaml ocamlbuild ocaml-findlib \
-       default-jre-headless python3 python3-distutils python \
+       default-jdk-headless python3 python3-distutils python \
        make git gawk gdb wget \
        libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
        libboost-iostreams-dev libboost-regex-dev libboost-serialization-dev libboost-filesystem-dev
