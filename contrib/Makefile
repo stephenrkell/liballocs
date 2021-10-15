@@ -39,7 +39,7 @@ endif
 
 .PHONY: build-libsystrap
 build-libsystrap: libsystrap/contrib/config.mk
-	$(MAKE) -C libsystrap
+	$(MAKE) -C libsystrap src lib
 
 libsystrap/contrib/config.mk $(CONTRIB)/libsystrap/contrib/env.sh:
 	$(MAKE) -C libsystrap/contrib default config.mk
