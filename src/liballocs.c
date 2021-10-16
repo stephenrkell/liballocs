@@ -37,7 +37,9 @@ ElfW(Sym) *__liballocs_rt_uniqtypes_dynsym;
 ElfW(Word) *__liballocs_rt_uniqtypes_gnu_hash;
 unsigned char *__liballocs_rt_uniqtypes_dynstr;
 
-static void update_rt_uniqtypes_obj(void *handle, void *old_base)
+__attribute__((visibility("hidden")))
+void
+update_rt_uniqtypes_obj(void *handle, void *old_base)
 {
 	_Bool unchanged_base = (handle == __liballocs_rt_uniqtypes_obj) &&
 		(void*) ((struct link_map *) handle)->l_addr == old_base;
@@ -672,16 +674,21 @@ const char *format_symbolic_address(const void *addr)
 }
 
 
-static _Bool done_init;
+_Bool done_main_init __attribute__((visibility("hidden")));
 void __liballocs_main_init(void) __attribute__((constructor(101),visibility("protected")));
 // NOTE: runs *before* the constructor in preload.c
-void (__attribute__((constructor(101))) __liballocs_main_init)(void)
+__attribute__((constructor(101),visibility("protected")))
+void __liballocs_main_init(void)
 {
-	assert(!done_init);
+	assert(!done_main_init);
 
-	/* This is a dummy: we choose not to initialise anything at this point, for now. */
+	/* This is a dummy: we choose not to initialise anything at this point, for now.
+	 * PROBLEM: gcc optimizes the constructor out! Because after eliminating done_init,
+	 * we have no observable effect, it concludes there's no need to put us in
+	 * .init_array. This rightly fails our 'constructor priority' check. We make the
+	 * done_main_init non-static as a workaround. */
 
-	done_init = 1;
+	done_main_init = 1;
 }
 
 static const char *meta_libfile_name(const char *objname)
@@ -1575,8 +1582,8 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 	return 0;
 }
 
-static int walk_child_bigallocs(struct big_allocation *b, walk_alloc_cb_t *cb,
-	void *arg);
+static int walk_child_bigallocs(struct alloc_containment_ctxt *cont,
+	walk_alloc_cb_t *cb, void *arg);
 /* Given a bigalloc, there are two kinds of allocation to walk:
  * child bigallocs, and suballocator chunks. If it's the suballocator,
  * we need to ask it to walk *its* allocations. The allocator API
@@ -1597,72 +1604,306 @@ static int walk_child_bigallocs(struct big_allocation *b, walk_alloc_cb_t *cb,
  * disambiguate a bigalloc call even in this top-level function.
  */
 int __liballocs_walk_allocations(
-	void */* a_as_void */ big_allocation_or_base_address,
-	uintptr_t flags_or_uniqtype,
+	struct alloc_containment_ctxt *cont,
 	walk_alloc_cb_t *cb,
 	void *arg
 )
 {
-	if (flags_or_uniqtype & 1u)
+	/* HMM. Now we have duplication between 'cont' and the arguments
+	 * 'big_allocation_or_base_address' and 'flags_or_uniqtype'.
+	 * In principle, 'cont' makes these arguments redundant. Do we
+	 * eliminate them? Yes, go on then. But it affects 'flags'.
+	 * Basically, if we are asked to walk children of a bigalloc,
+	 * not of a uniqtype, then
+	 *
+	 * - the bigalloc may have a type, in which case
+	 *    - it must NOT have suballocation
+	 *    - it must NOT have child allocations
+	 *    - we delegate to the uniqtype walker and that's it
+	 * - the bigalloc may have suballocations *and* children
+	 *    - flags determine which one(s) we walk (can be both)
+	 * - the bigalloc may have only children
+	 *    - we still honor the flags
+	 *
+	 * Given just an alloc_containment_ctxt, where do we get
+	 * our flags from? We can include flags in the uniqtype
+	 * as it is always 8-byte-aligned. We can't include flags
+	 * in bigalloc-or-base because base may be 1-byte-aligned.
+	 * But we can still distinguish bigalloc from base by testing
+	 * against . EXCEPTION: meta-completeness case, where we're
+	 * querying liballocs's own allocations. But even then, I
+	 * think we should be OK. */
+	assert(cont);
+	uintptr_t flags = (cont->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_FLAGS);
+	if (flags)
 	{
-		// we'd better have a bigalloc pointer
-		assert((uintptr_t) big_allocation_or_base_address
+		/* If we have flags, we must be traversing a bigalloc. */
+		struct big_allocation *b = (struct big_allocation *)(cont->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_NOTFLAGS);
+		assert((uintptr_t) b
 			>= (uintptr_t) &big_allocations[1]);
-		assert((uintptr_t) big_allocation_or_base_address
+		assert((uintptr_t) b
 			< (uintptr_t) &big_allocations[NBIGALLOCS]);
-		struct big_allocation *b =
-			(struct big_allocation *) big_allocation_or_base_address;
-		uintptr_t flags = flags_or_uniqtype & ~1ul;
+		assert(b->begin == cont->container_base);
 		int ret = 0;
-		if (flags & (ALLOC_WALK_CHILD_BIGALLOCS & ~1ul))
+		if (flags & ALLOC_WALK_CHILD_BIGALLOCS)
 		{
-			ret = walk_child_bigallocs(b, cb, arg);
+			struct alloc_containment_ctxt new_cont = {
+				.container_base = b->begin,
+				.bigalloc_or_uniqtype = (uintptr_t) b /* no flags set */,
+				.maybe_containee_coord = 0,
+				.encl = cont,
+				.encl_depth = cont->encl_depth + 1
+			};
+			ret = walk_child_bigallocs(&new_cont, cb, arg);
 			if (ret != 0) return ret;
 		}
-		if (flags & (ALLOC_WALK_SUBALLOCS & ~1ul))
+		if (flags & ALLOC_WALK_SUBALLOCS)
 		{
-			ret = b->suballocator->walk_allocations(b, 0ul, cb, arg);
+			struct alloc_containment_ctxt new_cont = {
+				.container_base = b->begin,
+				.bigalloc_or_uniqtype = (uintptr_t) b /* no flags set */,
+				.maybe_containee_coord = 0,
+				.encl = cont,
+				.encl_depth = cont->encl_depth + 1
+			};
+			ret = b->suballocator->walk_allocations(&new_cont, cb, arg);
 			if (ret != 0) return ret;
 		}
 		return ret;
 	}
 	// eventually: delegate to the uniqtype allocator
 #if 0
-	return __uniqtype_allocator_walk_allocations(big_allocation_or_base_address,
-		flags_or_uniqtype, cb, arg);
+	return __uniqtype_allocator_walk_allocations(...);
 #else
+	/* We've ruled out the bigalloc case, so we're being asked
+	 * to iterate through subobjects given a uniqtype. */
 	// for now, use our iteration macro
 	int ret = 0;
 #define suballoc_thing(_i, _t, _offs) do { \
-	ret = cb((void*)(((uintptr_t) big_allocation_or_base_address) + (_offs)), \
+	cont->maybe_containee_coord = (_i) + 1; \
+	ret = cb(NULL, (void*)(((uintptr_t) cont->container_base) + (_offs)), \
 	   (_t), \
 	   NULL /* allocsite */, \
+	   cont, \
 	   arg); \
 	if (ret != 0) return ret; \
 } while (0)
-	UNIQTYPE_FOR_EACH_SUBOBJECT(((struct uniqtype *) flags_or_uniqtype), suballoc_thing);
+	struct uniqtype *u = BOU_UNIQTYPE(cont->bigalloc_or_uniqtype);
+	if (UNIQTYPE_HAS_SUBOBJECTS(u))
+	{
+		UNIQTYPE_FOR_EACH_SUBOBJECT(u, suballoc_thing);
+	}
 	return ret;
 #endif
 }
 
 int
-alloc_walk_allocations(void */* a_as_void */ big_allocation_or_base_address,
-	uintptr_t flags_or_uniqtype,
+alloc_walk_allocations(struct alloc_containment_ctxt *cont,
 	walk_alloc_cb_t *cb,
 	void *arg) __attribute__((alias("__liballocs_walk_allocations")));
 
-static int walk_child_bigallocs(struct big_allocation *initial_b, walk_alloc_cb_t *cb,
+static int walk_child_bigallocs(struct alloc_containment_ctxt *cont,
+	walk_alloc_cb_t *cb,
 	void *arg)
 {
 	int ret = 0;
+	struct big_allocation *initial_b = (struct big_allocation *)
+		(cont->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_NOTFLAGS);
+	unsigned coord = 1;
 	for (struct big_allocation *b = initial_b->first_child;
-			b; b = b->next_sib)
+			b; ++coord, b = b->next_sib)
 	{
-		ret = cb(b->begin, NULL /* FIXME: type */, NULL /* FIXME: allocsite */, arg);
+		/* Bigallocs already encapsulate their containment context,
+		 * oh well...
+		 * FIXME: just like we want to factor out a common 'containment'
+		 * thing from uniqtype_rel_info, we should also pull it out here. */
+		struct alloc_containment_ctxt new_cont = {
+		 .container_base = initial_b->begin,
+		 .bigalloc_or_uniqtype = (uintptr_t) initial_b /* no flags set */,
+		 .maybe_containee_coord = coord,
+		 .encl = cont,
+		 .encl_depth = cont->encl_depth + 1
+		};
+		ret = cb(b, b->begin, NULL /* FIXME: type */, NULL /* FIXME: allocsite */, &new_cont, arg);
 		if (ret != 0) return ret;
 	}
 	return ret;
 }
+
+struct walk_df_arg
+{
+	walk_alloc_cb_t *cb;
+	void *arg;
+};
+static int walk_one_df_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+		struct alloc_containment_ctxt *cont, void *walk_df_arg_as_void)
+{
+	/* As a way to signal "skip this subtree" as distinct from
+	 * "terminate the whole walk here", return values mean
+	 *     0: carry on
+	 *    -1: skip the subtree
+	 *  else: return immediately
+	 */
+	struct walk_df_arg *arg = (struct walk_df_arg *) walk_df_arg_as_void;
+	// First, we call back for the present thing (i.e. we are pre-order)
+	int ret = arg->cb(maybe_the_allocation, obj, t, allocsite, cont, arg->arg);
+	if (ret == -1) return 0; // tell the caller to carry on *its* traversal
+	if (ret) return ret;     // stop immdiately
+	// Now... is this a thing that might contain things?
+	if (!maybe_the_allocation && !t) return 0;
+	struct alloc_containment_ctxt new_scope = {
+		.container_base = obj,
+		.bigalloc_or_uniqtype = (uintptr_t)((void*)maybe_the_allocation ?: (void*)t),
+		.maybe_containee_coord = 0,
+		.encl = cont,
+		.encl_depth = cont->encl_depth + 1
+	};
+	return __liballocs_walk_allocations(&new_scope, walk_one_df_cb, arg);
+#if 0
+	// a. a bigalloc with children
+	if (maybe_the_allocation && maybe_the_allocation->first_child)
+	{
+		// FIXME: this is just walking the allocations,
+		// so we should be able to call back to __liballocs_walk_allocations
+		// We need to deduplicate the logic here with that there,
+		// esp on the suballoc flags.
+		assert(!t && "with-children bigallocs should not have a type");
+		unsigned coord = 1;
+		for (struct big_allocation *b = maybe_the_allocation->first_child;
+				b;
+				++coord, b = b->next_sib)
+		{
+			// our scope is now this bigalloc
+			struct alloc_containment_ctxt new_scope = {
+				.container_base = b->begin,
+				.bigalloc_or_uniqtype = (uintptr_t) b,
+				.maybe_containee_coord = coord,
+				.encl = cont,
+				.encl_depth = cont->encl_depth + 1
+			};
+			ret = __liballocs_walk_allocations_df(&new_scope, walk_one_df_cb, arg);
+			if (ret) return ret;
+		}
+	}
+	// b. a suballocated bigalloc
+	if (maybe_the_allocation && maybe_the_allocation->suballocator)
+	{
+		assert(!t && "suballocated bigallocs should not have a type");
+		// our scope is now this bigalloc
+		struct alloc_containment_ctxt new_scope = {
+			.container_base = maybe_the_allocation->begin,
+			.bigalloc_or_uniqtype = (uintptr_t) maybe_the_allocation,
+			.maybe_containee_coord = 0,
+			.encl = cont,
+			.encl_depth = cont->encl_depth + 1
+		};
+		ret = __liballocs_walk_allocations_df(&new_scope, walk_one_df_cb, arg);
+		if (ret) return ret;
+	}
+	// c. bigalloc or no, a uniqtype-described object with substructure
+	if (t && UNIQTYPE_HAS_SUBOBJECTS(t))
+	{
+		// our scope is now this typed object
+		struct alloc_containment_ctxt new_scope = {
+			.container_base = obj,
+			.bigalloc_or_uniqtype = (uintptr_t) t,
+			.maybe_containee_coord = 0,
+			.encl = cont,
+			.encl_depth = cont->encl_depth + 1
+		};
+		ret = __liballocs_walk_allocations_df(&new_scope, walk_one_df_cb, arg);
+		if (ret) return ret;
+	}
+	return ret;
+#endif
+}
+int __liballocs_walk_allocations_df(
+	struct alloc_containment_ctxt *cont,
+	walk_alloc_cb_t *cb,
+	void *arg
+)
+{
+	/* We walk the tree rooted at scope 'cont',
+	 * by walking the allocations with a callback
+	 * that walks deeper. */
+	struct walk_df_arg walk_df_arg = {
+		.cb = cb,
+		.arg = arg
+	};
+	return __liballocs_walk_allocations(
+		cont,
+		walk_one_df_cb,
+		&walk_df_arg
+	);
+}
+
+int
+__liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_containment_ctxt *cont, void *walk_refs_state_as_void)
+{
+	struct walk_refs_state *state = (struct walk_refs_state *) walk_refs_state_as_void;
+	/* To walk references, we walk allocations (our caller is doing that) and
+	 * - if they are a reference, run our cb on them
+	 * - if they might contain references, recursively walk them with the same cb;
+	 * - otherwise skip them.
+	 */
+	// 1. is this a reference?
+	if (state->interp->can_interp(obj, t, cont))
+	{
+		int ret = state->ref_cb(maybe_the_allocation,
+			obj, t, allocsite, cont, walk_refs_state_as_void);
+		// 'ret' tells us whether or not to keep walking references; non-zero means stop
+		if (ret) return ret;
+		// if we got 0, we still don't want to "continue" per se; we want to cut off
+		// the subtree
+		return -1;
+	}
+	// 2. Is this a thing that might contain references?
+	// We really want our interpreter to help us here.
+	// Even a simple scalar might be a reference, so we really need help.
+	if (!state->interp->may_contain(obj, t, cont)) return -1;
+
+	return 0; // keep going with the depth-first thing
+}
+
+int
+__liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_containment_ctxt *cont, void *walk_environ_state_as_void)
+{
+	struct walk_environ_state *state = (struct walk_environ_state *) walk_environ_state_as_void;
+	/* To walk environment info, we walk allocations (our caller is doing that) and
+	 * - if they are part of the environment, run our cb on them
+	 * - if they might contain environment info, recursively walk them with the same cb;
+	 * - otherwise skip them.
+	 */
+	// 1. is this a reference?
+	uintptr_t maybe_environ_key = state->interp->is_environ(obj, t, cont);
+	if (maybe_environ_key)
+	{
+		// we want to pass the key through to our callback; how?
+		struct environ_elt_cb_arg arg = {
+			.state = state,
+			.key = maybe_environ_key
+		};
+		int ret = state->environ_cb(maybe_the_allocation,
+			obj, t, allocsite, cont, &arg);
+		// 'ret' tells us whether or not to keep walking environment; non-zero means stop
+		if (ret) return ret;
+		// if we got 0, we still don't want to "continue" per se; we want to cut off
+		// the subtree
+		return -1;
+	}
+	// 2. Is this a thing that might contain references?
+	// We really want our interpreter to help us here.
+	// Even a simple scalar might be a reference, so we really need help.
+	if (!/*state->interp->may_contain(obj, t, cont)*/ 1) return -1;
+
+	return 0; // keep going with the depth-first thing
+}
+
 /* Instantiate inlines from liballocs.h. */
 extern inline struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,

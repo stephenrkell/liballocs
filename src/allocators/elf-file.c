@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <err.h>
 #include "liballocs.h"
 #include "liballocs_private.h"
 #include "allocmeta.h"
@@ -156,7 +157,7 @@ count_represented_sections(ElfW(Shdr) *shdrs, unsigned nshdr)
 v(EHDR, ElfW(Ehdr), /* is array? */ 0) \
 v(SHDRS, ElfW(Shdr), 1) \
 v(PHDRS, ElfW(Phdr), 1) \
-v(NHDR, ElfW(Nhdr), 0) \
+v(NHDR, ElfW(Nhdr)_with_data, 0) \
 v(SYMS, ElfW(Sym), 1) \
 v(RELAS, ElfW(Rela), 1) \
 v(RELS, ElfW(Rel), 1) \
@@ -369,7 +370,7 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 					case SHT_INIT_ARRAY:
 					case SHT_FINI_ARRAY:
 					case SHT_PREINIT_ARRAY:
-						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, FUNPTRVVS); break;
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, /*FUNPTRVVS*/ BYTES); break;
 					// for now, other sections are just bytes
 					case SHT_GROUP:
 					case SHT_SYMTAB_SHNDX:
@@ -426,6 +427,92 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 // we should be able to generate these from macros
 // using the metavector/bitmap
 
+struct uniqtype *
+get_or_create_elfw_note_data_type(unsigned byte_array_len)
+{
+	/* Do we already have the actual type we want? */
+	const char *imprecise_struct_uniqtype_name = "__uniqtype__" stringifx(ElfW(Nhdr)_with_data);
+	char precise_struct_uniqtype_name[4096];
+	snprintf(precise_struct_uniqtype_name, sizeof precise_struct_uniqtype_name,
+		"%s%u",
+		imprecise_struct_uniqtype_name,
+		byte_array_len);
+	struct uniqtype *found_struct = //get_type_from_symname(precise_uniqtype_name);
+		fake_dlsym(RTLD_DEFAULT, precise_struct_uniqtype_name);
+	if (found_struct && found_struct != (void*)-1)
+	{
+		return (struct uniqtype *) found_struct;
+	}
+
+	/* Get the char-array type we need. */
+	struct uniqtype *found_array_t = __liballocs_get_or_create_array_type(
+		pointer_to___uniqtype__unsigned_char,
+		byte_array_len);
+	assert(found_array_t);
+	assert(found_array_t != (void*) -1);
+
+	/* Create the struct type and memoise using libdlbind. */
+	struct uniqtype *found_unbounded_struct_t =
+		fake_dlsym(RTLD_DEFAULT, imprecise_struct_uniqtype_name);
+	assert(found_unbounded_struct_t);
+	assert(found_unbounded_struct_t != (void*) -1);
+	/* We have *three* related fields: two members and a field_names. */
+	size_t sz = offsetof(struct uniqtype, related) + 3 * (sizeof (struct uniqtype_rel_info));
+	void *allocated = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE);
+	struct uniqtype *allocated_uniqtype = allocated;
+	memcpy(allocated, found_unbounded_struct_t, sz);
+	allocated_uniqtype->pos_maxoff = sizeof (ElfW(Nhdr)) + byte_array_len;
+	unsigned field_idx = allocated_uniqtype->un.composite.nmemb - 1;
+	assert(field_idx == 1);
+	allocated_uniqtype->related[field_idx]
+	= (struct uniqtype_rel_info) {
+		.un = { memb: {
+			.ptr = found_array_t,
+			.off = sizeof (ElfW(Nhdr))
+		} }
+	};
+	void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
+	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_struct_uniqtype_name,
+		allocated_uniqtype, sz, STT_OBJECT);
+	assert(reloaded);
+	update_rt_uniqtypes_obj(reloaded, old_base);
+
+	return allocated_uniqtype;
+}
+
+static
+struct uniqtype *elf_precise_type(unsigned idx, unsigned size)
+{
+	struct uniqtype *u = elf_file_type_table[idx];
+	if (UNIQTYPE_SIZE_IN_BYTES(u) == UNIQTYPE_POS_MAXOFF_UNBOUNDED)
+	{
+		if (UNIQTYPE_IS_ARRAY_TYPE(u)
+				&& UNIQTYPE_ARRAY_LENGTH(u) == UNIQTYPE_ARRAY_LENGTH_UNBOUNDED)
+		{
+			struct uniqtype *elem_t = UNIQTYPE_ARRAY_ELEMENT_TYPE(u);
+			assert(elem_t);
+			assert(size % UNIQTYPE_SIZE_IN_BYTES(elem_t) == 0);
+			unsigned n = size / UNIQTYPE_SIZE_IN_BYTES(elem_t);
+			assert(n >= 1);
+			struct uniqtype *real_u = __liballocs_get_or_create_array_type(
+				elem_t, n);
+			return real_u;
+		}
+		else
+		{
+			assert(idx == ELF_DATA_NHDR);
+			struct uniqtype *u = get_or_create_elfw_note_data_type(/* byte_array_len */
+				size - sizeof (ElfW(Nhdr)));
+			assert(u);
+			return u;
+			/* See GitHub issue #53 for the problem we run into with make_precise()
+			 * here.  So what do we do for now? We have to handle it as a special case,
+			 * some kind of get_or_create_ for the ElfW(Nhdr)_with_data. */
+		}
+	}
+	else return u;
+}
+
 static
 struct uniqtype *elf_get_type(void *obj)
 {
@@ -437,7 +524,7 @@ struct uniqtype *elf_get_type(void *obj)
 #define offset_from_rec(p) (p)->fileoff
 	struct elf_metavector_entry *found = bsearch_leq_generic(struct elf_metavector_entry, target_offset,
 		/* T* */ meta->metavector, meta->metavector_size, offset_from_rec);
-	if (found) return elf_file_type_table[found->type_idx];
+	if (found) return elf_precise_type(found->type_idx, found->size);
 	return NULL;
 }
 
@@ -532,22 +619,31 @@ static liballocs_err_t elf_get_info(void *obj, struct big_allocation *maybe_biga
 	return &__liballocs_err_unindexed_heap_object; // FIXME
 }
 
-/* */
-static int elf_elements_walk_allocations(void *bigalloc_as_void, uintptr_t ignored,
+static int elf_elements_walk_allocations(struct alloc_containment_ctxt *cont,
 	walk_alloc_cb_t *cb, void *arg)
 {
-	struct big_allocation *arena = (struct big_allocation *) bigalloc_as_void;
+	struct big_allocation *arena = (struct big_allocation *) cont->bigalloc_or_uniqtype;
 	struct elf_elements_metadata *elements_meta
 		 = (struct elf_elements_metadata *) arena->suballocator_private;
 	int ret = 0;
+	unsigned coord = 1;
 	for (struct elf_metavector_entry *e = elements_meta->metavector;
 			e != elements_meta->metavector + elements_meta->metavector_size;
-			++e)
+			++e, ++coord)
 	{
+		struct alloc_containment_ctxt new_ctxt = {
+			.container_base = arena->begin,
+			.bigalloc_or_uniqtype = (uintptr_t) arena,
+			.maybe_containee_coord = coord,
+			.encl = cont,
+			.encl_depth = cont->encl_depth + 1
+		};
 		ret = cb(
+			NULL,
 			(void*)((uintptr_t) arena->begin + e->fileoff),
-			elf_file_type_table[e->type_idx],
+			elf_precise_type(e->type_idx, e->size),
 			arena->meta.un.opaque_data.data_ptr /* alloc site */,
+			&new_ctxt,
 			arg
 		);
 		if (ret != 0) return ret;
@@ -588,57 +684,303 @@ struct allocator __elf_element_allocator = {
 #error "Must use assertions for test case; turn off -DNDEBUG"
 #endif
 
-struct memory_asm_ctxt
+struct emit_asm_ctxt
 {
-	const char *overall_comment;
+	void *start_address;
+	unsigned long emitted_up_to_offset;
 	unsigned depth;
-	// FIXME: need to thread through a summary of incoming references,
+	// need to thread through a summary of incoming references,
 	// so that we can emit labels as we go along
+	struct elf_walk_refs_state *references;
 };
 
-static int emit_memory_asm(void *base, struct uniqtype *t, const void *allocsite, void *memory_asm_ctxt_as_void)
+static _Bool can_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
 {
-	struct memory_asm_ctxt *ctxt = memory_asm_ctxt_as_void;
-	// recursive case
+	return UNIQTYPE_IS_POINTER_TYPE(exp_t);
+}
+static void *do_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+{
+	void *p;
+	memcpy(&p, exp, sizeof p);
+	return p;
+}
+static _Bool may_contain_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+{
+	// FIXME: this is a bit imprecise
+	return UNIQTYPE_HAS_SUBOBJECTS(exp_t);
+}
+static uintptr_t is_environ_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+{
+	return 0; // i.e. 'no'
+}
+struct interpreter pointer_resolver = (struct interpreter) {
+	.name = "pointer interpreter",
+	.can_interp = can_interp_pointer,
+	.do_interp = do_interp_pointer,
+	.may_contain = may_contain_pointer,
+	.is_environ = is_environ_pointer
+};
+
+static _Bool is_elf_structure_type(struct uniqtype *t)
+{
+	// HACK for now
+	for (unsigned n = 1; n < ELF_DATA_NTYPES; ++n)
+	{
+		if (UNIQTYPE_IS_COMPOSITE_TYPE(elf_file_type_table[n]) &&
+			t == elf_file_type_table[n]) return 1;
+	}
+	return 0;
+}
+static _Bool can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+{
+	/* Is it the right type to be an ELF file offset, in a context
+	 * where we understand what it means (i.e. that it really is one)? */
+	if (can_interp_pointer(exp, exp_t, cont)) return 1;
+	static struct uniqtype *offset_t;
+	if (!offset_t)
+	{
+		offset_t = fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(ElfW(Off)));
+	}
+	assert(offset_t);
+	assert(offset_t != (void*)-1);
+	return exp_t == offset_t && is_elf_structure_type(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype));
+}
+void *do_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+{
+	/* Resolve the offset to a pointer within the mapping. */
+	if (can_interp_pointer(exp, exp_t, cont))
+	{
+		return do_interp_pointer(exp, exp_t, cont);
+	}
+	struct alloc_containment_ctxt *elf_elements_cont = cont;
+	/* FIXME: searching up the chain like this
+	 * on *every* resolve is expensive. It should only
+	 * be a short distance, but still. */
+	while (!BOU_IS_BIGALLOC(elf_elements_cont->bigalloc_or_uniqtype) ||
+		BOU_BIGALLOC(elf_elements_cont->bigalloc_or_uniqtype)->suballocator !=
+				&__elf_element_allocator)
+	{
+		assert(elf_elements_cont->encl);
+		elf_elements_cont = elf_elements_cont->encl;
+	}
+	ElfW(Off) o;
+	memcpy(&o, exp, sizeof o);
+	/* interpreters have idempotent allocation semantics
+	 * (and region/GC reclaim semantics? i.e. we never have to worry about
+	 * freeing a result returned by an interpreter? */
+	return (void*)(((uintptr_t) BOU_BIGALLOC(elf_elements_cont->bigalloc_or_uniqtype)->begin) + o);
+}
+_Bool may_contain_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+{
+	return may_contain_pointer(exp, exp_t, cont);
+}
+uintptr_t is_environ_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+{
+	/* The referential 'environment' in a memory-mapped ELF file consists of:
+	 *
+	 * - all p_vaddr and p_offset fields in a LOAD program header
+	 *   (used to map between referenced offsets and file vaddrs)
+	 * - FIXME: any relocs and symbols
+	 *   (used to map between referenced offsets and more exotic addends that needn't be file vaddrs)
+	 */
+	static struct uniqtype *phdr_u;
+	if (!phdr_u)
+	{
+		phdr_u = fake_dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_Phdr");
+		if (!phdr_u) abort();
+	}
+	if (BOU_IS_UNIQTYPE(cont->bigalloc_or_uniqtype)
+			&& BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)
+				== phdr_u)
+	{
+		if (((Elf64_Phdr *) cont->container_base)->p_type != PT_LOAD) return 0;
+		if (0 == strcmp(CONT_UNIQTYPE_FIELD_NAME(cont), "p_offset"))
+		{
+			return (uintptr_t) "p_offset";
+		}
+		if (0 == strcmp(CONT_UNIQTYPE_FIELD_NAME(cont), "p_vaddr"))
+		{
+			return (uintptr_t) "p_vaddr";
+		}
+	}
+	return 0; // keep going
+}
+struct elf_reference
+{
+	unsigned long source_file_offset;
+	unsigned long target_file_offset; // may be -1, in theory (shouldn't be, for us)
+	const char *target_symname;
+	struct uniqtype *referenced_type;
+	// HMM: more here
+};
+struct elf_walk_refs_state
+{
+	struct walk_refs_state ref;
+	void *elf_mapping;
+	size_t elf_mapping_size;
+	struct elf_reference *buf; // don't copy this; we need to realloc it
+	unsigned buf_capacity;
+	unsigned buf_used;
+};
+#define ELF_WALK_REFS_BUF_INITIAL_CAPACITY 128
+int seen_elf_reference_or_pointer_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_containment_ctxt *cont,
+	void *elf_walk_refs_state_as_void)
+{
+	struct elf_walk_refs_state *state = (struct elf_walk_refs_state *)
+		elf_walk_refs_state_as_void;
+	/* When we see a reference, save it in the buffer. */
+	if (state->buf_used == state->buf_capacity)
+	{
+		unsigned long new_capacity = state->buf_capacity ? state->buf_capacity * 2 : ELF_WALK_REFS_BUF_INITIAL_CAPACITY;
+		state->buf = __private_realloc(state->buf, new_capacity * sizeof *state->buf);
+		if (!state->buf)
+		{
+			err(EXIT_FAILURE, "cannot realloc ELF reference buffer");
+		}
+		state->buf_capacity = new_capacity;
+	}
+	void *target = do_interp_elf_offset_or_pointer(obj, t, cont);
+	unsigned long target_offset;
+	if ((uintptr_t) target >= (uintptr_t) state->elf_mapping &&
+	    (uintptr_t) target <  (uintptr_t) state->elf_mapping + state->elf_mapping_size)
+	{
+		// the target is within the mapping bounds
+		target_offset = (uintptr_t) target - (uintptr_t) state->elf_mapping;
+	}
+	else
+	{
+		target_offset = (unsigned long) -1;
+		// FIXME: set symname based on alloc identity
+	}
+	struct elf_reference *the_ref = &state->buf[state->buf_used++];
+	*the_ref = (struct elf_reference) {
+		.source_file_offset = (uintptr_t) obj - (uintptr_t) state->elf_mapping,
+		.target_file_offset = (target_offset == (unsigned long) -1) ? (unsigned long) -1 : target_offset,
+		.referenced_type = UNIQTYPE_IS_POINTER_TYPE(t) ?
+				UNIQTYPE_POINTEE_TYPE(t)
+				: /*elf_offset_reference_target_type(
+					BOU_UNIQTYPE(cont->bigalloc_or_uniqtype),
+					obj,
+					cont->container_base) */ NULL /* FIXME */
+	};
+	assert(the_ref->source_file_offset < state->elf_mapping_size);
+	printf("Saw a reference within our mapping, at offset 0x%lx, "
+		"type %s, target offset %lx (absolute: %p, symname %s)\n",
+		(unsigned long) the_ref->source_file_offset,
+		UNIQTYPE_NAME(t),
+		(unsigned long) the_ref->target_file_offset,
+		target,
+		the_ref->target_symname);
+	return 0;
+}
+int seen_elf_environ_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_containment_ctxt *cont,
+	void *environ_elt_cb_arg_as_void)
+{
+	struct environ_elt_cb_arg *arg = (struct environ_elt_cb_arg *) environ_elt_cb_arg_as_void;
+	struct walk_environ_state *state = arg->state;
+	/* When we see an environment element , save it in the buffer. */
+	if (state->buf_used == state->buf_capacity)
+	{
+		unsigned long new_capacity = state->buf_capacity ? state->buf_capacity * 2 : ELF_WALK_REFS_BUF_INITIAL_CAPACITY;
+		state->buf = __private_realloc(state->buf, new_capacity * sizeof *state->buf);
+		if (!state->buf)
+		{
+			err(EXIT_FAILURE, "cannot realloc ELF environment buffer");
+		}
+		state->buf_capacity = new_capacity;
+	}
+	struct environ_elt *the_elt = &state->buf[state->buf_used++];
+	*the_elt = (struct environ_elt) {
+		.base = obj,
+		.t = t,
+		.sz = UNIQTYPE_SIZE_IN_BYTES(t), // FIXME
+		.key = arg->key
+	};
+	printf("Saw an environment element within our mapping, "
+		"type %s, key %s\n",
+		UNIQTYPE_NAME(t),
+		(const char *) arg->key);
+	return 0;
+}
+
+static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
+		void *obj, struct uniqtype *t, const void *allocsite,
+		struct alloc_containment_ctxt *cont, void *emit_asm_ctxt_as_void)
+{
+	struct emit_asm_ctxt *ctxt = emit_asm_ctxt_as_void;
+	// 0. pad up to the start
+	ptrdiff_t this_obj_offset = (intptr_t) obj - (intptr_t) ctxt->start_address;
+	int ret = 0;
+	char comment[4096] = "(no comment)";
+	// can we get a field name or index #?
+	if (BOU_IS_UNIQTYPE(cont->bigalloc_or_uniqtype))
+	{
+		if (!cont->maybe_containee_coord)
+		{
+			snprintf(comment, sizeof comment, "BUG: subobj but no coord");
+		}
+		else
+		{
+			if (UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
+			{
+				const char *field_name = CONT_UNIQTYPE_FIELD_NAME(cont);
+				int snret = snprintf(comment, sizeof comment, "field %s", field_name);
+				if (snret >= sizeof comment) comment[(sizeof comment) - 1] = '\0';
+			}
+			else if (UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
+			{
+				int snret = snprintf(comment, sizeof comment, "idx %d", cont->maybe_containee_coord - 1);
+				if (snret >= sizeof comment) comment[(sizeof comment) - 1] = '\0';
+			}
+		}
+	}
+
 #define indent(n) do { for (int i = 0; i < n; ++i) printf(" "); } while (0)
+	if (ctxt->emitted_up_to_offset != this_obj_offset)
+	{
+		ptrdiff_t pad = this_obj_offset - ctxt->emitted_up_to_offset;
+		if (pad < 0)
+		{
+			// union case, so must be a uniqtype; allocs can't overlap
+			assert(!BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype));
+			struct uniqtype *u = BOU_UNIQTYPE(cont->bigalloc_or_uniqtype);
+			assert(cont->maybe_containee_coord);
+			printf("# ASSUMING a union: would need to pad %d bytes for %s of type %s\n",
+				(int) pad, comment, UNIQTYPE_NAME(u));
+			fflush(stdout);
+			// skip this subobject
+			ret = 0;
+			goto out;
+		}
+		if (pad > 0)
+		{
+			indent(cont->encl_depth);
+			printf(".skip %d # padding before %s of type %s\n",
+				(int) pad, comment, UNIQTYPE_NAME(t));
+			ctxt->emitted_up_to_offset += pad;
+		}
+	}
+	// we're pre-order; before we descend, print a header
+	// FIXME: no postorder so can't easily print an '# end:' comment
 	if (UNIQTYPE_HAS_SUBOBJECTS(t))
 	{
-		uintptr_t emitted_up_to = (uintptr_t) base;
-		indent(ctxt->depth);
-		printf("# begin: %s of type %s\n", ctxt->overall_comment, UNIQTYPE_NAME(t));
-#define per_subobj_thing(_i, _t, _offs) \
-	{ uintptr_t this_subobj_base = (uintptr_t) base + (_offs); \
-	 /* We may need to emit some padding. */ \
-	 ptrdiff_t pad = this_subobj_base - emitted_up_to; \
-	 char *field_name = NULL; \
-	 if (UNIQTYPE_IS_ARRAY_TYPE(/*really t!*/t)) asprintf(&field_name, "idx %d", (_i)); \
-	 else asprintf(&field_name, "field %s", UNIQTYPE_COMPOSITE_SUBOBJ_NAMES(/*really t!*/(t))[(_i)]); \
-	 assert(pad >= 0); \
-	 if (pad > 0) { \
-	    printf(".skip %d # padding before %s\n", (int) pad, field_name); \
-	    emitted_up_to += pad; \
-	 } \
-	 struct memory_asm_ctxt new_ctxt; memcpy(&new_ctxt, ctxt, sizeof *ctxt); \
-	 new_ctxt.overall_comment = field_name; \
-	 ++new_ctxt.depth; \
-	 emit_memory_asm((void*) this_subobj_base, (_t), allocsite, &new_ctxt); \
-	 free(field_name); \
-	 emitted_up_to += UNIQTYPE_SIZE_IN_BYTES(_t); }
-		/* What if we have an unspecified-length array? We don't need to
-		 * make-precise it. Instead we have the length in a side channel. */
-		UNIQTYPE_FOR_EACH_SUBOBJECT(t,
-			per_subobj_thing);
-#undef per_subobj_thing
-		indent(ctxt->depth);
-		printf("# end: %s\n", ctxt->overall_comment);
-		return 0;
+		/* We're about to start printing the fields of the present thing */
+		indent(cont->encl_depth);
+		printf("# begin: %s of type %s\n", comment, UNIQTYPE_NAME(t));
 	}
 	if (UNIQTYPE_IS_POINTER_TYPE(t))
 	{
 		// FIXME: need to refer to a label
+		/* PROBLEM: */
+		printf("# Saw pointer type %s\n", UNIQTYPE_NAME(t));
+		fflush(stdout);
 		assert(0);
 	}
-	else if (UNIQTYPE_IS_BASE_OR_ENUM_TYPE(t))
+	if (UNIQTYPE_IS_BASE_OR_ENUM_TYPE(t))
 	{
 		struct uniqtype *b = UNIQTYPE_IS_BASE_TYPE(t) ? t
 			: UNIQTYPE_ENUM_BASE_TYPE(t);
@@ -649,45 +991,46 @@ static int emit_memory_asm(void *base, struct uniqtype *t, const void *allocsite
 			__int128_t ss;
 			__uint128_t us;
 		} data = { us: 0 };
-		memcpy(&data, base, UNIQTYPE_SIZE_IN_BYTES(b));
-		indent(ctxt->depth);
+	/* TODO: if we're emitting an environment element, don't copy
+	 * the data via memcpy; reference it by its assembler symbol,
+	 * that we should have (again TODO) created earlier by memcpy. */
+		memcpy(&data, obj, UNIQTYPE_SIZE_IN_BYTES(b));
+		indent(cont->encl_depth);
 		switch (mkpair(UNIQTYPE_SIZE_IN_BYTES(b), is_signed))
 		{
 			case mkpair(8, 0):
 			case mkpair(8, 1):
-				printf(".quad %llu # %s", (unsigned long long) data.us, ctxt->overall_comment);
+				printf(".quad %llu # %s", (unsigned long long) data.us, comment);
 				if (is_signed && data.ss < 0) printf(" # really %lld\n", (long long) data.ss); else printf("\n");
+				ctxt->emitted_up_to_offset += 8;
 				break;
 			case mkpair(4, 0):
 			case mkpair(4, 1):
-				printf(".long %lu # %s", (unsigned long) data.us, ctxt->overall_comment);
+				printf(".long %lu # %s", (unsigned long) data.us, comment);
 				if (is_signed && data.ss < 0) printf(" # really %ld\n", (long) data.ss); else printf("\n");
+				ctxt->emitted_up_to_offset += 4;
 				break;
 			case mkpair(2, 0):
 			case mkpair(2, 1):
-				printf(".short %hu # %s", (unsigned short) data.us, ctxt->overall_comment);
+				printf(".short %hu # %s", (unsigned short) data.us, comment);
 				if (is_signed && data.ss < 0) printf(" # really %hd\n", (short) data.ss); else printf("\n");
+				ctxt->emitted_up_to_offset += 2;
 				break;
 			case mkpair(1, 0):
 			case mkpair(1, 1):
-				printf(".byte %hhu # %s ", (unsigned char) data.us, ctxt->overall_comment);
+				printf(".byte %hhu # %s ", (unsigned char) data.us, comment);
 				if (is_signed && data.ss < 0) printf(" # really %hhd\n", (signed char) data.ss); else printf("\n");
+				ctxt->emitted_up_to_offset += 1;
 				break;
 			default:
 				debug_printf(0, "Saw surprising size: %u\n", (unsigned) UNIQTYPE_SIZE_IN_BYTES(b));
 				abort();
 		}
 #undef mkpair
-		/* FIXME: these might be 'pointers' (offsets) too -- it depends on the interpretation
+		/* Integers might be 'pointers' (offsets) too -- it depends on the interpretation
 		 * that we're making. How does this work?
 		 *
-		 * Recall: a resolver is an interpreter of naming languages, which are
-		 * distinguished from computational languages only by the computational
-		 * complexity ("linear in the length of the name"). A resolver is also an
-		 * idempotent allocator, i.e. it creates the name's denotation in memory,
-		 * only if it is not already available in memory (fsvo 'available').
-		 *
-		 * As a built-in we have an "address resolver" that knows how to resolve
+		 * As a built-in liballocs has an "address resolver" that knows how to resolve
 		 * pointers to addresses.
 		 *
 		 * But in our mapped ELF file we can also have an "offset resolver"
@@ -695,55 +1038,7 @@ static int emit_memory_asm(void *base, struct uniqtype *t, const void *allocsite
 		 * into their corresponding pointer.
 		 * What does this look like? E.g. how do we say "this knows how to
 		 * resolve offsets in structures of the following Elf_* types"?
-		 *
-		 * Am imagining a
-		 *
-		 *        can_resolve( p, type, containment_ctxt )
-		 *
-		 * and a
-		 *
-		 *        do_resolve(p, type, containment_ctxt )
-		 *
-		 * and also something that can walk references stored within any allocation...
-		 * maybe that is the best way to conceptualise the resolver first of all.
-		 *
-		 * A walkable allocation is either a bigalloc or a typealloc.
-		 * If it's a bigalloc, we walk it using per-allocator operations.
-		 * If it's a typealloc, in theory the same operations will do once we have an
-		 *   "allocator view" of uniqtypes. But maybe let's split the cases here for now.
-		 *
-		 *        walk_references( p, type, resolver )
-		 *
-		 * To represent a typealloc we need a pair of pointers: the object, and
-		 * the uniqtype describing that object (perhaps deep in a nest, but containment
-		 * isn't a recursive relation).
 		 */
-#if 0
-		struct interpreter pointer_resolver = (struct interpreter) {
-			.can_interpret = ,
-			.do_interpret = 
-		};
-
-		walk_references(mapping, type_or_bigalloc, elf_offset_resolver)
-#endif
-		// HMM. What are we calling this "walk_references" method on?
-		// It seems to be a generic function over an arbitrary piece of
-		// memory. Maybe that is right?
-		// We haven't said what to do when we find a reference. Maybe a
-		// callback?
-		// I guess walk_references, in the typealloc case, is a recursive
-		// function very much like what we're doing now, which is walking
-		// 'physical data'. We're just looking for different things.
-		// For any subobject, the first thing we do is ask whether our
-		// resolver can resolve it. If it can, we cut off the exploration
-		// there.
-		// We need to thread through the containment context, because our
-		// resolver needs it.
-		// Is a pointer to a 'struct related' enough context? No, we need
-		// the containing uniqtype pointer too.
-		// Still want a core "enumerate subobjects". Is our macro good
-		// enough? Not quite, because it doesn't know about the resolver.
-		// PULL in our liballocs inlines for walking subobjects, somehow.
 		// We have
 		/*
 		      walk_subobjects_spanning
@@ -764,12 +1059,8 @@ static int emit_memory_asm(void *base, struct uniqtype *t, const void *allocsite
 		   whereas 'walk_references' is a linear search.
 		 */
 	}
-	else
-	{
-		debug_printf(0, "Saw strange uniqtype: %s\n", UNIQTYPE_NAME(t));
-		abort();
-	}
-	return 0;
+out:
+	return ret;
 }
 
 __attribute__((constructor))
@@ -805,14 +1096,68 @@ static void init(void)
 	 * loaded? For now we have put a hack into lib-test, but we need to
 	 * ensure meta-objects have been loaded. */
 	__static_file_allocator_init();
-	struct memory_asm_ctxt initial_ctxt = { .overall_comment = "ELF element", .depth = 0 };
+	struct alloc_containment_ctxt scope = {
+		.container_base = b->begin,
+		.bigalloc_or_uniqtype = (uintptr_t) b | ALLOC_WALK_SUBALLOCS,
+		.maybe_containee_coord = 0,
+		.encl = NULL,
+		.encl_depth = 0
+	};
+	/* Walk references, to get the pointer targets. */
+	struct interpreter elf_offset_or_pointer_resolver = {
+		.name = "ELF-offset-or-pointer interpreter",
+		.can_interp = can_interp_elf_offset_or_pointer,
+		.do_interp = do_interp_elf_offset_or_pointer,
+		.may_contain = may_contain_elf_offset_or_pointer,
+		.is_environ = is_environ_elf_offset_or_pointer
+	};
+	struct elf_walk_refs_state reference_state = {
+		.ref = (struct walk_refs_state) {
+			.interp = &elf_offset_or_pointer_resolver,
+			.ref_cb = seen_elf_reference_or_pointer_cb
+			/* cb arg is always just the reference state */
+		},
+		.buf = NULL,
+		.buf_capacity = 0,
+		.buf_used = 0,
+		.elf_mapping = mapping,
+		.elf_mapping_size = len
+	};
+	struct walk_environ_state environ_state = {
+		.interp = &elf_offset_or_pointer_resolver,
+		.environ_cb = seen_elf_environ_cb,
+		.buf = NULL,
+		.buf_capacity = 0,
+		.buf_used = 0
+	};
+	// also __liballocs_walk_down_at( ... ) which privately uses an offset-based helper
+	__liballocs_walk_allocations_df(
+		&scope,
+		__liballocs_walk_environ_cb, // generic cb takes a struct walk_environ_state * arg, as void
+		&environ_state               // ... which our seen_... cb it will get by casting this guy
+	);
+	printf("Saw %u environment elements on our walk\n", (unsigned) environ_state.buf_used);
+	__liballocs_walk_allocations_df(
+		&scope,
+		__liballocs_walk_refs_cb, // generic cb takes a struct walk_environ_state * arg, as void
+		&reference_state               // ... which our seen_... cb it will get by casting this guy
+	);
+	printf("Saw %u references on our walk\n", (unsigned) reference_state.buf_used);
+	sleep(3);
 	/* Walk allocations. */
-	__liballocs_walk_allocations(
-		b,
-		ALLOC_WALK_SUBALLOCS,
-		emit_memory_asm,
+	struct emit_asm_ctxt initial_ctxt = {
+		.start_address = mapping,
+		.emitted_up_to_offset = 0,
+		//.overall_comment = "ELF element",
+		.depth = 0,
+		.references = &reference_state // HMM, we chain ctxts to...
+	};
+	__liballocs_walk_allocations_df(
+		&scope,
+		emit_memory_asm_cb,
 		&initial_ctxt
 	);
+	if (reference_state.buf) __private_free(reference_state.buf);
 }
 
 #endif

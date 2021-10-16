@@ -1,7 +1,12 @@
 #ifndef LIBALLOCS_CIL_INLINES_H_
 #define LIBALLOCS_CIL_INLINES_H_
 
+/* NOTE: this file gets included into user code,
+ * so needs to be written to be tolerant of old-ish versions of C.
+ * Ditto for anything it includes. */
+
 #include "liballocs_config.h"
+#include "malloc-meta.h"
 #include <stddef.h>
 #ifndef unlikely
 #define __liballocs_defined_unlikely
@@ -19,10 +24,6 @@
 //#else
 //#define assert(cond)
 //#endif
-#endif
-#ifndef offsetof
-#define __liballocs_defined_offsetof
-#define offsetof(type, member) (__builtin_offsetof(type, member))
 #endif
 
 /* Prototypes we omit. */
@@ -50,19 +51,6 @@ struct uniqtype; /* forward decl */
 # else
 #  define ALLOCA_TRAILER_SIZE (sizeof (void*))
 # endif
-#endif
-
-/* HACK: copied from memtable.h. */
-/* Thanks to Martin Buchholz -- <http://www.wambold.com/Martin/writings/alignof.html> */
-#ifndef ALIGNOF
-#if __STDC_VERSION__ >= 201112L
-#define ALIGNOF _Alignof
-#else
-#define ALIGNOF(type) offsetof (struct { char c; type member; }, member)
-#endif
-#endif
-#ifndef PAD_TO_ALIGN
-#define PAD_TO_ALIGN(n, a) 	((0 == ((n) % (a))) ? (n) : (n) + (a) - ((n) % (a)))
 #endif
 
 // This must match the required alignment of an allocation after the insert is added

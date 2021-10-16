@@ -82,6 +82,8 @@ static void *userptr_to_allocptr(void *allocptr);
 #define ALLOC_EVENT_QUALIFIERS __attribute__((visibility("hidden")))
 
 #include "alloc_events.h"
+
+#include "malloc-meta.h"
 #include "heap_index.h"
 #include "pageindex.h"
 
@@ -640,10 +642,7 @@ void pre_alloc(size_t *p_size, size_t *p_alignment, const void *caller)
 	/* We increase the size by the amount of extra data we store, 
 	 * and possibly a bit more to allow for alignment.  */
 	size_t orig_size = *p_size;
-	/* Add the size of struct insert, and round this up to the align of struct insert. 
-	 * This ensure we always have room for an *aligned* struct insert. */
-	size_t size_with_insert = orig_size + sizeof (struct extended_insert);
-	size_t size_to_allocate = PAD_TO_ALIGN(size_with_insert, ALIGNOF(void *));
+	size_t size_to_allocate = CHUNK_SIZE_WITH_TRAILER(orig_size, struct extended_insert, void*);
 	assert(0 == size_to_allocate % ALIGNOF(void *));
 	*p_size = size_to_allocate;
 }

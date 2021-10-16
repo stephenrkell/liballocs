@@ -22,7 +22,10 @@
 Elf64_Ehdr ehdr;
 Elf64_Shdr shdr[1];
 Elf64_Phdr phdr[1];
-Elf64_Nhdr nhdr[1];
+struct Elf64_Nhdr_with_data {
+	Elf64_Nhdr nhdr[1];
+	char data[];
+} __attribute__((packed)) nhdr_with_data[1];
 Elf64_Sym sym[1];
 Elf64_Rela rela[1];
 Elf64_Rel rel[1];

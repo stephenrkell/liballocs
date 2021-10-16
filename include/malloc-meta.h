@@ -25,6 +25,6 @@
 /* Add the size of struct insert, and round this up to the align of struct insert.
  * This ensure we always have room for an *aligned* struct insert. */
 #define CHUNK_SIZE_WITH_TRAILER(sz, trailer_t, trailer_align_t) \
-    PAD_TO_ALIGN(sz + sizeof (trailer_t), ALIGNOF(trailer_align))
+    PAD_TO_ALIGN(sz + sizeof (trailer_t), ALIGNOF(trailer_align_t))
 
 #endif

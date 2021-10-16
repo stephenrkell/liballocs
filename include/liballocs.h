@@ -412,6 +412,7 @@ __liballocs_first_subobject_spanning(
 	struct uniqtype **p_cur_containing_uniqtype,
 	struct uniqtype_rel_info **p_cur_contained_pos) __attribute__((always_inline,gnu_inline));
 
+// FIXME: replace with use of bsearch_leq_generic
 extern inline _Bool 
 __attribute__((always_inline,gnu_inline))
 __liballocs_first_subobject_spanning(

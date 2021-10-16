@@ -123,8 +123,70 @@ typedef struct lifetime_policy_s
 	} u_cond;
 } lifetime_policy_t;
 
-struct allocated_chunk;              /* the start of an allocation, opaquely */
-struct alloc_metadata;               /* metadata associated with a chunk */
+/* FIXME: we want to capture the commonality with uniqtype_rel_info's
+ * 'memb' anonymous struct case. Currently it looks like this:
+ *
+ *     struct {
+           struct uniqtype *ptr;
+           unsigned long off:56;
+           unsigned long is_absolute_address:1;
+           unsigned long may_be_invalid:1;
+       } memb;
+
+ * ... where the absolute-address case is intended for stackframe types
+ * where the field actually lives in some saved context outside the frame,
+ * i.e. the 'struct' is conceptual only. That is problematic w.r.t. our
+ * notion of containment, which really is about physical containment. But
+ * if we have a flag for fields-only-conceptually we should be OK.
+ * Also remember we need to modify this struct so that it encodes a
+ * [begin,end) range rather than just a begin offset.
+ */
+struct alloc_containment_ctxt
+{
+	void *container_base;
+	uintptr_t bigalloc_or_uniqtype;
+	unsigned maybe_containee_coord; // where within the container?
+	struct alloc_containment_ctxt *encl;
+	unsigned encl_depth;
+};
+#define BOU_BIGALLOC_NOCHECK_(b_o_u) ((struct big_allocation *) ((b_o_u) & UNIQTYPE_PTR_MASK_NOTFLAGS))
+#define BOU_UNIQTYPE_NOCHECK_(b_o_u) ((struct uniqtype *) ((b_o_u) & UNIQTYPE_PTR_MASK_NOTFLAGS))
+
+#define BOU_BIGALLOC(b_o_u) (assert(BOU_IS_BIGALLOC(b_o_u)), BOU_BIGALLOC_NOCHECK_(b_o_u))
+#define BOU_UNIQTYPE(b_o_u) (assert(BOU_IS_UNIQTYPE(b_o_u)), BOU_UNIQTYPE_NOCHECK_(b_o_u))
+
+#define BOU_IS_BIGALLOC(b_o_u) (((uintptr_t)BOU_BIGALLOC_NOCHECK_(b_o_u) >= (uintptr_t) &big_allocations[1]) \
+	&& ((uintptr_t)BOU_BIGALLOC_NOCHECK_(b_o_u) < (uintptr_t) &big_allocations[NBIGALLOCS]))
+#define BOU_IS_UNIQTYPE(b_o_u) (!BOU_IS_BIGALLOC(b_o_u))
+
+#define CONT_UNIQTYPE_FIELD_NAME(c) ( \
+   ( (BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) && \
+      UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
+      (UNIQTYPE_COMPOSITE_SUBOBJ_NAMES( \
+         BOU_UNIQTYPE((c)->bigalloc_or_uniqtype) \
+      )[(c)->maybe_containee_coord - 1]) : NULL \
+)
+
+struct interpreter
+{
+	const char *name;
+	_Bool (*can_interp)(void *, struct uniqtype *, struct alloc_containment_ctxt *);
+	void *(*do_interp) (void *, struct uniqtype *, struct alloc_containment_ctxt *);
+	_Bool (*may_contain)(void *, struct uniqtype *, struct alloc_containment_ctxt *);
+	uintptr_t (*is_environ)(void *, struct uniqtype *, struct alloc_containment_ctxt *);
+};
+/* Recall: a name resolver is an interpreter of naming languages, which are
+ * distinguished from computational languages only by the computational
+ * complexity ("linear in the length of the name"). A resolver is also an
+ * idempotent allocator, i.e. it creates the name's denotation in memory,
+ * only if it is not already available in memory (fsvo 'available'). FIXME:
+ * how do such allocations get freed? One possible answer is that they don't;
+ * another is that they are either GC'd or are reclaimed only when their
+ * wole container is reclaimed, i.e. region-style.
+ */
+
+struct allocated_chunk;   /* the start of an allocation, opaquely (gen this per-allocator?) */
+struct alloc_metadata;    /* metadata associated with a chunk (ditto?) */
 /* The idealised base-level allocator protocol. These operations are mostly
    to be considered logically; some allocators (e.g. stack, GC) "inline" them
    rather than defining them as entry points. However, some allocators do define
@@ -140,7 +202,7 @@ fun(struct allocated_chunk *,unsafe_migrate, arg(struct allocated_chunk *,start)
 fun(void,                    register_suballoc,arg(struct allocated_chunk *,start),arg(struct allocator *,suballoc))
 
 /* The *process-wide* reflective interface of liballocs.
- * FIXME: maybe this should always take
+ * FIXME: morally this should always take
  *     a struct allocator
  * and a struct big_allocation *maybe_the_allocation
  * and a struct containing_bigalloc?
@@ -149,15 +211,15 @@ fun(void,                    register_suballoc,arg(struct allocated_chunk *,star
  * the allocator itself is the suballocator, or
  * the allocator itself allocated the suballoc. Either way
  * that's all the information we need. So the FIXME is: do
- * the refactoring, starting with set_type and set_size. */
-typedef int walk_alloc_cb_t(void *obj, struct uniqtype *t, const void *allocsite, void *arg);
-/* top-level walk_allocations disambiguates cases using LSB of
- * flags_or_uniqtype, always zero for a uniqtype, so these should
- * always have LSB 1, and otherwise have only one bit set. */
+ * the refactoring to take these arguments consistently.
+ * NOTE that maybe_the_allocation args might not be going far
+ * enough... do we want maybe_the_allocation_or_arena? */
+typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *t, const void *allocsite, struct alloc_containment_ctxt *cont, void *arg);
+
 enum
 {
-	ALLOC_WALK_CHILD_BIGALLOCS = (0x1<<1)|1,
-	ALLOC_WALK_SUBALLOCS       = (0x2<<1)|1
+	ALLOC_WALK_CHILD_BIGALLOCS = 0x1,
+	ALLOC_WALK_SUBALLOCS       = 0x2
 };
 #define ALLOC_REFLECTIVE_API(fun, arg) \
 fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
@@ -174,7 +236,7 @@ fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \
 fun(size_t             ,raw_metadata,  arg(struct allocated_chunk *,start),arg(struct alloc_metadata **, buf)) \
 fun(liballocs_err_t    ,set_type,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
 fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
-fun(int                ,walk_allocations, arg(void *, bigalloc_or_base), arg(uintptr_t, uniqtype_or_flags), arg(walk_alloc_cb_t *, cb), arg(void *, arg))
+fun(int                ,walk_allocations, arg(struct alloc_containment_ctxt *,cont), arg(walk_alloc_cb_t *, cb), arg(void *, arg))
 
 #define __allocmeta_fun_arg(argt, name) argt
 #define __allocmeta_fun_ptr(rett, name, ...) \
@@ -197,6 +259,62 @@ struct allocator
 	rett __liballocs_ ## name( __VA_ARGS__ ); \
 	rett alloc_ ## name( __VA_ARGS__ );
 ALLOC_REFLECTIVE_API(__liballocs_toplevel_fun_decl, __allocmeta_fun_arg)
+
+/* other top-level functions */
+
+// we use walk_allocations to write a general cross-allocator depth-first traversal
+/* Depth-first walking necessarily crosses allocators, so it
+ * doesn't need to go on the allocator. */
+int __liballocs_walk_allocations_df(
+	struct alloc_containment_ctxt *cont,
+	walk_alloc_cb_t *cb,
+	void *arg
+);
+/* We use our general cross-allocator depth-first traversal to write a reference walker,
+ * parameterised by an interpreter (i.e. many notions of 'reference'). */
+struct walk_refs_state
+{
+	struct interpreter *interp;
+	walk_alloc_cb_t *ref_cb;
+	//void *ref_cb_arg;
+};
+int
+__liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_containment_ctxt *cont, void *walk_refs_state_as_void);
+
+/* We use our general cross-allocator depth-first traversal to write an environment walker,
+ * parameterised by an interpreter (i.e. many notions of 'environment', to serve the
+ * notion of 'reference').
+ */
+struct environ_elt;
+struct walk_environ_state
+{
+	struct interpreter *interp;
+	walk_alloc_cb_t *environ_cb; // this gets a environ_elt_cb_arg as its arg
+	struct environ_elt *buf; // don't copy this; we need to realloc it
+	unsigned buf_capacity;
+	unsigned buf_used;
+};
+struct environ_elt
+{
+	void *base;
+	struct uniqtype *t;
+	unsigned long sz;
+	uintptr_t key;
+};
+struct walk_environ_state;
+struct environ_elt_cb_arg
+{
+	struct walk_environ_state *state;
+	uintptr_t key;
+};
+
+int
+__liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_containment_ctxt *cont, void * /* YES */ walk_environ_state_as_void);
+
 // we can also ask for the allocator
 struct allocator *alloc_get_allocator(void *obj);
 void *__liballocs_get_alloc_base(void *); /* alias of __liballocs_get_base */

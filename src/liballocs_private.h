@@ -83,6 +83,7 @@ extern _Bool __thread __private_memalign_active __attribute__((visibility("hidde
 extern _Bool __thread __private_posix_memalign_active __attribute__((visibility("hidden")));
 extern _Bool __thread __private_malloc_usable_size_active __attribute__((visibility("hidden")));
 void *__private_malloc(size_t);
+void *__private_realloc(void*, size_t);
 void __private_free(void *);
 
 extern FILE *stream_err;
@@ -168,6 +169,8 @@ static struct uniqtype *get_type(void *obj) \
 	if (err) return NULL; \
 	return out; \
 }
+
+void update_rt_uniqtypes_obj(void *handle, void *old_base) __attribute__((visibility("hidden")));
 
 extern struct uniqtype *pointer_to___uniqtype__void __attribute__((visibility("hidden")));
 extern struct uniqtype *pointer_to___uniqtype__signed_char __attribute__((visibility("hidden")));
