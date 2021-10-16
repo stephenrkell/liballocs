@@ -195,8 +195,6 @@ static void init_elf_file_type_table(void)
 	        struct uniqtype *tmp_u = fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag) ); \
 	        tmp_u; }) ) \
 	    : fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag) ); \
-	assert(elf_file_type_table[ELF_DATA_ ## tag]); \
-	assert(elf_file_type_table[ELF_DATA_ ## tag] != (void*)-1); \
 	}
 	elf_file_data_types(elf_file_data_types_table_entry_init)
 }
