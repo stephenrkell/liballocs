@@ -131,7 +131,7 @@ get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
 struct uniqtype *
 __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
 {
-	assert(element_t);
+	if (!element_t || element_t == (void*) -1) return NULL;
 	assert(array_len < UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
 	if (element_t->pos_maxoff == 0) return NULL;
 	if (element_t->pos_maxoff == UNIQTYPE_POS_MAXOFF_UNBOUNDED) return NULL;
@@ -140,6 +140,7 @@ __liballocs_get_or_create_array_type(struct uniqtype *element_t, unsigned array_
 struct uniqtype *
 __liballocs_get_or_create_unbounded_array_type(struct uniqtype *element_t)
 {
+	if (!element_t || element_t == (void*) -1) return NULL;
 	if (element_t->pos_maxoff == 0) return NULL;
 	if (element_t->pos_maxoff == UNIQTYPE_POS_MAXOFF_UNBOUNDED) return NULL;
 	return get_or_create_array_type(element_t, UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
