@@ -193,7 +193,7 @@ static void init_elf_file_type_table(void)
 	elf_file_type_table[ELF_DATA_ ## tag] = (tisarray) \
 	    ? __liballocs_get_or_create_unbounded_array_type( ({ \
 	        struct uniqtype *tmp_u = fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag) ); \
-	        assert(tmp_u); assert(tmp_u != (void*)-1); tmp_u; }) ) \
+	        tmp_u; }) ) \
 	    : fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag) ); \
 	assert(elf_file_type_table[ELF_DATA_ ## tag]); \
 	assert(elf_file_type_table[ELF_DATA_ ## tag] != (void*)-1); \
