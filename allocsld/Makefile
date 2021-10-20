@@ -41,7 +41,7 @@ allocsld.so: allocsld.lds $(OBJS)
 
 main.o: CFLAGS += -DCHAIN_LOADER \
   -DCHAIN_LOADER_COVER_TRACKS_DECLS='void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned program_phnum, const char *ldso_path, uintptr_t inferior_dynamic_vaddr, uintptr_t base_addr);' \
-  -DCHAIN_LOADER_COVER_TRACKS='cover_tracks(we_are_the_program, program_phdrs, program_phnum, ldso_path, inferior_dynamic_vaddr, base_addr);'
+  -DCHAIN_LOADER_COVER_TRACKS='cover_tracks(we_are_the_program, program_phdrs, program_phnum, SYSTEM_LDSO_PATH, inferior_dynamic_vaddr, base_addr);'
 
 # We need to ensure we don't have any pages of 'hole'
 # in between the two segments. But how? How does the
