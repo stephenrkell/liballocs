@@ -296,7 +296,8 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 			+ 0 /* FIXME: support the no-shdrs case */;
 #define DIV_ROUNDING_UP(m, n) \
       (((m)+((n)-1))/(n))
-// FIXME: we're not accounting for the starting address of the range.
+// FIXME: we're not accounting for the starting address of the range,
+// i.e. that it should be aligned to align*BITMAP_WORD_NBITS bytes
 #define BITMAP_NWORDS(nbytes_spanned, align) \
 	DIV_ROUNDING_UP( \
 	   DIV_ROUNDING_UP(nbytes_spanned, align), \
@@ -1064,8 +1065,9 @@ out:
 __attribute__((constructor))
 static void init(void)
 {
-	char *path = getenv("LIBALLOCS_BUILD");
-	assert(path && "test lib should be loaded with LIBALLOCS_BUILD set");
+	char *path = getenv("ELF_FILE_TEST_DSO");
+	if (!path) path = getenv("LIBALLOCS_BUILD");
+	assert(path && "test lib should be loaded with ELF_FILE_TEST_DSO or LIBALLOCS_BUILD set");
 	int fd = open(path, O_RDONLY);
 	assert(fd != -1);
 	struct stat s;
@@ -1131,14 +1133,14 @@ static void init(void)
 	// also __liballocs_walk_down_at( ... ) which privately uses an offset-based helper
 	__liballocs_walk_allocations_df(
 		&scope,
-		__liballocs_walk_environ_cb, // generic cb takes a struct walk_environ_state * arg, as void
-		&environ_state               // ... which our seen_... cb it will get by casting this guy
+		__liballocs_walk_environ_cb,
+		&environ_state
 	);
 	printf("Saw %u environment elements on our walk\n", (unsigned) environ_state.buf_used);
 	__liballocs_walk_allocations_df(
 		&scope,
 		__liballocs_walk_refs_cb, // generic cb takes a struct walk_environ_state * arg, as void
-		&reference_state               // ... which our seen_... cb it will get by casting this guy
+		&reference_state          // ... which our seen_... cb it will get by casting this guy
 	);
 	printf("Saw %u references on our walk\n", (unsigned) reference_state.buf_used);
 	sleep(3);
