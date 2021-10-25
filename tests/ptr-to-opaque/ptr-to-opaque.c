@@ -19,6 +19,8 @@ int main(void)
 	 */
 	struct uniqtype *u1 = alloc_get_type(&my_t);
 	struct uniqtype *u2 = alloc_get_type(&other_t);
+	assert(u1);
+	assert(u2);
 	assert(u1 == u2);
 	return 0;
 }
