@@ -300,7 +300,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 	uintptr_t target_vaddr = obj_addr - file_load_addr;
 	unsigned metavector_nrecs = segment->metavector_size / sizeof (union sym_or_reloc_rec);
 #define proj(p) vaddr_from_rec(p, file)
-	union sym_or_reloc_rec *found = bsearch_leq_generic(
+	union sym_or_reloc_rec *found = (metavector_nrecs == 0) ? NULL : bsearch_leq_generic(
 		union sym_or_reloc_rec, target_vaddr,
 		/*  T*  */ segment->metavector, /* unsigned */ metavector_nrecs,
 		proj);
