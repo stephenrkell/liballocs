@@ -94,7 +94,7 @@ int main(int argc, char **argv)
 	iterator_df<type_die> array_of_uninterpreted_byte_t
 	 = get_or_create_array_of_uninterpreted_byte_type(root);
 	master_relation_t pervasives_master_relation;
-	add_type(uninterpreted_byte_t, pervasives_master_relation);
+	add_type_if_absent(uninterpreted_byte_t, pervasives_master_relation);
 	//add_type(generic_pointer_t, pervasives_master_relation);
 	// we have to do a hacked add-type to set the name
 	// We also need to ensure it comes out generic. We have hacked
@@ -106,7 +106,7 @@ int main(int argc, char **argv)
 	n.second = "__EXISTS1___PTR__1";
 	pervasives_master_relation[n] = generic_pointer_t;
 
-	add_type(array_of_uninterpreted_byte_t, pervasives_master_relation);
+	add_type_if_absent(array_of_uninterpreted_byte_t, pervasives_master_relation);
 
 	cout << "#include \"uniqtype-defs.h\"\n\n";
 	set<string> names_emitted;

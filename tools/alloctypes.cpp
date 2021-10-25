@@ -162,7 +162,7 @@ int main(int argc, char **argv)
 	for (auto i_t = created_types.begin(); i_t != created_types.end(); ++i_t)
 	{
 		// we need to emit a uniqtype from the dwarfidl'd DIEs
-		add_type(*i_t, needed);
+		add_type_if_absent(*i_t, needed);
 	}
 	set<string> names_emitted;
 	map<string, set< iterator_df<type_die> > > types_by_name;
