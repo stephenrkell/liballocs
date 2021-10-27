@@ -898,10 +898,11 @@ int main(int argc, char **argv)
 			auto found_minoff = interval_minoffs.find(i_frame_int->first);
 			assert(found_minoff != interval_minoffs.end());
 			signed interval_minoff = found_minoff->second;
+			auto& by_off = i_frame_int->second;
 			
 			/* Before we output anything, extern-declare any that we need and haven't
 			 * declared yet. */
-			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
+			for (auto i_by_off = by_off.begin(); i_by_off != by_off.end(); ++i_by_off)
 			{
 				auto el_type = i_by_off->second->find_type();
 				auto name_pair = initial_key_for_type(el_type);
@@ -924,6 +925,28 @@ int main(int argc, char **argv)
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
 			string mangled_name = mangle_typename(make_pair(cu_name, unmangled_typename));
+
+			/* Is this the same as a layout we've seen earlier for the same frame? */
+			bool emitted_as_alias = false;
+			for (auto i_earlier_frame_int = frame_intervals.begin();
+				i_earlier_frame_int != i_frame_int;
+				++i_earlier_frame_int)
+			{
+				if (by_off == i_earlier_frame_int->second)
+				{
+					// just output as an alias
+					string unmangled_earlier_typename
+					 = typename_for_vaddr_interval(i_subp, i_earlier_frame_int->first);
+					string mangled_earlier_name = mangle_typename(
+						make_pair(cu_name,
+						unmangled_earlier_typename));
+					cout << "\n/* an alias will do */\n";
+					emit_weak_alias_idem(cout, mangled_name, mangled_earlier_name); // FIXME: not weak
+					emitted_as_alias = true;
+				}
+			}
+			if (emitted_as_alias) continue;
+
 			write_uniqtype_section_decl(cout, mangled_name);
 			write_uniqtype_open_composite(cout,
 				mangled_name,
@@ -937,7 +960,7 @@ int main(int argc, char **argv)
 			opt<unsigned> highest_unused_offset = opt<unsigned>(0u);
 			// FIXME: prev_offset_plus_size needn't be the right thing.
 			// We want the highest offset yet seen.
-			for (auto i_by_off = i_frame_int->second.begin(); i_by_off != i_frame_int->second.end(); ++i_by_off)
+			for (auto i_by_off = by_off.begin(); i_by_off != by_off.end(); ++i_by_off)
 			{
 				ostringstream comment_s;
 				auto el_type = i_by_off->second->find_type();
