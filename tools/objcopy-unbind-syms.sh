@@ -135,4 +135,4 @@ else
 dbgnewobj="$curobj"
 fi
 mv "$dbgnewobj" "$obj"
-# rm -rf "$ourdir"
+rm -rf "$ourdir"
