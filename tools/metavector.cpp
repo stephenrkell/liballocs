@@ -114,7 +114,7 @@ int main(int argc, char **argv)
 			if (i_descr->k == sticky_root_die::static_descr::DWARF)
 			{
 				seen_codeful_type_names.insert(
-					canonical_key_for_type(i_descr->get_d().is_a<type_die>() ?
+					initial_key_for_type(i_descr->get_d().is_a<type_die>() ?
 						i_descr->get_d().as_a<type_die>() :
 						i_descr->get_d().as_a<variable_die>()->find_type()
 					)
@@ -391,7 +391,7 @@ generate_recs(sticky_root_die& root)
 				/* priority kind */ summary.descr_priority_k,
 				/* idx_in_per_kind_table */ extrasym_idx,
 				/* maybe_uniqtype */ i_static->second.get_type() ?
-					opt<uniqued_name>(canonical_key_for_type(summary.t))
+					opt<uniqued_name>(initial_key_for_type(summary.t))
 					: opt<uniqued_name>(),
 				/* extra_comment */ string("")
 			};
@@ -411,7 +411,7 @@ generate_recs(sticky_root_die& root)
 				/* priority kind */ summary.descr_priority_k,
 				/* idx_in_per_kind_table */ *summary.maybe_idx,
 				/* maybe_uniqtype */  i_static->second.get_type() ?
-					opt<uniqued_name>(canonical_key_for_type(i_static->second.get_type()))
+					opt<uniqued_name>(initial_key_for_type(i_static->second.get_type()))
 					: opt<uniqued_name>(),
 				/* extra_comment */ string("")
 			};

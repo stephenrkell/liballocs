@@ -102,7 +102,7 @@ get_names_depended_on(vector<allocsite>::const_iterator begin, vector<allocsite>
 			}
 			if (t && t != t->get_concrete_type()) return true; // don't add anything, but keep going
 			// we need this one
-			auto p = retval.insert(canonical_key_for_type(t));
+			auto p = retval.insert(initial_key_for_type(t));
 			if (!p.second) return false; // we've already added it; stop now
 			return true; // keep going
 		});
