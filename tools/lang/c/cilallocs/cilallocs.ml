@@ -235,7 +235,14 @@ let trim str =
             String.sub str left (right - left + 1)   
         with Empty -> ""
 
-let identFromString s = Str.global_replace (Str.regexp "[^a-zA-Z0-9_]") "_" s
+(* NOTE: this needs to match the escaping done by mangle_string
+ * in liballocstool's uniqtypes.hpp. *)
+let identFromString s =
+   let dollarDoubled = Str.global_replace (Str.regexp "\\$") "$$" s in
+   Str.global_substitute (Str.regexp "[^a-zA-Z0-9_\\$]") (fun wholeStr ->
+     let c = (Str.matched_string wholeStr).[0] in
+     ("$" ^ (Printf.sprintf "%02x" (int_of_char c)))
+   ) dollarDoubled
 
 let rec canonicalizeBaseTypeStr s = 
  (* 'generated' from a table maintained in srk's libcxxgen  *)

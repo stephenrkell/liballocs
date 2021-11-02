@@ -2,7 +2,7 @@
 #include "liballocs.h"
 
 extern struct uniqtype __uniqtype__int;
-extern struct uniqtype __uniqtype__long_int;
+extern struct uniqtype __uniqtype__long$20int;
 
 int f(int arg1, int arg2, int arg3)
 {
@@ -17,7 +17,7 @@ int f(int arg1, int arg2, int arg3)
 	// struct uniqtype *u1 = __liballocs_get_inner_type(&arg2, 0);
 	struct uniqtype *u2 = __liballocs_get_inner_type(&blah.q2, 0);
 	// assert(u1 == &__uniqtype__int);
-	assert(u2 == &__uniqtype__long_int);
+	assert(u2 == &__uniqtype__long$20int);
 	return arg2 + 1;
 }
 

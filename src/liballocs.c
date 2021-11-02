@@ -1026,19 +1026,19 @@ void __liballocs_post_systrap_init(void)
 		 * So we use the dynamic linker to work around this mess. */
 		pointer_to___uniqtype__void = dlsym(RTLD_DEFAULT, "__uniqtype__void");
 	#define SIZE_FOR_NRELATED(n) offsetof(struct uniqtype, related) + (n) * sizeof (struct uniqtype_rel_info)
-	#define CREATE(varname, symname, nrelated, ...) \
+	#define CREATE(varname, symstr, nrelated, ...) \
 			size_t sz = SIZE_FOR_NRELATED(nrelated); \
 			pointer_to_ ## varname = dlalloc(__liballocs_rt_uniqtypes_obj, sz, SHF_WRITE); \
 			if (!pointer_to_ ## varname) abort(); \
 			*(struct uniqtype *) pointer_to_ ## varname = (struct uniqtype) __VA_ARGS__; \
 			old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;\
-			reloaded = dlbind(__liballocs_rt_uniqtypes_obj, #symname, pointer_to_ ## varname, sz, STT_OBJECT); \
+			reloaded = dlbind(__liballocs_rt_uniqtypes_obj, symstr, pointer_to_ ## varname, sz, STT_OBJECT); \
 			update_rt_uniqtypes_obj(reloaded, old_base)
 		void *reloaded;
 		void *old_base;
 		if (!pointer_to___uniqtype__void)
 		{
-			CREATE(__uniqtype__void, __uniqtype__void, 1, {
+			CREATE(__uniqtype__void, "__uniqtype__void", 1, {
 				.pos_maxoff = 0,
 				.un = { _void: { .kind = VOID } }
 			});
@@ -1046,23 +1046,23 @@ void __liballocs_post_systrap_init(void)
 		pointer_to___uniqtype____uninterpreted_byte = dlsym(RTLD_DEFAULT, "__uniqtype____uninterpreted_byte");
 		if (!pointer_to___uniqtype____uninterpreted_byte)
 		{
-			CREATE(__uniqtype____uninterpreted_byte, __uniqtype____uninterpreted_byte, 1, {
+			CREATE(__uniqtype____uninterpreted_byte, "__uniqtype____uninterpreted_byte", 1, {
 				.pos_maxoff = 1,
 				.un = { base: { .kind = BASE, .enc = 0 } }
 			});
 		}
-		pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$8");
+		pointer_to___uniqtype__signed_char = dlsym(RTLD_DEFAULT, "__uniqtype__signed_char$$8");
 		if (!pointer_to___uniqtype__signed_char)
 		{
-			CREATE(__uniqtype__signed_char, __uniqtype__signed_char$8, 1, {
+			CREATE(__uniqtype__signed_char, "__uniqtype__signed_char$$8", 1, {
 				.pos_maxoff = 1,
 				.un = { base: { .kind = BASE, .enc = DW_ATE_signed_char } }
 			});
 		}
-		pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$8");
+		pointer_to___uniqtype__unsigned_char = dlsym(RTLD_DEFAULT, "__uniqtype__unsigned_char$$8");
 		if (!pointer_to___uniqtype__unsigned_char)
 		{
-			CREATE(__uniqtype__unsigned_char, __uniqtype__unsigned_char$8, 1, {
+			CREATE(__uniqtype__unsigned_char, "__uniqtype__unsigned_char$$8", 1, {
 				.pos_maxoff = 1,
 				.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned_char } }
 			});
@@ -1070,7 +1070,7 @@ void __liballocs_post_systrap_init(void)
 		pointer_to___uniqtype____uninterpreted_byte = dlsym(RTLD_DEFAULT, "__uniqtype____uninterpreted_byte");
 		if (!pointer_to___uniqtype____uninterpreted_byte)
 		{
-			CREATE(__uniqtype____uninterpreted_byte, __uniqtype____uninterpreted_byte, 1, {
+			CREATE(__uniqtype____uninterpreted_byte, "__uniqtype____uninterpreted_byte", 1, {
 				.pos_maxoff = 1,
 				.un = { base: { .kind = BASE, .enc = 0 } }
 			});
@@ -1081,18 +1081,18 @@ void __liballocs_post_systrap_init(void)
 		if (!(pointer_to___uniqtype__signed_char->related[0].un.t.ptr)) pointer_to___uniqtype__signed_char->related[0] = 
 			(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__unsigned_char } } };
 		
-		pointer_to___uniqtype__long_unsigned_int = dlsym(RTLD_DEFAULT, "__uniqtype__uint$64");
+		pointer_to___uniqtype__long_unsigned_int = dlsym(RTLD_DEFAULT, "__uniqtype__uint$$64");
 		if (!pointer_to___uniqtype__long_unsigned_int)
 		{
-			CREATE(__uniqtype__long_unsigned_int, __uniqtype__uint$64, 1, {
+			CREATE(__uniqtype__long_unsigned_int, "__uniqtype__uint$$64", 1, {
 				.pos_maxoff = 8,
 				.un = { base: { .kind = BASE, .enc = DW_ATE_unsigned } }
 			});
 		}
-		pointer_to___uniqtype__long_int = dlsym(RTLD_DEFAULT, "__uniqtype__int$64");
+		pointer_to___uniqtype__long_int = dlsym(RTLD_DEFAULT, "__uniqtype__int$$64");
 		if (!pointer_to___uniqtype__long_int)
 		{
-			CREATE(__uniqtype__long_int, __uniqtype__int$64, 1, {
+			CREATE(__uniqtype__long_int, "__uniqtype__int$$64", 1, {
 				.pos_maxoff = 8,
 				.un = { base: { .kind = BASE, .enc = DW_ATE_signed } }
 			});
@@ -1103,10 +1103,10 @@ void __liballocs_post_systrap_init(void)
 		if (!(pointer_to___uniqtype__long_int->related[0].un.t.ptr)) pointer_to___uniqtype__long_int->related[0] = 
 			(struct uniqtype_rel_info) { { t : { pointer_to___uniqtype__long_unsigned_int } } };
 
-		pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$8");
+		pointer_to___uniqtype____PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR_signed_char$$8");
 		if (!pointer_to___uniqtype____PTR_signed_char)
 		{
-			CREATE(__uniqtype____PTR_signed_char, __uniqtype____PTR_signed_char$8, 1, {
+			CREATE(__uniqtype____PTR_signed_char, "__uniqtype____PTR_signed_char$$8", 1, {
 				.pos_maxoff = sizeof (char*),
 				.un = { address: { .kind = ADDRESS, .indir_level = 1 } }
 			});
@@ -1114,10 +1114,10 @@ void __liballocs_post_systrap_init(void)
 				{ t : { pointer_to___uniqtype__signed_char } }
 			};
 		}
-		pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$8");
+		pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$$8");
 		if (!pointer_to___uniqtype____PTR___PTR_signed_char)
 		{
-			CREATE(__uniqtype____PTR___PTR_signed_char, __uniqtype____PTR___PTR_signed_char$8, 1, {
+			CREATE(__uniqtype____PTR___PTR_signed_char, "__uniqtype____PTR___PTR_signed_char$$8", 1, {
 				.pos_maxoff = sizeof (char**),
 				.un = { address: { .kind = ADDRESS, .indir_level = 2 } }
 			});
@@ -1138,7 +1138,7 @@ void __liballocs_post_systrap_init(void)
 			 * Since there is only one element in the union, and since we
 			 * (if we reach this line) don't have a unique auxv_t definition
 			 * in the guest program, we pretend it's just a pair of uint64s. */
-			CREATE(__uniqtype__Elf64_auxv_t, __uniqtype__Elf64_auxv_t, 2, {
+			CREATE(__uniqtype__Elf64_auxv_t, "__uniqtype__Elf64_auxv_t", 2, {
 				.pos_maxoff = 16,
 				.un = { composite: { .kind = COMPOSITE, .nmemb = 2, .not_simultaneous = 0 } }
 			});
@@ -1149,7 +1149,7 @@ void __liballocs_post_systrap_init(void)
 				{ t : { pointer_to___uniqtype__long_unsigned_int } }
 			};
 		}
-		pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$8");
+		pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$$8");
 		if (!pointer_to___uniqtype____ARR0_signed_char)
 		{
 			// FIXME: handle this
@@ -1186,7 +1186,7 @@ static void *metaobj_handle_for_addr(void *caller)
 		debug_printf(1, "No metaobj loaded for addr %p, typeobj name %s", caller, meta_libname);
 		return NULL;
 	}
-	// FIXME: this has bumped the refcount and we'll never unbump it
+	dlclose(handle); // unbump refcount; it will remain at least 1
 	return handle;
 }
 

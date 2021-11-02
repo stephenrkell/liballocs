@@ -14,7 +14,7 @@ int main(void)
 	 * in our types object, given that we *do* use unsigned short. */
 	__liballocs_ensure_init();
 	short unsigned int sshort_uniqtype_truncated = (short unsigned) (unsigned long) dlsym(
-			0 /* RTLD_DEFAULT */, "__uniqtype__short_int");
+			0 /* RTLD_DEFAULT */, "__uniqtype__short$20int");
 	if (!sshort_uniqtype_truncated) __assert_fail("sshort_uniqtype_truncated", __FILE__, __LINE__, __func__);
 	return 0;
 }

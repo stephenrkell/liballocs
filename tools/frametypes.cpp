@@ -68,9 +68,6 @@ using boost::format_all;
 using namespace allocs::tool;
 
 static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
-	const boost::icl::discrete_interval<Dwarf_Off> interval);
-
-static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
 	const boost::icl::discrete_interval<Dwarf_Off> interval)
 {
 	std::ostringstream s_typename;
@@ -924,7 +921,7 @@ int main(int argc, char **argv)
 				 << " defined in " << cu_name << ", "
 				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
 			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
-			string mangled_name = mangle_typename(make_pair(cu_name, unmangled_typename));
+			string mangled_name = mangle_typename(make_pair(string(""), cu_name + unmangled_typename));
 
 			/* Is this the same as a layout we've seen earlier for the same frame? */
 			bool emitted_as_alias = false;
@@ -938,8 +935,7 @@ int main(int argc, char **argv)
 					string unmangled_earlier_typename
 					 = typename_for_vaddr_interval(i_subp, i_earlier_frame_int->first);
 					string mangled_earlier_name = mangle_typename(
-						make_pair(cu_name,
-						unmangled_earlier_typename));
+						make_pair("", cu_name + unmangled_earlier_typename));
 					cout << "\n/* an alias will do */\n";
 					emit_weak_alias_idem(cout, mangled_name, mangled_earlier_name); // FIXME: not weak
 					emitted_as_alias = true;
@@ -1073,7 +1069,7 @@ int main(int argc, char **argv)
 			<< "+" << i_pair->first.upper() << std::dec << " */";
 		cout << "\n\t{\t" << offset_from_frame_base << ","
 			<< "\n\t\t{ 0x" << std::hex << i_pair->first.lower() << "UL, " << std::dec
-			<< "&" << mangle_typename(make_pair(*i_pair->second.enclosing_cu().name_here(),
+			<< "&" << mangle_typename(make_pair("", *i_pair->second.enclosing_cu().name_here() +
 				typename_for_vaddr_interval(i_pair->second, i_pair->first)))
 			<< " }"
 			<< "\n\t}";

@@ -163,7 +163,7 @@ v(RELAS, ElfW(Rela), 1) \
 v(RELS, ElfW(Rel), 1) \
 v(DYNAMICS, ElfW(Dyn), 1) \
 v(FUNPTRVVS, __PTR___FUN_FROM___FUN_TO_void, 1) \
-v(BYTES, unsigned_char$8, 1)
+v(BYTES, unsigned_char$$8, 1)
 
 // define an enum -- ignoring the second argument
 #define elf_file_data_types_enum_entry(tag, tfrag, tisarray) \

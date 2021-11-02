@@ -3,7 +3,8 @@
 #include <stdlib.h>
 #include <liballocs.h>
 
-extern struct uniqtype __uniqtype__short_unsigned_int;
+extern struct uniqtype __uniqtype__short$20unsigned$20int;
+extern struct uniqtype __uniqtype__short$20int;
 
 /* Here we test the __liballocs_add_type_to_block call and related helpers.
  * This is a convenience for code like that in bzip2, which uses C's
@@ -50,7 +51,7 @@ int main(void)
 
 	/* Now do the same again but with the "add_type_to_block" convenience. */
 	int *p2 = malloc(2 * sizeof(int));
-	int ret = __liballocs_add_type_to_block(p2, &__uniqtype__short_int);
+	int ret = __liballocs_add_type_to_block(p2, &__uniqtype__short$20int);
 	struct uniqtype *got_t2 = __liballocs_get_alloc_type(p2);
 	assert(got_t2 == union_type);
 	printf("And again: the type is now: %s\n", NAME_FOR_UNIQTYPE(got_t2));

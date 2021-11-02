@@ -11,6 +11,6 @@ void *l1a(void)
 {
 	/* Get our __uniqtype__s1a. */
 	struct uniqtype *resolved = dlsym(__liballocs_my_metaobj(), "__uniqtype__s1a");
-	/* Return our __uniqtype__int$32. */
+	/* Return our __uniqtype__int$$32. */
 	return resolved->related[0].un.memb.ptr;
 }

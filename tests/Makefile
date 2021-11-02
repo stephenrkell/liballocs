@@ -108,30 +108,27 @@ checkrun-plugin-hello:
 checkrun-allocsld-as-cmd:
 	$(MAKE) cleanbuild-allocsld-as-cmd >/dev/null 2>&1
 # Some cases are special and require only an exit status of zero
-checkrun-allocsld-as-ldso:
-	$(MAKE) cleanrun-allocsld-as-ldso >/dev/null 2>&1
-checkrun-stack-walk:
-	$(MAKE) cleanrun-stack-walk >/dev/null 2>&1
-checkrun-no-unbind-self:
-	$(MAKE) cleanrun-no-unbind-self >/dev/null 2>&1
-checkrun-sloppy-dumptypes:
-	$(MAKE) cleanrun-sloppy-dumptypes >/dev/null 2>&1
-checkrun-section-group:
-	$(MAKE) cleanrun-section-group >/dev/null 2>&1
-checkrun-simple-multi-alloc:
-	$(MAKE) cleanrun-simple-multi-alloc >/dev/null 2>&1
-checkrun-simple-client:
-	$(MAKE) cleanrun-simple-client >/dev/null 2>&1
-checkrun-nopreload-alloca:
-	$(MAKE) cleanrun-nopreload-alloca >/dev/null 2>&1
-checkrun-uniqtype-make-precise:
-	$(MAKE) cleanrun-uniqtype-make-precise >/dev/null 2>&1
-checkrun-lib-test:
-	$(MAKE) cleanrun-lib-test >/dev/null 2>&1
-checkrun-forward-decls:
-	$(MAKE) cleanrun-forward-decls >/dev/null 2>&1
-checkrun-metavec-layout:
-	$(MAKE) cleanrun-metavec-layout >/dev/null 2>&1
+define exit-zero-case
+checkrun-$(1):
+	$(MAKE) cleanrun-$(1) >/dev/null 2>&1
+
+endef
+define exit-zero-case-names
+allocsld-as-ldso \
+anon-aliases \
+stack-walk \
+no-unbind-self \
+sloppy-dumptypes \
+section-group \
+simple-multi-alloc \
+simple-client \
+nopreload-alloca \
+uniqtype-make-precise \
+lib-test \
+forward-decls \
+metavec-layout
+endef
+$(foreach case,$(exit-zero-case-names),$(eval $(call exit-zero-case,$(case))))
 
 _onlyrun-nopreload-%:
 	./nopreload-$*
