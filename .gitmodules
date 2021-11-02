@@ -3,16 +3,16 @@
 	url = https://github.com/stephenrkell/libmallochooks
 [submodule "tools/lang/c/cil"]
 	path = tools/lang/c/cil
-	url = git://github.com/stephenrkell/cil.git
+	url = https://github.com/stephenrkell/cil.git
 [submodule "contrib/libdlbind"]
 	path = contrib/libdlbind
-	url = git://github.com/stephenrkell/libdlbind.git
+	url = https://github.com/stephenrkell/libdlbind.git
 [submodule "contrib/liballocstool"]
 	path = contrib/liballocstool
-	url = git://github.com/stephenrkell/liballocstool.git
+	url = https://github.com/stephenrkell/liballocstool.git
 [submodule "contrib/libsystrap"]
 	path = contrib/libsystrap
-	url = git://github.com/stephenrkell/libsystrap.git
+	url = https://github.com/stephenrkell/libsystrap.git
 [submodule "contrib/toolsub"]
 	path = contrib/toolsub
 	url = https://github.com/stephenrkell/toolsub.git
