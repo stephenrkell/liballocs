@@ -1,3 +1,3 @@
 #include "subdir/header.h"
 
-mystr x2;
+mystr x1;

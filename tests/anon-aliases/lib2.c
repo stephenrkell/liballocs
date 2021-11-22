@@ -1,3 +1,3 @@
 #include "header.h"
-mystr x1;
+mystr x2;
 
