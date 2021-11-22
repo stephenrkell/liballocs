@@ -122,7 +122,7 @@ enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute
 void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));
 void __liballocs_report_wild_address(const void *ptr); //__attribute__((visibility("protected")));
 
-struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a) __attribute__((visibility("hidden")));
+struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a);
 
 _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end);
@@ -136,7 +136,7 @@ _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, cons
 struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr, const void *end);
 struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start) __attribute__((visibility("hidden")));
-struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start);
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
 
@@ -208,7 +208,7 @@ struct allocator *__liballocs_leaf_allocator_for(const void *obj,
 	 * ... but that's wrong. All we know is that if a deeper
 	 * allocation exists, it's not big, and it's exactly one level
 	 * down (there's no nesting in non-big allocations). 
-	 * FIMXE: we should really *try* the suballocator and then,
+	 * FIXME: we should really *try* the suballocator and then,
 	 * if ptr actually falls between the cracks, return the 
 	 * bigalloc's allocator. But that makes things slower than
 	 * we want. So we should add a slower call for this. */

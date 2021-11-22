@@ -393,7 +393,7 @@ static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const 
 static struct big_allocation *bigalloc_new(const void *ptr, size_t size, struct big_allocation *parent, 
 	struct meta_info meta, struct allocator *allocated_by);
 
-struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by) __attribute__((visibility("hidden")));
+struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by) __attribute__((visibility("protected")));
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by)
 {
 	/* We get called from heap_index when the malloc'd address is a multiple of the 
@@ -941,7 +941,7 @@ struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator
 }
 
 
-struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("protected")));
 struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start)
 {
 	if (!pageindex) __pageindex_init();

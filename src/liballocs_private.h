@@ -105,10 +105,6 @@ struct addrlist
 	unsigned allocsz;
 	void **addrs;
 };
-struct liballocs_err
-{
-	const char *message;
-};
 struct frame_uniqtype_and_offset
 {
 	struct uniqtype *u;

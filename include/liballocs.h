@@ -157,7 +157,10 @@ extern struct uniqtype __uniqtype____PTR_uint$64;
 extern struct uniqtype __uniqtype____PTR_signed_char$8;
 #endif
 
-struct liballocs_err;
+struct liballocs_err
+{
+	const char *message;
+};
 typedef struct liballocs_err *liballocs_err_t;
 
 extern struct liballocs_err __liballocs_err_stack_walk_step_failure;

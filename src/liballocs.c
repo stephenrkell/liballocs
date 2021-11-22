@@ -37,6 +37,10 @@ ElfW(Sym) *__liballocs_rt_uniqtypes_dynsym;
 ElfW(Word) *__liballocs_rt_uniqtypes_gnu_hash;
 unsigned char *__liballocs_rt_uniqtypes_dynstr;
 
+/* FIXME: why is this function necessary?
+ * We keep pointers into this object. Why?
+ * We use them only in get_type_from_symname,
+ * which appears to be just a faster way than fake_dlsym. */
 __attribute__((visibility("hidden")))
 void
 update_rt_uniqtypes_obj(void *handle, void *old_base)
@@ -123,7 +127,6 @@ get_or_create_array_type(struct uniqtype *element_t, unsigned array_len)
 	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
 		allocated, sz, STT_OBJECT);
 	assert(reloaded);
-	update_rt_uniqtypes_obj(reloaded, old_base);
 
 	return allocated_uniqtype;
 }
@@ -186,7 +189,6 @@ __liballocs_get_or_create_flexible_array_type(struct uniqtype *element_t)
 	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
 		allocated, sz, STT_OBJECT);
 	assert(reloaded);
-	update_rt_uniqtypes_obj(reloaded, old_base);
 
 	return allocated_uniqtype;
 }
@@ -243,7 +245,6 @@ __liballocs_get_or_create_address_type(const struct uniqtype *pointee_t)
 	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
 		allocated, sz, STT_OBJECT);
 	assert(reloaded);
-	update_rt_uniqtypes_obj(reloaded, old_base);
 
 	return allocated_uniqtype;
 }
@@ -311,7 +312,6 @@ __liballocs_get_or_create_subprogram_type(struct uniqtype *return_type, unsigned
 	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_uniqtype_name,
 		allocated, sz, STT_OBJECT);
 	assert(reloaded);
-	update_rt_uniqtypes_obj(reloaded, old_base);
 
 	return allocated_uniqtype;
 }
@@ -417,7 +417,6 @@ __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_
 	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, union_uniqtype_name,
 		allocated, sz, STT_OBJECT);
 	assert(reloaded);
-	update_rt_uniqtypes_obj(reloaded, old_base);
 
 	return allocated_uniqtype;
 }
@@ -1016,8 +1015,6 @@ void __liballocs_post_systrap_init(void)
 			raw_write(2, msg, sizeof msg);
 			abort();
 		}
-		/* Init the other stuff we happen to cache about the object. */
-		update_rt_uniqtypes_obj(__liballocs_rt_uniqtypes_obj, NULL);
 
 		/* Now we can grab our uniqtype pointers, or create them. */
 		/* Because the Unix linker is broken (see notes below on uniquing),
@@ -1032,8 +1029,7 @@ void __liballocs_post_systrap_init(void)
 			if (!pointer_to_ ## varname) abort(); \
 			*(struct uniqtype *) pointer_to_ ## varname = (struct uniqtype) __VA_ARGS__; \
 			old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;\
-			reloaded = dlbind(__liballocs_rt_uniqtypes_obj, symstr, pointer_to_ ## varname, sz, STT_OBJECT); \
-			update_rt_uniqtypes_obj(reloaded, old_base)
+			dlbind(__liballocs_rt_uniqtypes_obj, symstr, pointer_to_ ## varname, sz, STT_OBJECT);
 		void *reloaded;
 		void *old_base;
 		if (!pointer_to___uniqtype__void)

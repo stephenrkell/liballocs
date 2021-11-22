@@ -7,6 +7,7 @@
 #include "uniqtype.h"
 #include "uniqtype-bfs.h"
 #include "liballocs_cil_inlines.h"
+#include "pageindex.h"
 
 /* NOTE: is linking -R, i.e. "symbols only", the right solution for 
  * getting the weak references to pop out the way we want them?
@@ -44,6 +45,8 @@
 
 struct __liballocs_memrange_cache __liballocs_ool_cache; // all zeroes
 _Bool __liballocs_is_initialized;
+
+struct big_allocation;
 
 uint16_t *pageindex __attribute__((visibility("protected")));
 
@@ -118,11 +121,14 @@ struct allocator * __liballocs_get_leaf_allocator(void *obj)
 	return NULL;
 }
 struct allocator *alloc_get_allocator(void *obj) __attribute__((alias("__liballocs_get_leaf_allocator")));
-struct allocator * __liballocs_leaf_allocator_for(const void *obj,
-	struct big_allocation **out_bigalloc)
-{
-	return NULL;
-}
+//struct allocator * __liballocs_leaf_allocator_for(const void *obj,
+//	struct big_allocation **out_bigalloc)
+//{
+//	return NULL;
+///}
+// instantiate the inline here
+extern inline struct allocator * __liballocs_leaf_allocator_for(const void *obj,
+	struct big_allocation **out_bigalloc);
 
 struct uniqtype * 
 __liballocs_get_inner_type(void *obj, unsigned skip_at_bottom)
@@ -222,23 +228,62 @@ __liballocs_get_or_create_union_type(unsigned n, /* struct uniqtype *first_memb_
 {
 	return NULL;
 }
+struct uniqtype *__liballocs_get_or_create_unbounded_array_type(struct uniqtype *element_t)
+{
+	return NULL;
+}
 int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 {
 	return 0;
 }
-
+struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size,
+		struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a)
+{
+	return NULL;
+}
 struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 		struct big_allocation **maybe_out_bigalloc)
 {
 	return NULL;
 }
-
+struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start)
+{
+	return NULL;
+}
 Dl_info dladdr_with_cache(const void *addr)
 {
 	Dl_info dummy;
 	memset(&dummy, 0, sizeof dummy);
 	return dummy;
 }
+struct alloc_containment_ctxt;
+typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *t, const void *allocsite, struct alloc_containment_ctxt *cont, void *arg);
+int __liballocs_walk_allocations_df(
+	struct alloc_containment_ctxt *cont,
+	walk_alloc_cb_t *cb,
+	void *arg
+)
+{
+	return 0;
+}
+struct walk_refs_state;
+int
+__liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_containment_ctxt *cont, void *walk_refs_state_as_void)
+{
+	return 0;
+}
+struct walk_environ_state;
+int
+__liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_containment_ctxt *cont, void * /* YES */ walk_environ_state_as_void)
+{
+	return 0;
+}
+// instantiate this one
+extern struct big_allocation *__liballocs_get_bigalloc_containing(const void *obj);
 
 struct allocsite_entry;
 struct allocsite_entry *__liballocs_find_allocsite_entry_at(
@@ -304,3 +349,26 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	return memcpy(mem, s, len);
 }
 char *__private_strndup(const char *s, size_t n) __attribute__((weak,alias("__liballocs_private_strndup")));
+
+// FIXME: these are just pasted, and that is just wrong.
+// See GitHub issue #56 for possible ways to get rid of all this.
+struct liballocs_err
+{
+	const char *message;
+};
+struct liballocs_err __liballocs_err_stack_walk_step_failure 
+ = { "stack walk reached higher frame" };
+struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame 
+ = { "stack walk reached higher frame" };
+struct liballocs_err __liballocs_err_stack_walk_reached_top_of_stack 
+ = { "stack walk reached top-of-stack" };
+struct liballocs_err __liballocs_err_unknown_stack_walk_problem 
+ = { "unknown stack walk problem" };
+struct liballocs_err __liballocs_err_unindexed_heap_object
+ = { "unindexed heap object" };
+struct liballocs_err __liballocs_err_unrecognised_alloc_site
+ = { "unrecognised alloc site" };
+struct liballocs_err __liballocs_err_unrecognised_static_object
+ = { "unrecognised static object" };
+struct liballocs_err __liballocs_err_object_of_unknown_storage
+ = { "object of unknown storage" };

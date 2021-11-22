@@ -8,7 +8,6 @@
 #include <fcntl.h>
 #include <err.h>
 #include "liballocs.h"
-#include "liballocs_private.h"
 #include "allocmeta.h"
 #include "relf.h"
 
@@ -264,8 +263,8 @@ struct elf_elements_metadata
 static void free_elf_elements_metadata(void *elf_elements_metadata_as_void)
 {
 	struct elf_elements_metadata *m = (struct elf_elements_metadata *) elf_elements_metadata_as_void;
-	__private_free(m->metavector);
-	__private_free(m);
+	free(m->metavector);
+	free(m);
 }
 
 static
@@ -309,7 +308,7 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 	};
 	struct elf_elements_metadata *elf_meta = malloc(offsetof(struct elf_elements_metadata, bitmap)
 			+ sizeof (bitmap_word_t) * BITMAP_NWORDS(mapping_len + trailing_mapping_len, 1));
-	elf_meta->metavector = __private_malloc(metavector_nentries * sizeof *elf_meta->metavector);
+	elf_meta->metavector = malloc(metavector_nentries * sizeof *elf_meta->metavector);
 	// create the bigalloc
 	struct big_allocation *elf_b = __liballocs_new_bigalloc(
 		mapping_start, mapping_len + trailing_mapping_len,
@@ -445,7 +444,7 @@ get_or_create_elfw_note_data_type(unsigned byte_array_len)
 
 	/* Get the char-array type we need. */
 	struct uniqtype *found_array_t = __liballocs_get_or_create_array_type(
-		pointer_to___uniqtype__unsigned_char,
+		fake_dlsym(RTLD_DEFAULT, "__uniqtype__unsigned$20char"),
 		byte_array_len);
 	assert(found_array_t);
 	assert(found_array_t != (void*) -1);
@@ -471,10 +470,8 @@ get_or_create_elfw_note_data_type(unsigned byte_array_len)
 		} }
 	};
 	void *old_base = (void*) ((struct link_map *) __liballocs_rt_uniqtypes_obj)->l_addr;
-	void *reloaded = dlbind(__liballocs_rt_uniqtypes_obj, precise_struct_uniqtype_name,
+	dlbind(__liballocs_rt_uniqtypes_obj, precise_struct_uniqtype_name,
 		allocated_uniqtype, sz, STT_OBJECT);
-	assert(reloaded);
-	update_rt_uniqtypes_obj(reloaded, old_base);
 
 	return allocated_uniqtype;
 }
@@ -678,11 +675,6 @@ struct allocator __elf_element_allocator = {
 
 #endif
 
-#ifdef TEST
-#ifdef NDEBUG
-#error "Must use assertions for test case; turn off -DNDEBUG"
-#endif
-
 struct emit_asm_ctxt
 {
 	void *start_address;
@@ -833,7 +825,7 @@ int seen_elf_reference_or_pointer_cb(struct big_allocation *maybe_the_allocation
 	if (state->buf_used == state->buf_capacity)
 	{
 		unsigned long new_capacity = state->buf_capacity ? state->buf_capacity * 2 : ELF_WALK_REFS_BUF_INITIAL_CAPACITY;
-		state->buf = __private_realloc(state->buf, new_capacity * sizeof *state->buf);
+		state->buf = realloc(state->buf, new_capacity * sizeof *state->buf);
 		if (!state->buf)
 		{
 			err(EXIT_FAILURE, "cannot realloc ELF reference buffer");
@@ -885,7 +877,7 @@ int seen_elf_environ_cb(struct big_allocation *maybe_the_allocation,
 	if (state->buf_used == state->buf_capacity)
 	{
 		unsigned long new_capacity = state->buf_capacity ? state->buf_capacity * 2 : ELF_WALK_REFS_BUF_INITIAL_CAPACITY;
-		state->buf = __private_realloc(state->buf, new_capacity * sizeof *state->buf);
+		state->buf = realloc(state->buf, new_capacity * sizeof *state->buf);
 		if (!state->buf)
 		{
 			err(EXIT_FAILURE, "cannot realloc ELF environment buffer");
@@ -1022,7 +1014,7 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 				ctxt->emitted_up_to_offset += 1;
 				break;
 			default:
-				debug_printf(0, "Saw surprising size: %u\n", (unsigned) UNIQTYPE_SIZE_IN_BYTES(b));
+				fprintf(stderr, "Saw surprising size: %u\n", (unsigned) UNIQTYPE_SIZE_IN_BYTES(b));
 				abort();
 		}
 #undef mkpair
@@ -1062,8 +1054,7 @@ out:
 	return ret;
 }
 
-__attribute__((constructor))
-static void init(void)
+int main(void)
 {
 	char *path = getenv("ELF_FILE_TEST_DSO");
 	if (!path) path = getenv("LIBALLOCS_BUILD");
@@ -1095,7 +1086,6 @@ static void init(void)
 	/* How can we ensure that __uniqtype__Elf64_Ehdr will be generated and
 	 * loaded? For now we have put a hack into lib-test, but we need to
 	 * ensure meta-objects have been loaded. */
-	__static_file_allocator_init();
 	struct alloc_containment_ctxt scope = {
 		.container_base = b->begin,
 		.bigalloc_or_uniqtype = (uintptr_t) b | ALLOC_WALK_SUBALLOCS,
@@ -1157,7 +1147,5 @@ static void init(void)
 		emit_memory_asm_cb,
 		&initial_ctxt
 	);
-	if (reference_state.buf) __private_free(reference_state.buf);
+	if (reference_state.buf) free(reference_state.buf);
 }
-
-#endif
