@@ -106,7 +106,7 @@ struct big_allocation
 };
 #define BIGALLOC_IN_USE(b) ((b)->begin && (b)->end)
 #define NBIGALLOCS 1024
-extern struct big_allocation big_allocations[] __attribute__((weak,visibility("protected")));
+extern struct big_allocation big_allocations[] __attribute__((weak));
 extern struct big_allocation __liballocs_big_allocations[] __attribute__((weak));
 
 void __pageindex_init(void) __attribute__((visibility("hidden"),constructor(101)));
@@ -114,20 +114,20 @@ typedef uint16_t bigalloc_num_t;
 
 // FIXME: protected stuff should be in private header only. This is now a public header.
 // If I didn't want that (good arguments for a single <allocs.h>), then some refactoring to do.
-extern bigalloc_num_t *pageindex __attribute__((weak,visibility("protected")));
+extern bigalloc_num_t *pageindex __attribute__((weak));
 extern bigalloc_num_t *__liballocs_pageindex __attribute__((weak));
 
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
-void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));
+void __liballocs_print_l0_to_stream_err(void);
 void __liballocs_report_wild_address(const void *ptr); //__attribute__((visibility("protected")));
 
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a);
 
 _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end);
-_Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
-_Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
+_Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin);
+_Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin);
 _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin);
 struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_allocation *b, const void *split_addr);

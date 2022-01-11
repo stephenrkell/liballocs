@@ -32,12 +32,45 @@ typedef bool _Bool;
   __builtin_expect( (cond), 0 )
 #endif
 
-char execfile_name[4096] __attribute__((visibility("hidden")));
-extern const char *meta_base __attribute__((visibility("hidden")));
-extern unsigned meta_base_len __attribute__((visibility("hidden")));
+/* Macros to help with visibility.
+ * We had these long ago, then removed them. Why?
+ *
+ * We now want to reintroduce them. Why?
+ * It's prompted by a very surprising dynamic linking behaviour:
+ * a protected-visibility UND symbol won't be resolved
+ * to a protected-visibility definition in an external DSO.
+ * The UND symbol needs to have default visibility.
+ * Within the *same* DSO, it will resolve fine.
+ *
+ * We could just always make declarations use default visibility,
+ * and only put visibility restrictions on definitions.
+ * That feels fragile, though, e.g. where we have both prototypea and
+ * definition in the same file, and might copy a definition's prototype
+ * in order to forward-declare it, say (why ever forward-declare? hmm).
+ *
+ * Also, protected UND does give us an extra check: it *must* resolve
+ * within the given DSO, so we get a link-time error if the symbol
+ * is not defined, rather than a run-time error.
+ *
+ * It's also getting less clear what the intended use of each symbol
+ * is... normally 'hidden' means internal, 'protected' means exported.
+ * But we have at least two kinds of client: extenders (libcrunch)
+ * and client DSOs (common case). What interface should extenders see?
+ *
+ * If we were to define some macros, what would we define?
+ * INTERNAL
+ * EXTENDER
+ * PUBLIC
+ *
+ * We could just blanket-delete visibilities on declarations and
+ * then check that our DSO don't export any public symbols it shouldn't. */
 
-char *realpath_quick(const char *arg) __attribute__((visibility("hidden")));
-const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
+extern char execfile_name[4096];
+extern const char *meta_base;
+extern unsigned meta_base_len;
+
+char *realpath_quick(const char *arg);
+const char *format_symbolic_address(const void *addr);
 
 #include "pageindex.h"
 
@@ -54,40 +87,40 @@ struct mapping_sequence
 };
 _Bool __augment_mapping_sequence(struct mapping_sequence *cur, 
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename,
-	void *caller) __attribute__((visibility("hidden")));
+	void *caller);
 
-extern struct big_allocation *executable_mapping_bigalloc __attribute__((visibility("hidden")));
-extern struct big_allocation *executable_file_bigalloc __attribute__((visibility("hidden")));
-extern struct big_allocation *executable_data_segment_bigalloc __attribute__((visibility("hidden")));
-extern uintptr_t executable_data_segment_start_addr __attribute__((visibility("hidden")));
+extern struct big_allocation *executable_mapping_bigalloc;
+extern struct big_allocation *executable_file_bigalloc;
+extern struct big_allocation *executable_data_segment_bigalloc;
+extern uintptr_t executable_data_segment_start_addr;
 
-void mmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
-void munmap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
-void mremap_replacement(struct generic_syscall *s, post_handler *post) __attribute__((visibility("hidden")));
+void mmap_replacement(struct generic_syscall *s, post_handler *post);
+void munmap_replacement(struct generic_syscall *s, post_handler *post);
+void mremap_replacement(struct generic_syscall *s, post_handler *post);
 void __liballocs_systrap_init(void);
 void __systrap_brk_hack(void);
-int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
-int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
-int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *, size_t, void *data) __attribute__((visibility("hidden")));
-void load_meta_objects_for_early_libs(void) __attribute__((visibility("hidden")));
-void *(*orig_dlopen)(const char *, int) __attribute__((visibility("hidden")));
-void *(*orig_memmove)(void *, const void *, unsigned long) __attribute__((visibility("hidden")));
-const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
+int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data);
+int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data);
+int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *, size_t, void *data);
+void load_meta_objects_for_early_libs(void);
+void *(*orig_dlopen)(const char *, int);
+void *(*orig_memmove)(void *, const void *, unsigned long);
+const char *format_symbolic_address(const void *addr);
 /* We contain our own private malloc, and we wrap it using the linker 
  * to keep track of whether it's active on the current thread. */
-extern _Bool __thread __private_malloc_active __attribute__((visibility("hidden")));
-extern _Bool __thread __private_calloc_active __attribute__((visibility("hidden")));
-extern _Bool __thread __private_free_active __attribute__((visibility("hidden")));
-extern _Bool __thread __private_realloc_active __attribute__((visibility("hidden")));
-extern _Bool __thread __private_memalign_active __attribute__((visibility("hidden")));
-extern _Bool __thread __private_posix_memalign_active __attribute__((visibility("hidden")));
-extern _Bool __thread __private_malloc_usable_size_active __attribute__((visibility("hidden")));
+extern _Bool __thread __private_malloc_active;
+extern _Bool __thread __private_calloc_active;
+extern _Bool __thread __private_free_active;
+extern _Bool __thread __private_realloc_active;
+extern _Bool __thread __private_memalign_active;
+extern _Bool __thread __private_posix_memalign_active;
+extern _Bool __thread __private_malloc_usable_size_active;
 void *__private_malloc(size_t);
 void *__private_realloc(void*, size_t);
 void __private_free(void *);
 
 extern FILE *stream_err;
-__attribute__((visibility("hidden"))) FILE *get_stream_err(void);
+FILE *get_stream_err(void);
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \
       fprintf(get_stream_err(), "%s: " fmt, get_exe_basename(), ## __VA_ARGS__ );  \
@@ -112,11 +145,10 @@ struct frame_uniqtype_and_offset
 };
 
 #define META_OBJ_SUFFIX "-meta.so"
-_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l)
-			__attribute__((visibility("hidden")));
+_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l);
 
 #define MAX_EARLY_LIBS 128
-extern struct link_map *early_lib_handles[MAX_EARLY_LIBS] __attribute((visibility("hidden")));
+extern struct link_map *early_lib_handles[MAX_EARLY_LIBS];
 
 /* avoid dependency on libc headers (in this header only) */
 void __assert_fail(const char *assertion, 
@@ -136,21 +168,20 @@ extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 /* We're allowed to malloc, thanks to __private_malloc(), but we 
  * we shouldn't call strdup because libc will do the malloc. */
-char *__liballocs_private_strdup(const char *s) __attribute__((visibility("hidden")));
-char *__liballocs_private_strndup(const char *s, size_t n) __attribute__((visibility("hidden")));
+char *__liballocs_private_strdup(const char *s);
+char *__liballocs_private_strndup(const char *s, size_t n);
 
 /* Our handling of mmap is in two phases: before systrapping enabled,
  * and after. */
 extern _Bool __liballocs_systrap_is_initialized;
-void __liballocs_post_systrap_init(void) __attribute__((visibility("hidden")));
+void __liballocs_post_systrap_init(void);
 
-void __generic_malloc_allocator_init(void) __attribute__((visibility("hidden")));
+void __generic_malloc_allocator_init(void);
 
 /* If this weak function is defined, it will be called when we've loaded
  * the metadata for one object. */
 int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *meta_object_handle) __attribute__((weak));
-int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *out_meta_handle)
-	__attribute__((visibility("hidden")));
+int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *out_meta_handle);
 
 void __notify_copy(void *dest, const void *src, unsigned long n);
 void __notify_free(void *dest);
@@ -166,19 +197,19 @@ static struct uniqtype *get_type(void *obj) \
 	return out; \
 }
 
-void update_rt_uniqtypes_obj(void *handle, void *old_base) __attribute__((visibility("hidden")));
+void update_rt_uniqtypes_obj(void *handle, void *old_base);
 
-extern struct uniqtype *pointer_to___uniqtype__void __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype__signed_char __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype__unsigned_char __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype____uninterpreted_byte __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype____PTR_signed_char __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype__long_unsigned_int __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype__long_int __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype____ARR0_signed_char __attribute__((visibility("hidden")));
-extern struct uniqtype *pointer_to___uniqtype__intptr_t __attribute__((visibility("hidden")));
+extern struct uniqtype *pointer_to___uniqtype__void;
+extern struct uniqtype *pointer_to___uniqtype__signed_char;
+extern struct uniqtype *pointer_to___uniqtype__unsigned_char;
+extern struct uniqtype *pointer_to___uniqtype____uninterpreted_byte;
+extern struct uniqtype *pointer_to___uniqtype____PTR_signed_char;
+extern struct uniqtype *pointer_to___uniqtype____PTR___PTR_signed_char;
+extern struct uniqtype *pointer_to___uniqtype__long_unsigned_int;
+extern struct uniqtype *pointer_to___uniqtype__long_int;
+extern struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t;
+extern struct uniqtype *pointer_to___uniqtype____ARR0_signed_char;
+extern struct uniqtype *pointer_to___uniqtype__intptr_t;
 #ifdef __cplusplus
 } /* end extern "C" */
 #endif

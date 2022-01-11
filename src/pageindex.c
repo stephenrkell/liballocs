@@ -42,8 +42,7 @@ static unsigned bigalloc_depth(struct big_allocation *b)
 	return depth;
 }
 
-void sanity_check_bigalloc(struct big_allocation *b) __attribute__((visibility("hidden")));
-void __liballocs_sanity_check_bigalloc(struct big_allocation *b) __attribute__((visibility("protected"),alias("sanity_check_bigalloc")));
+__attribute__((visibility("hidden")))
 void sanity_check_bigalloc(struct big_allocation *b)
 {
 #ifndef NDEBUG
@@ -82,6 +81,7 @@ void sanity_check_bigalloc(struct big_allocation *b)
 	}
 #endif
 }
+void __liballocs_sanity_check_bigalloc(struct big_allocation *b) __attribute__((visibility("protected"),alias("sanity_check_bigalloc")));
 #define SANITY_CHECK_BIGALLOC(b) sanity_check_bigalloc((b)) 
 
 bigalloc_num_t *pageindex __attribute__((visibility("protected")));
@@ -228,13 +228,14 @@ is_unindexed(void *begin, void *end)
 	return 0;
 }
 
+__attribute__((visibility("hidden")))
 _Bool __pages_unused(void *begin, void *end)
 {
 	return is_unindexed(begin, end);
 }
 
 
-static void check_page_size(void) __attribute__((constructor));
+__attribute__((constructor))
 static void check_page_size(void)
 {
 	if (PAGE_SIZE != sysconf(_SC_PAGE_SIZE)) abort();
@@ -342,7 +343,7 @@ static void bigalloc_del(struct big_allocation *b)
 	assert(!BIGALLOC_IN_USE(b));
 }
 
-struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attribute__((visibility("protected")));
+__attribute__((visibility("protected")))
 struct allocator *__liballocs_get_allocator_upper_bound(const void *obj)
 {
 	if (!pageindex) __pageindex_init();
@@ -350,13 +351,13 @@ struct allocator *__liballocs_get_allocator_upper_bound(const void *obj)
 	if (b) return b->allocated_by;
 	else return NULL;
 }
-struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));
+__attribute__((visibility("protected")))
 struct allocator *__liballocs_ool_get_allocator(const void *obj)
 {
 	return __liballocs_leaf_allocator_for(obj, NULL);
 }
 
-void __liballocs_print_l0_to_stream_err(void) __attribute__((visibility("protected")));
+__attribute__((visibility("protected")))
 void __liballocs_print_l0_to_stream_err(void)
 {
 	int lock_ret;
@@ -374,6 +375,7 @@ void __liballocs_print_l0_to_stream_err(void)
 	BIG_UNLOCK
 }
 
+__attribute__((visibility("protected")))
 void __liballocs_report_wild_address(const void *ptr)
 {
 	if (ROUND_DOWN_PTR(ptr, PAGE_SIZE) == 0
@@ -393,7 +395,7 @@ static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const 
 static struct big_allocation *bigalloc_new(const void *ptr, size_t size, struct big_allocation *parent, 
 	struct meta_info meta, struct allocator *allocated_by);
 
-struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by) __attribute__((visibility("protected")));
+__attribute__((visibility("protected")))
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by)
 {
 	/* We get called from heap_index when the malloc'd address is a multiple of the 
@@ -546,7 +548,7 @@ static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size
 	SANITY_CHECK_BIGALLOC(b);
 }
 
-_Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end) __attribute__((visibility("protected")));
+__attribute__((visibility("protected")))
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end)
 {
 	if (!pageindex) __pageindex_init();
@@ -587,7 +589,7 @@ static _Bool is_one_or_more_levels_under(bigalloc_num_t maybe_lower_n, struct bi
 	return 0;
 }
 
-_Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
+__attribute__((visibility("protected")))
 _Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin)
 {
 	_Bool ret;
@@ -600,7 +602,7 @@ _Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const 
 	return ret;
 }
 
-_Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin) __attribute__((visibility("protected")));
+__attribute__((visibility("protected")))
 _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin)
 {
 	if (!pageindex) __pageindex_init();
@@ -638,6 +640,7 @@ _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_
 
 /* This helper just takes a new end, which may be an expansion or contraction. 
  * Clients must fix up the allocator-specific metadata. */
+__attribute__((visibility("hidden")))
 void __adjust_bigalloc_end(struct big_allocation *b, void *new_end)
 {
 	char *old_end = b->end;
@@ -672,6 +675,7 @@ static _Bool bigalloc_truncate_at_end(struct big_allocation *b, const void *new_
 	return 1;
 }
 
+__attribute__((visibility("protected")))
 _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end)
 {
 	if (!pageindex) __pageindex_init();
@@ -683,6 +687,7 @@ _Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void 
 	return ret;
 }
 
+__attribute__((visibility("protected")))
 _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const void *new_begin)
 {
 	if (!pageindex) __pageindex_init();
@@ -703,6 +708,7 @@ _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const
 	return 1;
 }
 
+__attribute__((visibility("protected")))
 struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_allocation *b, const void *split_addr)
 {
 	if (!pageindex) __pageindex_init();
@@ -798,14 +804,12 @@ static struct big_allocation *find_bigalloc_recursive(struct big_allocation *sta
 	/* We didn't find an overlapping child, so we fail. */
 	return NULL;
 }
-static struct big_allocation *find_bigalloc_under_pageindex_nofail(const void *addr, struct allocator *a);
 static struct big_allocation *find_bigalloc_under_pageindex(const void *addr, struct allocator *a)
 {
 	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
 	if (start_idx == 0) return NULL;
 	return find_bigalloc_recursive(&big_allocations[start_idx], addr, a);
 }
-static struct big_allocation *find_bigalloc_from_root(const void *addr, struct allocator *a);
 static struct big_allocation *find_bigalloc_from_root(const void *addr, struct allocator *a)
 {
 	return find_bigalloc_recursive(NULL, addr, a);
@@ -817,7 +821,6 @@ static struct big_allocation *find_bigalloc_under_pageindex_nofail(const void *a
 	if (start_idx == 0) abort();
 	return find_bigalloc_recursive(&big_allocations[start_idx], addr, a);
 }
-
 static struct big_allocation *find_deepest_bigalloc_recursive(struct big_allocation *start, 
 	const void *addr)
 {
@@ -838,7 +841,6 @@ static struct big_allocation *find_deepest_bigalloc_recursive(struct big_allocat
 	/* We didn't find an overlapping child, so start is the best we can do. */
 	return start;
 }
-
 static struct big_allocation *find_deepest_bigalloc(const void *addr)
 {
 	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
@@ -851,7 +853,7 @@ static struct big_allocation *find_deepest_bigalloc(const void *addr)
 	return find_deepest_bigalloc_recursive(&big_allocations[start_idx], addr);
 }
 
-_Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
+__attribute__((visibility("hidden")))
 _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
 {
 	if (!pageindex) __pageindex_init();
@@ -866,7 +868,7 @@ _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
 	return 1;
 }
 
-_Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, const void *end) __attribute__((visibility("hidden")));
+__attribute__((visibility("hidden")))
 _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, const void *end)
 {
 	if (!pageindex) __pageindex_init();
@@ -916,7 +918,7 @@ _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, cons
 	return 1;
 }
 
-struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+__attribute__((visibility("hidden")))
 struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start)
 {
 	if (!pageindex) __pageindex_init();
@@ -928,7 +930,7 @@ struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct
 	return b;
 }
 
-struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start) __attribute__((visibility("hidden")));
+__attribute__((visibility("hidden")))
 struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start)
 {
 	if (!pageindex) __pageindex_init();
@@ -941,7 +943,7 @@ struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator
 }
 
 
-struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("protected")));
+__attribute__((visibility("protected")))
 struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start)
 {
 	if (!pageindex) __pageindex_init();
@@ -953,7 +955,7 @@ struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct alloc
 	return b;
 }
 
-struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
+__attribute__((visibility("hidden")))
 struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start)
 {
 	if (!pageindex) __pageindex_init();
@@ -974,7 +976,7 @@ struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *
 	}
 }
 
-struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));
+__attribute__((visibility("hidden")))
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 {
 	if (!pageindex) __pageindex_init();
@@ -991,7 +993,7 @@ struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 	return b;
 }
 
-struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
+__attribute__((visibility("hidden")))
 struct big_allocation *__lookup_deepest_bigalloc(const void *mem)
 {
 	if (!pageindex) __pageindex_init();
