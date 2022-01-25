@@ -141,13 +141,18 @@ typedef struct lifetime_policy_s
  * Also remember we need to modify this struct so that it encodes a
  * [begin,end) range rather than just a begin offset.
  */
+// FIXME: this is a more general structure than we thought.
+// Perhaps rename it 'alloc_coord'? Not so much a coord as a 'tree pos'
+// It should be possible to reconstruct the exact object
+// address from one of these structs, now that we have the
+// maybe_containee_coord.
 struct alloc_containment_ctxt
 {
-	void *container_base;
-	uintptr_t bigalloc_or_uniqtype;
+	void *container_base;           // base addr of the containing alloc
+	uintptr_t bigalloc_or_uniqtype; // container might be a bigalloc or a uniqtype-described alloc
 	unsigned maybe_containee_coord; // where within the container?
-	struct alloc_containment_ctxt *encl;
-	unsigned encl_depth;
+	struct alloc_containment_ctxt *encl; // chain of enclosing contexts...
+	unsigned encl_depth;                 // ... 0 if chain is empty
 };
 #define BOU_BIGALLOC_NOCHECK_(b_o_u) ((struct big_allocation *) ((b_o_u) & UNIQTYPE_PTR_MASK_NOTFLAGS))
 #define BOU_UNIQTYPE_NOCHECK_(b_o_u) ((struct uniqtype *) ((b_o_u) & UNIQTYPE_PTR_MASK_NOTFLAGS))
@@ -159,6 +164,11 @@ struct alloc_containment_ctxt
 	&& ((uintptr_t)BOU_BIGALLOC_NOCHECK_(b_o_u) < (uintptr_t) &big_allocations[NBIGALLOCS]))
 #define BOU_IS_UNIQTYPE(b_o_u) (!BOU_IS_BIGALLOC(b_o_u))
 
+/* Given a containment context, we should be able
+ * to get back various things:
+ * the object pointer,
+ * its type,
+ * and the meaning of its coordinate, e.g. its field name */
 #define CONT_UNIQTYPE_FIELD_NAME(c) ( \
    ( (BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) && \
       UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
@@ -166,6 +176,33 @@ struct alloc_containment_ctxt
          BOU_UNIQTYPE((c)->bigalloc_or_uniqtype) \
       )[(c)->maybe_containee_coord - 1]) : NULL \
 )
+#define CONT_UNIQTYPE_FIELD(c) ( \
+ ( (BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) && \
+	UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
+	(struct uniqtype *)(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype)->related[(c)->maybe_containee_coord - 1].un.memb.ptr) \
+	: NULL \
+)
+#define CONT_UNIQTYPE_ARRAY_ELEMENT(c) ( \
+  ((BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) && \
+    UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) \
+  ? \
+  (BOU_UNIQTYPE((c)->bigalloc_or_uniqtype)->related[0].un.memb.ptr) \
+  : NULL \
+)
+#define CONT_UNIQTYPE(c) ( \
+  ((BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) ? \
+	(UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
+	CONT_UNIQTYPE_ARRAY_ELEMENT(c) : \
+	(UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
+	 CONT_UNIQTYPE_FIELD(c) \
+	: NULL \
+	: /* FIXME: see below */ NULL) \
+)
+
+/* PROBLEM: What about if our obj is a top-level allocation, so lies within a bigalloc
+ * but has no *enclosing* uniqtype? I guess we can call the allocator's get_type, since
+ * we have the bigalloc and can use its suballocator (which we know exists).
+ * We can possibly use the 'coord' field as short-cut to the type, but unclear. */
 
 struct interpreter
 {
@@ -225,7 +262,7 @@ enum
 fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
 fun(void *             ,get_base,      arg(void *, obj))  /* base address? */ \
 fun(unsigned long      ,get_size,      arg(void *, obj))  /* size? */ \
-fun(const char *       ,get_name,      arg(void *, obj))  /* name? */ \
+fun(const char *       ,get_name,      arg(void *, obj), arg(char *, namebuf), arg(size_t, buflen))  /* name? */ \
 fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
 fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct big_allocation *, maybe_alloc), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
 fun(struct big_allocation *,ensure_big,arg(void *, obj)) \
@@ -254,13 +291,12 @@ struct allocator
 
 /* Declare the top-level functions. FIXME: many of these are not defined
  * anywhere. FIXME: do we want to use 'protected' to make the __liballocs_-
- * prefixed ones non-overridable for internal calls? */
+ * prefixed ones non-overridable for internal calls? Beware protected undefs,
+ * which will prevent binding from outside-of-DSO clients... use IN_LIBALLOCS_DSO. */
 #define __liballocs_toplevel_fun_decl(rett, name, ...) \
 	rett __liballocs_ ## name( __VA_ARGS__ ); \
 	rett alloc_ ## name( __VA_ARGS__ );
 ALLOC_REFLECTIVE_API(__liballocs_toplevel_fun_decl, __allocmeta_fun_arg)
-
-/* other top-level functions */
 
 // we use walk_allocations to write a general cross-allocator depth-first traversal
 /* Depth-first walking necessarily crosses allocators, so it
@@ -372,6 +408,8 @@ _Bool __brk_allocator_notify_unindexed_address(const void *mem);
 
 typedef unsigned short allocsite_id_t;
 struct allocsites_vectors_by_base_id_entry; // opaque here
+
+const char *__liballocs_meta_libfile_name(const char *objname);
 
 struct allocs_file_metadata
 {

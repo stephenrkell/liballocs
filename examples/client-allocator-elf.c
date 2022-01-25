@@ -1,15 +1,19 @@
 #define _GNU_SOURCE
 #include <elf.h>
 #include <string.h>
+size_t strlcat(char *dst, const char *src, size_t size);
 #include <stdio.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <err.h>
+#include <ctype.h>
 #include "liballocs.h"
 #include "allocmeta.h"
 #include "relf.h"
+#include "librunt.h"
+#include "pageindex.h"
 
 /* An ELF file, mapped in memory, consists of
  * a collection of elements that are either
@@ -152,20 +156,71 @@ count_represented_sections(ElfW(Shdr) *shdrs, unsigned nshdr)
  * the __ARR_ typename will use the _usr_include_elf_h_NNN name
  * that was given to the anonymous underlying definition. We
  * encode the arrayness into the macro args. */
+
+// catx is like '##' but it expands its arguments
+#define caty(tok, ...) tok ## __VA_ARGS__
+#define catx(tok, ...) caty(tok, __VA_ARGS__)
+
+// we need a typedef to work around funky declarator syntax
+typedef void (*funptr_t)(void);
+
+// dummies start here
+// HACK: we should be able to autogenerate these using macro magic,
+// but life's too short
+Elf64_Ehdr ehdr;
+Elf64_Shdr shdr[1];
+Elf64_Phdr phdr[1];
+struct Elf64_Nhdr_with_data {
+        Elf64_Nhdr nhdr[1];
+        char data[];
+} __attribute__((packed)) nhdr_with_data[1];
+Elf64_Sym sym[1];
+Elf64_Rela rela[1];
+Elf64_Rel rel[1];
+Elf64_Dyn dyn[1];
+void (*fp)(void);
+// begin attempt at that macro magic
+#if 0
+// to ensure our meta-DSO contains the ELF types we need,
+// declare a dummy global of each type...
+// HMM -- we have uniqtype name fragments not actual C type names.
+// Do we want to use 'usedtypes'/'link-used-types'
+// or work towards an invariant where only meta-DSOs contain uniqtypes?
+// Unclear that this invariant is actually useful...
+// or even feasible, e.g. can we link libcrunch-style inlined checks
+// when the meta-DSO supplies the uniqtype? No because we'd need a load-time dependency
+// on the meta-DSO, even if we move to weak dynamic undefs (CHECK the GitHub issues about this).
+// So it seems reasonable that programs can depend on uniqtypes and therefore
+// must have them embedded via link-used-types or similar.
+// We have to (1) generate a reference to the uniqtype, and
+// (2) ensure that its DWARF type is in our DWARF.
+#define arrdecl0
+#define arrdecl1 [1]
+#define arru0
+#define arru1 __ARR1_
+#define elf_file_data_types_uniqtype_global(tag, ctype, tfrag, tisarray) \
+ctype __dummy_ ## tag arrdecl ## tisarray; \
+extern struct uniqtype catx(__uniqtype__, arru ## tisarray, caty(tfrag)); \
+struct uniqtype * catx(__dummyptr_to___uniqtype__, arru ## tisarray, caty(tfrag)) = \
+& catx(__uniqtype__, arru ## tisarray, caty(tfrag));
+elf_file_data_types(elf_file_data_types_uniqtype_global)
+#endif /* end attempt at macro magic */
+
+#define ElfW_with_data(t) catx(ElfW(t), _with_data)
 #define elf_file_data_types(v) \
-v(EHDR, ElfW(Ehdr), /* is array? */ 0) \
-v(SHDRS, ElfW(Shdr), 1) \
-v(PHDRS, ElfW(Phdr), 1) \
-v(NHDR, ElfW(Nhdr)_with_data, 0) \
-v(SYMS, ElfW(Sym), 1) \
-v(RELAS, ElfW(Rela), 1) \
-v(RELS, ElfW(Rel), 1) \
-v(DYNAMICS, ElfW(Dyn), 1) \
-v(FUNPTRVVS, __PTR___FUN_FROM___FUN_TO_void, 1) \
-v(BYTES, unsigned_char$$8, 1)
+v(EHDR, ElfW(Ehdr), ElfW(Ehdr), /* is array? */ 0) \
+v(SHDRS, ElfW(Shdr), ElfW(Shdr), 1) \
+v(PHDRS, ElfW(Phdr), ElfW(Phdr), 1) \
+v(NHDR, ElfW(Nhdr), ElfW_with_data(Nhdr), 0) \
+v(SYMS, ElfW(Sym), ElfW(Sym), 1) \
+v(RELAS, ElfW(Rela), ElfW(Rela), 1) \
+v(RELS, ElfW(Rel), ElfW(Rel),  1) \
+v(DYNAMICS, ElfW(Dyn), ElfW(Dyn), 1) \
+v(FUNPTRVVS, funptr_t, __PTR___FUN_FROM___FUN_TO_void, 1) \
+v(BYTES, unsigned char, unsigned_char$$8, 1)
 
 // define an enum -- ignoring the second argument
-#define elf_file_data_types_enum_entry(tag, tfrag, tisarray) \
+#define elf_file_data_types_enum_entry(tag, ctype, tfrag, tisarray) \
    ELF_DATA_ ## tag ,
 enum elf_file_data_type
 {
@@ -188,22 +243,33 @@ static void init_elf_file_type_table(void)
 #define stringifx(cond) stringify(cond)
 #endif
 
-#define elf_file_data_types_table_entry_init(tag, tfrag, tisarray) { \
+#define GET_UNIQTYPE_PTR(tfrag) ({ \
+   void *ret = fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag)); \
+   if (ret == (void*)-1) ret = NULL; \
+   ret; })
+
+#define elf_file_data_types_table_entry_init(tag, ctype, tfrag, tisarray) { \
 	elf_file_type_table[ELF_DATA_ ## tag] = (tisarray) \
 	    ? __liballocs_get_or_create_unbounded_array_type( ({ \
-	        struct uniqtype *tmp_u = fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag) ); \
+	        struct uniqtype *tmp_u = GET_UNIQTYPE_PTR(caty(tfrag)); \
 	        tmp_u; }) ) \
-	    : fake_dlsym(RTLD_DEFAULT, "__uniqtype__" stringifx(tfrag) ); \
+	    : GET_UNIQTYPE_PTR(catx(tfrag)); \
 	}
 	elf_file_data_types(elf_file_data_types_table_entry_init)
 }
 
 struct elf_metavector_entry
 {
-	ElfW(Word) fileoff;
-	unsigned size:28; // 256MB; too stingy? if so, borrow a few bits from fileoff
+	ElfW(Off) fileoff:38; // maximum 256GB ELF file...
 	unsigned type_idx:4;
+	unsigned short shndx; // 16 bits
+	unsigned long size:38;     // needs to match width of 'fileoff'
+	// we are up to 96 bits now... very ugly
 } __attribute__((packed));
+/* Most entries represent sections. Ideally we want some way to get the
+ * shndx for a given metavector entry. The problem is that we may have
+ * up to 65536 sections, and they need not be in offset order. So we
+ * really have to store the shndx for each element. */
 
 static int compare_elf_metavector_entry(const void *p1, const void *p2)
 {
@@ -255,6 +321,13 @@ struct elf_file_metadata
 
 struct elf_elements_metadata
 {
+	/* With the metavector, what we get is a collection of 'elements'
+	 * each with a file offset, a type_idx and a size in bytes.
+	 * However, we might want to correlate these back to (especially)
+	 * the section headers, so store this too. */
+	ElfW(Shdr) *shdrs;
+	unsigned nshdr;
+	unsigned char *shstrtab_data;
 	unsigned metavector_size;
 	struct elf_metavector_entry *metavector;
 	bitmap_word_t bitmap[];
@@ -306,7 +379,7 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 		.what = DATA_PTR,
 		.un = { opaque_data: { .data_ptr = __builtin_return_address(0), .free_func = NULL } }
 	};
-	struct elf_elements_metadata *elf_meta = malloc(offsetof(struct elf_elements_metadata, bitmap)
+	struct elf_elements_metadata *elf_meta = calloc(1, offsetof(struct elf_elements_metadata, bitmap)
 			+ sizeof (bitmap_word_t) * BITMAP_NWORDS(mapping_len + trailing_mapping_len, 1));
 	elf_meta->metavector = malloc(metavector_nentries * sizeof *elf_meta->metavector);
 	// create the bigalloc
@@ -323,27 +396,33 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 
 	// HMM. We assume we're adding in address order, but I don't think that's the case
 	unsigned metavector_ctr = 0;
-#define add_allocation_o(offset, thesize, typetag) do { \
+#define add_allocation_o(offset, thesize, typetag, theshndx) do { \
 	elf_meta->metavector[metavector_ctr++] = (struct elf_metavector_entry) {\
 	.fileoff = (offset), \
 	.size = (thesize), \
+	.shndx = (theshndx), \
 	.type_idx = ELF_DATA_ ## typetag \
 	}; \
 	assert(!(bitmap_get_b(elf_meta->bitmap, offset))); \
 	bitmap_set_b(elf_meta->bitmap, offset); \
 	} while(0)
-#define add_allocation_p(addr, size, typetag) \
-	add_allocation_o((uintptr_t)(addr) - (uintptr_t) mapping_start, size, typetag)
+#define add_allocation_p(addr, size, typetag, theshndx) \
+	add_allocation_o((uintptr_t)(addr) - (uintptr_t) mapping_start, size, typetag, theshndx)
 	// set up metadata for our ELF file:
 	// 1. metavector
 	// 2. bitmap
 	// 3. free list -- by iterating over metavector and differencing lengths
-	add_allocation_p(ehdr, ehdr->e_ehsize, EHDR);
+	add_allocation_p(ehdr, ehdr->e_ehsize, EHDR, 0);
 	if (ehdr->e_shoff)
 	{
 		ElfW(Shdr) *shdrs = (ElfW(Shdr)*)((uintptr_t) ehdr + ehdr->e_shoff);
-		add_allocation_p(shdrs, ehdr->e_shnum * ehdr->e_shentsize, SHDRS);
+		add_allocation_p(shdrs, ehdr->e_shnum * ehdr->e_shentsize, SHDRS, 0);
 		assert(ehdr->e_shentsize == sizeof (ElfW(Shdr)));
+		// remember this stuff in elf_meta
+		elf_meta->shdrs = shdrs;
+		elf_meta->nshdr = ehdr->e_shnum;
+		elf_meta->shstrtab_data = (unsigned char *)((uintptr_t) ehdr + shdrs[ehdr->e_shstrndx].sh_offset);
+		// add each as an element
 		for (unsigned i = 1; i < ehdr->e_shnum; ++i)
 		{
 			if (SHDR_IS_MANIFEST(shdrs[i]))
@@ -352,23 +431,23 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 				switch (shdrs[i].sh_type)
 				{
 					case SHT_NOTE:
-						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, NHDR); // FIXME: not quite right
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, NHDR, i); // FIXME: not quite right
 						break;
 					case SHT_DYNSYM:
 					case SHT_SYMTAB:
-						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, SYMS); break;
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, SYMS, i); break;
 					case SHT_RELA:
-						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, RELAS); break;
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, RELAS, i); break;
 					case SHT_DYNAMIC:
-						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, DYNAMICS); break;
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, DYNAMICS, i); break;
 					case SHT_NOBITS: assert(0 && "nobits should not be manifest");
 					case SHT_REL:
-						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, RELS); break;
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, RELS, i); break;
 					case SHT_SHLIB: assert(0 && "SHT_SHLIB should not be used");
 					case SHT_INIT_ARRAY:
 					case SHT_FINI_ARRAY:
 					case SHT_PREINIT_ARRAY:
-						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, /*FUNPTRVVS*/ BYTES); break;
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, /*FUNPTRVVS*/ BYTES, i); break;
 					// for now, other sections are just bytes
 					case SHT_GROUP:
 					case SHT_SYMTAB_SHNDX:
@@ -376,7 +455,7 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 					case SHT_STRTAB:
 					case SHT_HASH:
 					default:
-						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, BYTES); break;
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, BYTES, i); break;
 				}
 			}
 		}
@@ -384,7 +463,7 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 	if (ehdr->e_phoff)
 	{
 		assert(ehdr->e_phentsize == sizeof (ElfW(Phdr)));
-		add_allocation_o(ehdr->e_phoff, ehdr->e_phnum * ehdr->e_phentsize, PHDRS);
+		add_allocation_o(ehdr->e_phoff, ehdr->e_phnum * ehdr->e_phentsize, PHDRS, 0);
 	}
 	assert(metavector_nentries == metavector_ctr);
 	// now we have a metavector but it isn't sorted.
@@ -444,7 +523,7 @@ get_or_create_elfw_note_data_type(unsigned byte_array_len)
 
 	/* Get the char-array type we need. */
 	struct uniqtype *found_array_t = __liballocs_get_or_create_array_type(
-		fake_dlsym(RTLD_DEFAULT, "__uniqtype__unsigned$20char"),
+		GET_UNIQTYPE_PTR(unsigned$20char),
 		byte_array_len);
 	assert(found_array_t);
 	assert(found_array_t != (void*) -1);
@@ -509,17 +588,24 @@ struct uniqtype *elf_precise_type(unsigned idx, unsigned size)
 	else return u;
 }
 
-static
-struct uniqtype *elf_get_type(void *obj)
+/* helper */
+static struct elf_metavector_entry *elf_get_metavector_entry(void *obj, struct elf_elements_metadata **out_meta)
 {
 	struct big_allocation *b = __lookup_bigalloc_from_root(obj,
 		&__elf_file_allocator, NULL);
 	if (!b) return NULL;
 	struct elf_elements_metadata *meta = (struct elf_elements_metadata *) b->suballocator_private;
 	uintptr_t target_offset = (uintptr_t) obj - (uintptr_t) b->begin;
+	if (out_meta) *out_meta = meta;
 #define offset_from_rec(p) (p)->fileoff
-	struct elf_metavector_entry *found = bsearch_leq_generic(struct elf_metavector_entry, target_offset,
+	return bsearch_leq_generic(struct elf_metavector_entry, target_offset,
 		/* T* */ meta->metavector, meta->metavector_size, offset_from_rec);
+}
+
+static
+struct uniqtype *elf_get_type(void *obj)
+{
+	struct elf_metavector_entry *found = elf_get_metavector_entry(obj, NULL);
 	if (found) return elf_precise_type(found->type_idx, found->size);
 	return NULL;
 }
@@ -533,10 +619,45 @@ unsigned long *elf_get_size(void *obj);
 /* Getting a name makes sense... sections have names, though
  * header tables don't. One caveat is that section names don't
  * need to be unique. Maybe get_name functions should warn when
- * they generate a non-unique name?
+ * they generate a non-unique name? Or probably it should be
+ * a queryable property of an allocator's contract.
  */
 static
-const char *elf_get_name(void *obj);
+const char *elf_get_name(void *obj, char *buf, size_t buflen)
+{
+	struct elf_elements_metadata *meta = NULL;
+	/* To get the name, first we get the type. */
+	struct elf_metavector_entry *found = elf_get_metavector_entry(obj, &meta);
+	if (found)
+	{
+		switch (found->type_idx)
+		{
+			case ELF_DATA_EHDR: return "ehdr";
+			case ELF_DATA_SHDRS: return "shdrs";
+			case ELF_DATA_PHDRS: return "phdrs";
+			default: {
+				/* The allocation is a section, so we want the
+				 * section name. We have the fileoff, which
+				 * should be enough. ELF  But we need the shstrtab. */
+				ElfW(Shdr) *found_shdr = meta->shdrs ? &meta->shdrs[found->shndx] : NULL;
+				if (found_shdr)
+				{
+					assert(meta->shstrtab_data);
+					const char *shname = (const char *)(&meta->shstrtab_data[found_shdr->sh_name]);
+					/* FIXME: we do not handle the case where section names are
+					 * not unique. Or at least, we pass that non-uniqueness to
+					 * our caller to deal with. */
+					int ret = snprintf(buf, buflen, "section%s", shname);
+					if (ret >= buflen) buf[buflen - 1] = '\0';
+					return buf;
+					// FIXME: we are not signalling error on truncation
+				}
+				break; // we fail
+			}
+		}
+	}
+	return NULL;
+}
 
 
 static
@@ -655,7 +776,8 @@ struct allocator __elf_element_allocator = {
 	.name = "ELF element",
 	.is_cacheable = 1,
 	.get_info = elf_get_info,
-	.walk_allocations = elf_elements_walk_allocations
+	.walk_allocations = elf_elements_walk_allocations,
+	.get_name = elf_get_name
 };
 
 #if 0
@@ -683,6 +805,17 @@ struct emit_asm_ctxt
 	// need to thread through a summary of incoming references,
 	// so that we can emit labels as we go along
 	struct elf_walk_refs_state *references;
+	// to simulate a post-order traversal given only in-order traversal,
+	// we queue up post-order output, which gets flushed
+	// (1) on output at or below its depth, and
+	// (2) at the end of the traversal.
+	struct {
+		unsigned depth;
+		char *output;
+	} *queued_end_output;
+	unsigned queue_size;
+	unsigned queue_nused;
+	struct big_allocation *file_bigalloc;
 };
 
 static _Bool can_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
@@ -777,7 +910,7 @@ uintptr_t is_environ_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, st
 	static struct uniqtype *phdr_u;
 	if (!phdr_u)
 	{
-		phdr_u = fake_dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_Phdr");
+		phdr_u = GET_UNIQTYPE_PTR(Elf64_Phdr);
 		if (!phdr_u) abort();
 	}
 	if (BOU_IS_UNIQTYPE(cont->bigalloc_or_uniqtype)
@@ -898,15 +1031,128 @@ int seen_elf_environ_cb(struct big_allocation *maybe_the_allocation,
 	return 0;
 }
 
+static void drain_queued_output(struct emit_asm_ctxt *ctxt, unsigned depth)
+{
+	for (int i = ctxt->queue_nused - 1; i >= 0; --i)
+	{
+		if (ctxt->queued_end_output &&
+			ctxt->queued_end_output[i].depth >= depth)
+		{
+			assert(ctxt->queued_end_output[i].output); // should have something here
+			puts(ctxt->queued_end_output[i].output);
+			free(ctxt->queued_end_output[i].output);
+			bzero(&ctxt->queued_end_output[i], sizeof ctxt->queued_end_output[i]);
+			--ctxt->queue_nused;
+		}
+		else break; // queue is in asccending order of depth, so 'one <' means 'all remaining <'
+	}
+}
+
+static int append_subobject_label(char *buf, size_t sz,
+	struct alloc_containment_ctxt *cont, void *the_alloc)
+{
+	assert(cont->maybe_containee_coord);
+	int nwritten = 0;
+	if (UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
+	{
+		int ret = strlcat(buf, CONT_UNIQTYPE_FIELD_NAME(cont), sz);
+		assert(ret < sz);
+		nwritten += ret;
+	}
+	else if (UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
+	{
+		int ret = snprintf(buf, sz, "%d", cont->maybe_containee_coord - 1);
+		assert(ret > 0);
+		nwritten += ret;
+	}
+	else { /* ... */ }
+	return nwritten;
+}
+
+int recursive_print_context_label(char *buf, size_t sz,
+	struct alloc_containment_ctxt *cont, void *the_alloc,
+	struct big_allocation *maybe_the_alloc,
+	struct big_allocation *root_empty_name)
+{
+	/* Recursively build in 'buf' the label describing
+	 * our containment context argument. */
+	int nwritten = 0;
+	// we are asked to stop at a particular place, which must be a bigalloc
+	if (maybe_the_alloc == root_empty_name)
+	{
+		buf[0] = '\0';
+		return 1; // our return value counts the NUL
+	}
+
+	if (cont->encl)
+	{
+		int ret = recursive_print_context_label(buf, sz, cont->encl, cont->container_base,
+			BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype) ?
+					BOU_BIGALLOC(cont->bigalloc_or_uniqtype)
+					: NULL,
+			root_empty_name
+		);
+		/* After we do a recursive call, print a dot, sinc we need to do ourselves...
+		 * unless the name came back empty */
+		assert(ret < sz);
+		if (buf[0] != '\0')
+		{
+			ret = strlcat(buf, ".", sz);
+			// now 'ret' is the total length of the combined string with '.' appended
+			// where 'length' does not include the NUL
+			assert(ret < sz);
+			buf = buf + ret;
+			sz -= (ret + 1);
+			// nwritten DOES include the NUL
+			nwritten += (ret+1);
+		} else nwritten = ret;
+	}
+	// now we have 'cont' but not necessary 'cont->encl'
+	/* What's the label for our current allocation? */
+	// can we get a field name or index #?
+	if (BOU_IS_UNIQTYPE(cont->bigalloc_or_uniqtype))
+	{
+		nwritten += append_subobject_label(buf, sz, cont, the_alloc);
+	}
+	else
+	{
+		/* If we're a bona-fide allocation, we may have a name.
+		 * We need to ask the allocator. Get it either because
+		 * we're also a bigalloc and have allocated_by, or because
+		 * our container is a bigalloc that has suballocator. */
+		struct big_allocation *containing_bigalloc = BOU_BIGALLOC(cont->bigalloc_or_uniqtype);
+		struct allocator *a = __liballocs_infer_allocator(the_alloc,
+			maybe_the_alloc, containing_bigalloc);
+		char namebuf[4096];
+		const char *maybe_name = a->get_name ? a->get_name(the_alloc, namebuf, sizeof namebuf)
+			: NULL;
+		// FIXME: what if we hit an allocation with no name?
+		assert(maybe_name);
+		int ret = snprintf(buf, sz, "%s", maybe_name);
+		assert(ret > 0); // empty names not allowed
+		nwritten += ret;
+	}
+	return nwritten;
+}
+
+/* This is called for allocations and subobjects. */
 static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 		void *obj, struct uniqtype *t, const void *allocsite,
 		struct alloc_containment_ctxt *cont, void *emit_asm_ctxt_as_void)
 {
 	struct emit_asm_ctxt *ctxt = emit_asm_ctxt_as_void;
+	// -1. flush any queued outputs that are from a depth >= our depth
+	drain_queued_output(ctxt, cont->encl_depth);
 	// 0. pad up to the start
 	ptrdiff_t this_obj_offset = (intptr_t) obj - (intptr_t) ctxt->start_address;
 	int ret = 0;
-	char comment[4096] = "(no comment)";
+	char comment[4096] = "(no comment)"; // FIXME: can change to "allocation" wlog, but not while we're trying to match the diff
+	char label[4096] = "";
+	char end_label[4096] = "";
+	// macro for printing into any of the above arrays
+#define PRINT_TO_ARRAY(arr, fmt, ...) \
+do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
+     if (snret >= sizeof (arr)) { (arr)[(sizeof (arr)) - 1] = '\0'; } } while (0)
 	// can we get a field name or index #?
 	if (BOU_IS_UNIQTYPE(cont->bigalloc_or_uniqtype))
 	{
@@ -918,16 +1164,24 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 		{
 			if (UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
 			{
-				const char *field_name = CONT_UNIQTYPE_FIELD_NAME(cont);
-				int snret = snprintf(comment, sizeof comment, "field %s", field_name);
-				if (snret >= sizeof comment) comment[(sizeof comment) - 1] = '\0';
+				PRINT_TO_ARRAY(comment, "field %s", CONT_UNIQTYPE_FIELD_NAME(cont));
 			}
 			else if (UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
 			{
-				int snret = snprintf(comment, sizeof comment, "idx %d", cont->maybe_containee_coord - 1);
-				if (snret >= sizeof comment) comment[(sizeof comment) - 1] = '\0';
+				PRINT_TO_ARRAY(comment, "idx %d", cont->maybe_containee_coord - 1);
 			}
 		}
+	}
+	// FIXME: this should be cleaner. 'cont' is basically a tree
+	// coordinate in memory -- 'maybe_containee_coord' pinpoints
+	// a spot within that context -- and what we're doing is simply
+	// walking the tree.
+	// HACK: we only print a label for arrays or bigallocs
+	if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype)
+			|| UNIQTYPE_IS_ARRAY_TYPE(CONT_UNIQTYPE(cont)))
+	{
+		int ret = recursive_print_context_label(label, sizeof label, cont,
+			obj, maybe_the_allocation, ctxt->file_bigalloc);
 	}
 
 #define indent(n) do { for (int i = 0; i < n; ++i) printf(" "); } while (0)
@@ -937,6 +1191,8 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 		if (pad < 0)
 		{
 			// union case, so must be a uniqtype; allocs can't overlap
+			// (For our hypothetical 'subobjects are another kind of allocation' future:
+			// only 'active' subobjects 'are' allocations in a true sense.)
 			assert(!BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype));
 			struct uniqtype *u = BOU_UNIQTYPE(cont->bigalloc_or_uniqtype);
 			assert(cont->maybe_containee_coord);
@@ -955,14 +1211,82 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 			ctxt->emitted_up_to_offset += pad;
 		}
 	}
+	// We might have a label; if so emit it. We do this before any indentation,
+	// so that labels stay flush-left
+	if (label[0] != '\0')
+	{
+		// we have a label
+		printf("%s:\n", label);
+		// create an end label... will get enqueued as we return
+		/* We only emit labels for bigallocs or arrays. NOT 'things
+		 * contained in arrays', but really the thing itself.  */
+		if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype)
+				|| UNIQTYPE_IS_ARRAY_TYPE(CONT_UNIQTYPE(cont)) )
+		{
+			PRINT_TO_ARRAY(end_label, "%s.end", label);
+		}
+	}
+
 	// we're pre-order; before we descend, print a header
-	// FIXME: no postorder so can't easily print an '# end:' comment
+	// FIXME: no postorder so can't easily print an '# end:' comment (or label)
 	if (UNIQTYPE_HAS_SUBOBJECTS(t))
 	{
 		/* We're about to start printing the fields of the present thing */
 		indent(cont->encl_depth);
 		printf("# begin: %s of type %s\n", comment, UNIQTYPE_NAME(t));
+		// subobjects get walked separately; we don't have to recurse
 	}
+
+	/* handle special-case types */
+	/* we use asciiz for top-level char-arrays (sections or other ELF elements)
+	 * but not otherwise (e.g. char arrays within a struct). HMM. That's a bit crude.
+	 * We check for (roughly) this by testing whether we're directly under a bigalloc.
+	 * Ideally we want the ELF section. How can we get the ELF metadata for the
+	 * containing allocation? Need to check it's allocated by __elf_element_allocator
+	 * and if so, ask it! Ideally we'd have a better way to signal asciizness, since
+	 * we want this code one day to work for any memory, not just a mapped ELF binary. */
+	if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype) &&
+			UNIQTYPE_IS_ARRAY_TYPE(t) &&
+			(UNIQTYPE_ARRAY_ELEMENT_TYPE(t) == GET_UNIQTYPE_PTR(unsigned_char$$8)
+			|| UNIQTYPE_ARRAY_ELEMENT_TYPE(t) == GET_UNIQTYPE_PTR(signed_char$$8)))
+	{
+		/* split the data on '\0' and write .asciiz, ending in .ascii or .asciiz */
+		unsigned off = 0;
+		unsigned sz = UNIQTYPE_SIZE_IN_BYTES(t);
+		char *found_nul = NULL;
+		_Bool indented = 0; // we did this above
+		while (off < sz && NULL != (found_nul = memchr(((char*)obj+off), '\0', sz-off)))
+		{
+			if (!indented) { indent(cont->encl_depth); }
+			printf(".asciz \"");
+			for (char *c = (char*) obj + off; c < found_nul; ++c)
+			{
+				if (isprint(*c) && *c != '"') putchar(*c);
+				else printf("\\%03o", *c);
+			}
+			printf("\"\n");
+			indented = 0;
+			off += ((found_nul+1) - (char*) (obj+off));
+		}
+		// stuff left to do?
+		if (!found_nul && off < sz)
+		{
+			// no nuls left, but ssme chars, so .ascii
+			if (!indented) { indent(cont->encl_depth); }
+			printf(".ascii \"");
+			// can't printf (no NUL) so just do a slow but reliable putc loop
+			for (char *c = (char*) obj + off; c < (char*) obj + sz; ++c)
+			{
+				putchar(*c);
+			}
+			off = sz;
+			printf("\"\n");
+		}
+		ctxt->emitted_up_to_offset += sz;
+		ret = -1; // 'cut off this subtree'
+		goto out; // finished outputting the thing
+	} // we need to AVOID recursing down subobjects
+
 	if (UNIQTYPE_IS_POINTER_TYPE(t))
 	{
 		// FIXME: need to refer to a label
@@ -975,6 +1299,10 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 	{
 		struct uniqtype *b = UNIQTYPE_IS_BASE_TYPE(t) ? t
 			: UNIQTYPE_ENUM_BASE_TYPE(t);
+		/* TODO: if we're emitting an environment element, don't copy
+		 * the data via memcpy; reference it by its assembler symbol,
+		 * that we should have (again TODO) created earlier by memcpy. */
+
 		assert(!UNIQTYPE_IS_BIT_GRANULARITY_BASE_TYPE(b));
 		_Bool is_signed = UNIQTYPE_IS_2S_COMPL_INTEGER_TYPE(b);
 #define mkpair(sz, signed) ((sz)<<1 | (signed))
@@ -982,9 +1310,6 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 			__int128_t ss;
 			__uint128_t us;
 		} data = { us: 0 };
-	/* TODO: if we're emitting an environment element, don't copy
-	 * the data via memcpy; reference it by its assembler symbol,
-	 * that we should have (again TODO) created earlier by memcpy. */
 		memcpy(&data, obj, UNIQTYPE_SIZE_IN_BYTES(b));
 		indent(cont->encl_depth);
 		switch (mkpair(UNIQTYPE_SIZE_IN_BYTES(b), is_signed))
@@ -1051,11 +1376,30 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 		 */
 	}
 out:
+	if (end_label[0] != '\0')
+	{
+		if (ctxt->queue_nused == ctxt->queue_size)
+		{
+			ctxt->queue_size = (ctxt->queue_size ? 4 * ctxt->queue_size : 4);
+			ctxt->queued_end_output = realloc(ctxt->queued_end_output,
+				ctxt->queue_size * sizeof (*ctxt->queued_end_output)
+			);
+			if (!ctxt->queued_end_output) err(EXIT_FAILURE, "could not realloc ctxt->queued_end_output");
+		}
+		int idx = ctxt->queue_nused++;
+		ctxt->queued_end_output[idx].depth = cont->encl_depth;
+		asprintf(&ctxt->queued_end_output[idx].output, "%s:", end_label); // next line will indent
+	}
 	return ret;
 }
 
 int main(void)
 {
+	// assert our meta-object has been loaded, since we can't work without it?
+	// FIXME: we now link in our usedtypes, but that doesn't help because
+	// we didn't finish the macro magic that would make them actually used;
+	// instead we still do need the meta-DSO
+	assert(NULL != dlopen(__liballocs_meta_libfile_name(__runt_get_exe_realpath()), RTLD_NOW|RTLD_NOLOAD));
 	char *path = getenv("ELF_FILE_TEST_DSO");
 	if (!path) path = getenv("LIBALLOCS_BUILD");
 	assert(path && "test lib should be loaded with ELF_FILE_TEST_DSO or LIBALLOCS_BUILD set");
@@ -1121,12 +1465,18 @@ int main(void)
 		.buf_used = 0
 	};
 	// also __liballocs_walk_down_at( ... ) which privately uses an offset-based helper
+	/* Gather 'environment' info, i.e. stuff that we need in order to decode
+	 * references a.k.a. offsets-or-pointers. Am not entirely sure that this step is sane.
+	 * The issue is possibly that we need to emit references *symbolically*,
+	 * so we need to gather knowledge that will let us *generate* those symbols (labels *references*). */
 	__liballocs_walk_allocations_df(
 		&scope,
 		__liballocs_walk_environ_cb,
 		&environ_state
 	);
 	printf("Saw %u environment elements on our walk\n", (unsigned) environ_state.buf_used);
+	/* Now gather references themselves. The idea is that we need incoming
+	 * references so that we can emit label *definitions* as we go along. */
 	__liballocs_walk_allocations_df(
 		&scope,
 		__liballocs_walk_refs_cb, // generic cb takes a struct walk_environ_state * arg, as void
@@ -1135,17 +1485,20 @@ int main(void)
 	printf("Saw %u references on our walk\n", (unsigned) reference_state.buf_used);
 	sleep(3);
 	/* Walk allocations. */
-	struct emit_asm_ctxt initial_ctxt = {
+	struct emit_asm_ctxt ctxt = {
 		.start_address = mapping,
 		.emitted_up_to_offset = 0,
 		//.overall_comment = "ELF element",
 		.depth = 0,
-		.references = &reference_state // HMM, we chain ctxts to...
+		.references = &reference_state, // HMM, we chain ctxts to...
+		.file_bigalloc = b
 	};
 	__liballocs_walk_allocations_df(
 		&scope,
 		emit_memory_asm_cb,
-		&initial_ctxt
+		&ctxt
 	);
+	drain_queued_output(&ctxt, 0);
+	if (ctxt.queued_end_output) free(ctxt.queued_end_output);
 	if (reference_state.buf) free(reference_state.buf);
 }
