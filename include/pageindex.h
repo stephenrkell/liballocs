@@ -174,6 +174,23 @@ inline struct big_allocation *__liballocs_get_bigalloc_containing(const void *ob
 	return b;
 }
 
+/* If we know enough about the bigallocs, we can infer what the allocator
+ * is. */
+static inline
+struct allocator *
+__liballocs_infer_allocator(void *obj, struct big_allocation *maybe_the_allocation,
+	struct big_allocation *containing_bigalloc)
+{
+	assert(containing_bigalloc);
+	assert(containing_bigalloc->suballocator || maybe_the_allocation);
+	struct allocator *a;
+	if (maybe_the_allocation)
+	{
+		a = maybe_the_allocation->allocated_by;
+	} else a = containing_bigalloc->suballocator;
+	return a;
+}
+
 inline
 struct allocator *__liballocs_leaf_allocator_for(const void *obj,
 	struct big_allocation **out_bigalloc)
