@@ -716,7 +716,11 @@ static const char *meta_libfile_name(const char *objname)
 	// no need to compute the last bytes_left
 	
 	return &libfile_name[0];
-}	
+}
+const char *__liballocs_meta_libfile_name(const char *objname)
+{
+	return meta_libfile_name(objname);
+}
 
 // HACK
 extern void __libcrunch_scan_lazy_typenames(void *handle) __attribute__((weak));
@@ -1606,11 +1610,7 @@ int __liballocs_walk_allocations(
 	void *arg
 )
 {
-	/* HMM. Now we have duplication between 'cont' and the arguments
-	 * 'big_allocation_or_base_address' and 'flags_or_uniqtype'.
-	 * In principle, 'cont' makes these arguments redundant. Do we
-	 * eliminate them? Yes, go on then. But it affects 'flags'.
-	 * Basically, if we are asked to walk children of a bigalloc,
+	/* If we are asked to walk children of a bigalloc,
 	 * not of a uniqtype, then
 	 *
 	 * - the bigalloc may have a type, in which case
@@ -1624,12 +1624,7 @@ int __liballocs_walk_allocations(
 	 *
 	 * Given just an alloc_containment_ctxt, where do we get
 	 * our flags from? We can include flags in the uniqtype
-	 * as it is always 8-byte-aligned. We can't include flags
-	 * in bigalloc-or-base because base may be 1-byte-aligned.
-	 * But we can still distinguish bigalloc from base by testing
-	 * against . EXCEPTION: meta-completeness case, where we're
-	 * querying liballocs's own allocations. But even then, I
-	 * think we should be OK. */
+	 * as it is always 8-byte-aligned. */
 	assert(cont);
 	uintptr_t flags = (cont->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_FLAGS);
 	if (flags)
@@ -1668,7 +1663,12 @@ int __liballocs_walk_allocations(
 		}
 		return ret;
 	}
-	// eventually: delegate to the uniqtype allocator
+	// if we get here, then we have walked any child bigallocs
+	// *and*
+	// we have walked any suballocs.
+	// BUT what if we're just a thing with a type, and want to walk its substructure?
+	// eventually: delegate to the uniqtype allocator (more uniform)
+	// for now: use UNIQTYPE_FOR_EACH_SUBOBJECT
 #if 0
 	return __uniqtype_allocator_walk_allocations(...);
 #else

@@ -250,12 +250,7 @@ struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct alloc
 {
 	return NULL;
 }
-Dl_info dladdr_with_cache(const void *addr)
-{
-	Dl_info dummy;
-	memset(&dummy, 0, sizeof dummy);
-	return dummy;
-}
+
 struct alloc_containment_ctxt;
 typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *t, const void *allocsite, struct alloc_containment_ctxt *cont, void *arg);
 int __liballocs_walk_allocations_df(
@@ -318,6 +313,7 @@ void __notify_copy(void *dest, const void *src, unsigned long n)
 	 * Also note that in any case, libcrunch will wrap us. */
 }
 
+const char *__liballocs_meta_libfile_name(const char *objname) { return NULL; }
 
 /* GIANT HACK:
  * This is in this file because:
