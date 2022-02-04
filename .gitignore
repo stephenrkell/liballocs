@@ -174,3 +174,24 @@ config.h.in
 contrib/config.mk
 contrib/env.sh
 
+/allocsld/*.s
+/TODO.srk
+/00*.patch
+*.ii
+/build
+/configure.cmd*
+/contrib/cil.stamp
+/examples/elf-file-symbolised*
+/examples/elf-file-vanilla*
+/examples/elf-file.test
+/examples/test*
+/tests/lib-test/elf-file-symbolised*
+/tests/lib-test/elf-file-vanilla*
+/tests/lib-test/elf-file.test
+/tests/lib-test/test*
+examples/client-allocator-elf+meta
+examples/test*
+oopsla*.ps
+*.rej
+*.orig
+/tests/bit-fields/bit-fields
