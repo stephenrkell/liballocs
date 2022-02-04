@@ -1627,6 +1627,46 @@ int __liballocs_walk_allocations(
 	 * as it is always 8-byte-aligned. */
 	assert(cont);
 	uintptr_t flags = (cont->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_FLAGS);
+	/* Currently we
+	 * - walk child bigallocs (if asked), then
+	 * - walk suballocator allocations (if asked), then
+	 * - walk uniqtype substructure.
+	 * BUT
+	 * - we want a depth-first walk to be possible
+	 *   which visits allocations at any depth in increasing address order.
+	 * - That means we MAY need to interleave the bigalloc-walking
+	 *   with the suballoc-walking.
+	 *   One way: accept a range, and walk within that range; use bigalloc start/end to break up.
+	 * - SANITY: when do we have a mix of child bigallocs and ordinary allocs?
+	 *
+	 * The wackiest case is auxv containing the initial stack, rather
+	 * than the other way around, which was so that stackframe could be
+	 * stack's suballocator.
+	 
+	 * From auxv.c:
+	 * Don't record the stack allocator as a suballocator; child bigallocs
+	 * fill this function for us. Suballocators only make sense at the leaf
+	 * level, when you can say "anything smaller than us is managed by this
+	 * allocator". Child bigallocs can be sized precisely, leaving our auxv
+	 * "crack" modelled with precise bounds, which is exactly what we need 
+	 * as the auxv is often less than a whole page. The stack will always be
+	 * a bigalloc, and having it as our child is how we carve out this
+	 * not-page-boundaried region as the auxv.
+
+	 * So here we have the auxv mostly-covered by a child bigalloc that is
+	 * the stack, which is suballocated by the stackframe. If we wanted to
+	 * walk the auxv depth-first, what would we need to do?
+	 * And let's imagine (falsely) that there is stuff at the end of the auxv
+	 * too.
+	 * We would need exactly to interleave the walking of child small allocs
+	 * with the walking of the child bigalloc. Using the 'range' arguments is
+	 * probably the right thing here. Remember that 'walk_allocations' is a
+	 * primitive which allocators can reasonably provide, but which client code
+	 * is unlikely to call directly - walk_df is much more useful.
+	 
+	 
+	 
+	 */
 	if (flags)
 	{
 		/* If we have flags, we must be traversing a bigalloc. */

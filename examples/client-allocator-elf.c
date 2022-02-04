@@ -392,9 +392,8 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 	elf_b->suballocator = &__elf_element_allocator;
 	elf_b->suballocator_private = elf_meta;
 	elf_b->suballocator_private_free = free_elf_elements_metadata;
-	
 
-	// HMM. We assume we're adding in address order, but I don't think that's the case
+	// adding in any order for now; we qsort later
 	unsigned metavector_ctr = 0;
 #define add_allocation_o(offset, thesize, typetag, theshndx) do { \
 	elf_meta->metavector[metavector_ctr++] = (struct elf_metavector_entry) {\
@@ -435,6 +434,50 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 						break;
 					case SHT_DYNSYM:
 					case SHT_SYMTAB:
+						// also promote these to bigallocs: they are packed_seqs
+						// of the nulterm'd-string kind
+						/* BIG Q: how do we iterate depth first over
+						 * promoted and non-promoted allocations,
+						 * while preserivng the property that a depth-first pre-order walk
+						 * enumerates (sub)allocations in address order?
+						 *
+						 * Tentative: bigallocs know that they're promoted, and
+						 * we skip those children when walking bigalloc children.
+						 * The allocator also has to know about promotion.
+						 * GAH. Preserving the depth-first order here is a problem.
+						 *
+						 * What's the other case? It's things like the auxv/stack
+						 * hack perhaps. Remind me why we had that?
+						 *
+						 * Or it's actual suballocation: not reasonable for the
+						 * two allocators to know about each other then. Suballocation
+						 * is different from promotion.
+						 *
+						 * So hmm, are we talking about promotion or suballocation here?
+						 * A packed sequence seems like a suballocator to me.
+						 *
+						 * Currently, bigalloc records can contain an insert, for
+						 * the case of promoted heap allocations. This is in a big ugly
+						 * union. We really want to remove the 'ins_and_bits' case.
+						 * The reason for putting it in the bigalloc was clownshoes,
+						 * although clients who do that already have to nonportably
+						 * guess the malloc header overhead anyway.
+						 * SO
+						 * Probably the things to do are:
+						 *
+						 * - when walking DF, interleave the walk of ordinary allocations
+						 *   and child bigallocs (of either kind!)
+						 * - distinguish 'promoted [but not suballocated]' from
+						 *   'suballocated' in the bigalloc struct. Actually this is
+						 *   already the case: "suballocator" may be null.
+						 * - promoted chunks' metadata should always be managed
+						 *   by the underlying allocator
+						 *      - update generic-malloc and generic-small
+						 *      - eliminate ins_and_bits
+						 *
+						 * THEN we can manage packed subsequences as... what? They are
+						 * suballocated.
+						 */
 						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, SYMS, i); break;
 					case SHT_RELA:
 						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, RELAS, i); break;

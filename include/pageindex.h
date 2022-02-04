@@ -228,7 +228,30 @@ struct allocator *__liballocs_leaf_allocator_for(const void *obj,
 	 * FIXME: we should really *try* the suballocator and then,
 	 * if ptr actually falls between the cracks, return the 
 	 * bigalloc's allocator. But that makes things slower than
-	 * we want. So we should add a slower call for this. */
+	 * we want. So we should add a slower call for this.
+	 *
+	 * It's possible that the planned 'pageindex top bit' usage could
+	 * avoid any slowdown here. If the top bit is set, it means there
+	 * is nothing in the page (any part of the page, i.e. it may *begin*
+	 * on a previous page) that is not common-case, i.e. not allocated by
+	 * the suballocator of this bigalloc (if there is one; otherwise
+	 * it means it is all part of this exact bigalloc?).
+	 *
+	 * How does this 'top bit' thing work in the case of, say, a
+	 * malloc arena? When the arena is allocated, we set the top
+	 * bits for all pages except perhaps the end ones if it's not
+	 * page-aligned. We clear some of them if we, sya, promote a
+	 * malloc chunk to a bigalloc; its begin and end pages might need
+	 * their bits cleared. But its fully-contained pages would be
+	 * fine to keep their bits. DOES THIS WORK? It means that even
+	 * for an empty arena, the malloc is 'the leaf allocator' for
+	 * all addresses in the range, even if there is nothing allocated
+	 * at a queried address. Is that the semantics we want? Depends
+	 * a bit on our callers, i.e. who wants to know about leaf allocators
+	 * and why. libcrunch is one. It doesn't want to know about the arena,
+	 * only about stuff in it, so 'yes it's the leaf; nothing here' would
+	 * indeed be the correct response here.
+	 */
 	
 	if (__builtin_expect(!deepest, 0)) return NULL;
 	if (out_bigalloc) *out_bigalloc = deepest;
