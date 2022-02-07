@@ -273,7 +273,7 @@ fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \
 fun(size_t             ,raw_metadata,  arg(struct allocated_chunk *,start),arg(struct alloc_metadata **, buf)) \
 fun(liballocs_err_t    ,set_type,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
 fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
-fun(int                ,walk_allocations, arg(struct alloc_containment_ctxt *,cont), arg(walk_alloc_cb_t *, cb), arg(void *, arg))
+fun(int                ,walk_allocations, arg(struct alloc_containment_ctxt *,cont), arg(walk_alloc_cb_t *, cb), arg(void *, arg), arg(void *, begin), arg(void *, end))
 
 #define __allocmeta_fun_arg(argt, name) argt
 #define __allocmeta_fun_ptr(rett, name, ...) \

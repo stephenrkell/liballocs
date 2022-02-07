@@ -1102,20 +1102,6 @@ struct insert *object_insert(const void *obj, struct insert *ins)
 {
 	return ins;
 }
-/* A client-friendly lookup function that knows about bigallocs.
- * FIXME: this needs to go away! Clients shouldn't have to know about inserts,
- * and not all allocators maintain them. */
-struct insert *__liballocs_get_insert(struct big_allocation *maybe_the_allocation, const void *mem)
-{
-	struct big_allocation *b = maybe_the_allocation ? maybe_the_allocation :
-		__lookup_bigalloc_under_pageindex(mem, &__generic_malloc_allocator, NULL);
-	if (b)
-	{
-		assert(b->meta.what == INS_AND_BITS);
-		return &b->meta.un.ins_and_bits.ins;
-	}
-	else return lookup_object_info(mem, NULL, NULL, NULL);
-}
 
 /* A client-friendly lookup function with cache. */
 struct insert *lookup_object_info(const void *mem, void **out_object_start, size_t *out_object_size,
@@ -1390,42 +1376,45 @@ liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *b,
 	 * are discovered, e.g. indirect ones.)
 	 */
 	struct insert *heap_info = NULL;
-	
-	/* NOTE: bigallocs already have the size adjusted by the insert. */
+	void *base;
+	size_t logical_size;
+	/* NOTE: bigallocs already have the size adjusted to exclude the insert. */
 	if (b->allocated_by == &__generic_malloc_allocator)
 	{
 		/* We already have the metadata. */
+		base = b->begin;
+		logical_size = (char*) b->end - (char*) b->begin;
 		heap_info = &b->meta.un.ins_and_bits.ins;
-		if (out_base) *out_base = b->begin;
-		if (out_size) *out_size = (char*) b->end - (char*) b->begin;
 	}
 	else
 	{
-		size_t alloc_usable_chunksize;
-		void *base_if_no_out_base;
-		heap_info = lookup_object_info(obj, out_base ? out_base : &base_if_no_out_base,
-			&alloc_usable_chunksize, NULL);
-		if (heap_info && out_size)
+		size_t alloc_usable_chunksize = 0;
+		heap_info = lookup_object_info(obj, &base, &alloc_usable_chunksize, NULL);
+		if (!heap_info)
 		{
-			*out_size = requested_size_for_chunk(out_base ? *out_base : base_if_no_out_base,
-				alloc_usable_chunksize);
+			/* For an unindexed non-promoted chunk, we don't know the base, so
+			 * we don't know the logical size. We don't know anything. Note that
+			 * for promoted chunks, we might know the size and base because we
+			 * can promote to bigalloc passing the original base pointer, from
+			 * which malloc_usable_size() can do the rest. */
+			++__liballocs_aborted_unindexed_heap;
+			return &__liballocs_err_unindexed_heap_object;
 		}
+		assert(base);
+		logical_size = requested_size_for_chunk(base, alloc_usable_chunksize);
 	}
-	
-	if (!heap_info)
-	{
-		++__liballocs_aborted_unindexed_heap;
-		return &__liballocs_err_unindexed_heap_object;
-	}
-	
-	if (!out_type && !out_site) return NULL;
-	return extract_and_output_alloc_site_and_type(heap_info, out_type, (void**) out_site);
+	assert(heap_info);
+	if (out_base) *out_base = b->begin;
+	if (out_size) *out_size = logical_size;
+	if (out_type || out_site) return extract_and_output_alloc_site_and_type(
+		heap_info, out_type, (void**) out_site);
+	// no error
+	return NULL;
 }
 
 liballocs_err_t __generic_heap_set_type(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type)
 {
-	struct insert *ins = __liballocs_get_insert(maybe_the_allocation, obj);
-	struct insert *heap_info = lookup_object_info(obj, NULL, NULL, NULL);
+	struct insert *ins = lookup_object_info(obj, NULL, NULL, NULL);
 	if (!ins) return &__liballocs_err_unindexed_heap_object;
 	ins->alloc_site = (uintptr_t) new_type;
 	ins->alloc_site_flag = 1; // meaning it's a type, not a site

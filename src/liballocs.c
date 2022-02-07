@@ -1607,7 +1607,9 @@ static int walk_child_bigallocs(struct alloc_containment_ctxt *cont,
 int __liballocs_walk_allocations(
 	struct alloc_containment_ctxt *cont,
 	walk_alloc_cb_t *cb,
-	void *arg
+	void *arg,
+	void *maybe_range_begin,
+	void *maybe_range_end
 )
 {
 	/* If we are asked to walk children of a bigalloc,
@@ -1639,9 +1641,11 @@ int __liballocs_walk_allocations(
 	 *   One way: accept a range, and walk within that range; use bigalloc start/end to break up.
 	 * - SANITY: when do we have a mix of child bigallocs and ordinary allocs?
 	 *
-	 * The wackiest case is auxv containing the initial stack, rather
-	 * than the other way around, which was so that stackframe could be
-	 * stack's suballocator.
+	 * The wackiest cases are
+	 * - promoted malloc chunks, which may or may not be suballoc-d from
+	 * - auxv containing the initial stack, rather
+	 *   than the other way around, which was so that stackframe could be
+	 *   stack's suballocator.
 	 
 	 * From auxv.c:
 	 * Don't record the stack allocator as a suballocator; child bigallocs
@@ -1698,7 +1702,7 @@ int __liballocs_walk_allocations(
 				.encl = cont,
 				.encl_depth = cont->encl_depth + 1
 			};
-			ret = b->suballocator->walk_allocations(&new_cont, cb, arg);
+			ret = b->suballocator->walk_allocations(&new_cont, cb, arg, NULL, NULL);
 			if (ret != 0) return ret;
 		}
 		return ret;
@@ -1737,7 +1741,9 @@ int __liballocs_walk_allocations(
 int
 alloc_walk_allocations(struct alloc_containment_ctxt *cont,
 	walk_alloc_cb_t *cb,
-	void *arg) __attribute__((alias("__liballocs_walk_allocations")));
+	void *arg,
+	void *maybe_range_begin,
+	void *maybe_range_end) __attribute__((alias("__liballocs_walk_allocations")));
 
 static int walk_child_bigallocs(struct alloc_containment_ctxt *cont,
 	walk_alloc_cb_t *cb,
@@ -1796,7 +1802,7 @@ static int walk_one_df_cb(struct big_allocation *maybe_the_allocation,
 		.encl = cont,
 		.encl_depth = cont->encl_depth + 1
 	};
-	return __liballocs_walk_allocations(&new_scope, walk_one_df_cb, arg);
+	return __liballocs_walk_allocations(&new_scope, walk_one_df_cb, arg, NULL, NULL);
 #if 0
 	// a. a bigalloc with children
 	if (maybe_the_allocation && maybe_the_allocation->first_child)
@@ -1871,7 +1877,9 @@ int __liballocs_walk_allocations_df(
 	return __liballocs_walk_allocations(
 		cont,
 		walk_one_df_cb,
-		&walk_df_arg
+		&walk_df_arg,
+		NULL,
+		NULL
 	);
 }
 

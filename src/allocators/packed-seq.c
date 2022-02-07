@@ -70,7 +70,13 @@ struct packed_sequence_metavector_rec16
 typedef size_t enumerate_fn(void *pos, void *end, struct uniqtype **out_u, unsigned *out_size_delta_nbytes, void *arg);
 
 /* This is the 'uniqtype equivalent'. We could rejig it into a case of
- * uniqtype quite easily, actually. */
+ * uniqtype quite easily, actually.
+ * Remember that the key difference between a packed sequence and a structure type
+ * is that sequences of the same 'type 'are self-delimiting and don't have to have the
+ * same substructure instance-to-instance. So we optionally cache their substructure,
+ * which makes no sense for structs. TODO: .. it could for unions, i.e.  maybe this should
+ * be stored/managed the same way as the union shadow? We don't currently implement the union
+ * shadow so there's an opportunity. */
 struct packed_sequence_family
 {
 	enumerate_fn *fn;
