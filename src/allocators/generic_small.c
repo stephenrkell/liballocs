@@ -441,13 +441,17 @@ int __index_small_alloc(void *ptr, int level, unsigned size_bytes)
 	}
 	else if (container->suballocator != &__generic_small_allocator)
 	{
-		/* We hit the parent bigalloc, but it's not a bigalloc that we are managing.
-		 * So we need to promote that underlying alloc. We need to get its info first. */
-		void *bigalloc_base;
-		liballocs_err_t err = a->get_info(ptr, container, NULL, &bigalloc_base, NULL, NULL);
+		/* 'Container' is a higher-up bigalloc; it's not a bigalloc that we are suballocating.
+		 * This means we need to promote our immediately containing alloc.
+		 * We need to get its info first. */
+		void *containing_alloc_base;
+		liballocs_err_t err = a->get_info(ptr, /* maybe_the_alloc? NO GAH GAH */ /*container*/ NULL,
+			NULL, &containing_alloc_base, NULL, NULL);
 		if (err && err != &__liballocs_err_unrecognised_alloc_site) abort();
-		
-		container = a->ensure_big(bigalloc_base);
+		// HMM. We're asking generic_malloc to ensure its own arena base (bigalloc_base) is big.
+		// That won't work. Our chunk *should* be a real malloc alloc and it's not.
+		// But also we're reutrning the wrong bigalloc base.
+		container = a->ensure_big(containing_alloc_base);
 		// we will set up the chunk below
 	}
 	/* Else we hit the parent allocation, and it's already a bigalloc. */

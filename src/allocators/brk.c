@@ -90,7 +90,7 @@ static void set_brk_bigalloc(void *curbrk)
 			(void*) phdr_end_addr,
 			(uintptr_t) executable_mapping_bigalloc->end - phdr_end_addr,
 			(struct meta_info) {
-				.what = INS_AND_BITS
+				.what = DATA_PTR
 			},
 			executable_mapping_bigalloc,
 			/* allocated_by */ &__brk_allocator

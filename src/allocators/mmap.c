@@ -800,7 +800,12 @@ void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)
 }
 
 static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg);
-void add_missing_mappings_from_proc(void)
+struct add_missing_cb_args
+{
+	struct mapping_sequence *seq;
+	void *end_addr;
+};
+void add_missing_mappings_from_proc(void *executable_end_addr)
 {
 	struct maps_entry entry;
 
@@ -819,7 +824,12 @@ void add_missing_mappings_from_proc(void)
 	struct mapping_sequence current = {
 		.begin = NULL
 	};
-	for_each_maps_entry(fd, get_a_line_from_maps_fd, linebuf, sizeof linebuf, &entry, add_missing_cb, &current);
+	struct add_missing_cb_args args = {
+		.seq = &current,
+		.end_addr = executable_end_addr
+	};
+	for_each_maps_entry(fd, get_a_line_from_maps_fd, linebuf, sizeof linebuf, &entry,
+		add_missing_cb, &args);
 	/* Finish off the last mapping. */
 	if (current.nused > 0) add_mapping_sequence_bigalloc_if_absent(&current);
 
@@ -921,6 +931,7 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 				break;
 			}
 		}
+		// this is just used for detecting and filling holes, opportunistically
 		uintptr_t last_seen_end_vaddr_rounded_up = (uintptr_t) -1;
 		for (int i = 0; i < phnum_auxv->a_un.a_val; ++i)
 		{
@@ -930,8 +941,8 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 				/* Kernel's treatment of extra-memsz is not reliable -- i.e. the 
 				 * memsz bit needn't show up in /proc/<pid>/maps -- so use the
 				 * beginning. */
-				uintptr_t end = executable_load_addr + 
-					(uintptr_t) phdr->p_vaddr + phdr->p_memsz;
+				uintptr_t end = ROUND_UP(executable_load_addr + 
+					(uintptr_t) phdr->p_vaddr + phdr->p_memsz, PAGE_SIZE);
 				if (end > biggest_end_seen)
 				{
 					biggest_end_seen = end;
@@ -988,7 +999,7 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 		 * because we're not trapping sbrk() yet. We need the bigalloc lookup
 		 * (in the indexing logic, or in pageindex) to have a second-attempt
 		 * at getting the bigalloc after re-checking the sbrk(). */
-		add_missing_mappings_from_proc();
+		add_missing_mappings_from_proc(executable_end_addr);
 		/* Also extend the data segment to account for the current brk. */
 		set_executable_mapping_bigalloc(executable_end_addr);
 		/* Before we ask libsystrap to do anything, ensure the file metadata
@@ -1380,10 +1391,11 @@ static _Bool extend_current(struct mapping_sequence *cur, struct maps_entry *ent
 				filename, NULL);
 };
 
-static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
+static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *args_as_void)
 {
 	unsigned long size = ent->second - ent->first;
-	struct mapping_sequence *cur = (struct mapping_sequence *) arg;
+	struct add_missing_cb_args *args = (struct add_missing_cb_args *) args_as_void;
+	struct mapping_sequence *cur = args->seq;
 	
 	// if this mapping looks like a memtable, we skip it
 	if (size > BIGGEST_SANE_USER_ALLOC) return 0; // keep going
@@ -1401,17 +1413,32 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg)
 	 * add_mapping_sequence_bigalloc_if_absent reconcile any discrepancies
 	 * with what already exists.
 	 */
+	void *obj = (void *)(uintptr_t) ent->first;
+	void *obj_lastbyte __attribute__((unused)) = (void *)((uintptr_t) ent->second - 1);
+	struct maps_entry fake_ent;
 
 	if (0 == strncmp(ent->rest, "[heap", 5)) // it might say '[heap]'; treat it as heap
 	{
 		/* We will get this when we do the sbrk. Do nothing for now. */
-		return 0;
+		/* PROBLEM: Linux sometimes says '[heap]' when actually some or all
+		 * of the mapping is bss from the executable. This messes us up because
+		 * static_file_allocator wants there to be a mapping_entry for the
+		 * highest vaddr in the file, which could be the end of bss. */
+		if ((uintptr_t) obj < (uintptr_t) args->end_addr)
+		{
+			/* This mapping is actually partly bss. Fake up an entry
+			 * that covers just the bss. */
+			debug_printf(1, "Linux says [heap] but we think it's partly BSS\n");
+			memcpy(&fake_ent, ent, sizeof *ent);
+			fake_ent.rest[0] = '\0';
+			fake_ent.second = (uintptr_t) args->end_addr;
+			ent = &fake_ent;
+			obj_lastbyte = args->end_addr;
+		}
+		else return 0;
 	}
 
 	// ... but if we do, and it's not square-bracketed and nonzero-sizes, it's a mapping
-	void *obj = (void *)(uintptr_t) ent->first;
-	void *obj_lastbyte __attribute__((unused)) = (void *)((uintptr_t) ent->second - 1);
-
 	_Bool extended = extend_current(cur, ent);
 	if (!extended)
 	{

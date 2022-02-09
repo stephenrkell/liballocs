@@ -366,10 +366,10 @@ void __liballocs_print_l0_to_stream_err(void)
 	if (!pageindex) __pageindex_init();
 	for (struct big_allocation *b = &big_allocations[1]; b < &big_allocations[NBIGALLOCS]; ++b)
 	{
-		if (BIGALLOC_IN_USE(b) && !b->parent) fprintf(get_stream_err(), "%p-%p %s %s %p\n",
+		if (BIGALLOC_IN_USE(b) && !b->parent) fprintf(get_stream_err(), "%p-%p %s %p\n",
 				b->begin, b->end, b->allocated_by->name, 
-				b->meta.what == DATA_PTR ? "(data ptr) " : "(insert + bits) ", 
-				b->meta.what == DATA_PTR ? b->meta.un.opaque_data.data_ptr : (void*)(uintptr_t) b->meta.un.ins_and_bits.ins.alloc_site);
+				b->meta.un.opaque_data.data_ptr
+		);
 	}
 	
 	BIG_UNLOCK
@@ -953,27 +953,6 @@ struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct alloc
 	struct big_allocation *b = find_bigalloc_from_root(mem, a);
 	BIG_UNLOCK;
 	return b;
-}
-
-__attribute__((visibility("hidden")))
-struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start)
-{
-	if (!pageindex) __pageindex_init();
-	int lock_ret;
-	BIG_LOCK
-	
-	struct big_allocation *b = find_bigalloc_under_pageindex(mem, a);
-	if (b && b->meta.what == INS_AND_BITS)
-	{
-		if (out_object_start) *out_object_start = b->begin;
-		BIG_UNLOCK
-		return &b->meta.un.ins_and_bits.ins;
-	}
-	else
-	{
-		BIG_UNLOCK
-		return NULL;
-	}
 }
 
 __attribute__((visibility("hidden")))

@@ -45,7 +45,7 @@ struct insert
  * "insert" is down to the individual allocator. */
 struct meta_info
 {
-	enum meta_info_kind { DATA_PTR, INS_AND_BITS } what;
+	enum meta_info_kind { DATA_PTR } what;
 	union
 	{
 		struct
@@ -53,15 +53,6 @@ struct meta_info
 			void *data_ptr;
 			void (*free_func)(void*);
 		} opaque_data;
-		struct 
-		{
-			struct insert ins;
-			/* FIXME: document what these fields are for. I think it's when we 
-			 * push malloc chunks' metadata down into the bigalloc metadata. */
-			/*unsigned is_object_start:1;
-			unsigned npages:20;
-			unsigned obj_offset:7;*/
-		} ins_and_bits;
 	} un;
 };
 
@@ -139,9 +130,6 @@ struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator
 struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start);
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
-
-// FIXME: this should go away
-struct insert *__lookup_bigalloc_with_insert(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 
 struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attribute__((visibility("protected")));
 struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));

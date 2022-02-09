@@ -328,7 +328,8 @@ __liballocs_make_array_precise_with_memory_bounds(struct uniqtype *in,
 	assert(element_t->pos_maxoff != UNIQTYPE_POS_MAXOFF_UNBOUNDED);
 	
 	unsigned array_len = precise_size / element_t->pos_maxoff;
-	assert(precise_size % element_t->pos_maxoff == 0); /* too strict? */
+	// assert(precise_size % element_t->pos_maxoff == 0); // too strict?
+	/* YES it's too strict. For why, see the note under heap_index.h's 'sizes' diagram. */
 	
 	return __liballocs_get_or_create_array_type(element_t, precise_size / element_t->pos_maxoff);
 }
