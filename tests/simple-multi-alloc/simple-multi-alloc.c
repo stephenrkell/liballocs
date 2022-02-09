@@ -18,8 +18,6 @@ static void (__attribute__((constructor)) init)(void)
 
 _Bool __thread doing_deep_call = 0;
 
-char early_heap[4 * 1048576];
-char *early_heap_cur = &early_heap[0];
 void *xmalloc(size_t size)
 {
 	uintptr_t *ret = g_slice_alloc(size + sizeof (uintptr_t));
