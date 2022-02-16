@@ -259,7 +259,7 @@ LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJ
 liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
 liballocs_preload.so: LDFLAGS += -Wl,-Map,liballocs_preload.so.map
 liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a
-liballocs_preload.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
+liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 # also set the dependencies, for make purposes
 liballocs_preload.so: $(LIBDLBIND)/lib/libdlbind.a $(LIBSYSTRAP)/lib/libsystrap.a # anything that goes in ldlibs should be a dependency
 
