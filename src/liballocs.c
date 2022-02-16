@@ -1153,7 +1153,13 @@ void __liballocs_post_systrap_init(void)
 		pointer_to___uniqtype____ARR0_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____ARR0_signed_char$$8");
 		if (!pointer_to___uniqtype____ARR0_signed_char)
 		{
-			// FIXME: handle this
+			CREATE(__uniqtype____ARR0_signed_char, "__uniqtype____ARR0_signed_char", 2, {
+				.pos_maxoff = UNIQTYPE_POS_MAXOFF_UNBOUNDED,
+				.un = { array: { .is_array = 1, .nelems = UNIQTYPE_ARRAY_LENGTH_UNBOUNDED } }
+			});
+			pointer_to___uniqtype____ARR0_signed_char->related[0] = (struct uniqtype_rel_info) {
+				{ t : { pointer_to___uniqtype__signed_char } }
+			};
 		}
 		pointer_to___uniqtype__intptr_t = dlsym(RTLD_DEFAULT, "__uniqtype__intptr_t");
 		if (!pointer_to___uniqtype__intptr_t)
@@ -1584,13 +1590,26 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 	return 0;
 }
 
-static int walk_child_bigallocs(struct alloc_containment_ctxt *cont,
-	walk_alloc_cb_t *cb, void *arg);
-/* Given a bigalloc, there are two kinds of allocation to walk:
+/* Ways to walk allocations:
+ *
+ * - each allocator may provide a walk_allocations function
+ *   which walks (exactly) its allocations as contained within
+ *   a given containment context (bigalloc, mostly -- see below about uniqtype).
+ *      - if there are 'imposed child bigallocs', i.e. child
+ *        bigallocs that are not allocated_by that allocator,
+ *        it will *not* walk them. These are rare... 'stackframe
+ *        within auxv' is probably the only case to date.
+ * - the *top-level* walk_allocations function, below, can walk
+ *   allocations in any containment context (by delegating to the
+ *   appropriate allocator, but also optionally *will* walk imposed
+ *   children, if given the right flag.
+ * - iterating contained subobjects within a uniqtype is currently
+ *   a separate case but should eventually become just another allocator.
+ * Given a bigalloc, there are two kinds of allocation to walk:
  * child bigallocs, and suballocator chunks. If it's the suballocator,
  * we need to ask it to walk *its* allocations. The allocator API
- * also uses ALLOC_REFLECTIVE_API so we need to create something
- * uniform.
+ * also uses ALLOC_REFLECTIVE_API so we need the top-level API here
+ * to be uniform.
  *
  * Is there an invariant that says we can't have both child allocs
  * and bigallocs? No, actually we CAN because a malloc chunk can be
@@ -1620,6 +1639,9 @@ int __liballocs_walk_allocations(
 	 *    - it must NOT have suballocation
 	 *    - it must NOT have child allocations
 	 *    - we delegate to the uniqtype walker and that's it
+	 *    - FIXME: I don't think we do that right now. Unless
+	 *      our bou is a uniqtype... can we represent the context
+	 *      as "the whole of this bigalloc"?
 	 * - the bigalloc may have suballocations *and* children
 	 *    - flags determine which one(s) we walk (can be both)
 	 * - the bigalloc may have only children
@@ -1647,6 +1669,9 @@ int __liballocs_walk_allocations(
 	 * - auxv containing the initial stack, rather
 	 *   than the other way around, which was so that stackframe could be
 	 *   stack's suballocator.
+	 * - packed_sequence instances -- these may have a type, but also have a
+	 *   bigalloc that knows more fine-grained types. The allocator may not
+	 *   know about them.
 	 
 	 * From auxv.c:
 	 * Don't record the stack allocator as a suballocator; child bigallocs
@@ -1668,50 +1693,71 @@ int __liballocs_walk_allocations(
 	 * probably the right thing here. Remember that 'walk_allocations' is a
 	 * primitive which allocators can reasonably provide, but which client code
 	 * is unlikely to call directly - walk_df is much more useful.
-	 
-	 
-	 
+	 *
+	 * So what about *non*-imposed child bigallocs? We seem to be expecting the
+	 * 'promoting' allocator to notice that there's a bigalloc and interleave
+	 * that. But is that reasonable? If it promoted the chunk, then fine. But
+	 * we seem to have cases where that's not so, e.g. in the ELF elements
+	 * allocator. There we try to promote a section simply by creating a new
+	 * bigalloc that hangs in the relevant place. But it doesn't show up as
+	 * imposed... why not? That would mean
+	 * b->suballocator || child->allocated_by != b->suballocator
+	 * ... but what is b? it's the ELF file bigalloc, and its suballocator is __elf_elements_allocator
+	 * ... and 'child' is the new bigalloc for the section, and allocated_by is ^^ that too.
+	 * So it's not considered imposed.
 	 */
-	if (flags)
+	int ret = 0;
+	void *walked_up_to = maybe_range_begin ?: cont->container_base;
+	if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype))
 	{
-		/* If we have flags, we must be traversing a bigalloc. */
-		struct big_allocation *b = (struct big_allocation *)(cont->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_NOTFLAGS);
-		assert((uintptr_t) b
-			>= (uintptr_t) &big_allocations[1]);
-		assert((uintptr_t) b
-			< (uintptr_t) &big_allocations[NBIGALLOCS]);
+		struct big_allocation *b = BOU_BIGALLOC(cont->bigalloc_or_uniqtype);
 		assert(b->begin == cont->container_base);
-		int ret = 0;
-		if (flags & ALLOC_WALK_CHILD_BIGALLOCS)
+		struct alloc_containment_ctxt new_cont = {
+			.container_base = b->begin,
+			.bigalloc_or_uniqtype = (uintptr_t) b /* no flags set */,
+			.maybe_containee_coord = 1,
+			.encl = cont,
+			.encl_depth = cont->encl_depth + 1
+		};
+		if (flags & ALLOC_WALK_BIGALLOC_IMPOSED_CHILDREN)
 		{
-			struct alloc_containment_ctxt new_cont = {
-				.container_base = b->begin,
-				.bigalloc_or_uniqtype = (uintptr_t) b /* no flags set */,
-				.maybe_containee_coord = 0,
-				.encl = cont,
-				.encl_depth = cont->encl_depth + 1
-			};
-			ret = walk_child_bigallocs(&new_cont, cb, arg);
-			if (ret != 0) return ret;
+			// we are asked to walk the allocations under b in the allocation tree
+			/* To walk the imposed children, we need to divide the range up into
+			 * chunks for each imposed child. FIXME: this is racy, but imposed
+			 * children are rare and come/go/move even more rarely. */
+			for (struct big_allocation *child = b->first_child; child;
+				walked_up_to = child->end,
+				child = child->next_sib,
+				++new_cont.maybe_containee_coord)
+			{
+				// skip any that don't fall within our range
+				if ((uintptr_t) child->end <= (uintptr_t) walked_up_to) continue;
+				if (maybe_range_end && (uintptr_t) child->begin > (uintptr_t) maybe_range_end) continue;
+				if (!b->suballocator || child->allocated_by != b->suballocator)
+				{
+					// it's an imposed child
+					// 1. walk non-i.c. suballocations
+					// NOTE: this will override the 'coord' as it calls the cb
+					// for its own children; we only pass coords for bigallocs
+					// or for uniqtype containeds
+					ret = b->suballocator->walk_allocations(&new_cont, cb, arg,
+						walked_up_to, child->begin);
+					if (ret != 0) return ret;
+					// 2. walk the i.c.
+					ret = cb(b, b->begin, NULL /* FIXME: type */, NULL /* FIXME: allocsite */,
+						&new_cont, arg);
+					if (ret != 0) return ret;
+				}
+			}
 		}
-		if (flags & ALLOC_WALK_SUBALLOCS)
-		{
-			struct alloc_containment_ctxt new_cont = {
-				.container_base = b->begin,
-				.bigalloc_or_uniqtype = (uintptr_t) b /* no flags set */,
-				.maybe_containee_coord = 0,
-				.encl = cont,
-				.encl_depth = cont->encl_depth + 1
-			};
-			ret = b->suballocator->walk_allocations(&new_cont, cb, arg, NULL, NULL);
-			if (ret != 0) return ret;
-		}
+		// now there is a range, either from the beginning or from the last i.c.,
+		// to the end, that we haven't walked yet and which by definition only contains normal children
+		ret = b->suballocator->walk_allocations(&new_cont, cb, arg,
+			walked_up_to, maybe_range_end ?: b->end);
 		return ret;
 	}
-	// if we get here, then we have walked any child bigallocs
-	// *and*
-	// we have walked any suballocs.
-	// BUT what if we're just a thing with a type, and want to walk its substructure?
+	// if we get here, then
+	// we're just a thing with a type, and want to walk its substructure
 	// eventually: delegate to the uniqtype allocator (more uniform)
 	// for now: use UNIQTYPE_FOR_EACH_SUBOBJECT
 #if 0
@@ -1720,10 +1766,10 @@ int __liballocs_walk_allocations(
 	/* We've ruled out the bigalloc case, so we're being asked
 	 * to iterate through subobjects given a uniqtype. */
 	// for now, use our iteration macro
-	int ret = 0;
 #define suballoc_thing(_i, _t, _offs) do { \
 	cont->maybe_containee_coord = (_i) + 1; \
-	ret = cb(NULL, (void*)(((uintptr_t) cont->container_base) + (_offs)), \
+	void *base = (void*)(((uintptr_t) cont->container_base) + (_offs)); \
+	ret = cb(NULL, base, \
 	   (_t), \
 	   NULL /* allocsite */, \
 	   cont, \
@@ -1746,34 +1792,6 @@ alloc_walk_allocations(struct alloc_containment_ctxt *cont,
 	void *maybe_range_begin,
 	void *maybe_range_end) __attribute__((alias("__liballocs_walk_allocations")));
 
-static int walk_child_bigallocs(struct alloc_containment_ctxt *cont,
-	walk_alloc_cb_t *cb,
-	void *arg)
-{
-	int ret = 0;
-	struct big_allocation *initial_b = (struct big_allocation *)
-		(cont->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_NOTFLAGS);
-	unsigned coord = 1;
-	for (struct big_allocation *b = initial_b->first_child;
-			b; ++coord, b = b->next_sib)
-	{
-		/* Bigallocs already encapsulate their containment context,
-		 * oh well...
-		 * FIXME: just like we want to factor out a common 'containment'
-		 * thing from uniqtype_rel_info, we should also pull it out here. */
-		struct alloc_containment_ctxt new_cont = {
-		 .container_base = initial_b->begin,
-		 .bigalloc_or_uniqtype = (uintptr_t) initial_b /* no flags set */,
-		 .maybe_containee_coord = coord,
-		 .encl = cont,
-		 .encl_depth = cont->encl_depth + 1
-		};
-		ret = cb(b, b->begin, NULL /* FIXME: type */, NULL /* FIXME: allocsite */, &new_cont, arg);
-		if (ret != 0) return ret;
-	}
-	return ret;
-}
-
 struct walk_df_arg
 {
 	walk_alloc_cb_t *cb;
@@ -1789,6 +1807,28 @@ static int walk_one_df_cb(struct big_allocation *maybe_the_allocation,
 	 *    -1: skip the subtree
 	 *  else: return immediately
 	 */
+	// If the allocating allocator says there's no bigalloc, it doesn't
+	// mean there isn't. It just means it doesn't know or care. We do
+	// because we don't want to double-walk the substructure (once
+	// with uniqtype, once with the bigalloc child structure).
+	if (t && BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype))
+	{
+		for (struct big_allocation *child = BOU_BIGALLOC(cont->bigalloc_or_uniqtype)->first_child;
+			child;
+			child = child->next_sib)
+		{
+			// does this child alloc actually describe the alloc
+			// in question? e.g. if it was just hung on there.
+			if (child->begin == obj)
+			{
+				maybe_the_allocation = child;
+				// this will force us to pass a BOU_BIGALLOC not a BOU_UNIQTYPE
+				// wheren we call __liballocs_walk_allocations below
+				break;
+			}
+		}
+	}
+	
 	struct walk_df_arg *arg = (struct walk_df_arg *) walk_df_arg_as_void;
 	// First, we call back for the present thing (i.e. we are pre-order)
 	int ret = arg->cb(maybe_the_allocation, obj, t, allocsite, cont, arg->arg);
@@ -1804,63 +1844,6 @@ static int walk_one_df_cb(struct big_allocation *maybe_the_allocation,
 		.encl_depth = cont->encl_depth + 1
 	};
 	return __liballocs_walk_allocations(&new_scope, walk_one_df_cb, arg, NULL, NULL);
-#if 0
-	// a. a bigalloc with children
-	if (maybe_the_allocation && maybe_the_allocation->first_child)
-	{
-		// FIXME: this is just walking the allocations,
-		// so we should be able to call back to __liballocs_walk_allocations
-		// We need to deduplicate the logic here with that there,
-		// esp on the suballoc flags.
-		assert(!t && "with-children bigallocs should not have a type");
-		unsigned coord = 1;
-		for (struct big_allocation *b = maybe_the_allocation->first_child;
-				b;
-				++coord, b = b->next_sib)
-		{
-			// our scope is now this bigalloc
-			struct alloc_containment_ctxt new_scope = {
-				.container_base = b->begin,
-				.bigalloc_or_uniqtype = (uintptr_t) b,
-				.maybe_containee_coord = coord,
-				.encl = cont,
-				.encl_depth = cont->encl_depth + 1
-			};
-			ret = __liballocs_walk_allocations_df(&new_scope, walk_one_df_cb, arg);
-			if (ret) return ret;
-		}
-	}
-	// b. a suballocated bigalloc
-	if (maybe_the_allocation && maybe_the_allocation->suballocator)
-	{
-		assert(!t && "suballocated bigallocs should not have a type");
-		// our scope is now this bigalloc
-		struct alloc_containment_ctxt new_scope = {
-			.container_base = maybe_the_allocation->begin,
-			.bigalloc_or_uniqtype = (uintptr_t) maybe_the_allocation,
-			.maybe_containee_coord = 0,
-			.encl = cont,
-			.encl_depth = cont->encl_depth + 1
-		};
-		ret = __liballocs_walk_allocations_df(&new_scope, walk_one_df_cb, arg);
-		if (ret) return ret;
-	}
-	// c. bigalloc or no, a uniqtype-described object with substructure
-	if (t && UNIQTYPE_HAS_SUBOBJECTS(t))
-	{
-		// our scope is now this typed object
-		struct alloc_containment_ctxt new_scope = {
-			.container_base = obj,
-			.bigalloc_or_uniqtype = (uintptr_t) t,
-			.maybe_containee_coord = 0,
-			.encl = cont,
-			.encl_depth = cont->encl_depth + 1
-		};
-		ret = __liballocs_walk_allocations_df(&new_scope, walk_one_df_cb, arg);
-		if (ret) return ret;
-	}
-	return ret;
-#endif
 }
 int __liballocs_walk_allocations_df(
 	struct alloc_containment_ctxt *cont,

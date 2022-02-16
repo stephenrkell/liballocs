@@ -474,9 +474,9 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 						 *   by the underlying allocator
 						 *      - update generic-malloc and generic-small
 						 *      - eliminate ins_and_bits
-						 *
+						 * DONE all these.
 						 * THEN we can manage packed subsequences as... what? They are
-						 * suballocated.
+						 * suballocated. See SHT_STRTAB below.
 						 */
 						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, SYMS, i); break;
 					case SHT_RELA:
@@ -491,11 +491,39 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 					case SHT_FINI_ARRAY:
 					case SHT_PREINIT_ARRAY:
 						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, /*FUNPTRVVS*/ BYTES, i); break;
+					case SHT_STRTAB: {
+						/* Let's try our packed_sequence thingy. How do we promote one
+						 * of our allocations? I guess we just create a bigalloc and
+						 * make sure it is allocated_by us. */
+						struct big_allocation *seq_b = __liballocs_new_bigalloc(
+							(void*)((uintptr_t) elf_b->begin + shdrs[i].sh_offset),
+							shdrs[i].sh_size,
+							(struct meta_info) {
+								.what = DATA_PTR
+							},
+							elf_b, /* parent is the ELF file bigalloc? yes */
+							&__elf_element_allocator /* allocated by */
+						);
+						seq_b->suballocator = &__packed_seq_allocator;
+						seq_b->suballocator_private = malloc(sizeof (struct packed_sequence));
+						seq_b->suballocator_private_free = __packed_seq_free;
+						if (!seq_b->suballocator_private) abort();
+						*(struct packed_sequence *) seq_b->suballocator_private = (struct packed_sequence) {
+							.fam = &__string8_nulterm_packed_sequence,
+							.fn_arg = NULL,
+							.un = { .metavector_any = NULL },
+							.metavector_nused = 0,
+							.metavector_size = 0,
+							.starts_bitmap = NULL,
+							.starts_bitmap_nwords = 0,
+							.offset_cached_up_to = 0
+						};
+						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, BYTES, i);
+					}   break;
 					// for now, other sections are just bytes
 					case SHT_GROUP:
 					case SHT_SYMTAB_SHNDX:
 					case SHT_PROGBITS:
-					case SHT_STRTAB:
 					case SHT_HASH:
 					default:
 						add_allocation_o(shdrs[i].sh_offset, shdrs[i].sh_size, BYTES, i); break;
@@ -780,13 +808,23 @@ static liballocs_err_t elf_get_info(void *obj, struct big_allocation *maybe_biga
 }
 
 static int elf_elements_walk_allocations(struct alloc_containment_ctxt *cont,
-	walk_alloc_cb_t *cb, void *arg)
+	walk_alloc_cb_t *cb, void *arg, void *maybe_range_begin, void *maybe_range_end)
 {
-	struct big_allocation *arena = (struct big_allocation *) cont->bigalloc_or_uniqtype;
+	struct big_allocation *arena = BOU_BIGALLOC(cont->bigalloc_or_uniqtype);
 	struct elf_elements_metadata *elements_meta
 		 = (struct elf_elements_metadata *) arena->suballocator_private;
 	int ret = 0;
 	unsigned coord = 1;
+	// FIXME: heed maybe_range_begin and maybe_range_end
+	/* Do we need to recognise when one of our allocations is also
+	 * a bigalloc? Maybe we promoted it, but maybe some other code
+	 * decided just to 'hang' the bigalloc there. I think this is
+	 * for the depth-first walker to notice. We only walk one level.
+	 * The depth-first walker may discard the type we give it, because
+	 * there's an essential conflict between saying you have a uniqtype,
+	 * and saying you have a suballocator (other than __uniqtype_allocator).
+	 * They might have different ways of divvying up the space.
+	 */
 	for (struct elf_metavector_entry *e = elements_meta->metavector;
 			e != elements_meta->metavector + elements_meta->metavector_size;
 			++e, ++coord)
@@ -1270,6 +1308,14 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		}
 	}
 
+	if (maybe_the_allocation && maybe_the_allocation->suballocator)
+	{
+		// even if we have a type, we're going to descend further
+		// e.g. to a packed_sequence
+		ret = 0;
+		goto out;
+	}
+
 	// we're pre-order; before we descend, print a header
 	// FIXME: no postorder so can't easily print an '# end:' comment (or label)
 	if (UNIQTYPE_HAS_SUBOBJECTS(t))
@@ -1288,6 +1334,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 	 * containing allocation? Need to check it's allocated by __elf_element_allocator
 	 * and if so, ask it! Ideally we'd have a better way to signal asciizness, since
 	 * we want this code one day to work for any memory, not just a mapped ELF binary. */
+#if 0
 	if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype) &&
 			UNIQTYPE_IS_ARRAY_TYPE(t) &&
 			(UNIQTYPE_ARRAY_ELEMENT_TYPE(t) == GET_UNIQTYPE_PTR(unsigned_char$$8)
@@ -1329,6 +1376,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		ret = -1; // 'cut off this subtree'
 		goto out; // finished outputting the thing
 	} // we need to AVOID recursing down subobjects
+#endif
 
 	if (UNIQTYPE_IS_POINTER_TYPE(t))
 	{
@@ -1475,7 +1523,7 @@ int main(void)
 	 * ensure meta-objects have been loaded. */
 	struct alloc_containment_ctxt scope = {
 		.container_base = b->begin,
-		.bigalloc_or_uniqtype = (uintptr_t) b | ALLOC_WALK_SUBALLOCS,
+		.bigalloc_or_uniqtype = (uintptr_t) b,
 		.maybe_containee_coord = 0,
 		.encl = NULL,
 		.encl_depth = 0

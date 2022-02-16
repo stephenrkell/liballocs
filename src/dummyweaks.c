@@ -181,6 +181,8 @@ struct allocator __generic_malloc_allocator; /* covers all chunks */
 struct allocator __generic_small_allocator; /* usual suballoc impl */
 struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 struct allocator __generic_malloc_allocator;
+struct allocator __packed_seq_allocator;
+struct packed_sequence_family { long pad[10]; } __string8_nulterm_packed_sequence; // HACK
 
 struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,
@@ -253,6 +255,19 @@ struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct alloc
 
 struct alloc_containment_ctxt;
 typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *t, const void *allocsite, struct alloc_containment_ctxt *cont, void *arg);
+int
+__liballocs_walk_allocations(struct alloc_containment_ctxt *cont,
+	walk_alloc_cb_t *cb,
+	void *arg,
+	void *maybe_range_begin,
+	void *maybe_range_end) { return 0; }
+int
+alloc_walk_allocations(struct alloc_containment_ctxt *cont,
+	walk_alloc_cb_t *cb,
+	void *arg,
+	void *maybe_range_begin,
+	void *maybe_range_end) __attribute__((alias("__liballocs_walk_allocations")));
+
 int __liballocs_walk_allocations_df(
 	struct alloc_containment_ctxt *cont,
 	walk_alloc_cb_t *cb,
@@ -345,6 +360,8 @@ char *__liballocs_private_strndup(const char *s, size_t n)
 	return memcpy(mem, s, len);
 }
 char *__private_strndup(const char *s, size_t n) __attribute__((weak,alias("__liballocs_private_strndup")));
+
+void __packed_seq_free(void *arg) {}
 
 // FIXME: these are just pasted, and that is just wrong.
 // See GitHub issue #56 for possible ways to get rid of all this.

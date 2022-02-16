@@ -5,6 +5,7 @@
 #include "vas.h" /* for rounding and dividing macros */
 #include "bitmap.h"
 #include "liballocs_private.h"
+#include "relf.h"
 
 static const char *get_name(void *obj, char *namebuf, size_t buflen)
 {
@@ -91,8 +92,8 @@ static size_t enumerate_string8_nulterm(void *pos, void *end, struct uniqtype **
 {
 	/* 'pos' points at a sequence element; we need to get the next one.  */
 	unsigned char *cpos = pos;
-	while (cpos != end && *cpos++);
 	if (cpos == end) return (size_t) -1;
+	while (cpos != end && *cpos++);
 	if (out_size_delta_nbytes) *out_size_delta_nbytes = 0u;
 	if (out_u) *out_u = pointer_to___uniqtype____ARR0_signed_char;
 	return cpos - (unsigned char *) pos;
@@ -102,36 +103,32 @@ struct packed_sequence_family __string8_nulterm_packed_sequence = {
 	.log2_align = 0,
 	.one_plus_log2_metavector_entry_size_bytes = 0, /* we don't need a metavector */
 	.ntypes = 1,
-	.types_table = { NULL /* init'd below */ }
+	.types_table = { NULL /* init'd below in constructor */ }
 };
 __attribute__((constructor))
 static void init(void)
 {
-	__string8_nulterm_packed_sequence.types_table[0] = pointer_to___uniqtype____ARR0_signed_char;
+	// FIXME: don't assume this uniqtype is available... need a pointer_to_*
+	__string8_nulterm_packed_sequence.types_table[0] =
+		pointer_to___uniqtype____ARR0_signed_char;
+	assert(__string8_nulterm_packed_sequence.types_table[0]);
+	assert(__string8_nulterm_packed_sequence.types_table[0] != (void*) -1);
 }
 /* This is the per-sequence metadata. */
-struct packed_sequence
-{
-	struct packed_sequence_family *fam;
-	void *fn_arg;
-	/* We cache, lazily, up to a given offset. The metavector
-	 * and starts bitmap are good up to exactly that offset.
-	 * We can realloc them if we need to enlarge the range. */
-	union {
-		void *metavector_any; /* for generic access */
-		struct packed_sequence_metavector_rec16 *metavector_16;
-		struct packed_sequence_metavector_rec32 *metavector_32;
-	} un;
-	unsigned metavector_nused;
-	unsigned metavector_size;
-	bitmap_word_t *starts_bitmap;
-	unsigned starts_bitmap_nwords;
-	// unsigned length_in_bytes; // do we need this? implied by container?
-	unsigned offset_cached_up_to; // always the *end* offset of the last one we have cached
-};
+struct packed_sequence; // in allocmeta.h
 
-#define METAVECTOR_ENTRY_SIZE_BYTES(seq) (1u << \
- ((seq)->fam->one_plus_log2_metavector_entry_size_bytes - 1))
+void __packed_seq_free(void *arg)
+{
+	struct packed_sequence *seq = arg;
+	if (seq->starts_bitmap) free(seq->starts_bitmap);
+	if (seq->un.metavector_any) free(seq->un.metavector_any);
+	free(arg);
+}
+
+#define METAVECTOR_ENTRY_SIZE_BYTES(seq) \
+ ((seq)->fam->one_plus_log2_metavector_entry_size_bytes ? \
+  (1u << ((seq)->fam->one_plus_log2_metavector_entry_size_bytes - 1)) \
+  : 0)
 #define INITIAL_METAVECTOR_SIZE 8
 
 /* Can we macroise a polymorphic access to 'ent', in a flexible way?
@@ -150,6 +147,7 @@ struct packed_sequence
 #define WITH_ENT_MAC(_ent, seq, toksmac) \
     switch ((seq)->fam->one_plus_log2_metavector_entry_size_bytes) \
 	{ \
+		case 0: break; \
 		case 2: { struct packed_sequence_metavector_rec16 *ent = _ent; toksmac(struct packed_sequence_metavector_rec16 ) ; break; } \
 		case 3: { struct packed_sequence_metavector_rec32 *ent = _ent; toksmac(struct packed_sequence_metavector_rec32 ) ; break; } \
 		default: assert(0); break; \
@@ -164,12 +162,17 @@ struct packed_sequence
 #define WITH_ENT(_ent, seq, toks...) \
     WITH_ENT_MAC(_ent, seq, toks gobble)
 
+static int walk_allocations(struct alloc_containment_ctxt *ctxt,
+			walk_alloc_cb_t *cb, void *arg, void *maybe_range_begin,
+			void *maybe_range_end);
+
 struct allocator __packed_seq_allocator = {
 	.name = "packed sequence",
 	.is_cacheable = 1,
 	.get_info = get_info,
 	.get_type = get_type,
-	.get_name = get_name
+	.get_name = get_name,
+	.walk_allocations = walk_allocations
 };
 
 /* How do we get from a sequence to its state?
@@ -201,12 +204,26 @@ static void ensure_cached_up_to(struct big_allocation *b, struct packed_sequence
 	if (seq->offset_cached_up_to < offset)
 	{
 		uintptr_t bitmap_base_addr = ROUND_DOWN(b->begin, 1u<<(seq->fam->log2_align));
-		void *cur = b->begin + seq->offset_cached_up_to;
+		void *addr_to_cache_up_to = (void*)((uintptr_t) b->begin + offset);
+		void *cur = (void*)((uintptr_t) b->begin + seq->offset_cached_up_to);
 		/* If we're going to bother, let's make it worth our while.
 		 * Plan to cache at least twice as much stuff as we already have,
 		 * unless we run out of stuff. HMM: is this wise? */
 		unsigned target_offset = MIN((uintptr_t) b->end - (uintptr_t) b->begin,
 			MAX(2 * seq->offset_cached_up_to, offset));
+		uintptr_t target_addr = (uintptr_t) b->begin + target_offset;
+		unsigned long bitmap_naddrs = target_addr + 1 - bitmap_base_addr;
+		unsigned long bitmap_nbits = DIVIDE_ROUNDING_UP(bitmap_naddrs, 1u<<seq->fam->log2_align);
+		unsigned long bitmap_nwords = DIVIDE_ROUNDING_UP(bitmap_nbits, BITMAP_WORD_NBITS);
+		if (unlikely(seq->starts_bitmap_nwords < bitmap_nwords))
+		{
+			seq->starts_bitmap_nwords = bitmap_nwords;
+			seq->starts_bitmap = realloc(
+				seq->starts_bitmap,
+				seq->starts_bitmap_nwords * sizeof (bitmap_word_t)
+			);
+			if (!seq->starts_bitmap) err(EXIT_FAILURE, "allocating memory");
+		}
 		size_t cur_sz;
 		unsigned size_delta_nbytes = 0u;
 		struct uniqtype *u = NULL;
@@ -219,8 +236,8 @@ static void ensure_cached_up_to(struct big_allocation *b, struct packed_sequence
 			 * at 'cur'. This is correct. */
 			uintptr_t cur_end = (uintptr_t) cur + cur_sz;
 			uintptr_t cur_next_start = ROUND_UP(cur_end, 1u<<seq->fam->log2_align);
-			if ((uintptr_t) cur_end >= (uintptr_t) b->begin + target_offset) break;
-			if (unlikely(seq->metavector_nused == seq->metavector_size))
+			if (unlikely(seq->fam->one_plus_log2_metavector_entry_size_bytes != 0 &&
+					seq->metavector_nused == seq->metavector_size))
 			{
 				seq->metavector_size = seq->metavector_size ? 2 * seq->metavector_size
 						: INITIAL_METAVECTOR_SIZE;
@@ -229,28 +246,28 @@ static void ensure_cached_up_to(struct big_allocation *b, struct packed_sequence
 					seq->metavector_size * METAVECTOR_ENTRY_SIZE_BYTES(seq)
 				);
 				if (!seq->un.metavector_any) err(EXIT_FAILURE, "allocating memory");
-				// also for the bitmap
-				unsigned long bitmap_naddrs = (uintptr_t) cur_next_start - bitmap_base_addr;
-				unsigned long bitmap_nbits = bitmap_naddrs >> seq->fam->log2_align;
-				seq->starts_bitmap_nwords = DIVIDE_ROUNDING_UP(bitmap_nbits, BITMAP_WORD_NBITS);
-				seq->starts_bitmap = realloc(
-					seq->starts_bitmap,
-					seq->starts_bitmap_nwords * sizeof (bitmap_word_t)
-				);
-				if (!seq->starts_bitmap) err(EXIT_FAILURE, "allocating memory");
 			}
-			// calculate the next free metavector entry address, in integer-space
-			void *ent_as_void = (void*)(((uintptr_t) seq->un.metavector_any) +
-					(seq->metavector_nused++ * METAVECTOR_ENTRY_SIZE_BYTES(seq)));
-			// gen the case-splitting code that initializes the entry
-			WITH_ENT(ent_as_void, seq, {
-			    ent->type_idx = find_idx(u, seq->fam);
-			    ent->size_nalign = ((uintptr_t) cur_next_start - (uintptr_t) cur) >> seq->fam->log2_align;
-			    ent->size_delta_nbytes = (uintptr_t) cur_next_start - (uintptr_t) cur_end;
-			});
+			if (likely(seq->fam->one_plus_log2_metavector_entry_size_bytes != 0))
+			{
+				// calculate the next free metavector entry address, in integer-space
+				void *ent_as_void = (void*)(((uintptr_t) seq->un.metavector_any) +
+						(seq->metavector_nused++ * METAVECTOR_ENTRY_SIZE_BYTES(seq)));
+				// gen the case-splitting code that initializes the entry
+				WITH_ENT(ent_as_void, seq, {
+					ent->type_idx = find_idx(u, seq->fam);
+					ent->size_nalign = ((uintptr_t) cur_next_start - (uintptr_t) cur) >> seq->fam->log2_align;
+					ent->size_delta_nbytes = (uintptr_t) cur_next_start - (uintptr_t) cur_end;
+				});
+			}
 			bitmap_set_l(seq->starts_bitmap, ((uintptr_t) cur - bitmap_base_addr) >>
 				seq->fam->log2_align);
 			seq->offset_cached_up_to = (uintptr_t) cur_next_start - (uintptr_t) b->begin;
+			if ((uintptr_t) cur_end == (uintptr_t) b->begin + target_offset) break;
+			if ((uintptr_t) cur_end > (uintptr_t) b->begin + target_offset)
+			{
+				// we've overshot our target offset -- is that a problem?
+				break;
+			}
 			cur = (void*) cur_next_start;
 		}
 	}
@@ -331,14 +348,78 @@ static liballocs_err_t get_info(void *obj,
 		// it's at count_before in the metavector, e.g. if there's 0 earlier bits set it's at idx 0
 		void *metavector_found = (void*)((uintptr_t)seq->un.metavector_any +
 			(count_before)*(1u<<(seq->fam->one_plus_log2_metavector_entry_size_bytes - 1)));
+		struct uniqtype *found_t;
+		size_t sz;
+		void *base;
 		WITH_ENT(metavector_found, seq, { \
-		  if (out_type) *out_type = seq->fam->types_table[ent->type_idx];
-		  if (out_size) *out_size = (ent->size_nalign << seq->fam->log2_align) - ent->size_delta_nbytes;
-		  if (out_base) *out_base = (void*)(bitmap_base + (found_idx << seq->fam->log2_align));
-		  if (out_site) *out_site = NULL;
+			found_t = seq->fam->types_table[ent->type_idx];
+			sz = (ent->size_nalign << seq->fam->log2_align) - ent->size_delta_nbytes;
+			base = (void*)(bitmap_base + (found_idx << seq->fam->log2_align));
 		});
+		/* HACK: do a make_precise for arrays. This will go away eventually,
+		 * i.e. it will be the caller's responsibility to grok the size of
+		 * an array. */
+#define FIXUP_T(t) \
+ ((t) && UNIQTYPE_IS_ARRAY_TYPE(t) && UNIQTYPE_ARRAY_LENGTH(t) == UNIQTYPE_ARRAY_LENGTH_UNBOUNDED) \
+ ? __liballocs_get_or_create_array_type(UNIQTYPE_ARRAY_ELEMENT_TYPE(t), \
+				sz / UNIQTYPE_ARRAY_ELEMENT_TYPE(t)->pos_maxoff) \
+ : (t)
+		if (out_type) *out_type = FIXUP_T(found_t);
+		if (out_size) *out_size = sz;
+		if (out_base) *out_base = base;
+		if (out_site) *out_site = NULL;
 		return NULL; // no error
 	}
 
 	return &__liballocs_err_unrecognised_static_object;
+}
+
+static int walk_allocations(struct alloc_containment_ctxt *ctxt,
+			walk_alloc_cb_t *cb, void *arg, void *maybe_range_begin,
+			void *maybe_range_end)
+{
+	assert(BOU_IS_BIGALLOC(ctxt->bigalloc_or_uniqtype));
+	struct big_allocation *b = BOU_BIGALLOC(ctxt->bigalloc_or_uniqtype);
+	struct packed_sequence *seq = b->suballocator_private;
+	ensure_cached_up_to(b, seq, (uintptr_t) (maybe_range_end ?: b->end) - (uintptr_t) b->begin);
+	/* Use the bitmap, not the metavector (which we may not have). */
+	uintptr_t bitmap_base_addr = ROUND_DOWN(b->begin, 1u<<(seq->fam->log2_align));
+	unsigned bitmap_start_idx = ((uintptr_t) (maybe_range_begin ?: b->begin)
+			- (uintptr_t) bitmap_base_addr) >> seq->fam->log2_align;
+	unsigned bitmap_pre_count = bitmap_count_set_l(seq->starts_bitmap,
+		seq->starts_bitmap + seq->starts_bitmap_nwords,
+		0, bitmap_start_idx);
+	unsigned long n = bitmap_pre_count;
+	unsigned long cur_bit_idx = bitmap_start_idx;
+	/* Iterate over set bits. */
+	unsigned long found;
+	bitmap_word_t test_bit;
+	int ret = 0;
+	while ((unsigned long)-1 != (cur_bit_idx = bitmap_find_first_set1_geq_l(
+		seq->starts_bitmap, seq->starts_bitmap + seq->starts_bitmap_nwords,
+		cur_bit_idx, &test_bit)))
+	{
+		// tell the cb the idx of the sequence element -- must be 1-based
+		ctxt->maybe_containee_coord = n+1;
+		// have we exhausted our range?
+		void *obj = (char*) bitmap_base_addr + (cur_bit_idx << seq->fam->log2_align);
+		if (maybe_range_end && (uintptr_t) maybe_range_end <= (uintptr_t) obj) break;
+		size_t sz = METAVECTOR_ENTRY_SIZE_BYTES(seq);
+		void *ent = (char*) seq->un.metavector_any + n * sz;
+		struct uniqtype *t;
+		// NOTE that we might not have a metavector, i.e. sz might be 0
+		if (sz)
+		{
+			WITH_ENT(ent, seq, { t = seq->fam->types_table[ent->type_idx]; });
+		}
+		else
+		{
+			t = seq->fam->types_table[0];
+		}
+		ret = cb(NULL, obj, FIXUP_T(t), /* allocsite */ NULL, ctxt, arg);
+		if (ret) return ret;
+		// the next set bit we see will be for metavector idx n+1
+		++cur_bit_idx;
+	}
+	return ret;
 }

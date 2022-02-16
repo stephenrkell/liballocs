@@ -22,3 +22,7 @@ client-allocator-elf+meta: client-allocator-elf+meta.o
 
 client-allocator-elf+meta.o: client-allocator-elf.o
 	cp "$<" "$@" && ../tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
+
+.PHONY: clean
+clean:
+	rm -f  client-allocator-elf.o  client-allocator-elf+meta.o client-allocator-elf+meta

@@ -195,3 +195,4 @@ oopsla*.ps
 *.rej
 *.orig
 /tests/bit-fields/bit-fields
+/tests/packed-seq-walk/packed-seq-walk

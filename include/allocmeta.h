@@ -146,6 +146,56 @@ typedef struct lifetime_policy_s
 // It should be possible to reconstruct the exact object
 // address from one of these structs, now that we have the
 // maybe_containee_coord.
+// FIXME: maybe distinguish "tree pos" from "tree path"
+// where only tree path has the encl_* stuff.
+// Also remember that a path need not be a path all the way
+// back to the root.
+// FIXME: container_base isn't needed when we have a bigalloc, because
+// the bigalloc records it.
+// There's really a few concepts here:
+// a "span", a "pos" and a "path"
+/*
+// HMM. is this really a branch? It can represent leaves too.
+// Instead of 'branch' and 'pos', maybe 'pos' and 'link'?
+struct alloc_tree_branch
+{
+	void *base;           // base addr of the containing alloc
+	uintptr_t bigalloc_or_uniqtype; // container might be a bigalloc or a uniqtype-described alloc
+	// FIXME: this is redundant for bigallocs
+	// FIXME: for uniqtypes we need an 'end' address too,
+	// especially once we make the arrays change.
+	// We can just about fit all three in 128 bits, but not clear this is necessary.
+	// could do the short-alloc union trick, although not clear it would help
+	// since we rarely heap-allocate these things
+	// We could also use the bigalloc *index*, a small integer,
+	// rather than the bigalloc pointer. This is probably worth doing.
+	union { struct {
+		unsigned long  base:48;
+		unsigned short bigalloc_idx:16; // MSB is always 0
+	 };     struct {
+		unsigned long base:48;
+		unsigned      always_1:1;  // to discriminate w.r.t. the above -- CHECK bit order
+		unsigned long uniqtype:47; // could be reduced to 44
+		unsigned      len:32;
+	 } // HMM: how does this compare to our 128-bit pointer-with-bounds type?
+	   // That has a base but no type.
+	   // Its first 64 bits are a raw pointer.
+	   // And it only uses 32 bits for the base, relying on a no-cross-4GB-boundary property (or denorm cases)
+	};
+};
+struct alloc_tree_pos
+{
+	struct alloc_tree_branch container;
+	unsigned containee_coord; // where within the container?
+};
+struct alloc_tree_path
+{
+	struct alloc_tree_pos cur;
+	unsigned encl_depth;
+	struct alloc_tree_path *encl;
+};
+
+ */
 struct alloc_containment_ctxt
 {
 	void *container_base;           // base addr of the containing alloc
@@ -252,11 +302,19 @@ fun(void,                    register_suballoc,arg(struct allocated_chunk *,star
  * NOTE that maybe_the_allocation args might not be going far
  * enough... do we want maybe_the_allocation_or_arena? */
 typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *t, const void *allocsite, struct alloc_containment_ctxt *cont, void *arg);
-
+/* An 'imposed child bigalloc' is a child c of bigalloc b
+ * where c is not allocated_by the suballocator of b.
+ * In other words, te allocator that is nominally managing
+ * the space knows nothing about this particular occupant.
+ * One example is how the initial stack is imposed on the auxv,
+ * which knows nothing about it. There are few or no other
+ * examples as yet, but it seems worth retaining this case.
+ * (We needed this wacky stack/auxv case because the two can
+ * share the same page of memory, and we have an invariant that
+ * memory-mapping-sequence bigallocs are page-aligned.) */
 enum
 {
-	ALLOC_WALK_CHILD_BIGALLOCS = 0x1,
-	ALLOC_WALK_SUBALLOCS       = 0x2
+	ALLOC_WALK_BIGALLOC_IMPOSED_CHILDREN = 0x1
 };
 #define ALLOC_REFLECTIVE_API(fun, arg) \
 fun(struct uniqtype *  ,get_type,      arg(void *, obj)) /* what type? */ \
@@ -366,6 +424,7 @@ extern struct allocator __static_section_allocator;
 extern struct allocator __static_symbol_allocator;
 extern struct allocator __auxv_allocator; /* nests under stack? */
 extern struct allocator __alloca_allocator; /* nests under stack? */
+extern struct allocator __packed_seq_allocator;
 // FIXME: These are indexes, not allocators
 extern struct allocator __generic_malloc_allocator; /* covers all chunks */
 extern struct allocator __generic_small_allocator; /* usual suballoc impl */
@@ -482,6 +541,29 @@ _Bool __auxv_get_argv(const char ***out_start, const char ***out_terminator, str
 _Bool __auxv_get_env(const char ***out_start, const char ***out_terminator, struct uniqtype **out_uniqtype);
 _Bool __auxv_get_auxv(const Elf64_auxv_t **out_start, Elf64_auxv_t **out_terminator, struct uniqtype **out_uniqtype);
 void *__auxv_get_program_entry_point(void);
+
+struct packed_sequence_family;
+struct packed_sequence
+{
+	struct packed_sequence_family *fam;
+	void *fn_arg;
+	/* We cache, lazily, up to a given offset. The metavector
+	 * and starts bitmap are good up to exactly that offset.
+	 * We can realloc them if we need to enlarge the range. */
+	union {
+		void *metavector_any; /* for generic access */
+		struct packed_sequence_metavector_rec16 *metavector_16;
+		struct packed_sequence_metavector_rec32 *metavector_32;
+	} un;
+	unsigned metavector_nused;
+	unsigned metavector_size;
+	bitmap_word_t *starts_bitmap;
+	unsigned starts_bitmap_nwords;
+	// unsigned length_in_bytes; // do we need this? implied by container?
+	unsigned offset_cached_up_to; // always the *end* offset of the last one we have cached
+};
+extern struct packed_sequence_family __string8_nulterm_packed_sequence;
+void __packed_seq_free(void *arg);
 
 /* Assorted notes:
  * - core liballocs implements the reflective protocol 
