@@ -7,11 +7,6 @@
 #include "liballocs_private.h"
 #include "relf.h"
 
-static const char *get_name(void *obj, char *namebuf, size_t buflen)
-{
-	/* Do our allocations have names? Generally no. */
-	return NULL;
-}
 static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_the_allocation,
 	struct uniqtype **out_type, void **out_base,
 	unsigned long *out_size, const void **out_site);
@@ -55,13 +50,13 @@ DEFAULT_GET_TYPE
 struct packed_sequence_metavector_rec32
 {
 	unsigned type_idx:10; /* at most 1024 distinct uniqtypes allocated within this family of seqs */
-	unsigned size_nalign:18; /* # alignment units to next entry */
+	unsigned size_nalign:18; /* # alignment units to next entry FIXME: just use bitmap? */
 	unsigned size_delta_nbytes:4; /* actual size can be up to 15 bytes smaller */
 };
 struct packed_sequence_metavector_rec16
 {
 	unsigned type_idx:4; /* at most 16 distinct uniqtypes allocated within this family of seqs */
-	unsigned size_nalign:9; /* # alignment units to the next entry */
+	unsigned size_nalign:9; /* # alignment units to the next entry FIXME: just use bitmap? */
 	unsigned size_delta_nbytes:3; /* actual size can be up to 7 bytes smaller */
 };
 /* The enumerate function: given a start position,
@@ -69,6 +64,7 @@ struct packed_sequence_metavector_rec16
  * The type's size doesn't suffice because our entry might
  * be, say, an array of char. */
 typedef size_t enumerate_fn(void *pos, void *end, struct uniqtype **out_u, unsigned *out_size_delta_nbytes, void *arg);
+typedef const char *name_fn(void *pos, struct uniqtype *maybe_u, void *arg);
 
 /* This is the 'uniqtype equivalent'. We could rejig it into a case of
  * uniqtype quite easily, actually.
@@ -80,7 +76,8 @@ typedef size_t enumerate_fn(void *pos, void *end, struct uniqtype **out_u, unsig
  * shadow so there's an opportunity. */
 struct packed_sequence_family
 {
-	enumerate_fn *fn;
+	enumerate_fn *enumerate;
+	name_fn *name;
 	unsigned log2_align:3; // what's the minimum entry alignment, in bytes, for this sequence?
 	unsigned one_plus_log2_metavector_entry_size_bytes:4; // 0 means no metavector; maximum entry size 2^14 bytes (!)
 	unsigned ntypes:12;
@@ -98,8 +95,19 @@ static size_t enumerate_string8_nulterm(void *pos, void *end, struct uniqtype **
 	if (out_u) *out_u = pointer_to___uniqtype____ARR0_signed_char;
 	return cpos - (unsigned char *) pos;
 }
+/* FIXME: this is a sensible choice for things like strtabs
+ * where the strings are uniqued/interned, but it will give
+ * us non-unique names in other cases. Since allocation names
+ * don't have to be unique, this is OK... we need a way for
+ * allocators to declare stuff like this, and for clients to
+ * say something like "only give me unique names". */
+const char *name_for_string8_nulterm(void *s, struct uniqtype *maybe_u, void *arg)
+{
+	return (const char*) s;
+}
 struct packed_sequence_family __string8_nulterm_packed_sequence = {
-	.fn = enumerate_string8_nulterm,
+	.enumerate = enumerate_string8_nulterm,
+	.name = name_for_string8_nulterm,
 	.log2_align = 0,
 	.one_plus_log2_metavector_entry_size_bytes = 0, /* we don't need a metavector */
 	.ntypes = 1,
@@ -108,11 +116,11 @@ struct packed_sequence_family __string8_nulterm_packed_sequence = {
 __attribute__((constructor))
 static void init(void)
 {
-	// FIXME: don't assume this uniqtype is available... need a pointer_to_*
-	__string8_nulterm_packed_sequence.types_table[0] =
-		pointer_to___uniqtype____ARR0_signed_char;
+	__string8_nulterm_packed_sequence.types_table[0] = pointer_to___uniqtype____ARR0_signed_char;
 	assert(__string8_nulterm_packed_sequence.types_table[0]);
 	assert(__string8_nulterm_packed_sequence.types_table[0] != (void*) -1);
+	assert(UNIQTYPE_ARRAY_LENGTH(__string8_nulterm_packed_sequence.types_table[0])
+		== UNIQTYPE_ARRAY_LENGTH_UNBOUNDED);
 }
 /* This is the per-sequence metadata. */
 struct packed_sequence; // in allocmeta.h
@@ -123,6 +131,23 @@ void __packed_seq_free(void *arg)
 	if (seq->starts_bitmap) free(seq->starts_bitmap);
 	if (seq->un.metavector_any) free(seq->un.metavector_any);
 	free(arg);
+}
+
+static const char *get_name(void *obj, char *namebuf, size_t buflen)
+{
+	/* Do our allocations have names? It depends on the family. */
+	void *start = NULL;
+	struct big_allocation *b = __lookup_bigalloc_from_root_by_suballocator(obj, &__packed_seq_allocator, &start);
+	assert(b);
+	struct packed_sequence *seq = b->suballocator_private;
+	assert(seq);
+	if (seq->fam->name)
+	{
+		const char *n = seq->fam->name(obj, /* HACK: */ NULL, seq->name_fn_arg);
+		// HACK: empty name is no name
+		if (n && *n) return n;
+	}
+	return NULL;
 }
 
 #define METAVECTOR_ENTRY_SIZE_BYTES(seq) \
@@ -217,17 +242,21 @@ static void ensure_cached_up_to(struct big_allocation *b, struct packed_sequence
 		unsigned long bitmap_nwords = DIVIDE_ROUNDING_UP(bitmap_nbits, BITMAP_WORD_NBITS);
 		if (unlikely(seq->starts_bitmap_nwords < bitmap_nwords))
 		{
+			unsigned long old_bitmap_nwords = seq->starts_bitmap_nwords;
 			seq->starts_bitmap_nwords = bitmap_nwords;
 			seq->starts_bitmap = realloc(
 				seq->starts_bitmap,
 				seq->starts_bitmap_nwords * sizeof (bitmap_word_t)
 			);
 			if (!seq->starts_bitmap) err(EXIT_FAILURE, "allocating memory");
+			// bzero the new space
+			bzero((char*) seq->starts_bitmap + old_bitmap_nwords * sizeof (bitmap_word_t),
+				sizeof (bitmap_word_t) * (bitmap_nwords - old_bitmap_nwords));
 		}
 		size_t cur_sz;
 		unsigned size_delta_nbytes = 0u;
 		struct uniqtype *u = NULL;
-		while ((size_t)-1 != (cur_sz = seq->fam->fn(cur, b->end, &u, &size_delta_nbytes, seq->fn_arg)))
+		while ((size_t)-1 != (cur_sz = seq->fam->enumerate(cur, b->end, &u, &size_delta_nbytes, seq->enumerate_fn_arg)))
 		{
 			/* Invariant: our 'cached_up_to' should always be the start of an
 			 * element in the sequence, so we know where to resume iterating from.
@@ -359,12 +388,12 @@ static liballocs_err_t get_info(void *obj,
 		/* HACK: do a make_precise for arrays. This will go away eventually,
 		 * i.e. it will be the caller's responsibility to grok the size of
 		 * an array. */
-#define FIXUP_T(t) \
+#define FIXUP_T(t, sz) \
  ((t) && UNIQTYPE_IS_ARRAY_TYPE(t) && UNIQTYPE_ARRAY_LENGTH(t) == UNIQTYPE_ARRAY_LENGTH_UNBOUNDED) \
  ? __liballocs_get_or_create_array_type(UNIQTYPE_ARRAY_ELEMENT_TYPE(t), \
-				sz / UNIQTYPE_ARRAY_ELEMENT_TYPE(t)->pos_maxoff) \
+				(sz) / UNIQTYPE_ARRAY_ELEMENT_TYPE(t)->pos_maxoff) \
  : (t)
-		if (out_type) *out_type = FIXUP_T(found_t);
+		if (out_type) *out_type = FIXUP_T(found_t, sz);
 		if (out_size) *out_size = sz;
 		if (out_base) *out_base = base;
 		if (out_site) *out_site = NULL;
@@ -390,36 +419,46 @@ static int walk_allocations(struct alloc_containment_ctxt *ctxt,
 		seq->starts_bitmap + seq->starts_bitmap_nwords,
 		0, bitmap_start_idx);
 	unsigned long n = bitmap_pre_count;
-	unsigned long cur_bit_idx = bitmap_start_idx;
+	unsigned long cur_bit_idx;
+	unsigned long next_bit_idx = bitmap_start_idx;
 	/* Iterate over set bits. */
 	unsigned long found;
 	bitmap_word_t test_bit;
 	int ret = 0;
-	while ((unsigned long)-1 != (cur_bit_idx = bitmap_find_first_set1_geq_l(
-		seq->starts_bitmap, seq->starts_bitmap + seq->starts_bitmap_nwords,
-		cur_bit_idx, &test_bit)))
+	while ((unsigned long)-1 != (cur_bit_idx = next_bit_idx))
 	{
 		// tell the cb the idx of the sequence element -- must be 1-based
 		ctxt->maybe_containee_coord = n+1;
 		// have we exhausted our range?
 		void *obj = (char*) bitmap_base_addr + (cur_bit_idx << seq->fam->log2_align);
 		if (maybe_range_end && (uintptr_t) maybe_range_end <= (uintptr_t) obj) break;
-		size_t sz = METAVECTOR_ENTRY_SIZE_BYTES(seq);
-		void *ent = (char*) seq->un.metavector_any + n * sz;
+		/* To get the size, use the bitmap. */
+		next_bit_idx = bitmap_find_first_set1_geq_l(
+			seq->starts_bitmap, seq->starts_bitmap + seq->starts_bitmap_nwords,
+			cur_bit_idx + 1, NULL);
+		assert(next_bit_idx == (unsigned long) -1 ||
+			next_bit_idx > cur_bit_idx);
+		size_t padded_sz = (next_bit_idx == (unsigned long) -1) ?
+			(uintptr_t) b->end - (uintptr_t) obj :
+			((next_bit_idx - cur_bit_idx) << seq->fam->log2_align);
+		void *ent = (char*) seq->un.metavector_any + n * METAVECTOR_ENTRY_SIZE_BYTES(seq);
+		size_t actual_sz;
 		struct uniqtype *t;
 		// NOTE that we might not have a metavector, i.e. sz might be 0
-		if (sz)
+		if (METAVECTOR_ENTRY_SIZE_BYTES(seq) > 0)
 		{
-			WITH_ENT(ent, seq, { t = seq->fam->types_table[ent->type_idx]; });
+			WITH_ENT(ent, seq, { \
+				t = seq->fam->types_table[ent->type_idx];
+				actual_sz = padded_sz - ent->size_delta_nbytes;
+			});
 		}
 		else
 		{
 			t = seq->fam->types_table[0];
+			actual_sz = padded_sz;
 		}
-		ret = cb(NULL, obj, FIXUP_T(t), /* allocsite */ NULL, ctxt, arg);
+		ret = cb(NULL, obj, FIXUP_T(t, actual_sz), /* allocsite */ NULL, ctxt, arg);
 		if (ret) return ret;
-		// the next set bit we see will be for metavector idx n+1
-		++cur_bit_idx;
 	}
 	return ret;
 }

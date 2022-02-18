@@ -546,7 +546,8 @@ struct packed_sequence_family;
 struct packed_sequence
 {
 	struct packed_sequence_family *fam;
-	void *fn_arg;
+	void *enumerate_fn_arg;
+	void *name_fn_arg;
 	/* We cache, lazily, up to a given offset. The metavector
 	 * and starts bitmap are good up to exactly that offset.
 	 * We can realloc them if we need to enlarge the range. */

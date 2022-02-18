@@ -510,7 +510,8 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 						if (!seq_b->suballocator_private) abort();
 						*(struct packed_sequence *) seq_b->suballocator_private = (struct packed_sequence) {
 							.fam = &__string8_nulterm_packed_sequence,
-							.fn_arg = NULL,
+							.enumerate_fn_arg = NULL,
+							.name_fn_arg = NULL,
 							.un = { .metavector_any = NULL },
 							.metavector_nused = 0,
 							.metavector_size = 0,
@@ -1173,6 +1174,7 @@ int recursive_print_context_label(char *buf, size_t sz,
 					: NULL,
 			root_empty_name
 		);
+		if (ret < 0) return ret;
 		/* After we do a recursive call, print a dot, sinc we need to do ourselves...
 		 * unless the name came back empty */
 		assert(ret < sz);
@@ -1207,10 +1209,13 @@ int recursive_print_context_label(char *buf, size_t sz,
 		char namebuf[4096];
 		const char *maybe_name = a->get_name ? a->get_name(the_alloc, namebuf, sizeof namebuf)
 			: NULL;
-		// FIXME: what if we hit an allocation with no name?
-		assert(maybe_name);
+		// bail if we hit an allocation with no name -- is this OK?
+		if (!maybe_name)
+		{
+			return -1;
+		}
 		int ret = snprintf(buf, sz, "%s", maybe_name);
-		assert(ret > 0); // empty names not allowed
+		assert(ret > 0); // empty names not allowed from get_name
 		nwritten += ret;
 	}
 	return nwritten;
@@ -1263,6 +1268,12 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 	{
 		int ret = recursive_print_context_label(label, sizeof label, cont,
 			obj, maybe_the_allocation, ctxt->file_bigalloc);
+		if (ret < 0)
+		{
+			// HMM. couldn't get the names, so we have no label
+			snprintf(label, sizeof label,
+				"# could not make a label for the current allocation");
+		}
 	}
 
 #define indent(n) do { for (int i = 0; i < n; ++i) printf(" "); } while (0)
@@ -1334,7 +1345,6 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 	 * containing allocation? Need to check it's allocated by __elf_element_allocator
 	 * and if so, ask it! Ideally we'd have a better way to signal asciizness, since
 	 * we want this code one day to work for any memory, not just a mapped ELF binary. */
-#if 0
 	if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype) &&
 			UNIQTYPE_IS_ARRAY_TYPE(t) &&
 			(UNIQTYPE_ARRAY_ELEMENT_TYPE(t) == GET_UNIQTYPE_PTR(unsigned_char$$8)
@@ -1376,7 +1386,6 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		ret = -1; // 'cut off this subtree'
 		goto out; // finished outputting the thing
 	} // we need to AVOID recursing down subobjects
-#endif
 
 	if (UNIQTYPE_IS_POINTER_TYPE(t))
 	{

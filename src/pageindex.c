@@ -773,7 +773,7 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 }
 
 static struct big_allocation *find_bigalloc_recursive(struct big_allocation *start,
-	const void *addr, struct allocator *a)
+	const void *addr, struct allocator *a, _Bool match_suballocator)
 {
 	/* If we don't have a start, start at top level. But
 	 * we can't find anywhere in the chain of bigallocs spanning
@@ -786,7 +786,7 @@ static struct big_allocation *find_bigalloc_recursive(struct big_allocation *sta
 	}
 
 	/* Is it this one? */
-	if (start->allocated_by == a) return start;
+	if ((match_suballocator ? start->suballocator : start->allocated_by) == a) return start;
 	
 	/* Okay, it's not this one. Is it one of the children? */
 	for (struct big_allocation *child = start->first_child;
@@ -797,7 +797,7 @@ static struct big_allocation *find_bigalloc_recursive(struct big_allocation *sta
 				child->end > addr)
 		{
 			/* okay, tail-recurse down here */
-			return find_bigalloc_recursive(child, addr, a);
+			return find_bigalloc_recursive(child, addr, a, match_suballocator);
 		}
 	}
 	
@@ -808,18 +808,18 @@ static struct big_allocation *find_bigalloc_under_pageindex(const void *addr, st
 {
 	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
 	if (start_idx == 0) return NULL;
-	return find_bigalloc_recursive(&big_allocations[start_idx], addr, a);
+	return find_bigalloc_recursive(&big_allocations[start_idx], addr, a, /* suballocator? */ 0);
 }
 static struct big_allocation *find_bigalloc_from_root(const void *addr, struct allocator *a)
 {
-	return find_bigalloc_recursive(NULL, addr, a);
+	return find_bigalloc_recursive(NULL, addr, a, /* suballocator? */ 0);
 }
 static struct big_allocation *find_bigalloc_under_pageindex_nofail(const void *addr, struct allocator *a)
 {
 	bigalloc_num_t start_idx = pageindex[PAGENUM(addr)];
 	/* We should always have something at level0 spanning the whole page. */
 	if (start_idx == 0) abort();
-	return find_bigalloc_recursive(&big_allocations[start_idx], addr, a);
+	return find_bigalloc_recursive(&big_allocations[start_idx], addr, a, /* suballocator? */ 0);
 }
 static struct big_allocation *find_deepest_bigalloc_recursive(struct big_allocation *start, 
 	const void *addr)
@@ -937,7 +937,7 @@ struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator
 	int lock_ret;
 	BIG_LOCK
 	assert(a);
-	struct big_allocation *b = find_bigalloc_recursive(start, mem, a);
+	struct big_allocation *b = find_bigalloc_recursive(start, mem, a, /* suballocator? */ 0);
 	BIG_UNLOCK;
 	return b;
 }
@@ -955,6 +955,17 @@ struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct alloc
 	return b;
 }
 
+__attribute__((visibility("protected")))
+struct big_allocation *__lookup_bigalloc_from_root_by_suballocator(const void *mem, struct allocator *sub_a, void **out_object_start)
+{
+	if (!pageindex) __pageindex_init();
+	int lock_ret;
+	BIG_LOCK
+	assert(sub_a);
+	struct big_allocation *b = find_bigalloc_recursive(NULL, mem, sub_a, /* suballocator? */ 1);
+	BIG_UNLOCK;
+	return b;
+}
 __attribute__((visibility("hidden")))
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 {
