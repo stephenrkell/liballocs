@@ -808,10 +808,10 @@ static liballocs_err_t elf_get_info(void *obj, struct big_allocation *maybe_biga
 	return &__liballocs_err_unindexed_heap_object; // FIXME
 }
 
-static int elf_elements_walk_allocations(struct alloc_containment_ctxt *cont,
+static int elf_elements_walk_allocations(struct alloc_tree_pos *scope,
 	walk_alloc_cb_t *cb, void *arg, void *maybe_range_begin, void *maybe_range_end)
 {
-	struct big_allocation *arena = BOU_BIGALLOC(cont->bigalloc_or_uniqtype);
+	struct big_allocation *arena = BOU_BIGALLOC(scope->bigalloc_or_uniqtype);
 	struct elf_elements_metadata *elements_meta
 		 = (struct elf_elements_metadata *) arena->suballocator_private;
 	int ret = 0;
@@ -830,19 +830,35 @@ static int elf_elements_walk_allocations(struct alloc_containment_ctxt *cont,
 			e != elements_meta->metavector + elements_meta->metavector_size;
 			++e, ++coord)
 	{
-		struct alloc_containment_ctxt new_ctxt = {
-			.container_base = arena->begin,
-			.bigalloc_or_uniqtype = (uintptr_t) arena,
-			.maybe_containee_coord = coord,
-			.encl = cont,
-			.encl_depth = cont->encl_depth + 1
+		/* We are making a link. And we don't know anything about DF walking.
+		 * We pass only a link, and it's up to walk_one_df_cb to maintain the path.
+		 *
+		 * (LONGER EXPLANATION)
+		 * So [how] does the DF walker ensure that if it has to walk ELF elements
+		 * lower down the hierarchy, its cb always gets called with a full path
+		 * and not a mere link?
+		 *
+		 * We do DF walking by doing an ordinary walk
+		 * and passing the DF callback as the argument.
+		 * A WRONG version of this would be if the first thing the callback does is
+		 *
+		    struct alloc_tree_path *path = (struct alloc_tree_path *) link; // downcast
+		 *
+		 * i.e. assume it has been give a path, not just a link. That is wron
+		 * because it is called by a plain old walker like us, which does not
+		 * know about paths.For the DF cb to get its contextual path, it needs
+		 * to get it from its own 'arg'.
+		 */
+		struct alloc_tree_link link = {
+			.container = { .base = arena->begin, .bigalloc_or_uniqtype = (uintptr_t) arena },
+			.containee_coord = coord
 		};
 		ret = cb(
 			NULL,
 			(void*)((uintptr_t) arena->begin + e->fileoff),
 			elf_precise_type(e->type_idx, e->size),
 			arena->meta.un.opaque_data.data_ptr /* alloc site */,
-			&new_ctxt,
+			&link,
 			arg
 		);
 		if (ret != 0) return ret;
@@ -900,22 +916,22 @@ struct emit_asm_ctxt
 	struct big_allocation *file_bigalloc;
 };
 
-static _Bool can_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+static _Bool can_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
 	return UNIQTYPE_IS_POINTER_TYPE(exp_t);
 }
-static void *do_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+static void *do_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
 	void *p;
 	memcpy(&p, exp, sizeof p);
 	return p;
 }
-static _Bool may_contain_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+static _Bool may_contain_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
 	// FIXME: this is a bit imprecise
 	return UNIQTYPE_HAS_SUBOBJECTS(exp_t);
 }
-static uintptr_t is_environ_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+static uintptr_t is_environ_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
 	return 0; // i.e. 'no'
 }
@@ -937,11 +953,12 @@ static _Bool is_elf_structure_type(struct uniqtype *t)
 	}
 	return 0;
 }
-static _Bool can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+static _Bool can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t,
+	struct alloc_tree_link *link)
 {
 	/* Is it the right type to be an ELF file offset, in a context
 	 * where we understand what it means (i.e. that it really is one)? */
-	if (can_interp_pointer(exp, exp_t, cont)) return 1;
+	if (can_interp_pointer(exp, exp_t, link)) return 1;
 	static struct uniqtype *offset_t;
 	if (!offset_t)
 	{
@@ -949,38 +966,38 @@ static _Bool can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t,
 	}
 	assert(offset_t);
 	assert(offset_t != (void*)-1);
-	return exp_t == offset_t && is_elf_structure_type(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype));
+	return exp_t == offset_t && is_elf_structure_type(BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype));
 }
-void *do_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+void *do_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
 	/* Resolve the offset to a pointer within the mapping. */
-	if (can_interp_pointer(exp, exp_t, cont))
+	if (can_interp_pointer(exp, exp_t, link))
 	{
-		return do_interp_pointer(exp, exp_t, cont);
+		return do_interp_pointer(exp, exp_t, link);
 	}
-	struct alloc_containment_ctxt *elf_elements_cont = cont;
+	struct alloc_tree_path *elf_elements_path = (struct alloc_tree_path *) link; // can downcast; we are doing DF
 	/* FIXME: searching up the chain like this
 	 * on *every* resolve is expensive. It should only
 	 * be a short distance, but still. */
-	while (!BOU_IS_BIGALLOC(elf_elements_cont->bigalloc_or_uniqtype) ||
-		BOU_BIGALLOC(elf_elements_cont->bigalloc_or_uniqtype)->suballocator !=
+	while (!BOU_IS_BIGALLOC(elf_elements_path->to_here.container.bigalloc_or_uniqtype) ||
+		BOU_BIGALLOC(elf_elements_path->to_here.container.bigalloc_or_uniqtype)->suballocator !=
 				&__elf_element_allocator)
 	{
-		assert(elf_elements_cont->encl);
-		elf_elements_cont = elf_elements_cont->encl;
+		assert(elf_elements_path->encl);
+		elf_elements_path = elf_elements_path->encl;
 	}
 	ElfW(Off) o;
 	memcpy(&o, exp, sizeof o);
 	/* interpreters have idempotent allocation semantics
 	 * (and region/GC reclaim semantics? i.e. we never have to worry about
 	 * freeing a result returned by an interpreter? */
-	return (void*)(((uintptr_t) BOU_BIGALLOC(elf_elements_cont->bigalloc_or_uniqtype)->begin) + o);
+	return (void*)(((uintptr_t) BOU_BIGALLOC(elf_elements_path->to_here.container.bigalloc_or_uniqtype)->begin) + o);
 }
-_Bool may_contain_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+_Bool may_contain_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
-	return may_contain_pointer(exp, exp_t, cont);
+	return may_contain_pointer(exp, exp_t, link);
 }
-uintptr_t is_environ_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_containment_ctxt *cont)
+uintptr_t is_environ_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
 	/* The referential 'environment' in a memory-mapped ELF file consists of:
 	 *
@@ -995,16 +1012,16 @@ uintptr_t is_environ_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, st
 		phdr_u = GET_UNIQTYPE_PTR(Elf64_Phdr);
 		if (!phdr_u) abort();
 	}
-	if (BOU_IS_UNIQTYPE(cont->bigalloc_or_uniqtype)
-			&& BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)
+	if (BOU_IS_UNIQTYPE(link->container.bigalloc_or_uniqtype)
+			&& BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype)
 				== phdr_u)
 	{
-		if (((Elf64_Phdr *) cont->container_base)->p_type != PT_LOAD) return 0;
-		if (0 == strcmp(CONT_UNIQTYPE_FIELD_NAME(cont), "p_offset"))
+		if (((Elf64_Phdr *) link->container.base)->p_type != PT_LOAD) return 0;
+		if (0 == strcmp(LINK_UNIQTYPE_FIELD_NAME(link), "p_offset"))
 		{
 			return (uintptr_t) "p_offset";
 		}
-		if (0 == strcmp(CONT_UNIQTYPE_FIELD_NAME(cont), "p_vaddr"))
+		if (0 == strcmp(LINK_UNIQTYPE_FIELD_NAME(link), "p_vaddr"))
 		{
 			return (uintptr_t) "p_vaddr";
 		}
@@ -1031,7 +1048,7 @@ struct elf_walk_refs_state
 #define ELF_WALK_REFS_BUF_INITIAL_CAPACITY 128
 int seen_elf_reference_or_pointer_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-	struct alloc_containment_ctxt *cont,
+	struct alloc_tree_link *link_to_here,
 	void *elf_walk_refs_state_as_void)
 {
 	struct elf_walk_refs_state *state = (struct elf_walk_refs_state *)
@@ -1047,7 +1064,7 @@ int seen_elf_reference_or_pointer_cb(struct big_allocation *maybe_the_allocation
 		}
 		state->buf_capacity = new_capacity;
 	}
-	void *target = do_interp_elf_offset_or_pointer(obj, t, cont);
+	void *target = do_interp_elf_offset_or_pointer(obj, t, link_to_here);
 	unsigned long target_offset;
 	if ((uintptr_t) target >= (uintptr_t) state->elf_mapping &&
 	    (uintptr_t) target <  (uintptr_t) state->elf_mapping + state->elf_mapping_size)
@@ -1083,7 +1100,7 @@ int seen_elf_reference_or_pointer_cb(struct big_allocation *maybe_the_allocation
 }
 int seen_elf_environ_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-	struct alloc_containment_ctxt *cont,
+	struct alloc_tree_link *link_to_here,
 	void *environ_elt_cb_arg_as_void)
 {
 	struct environ_elt_cb_arg *arg = (struct environ_elt_cb_arg *) environ_elt_cb_arg_as_void;
@@ -1131,19 +1148,19 @@ static void drain_queued_output(struct emit_asm_ctxt *ctxt, unsigned depth)
 }
 
 static int append_subobject_label(char *buf, size_t sz,
-	struct alloc_containment_ctxt *cont, void *the_alloc)
+	struct alloc_tree_path *path, void *the_alloc)
 {
-	assert(cont->maybe_containee_coord);
+	assert(path->to_here.containee_coord);
 	int nwritten = 0;
-	if (UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
+	if (UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE(path->to_here.container.bigalloc_or_uniqtype)))
 	{
-		int ret = strlcat(buf, CONT_UNIQTYPE_FIELD_NAME(cont), sz);
+		int ret = strlcat(buf, LINK_UNIQTYPE_FIELD_NAME(&path->to_here), sz);
 		assert(ret < sz);
 		nwritten += ret;
 	}
-	else if (UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
+	else if (UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE(path->to_here.container.bigalloc_or_uniqtype)))
 	{
-		int ret = snprintf(buf, sz, "%d", cont->maybe_containee_coord - 1);
+		int ret = snprintf(buf, sz, "%d", path->to_here.containee_coord - 1);
 		assert(ret > 0);
 		nwritten += ret;
 	}
@@ -1152,7 +1169,7 @@ static int append_subobject_label(char *buf, size_t sz,
 }
 
 int recursive_print_context_label(char *buf, size_t sz,
-	struct alloc_containment_ctxt *cont, void *the_alloc,
+	struct alloc_tree_path *path, void *the_alloc,
 	struct big_allocation *maybe_the_alloc,
 	struct big_allocation *root_empty_name)
 {
@@ -1166,11 +1183,11 @@ int recursive_print_context_label(char *buf, size_t sz,
 		return 1; // our return value counts the NUL
 	}
 
-	if (cont->encl)
+	if (path->encl)
 	{
-		int ret = recursive_print_context_label(buf, sz, cont->encl, cont->container_base,
-			BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype) ?
-					BOU_BIGALLOC(cont->bigalloc_or_uniqtype)
+		int ret = recursive_print_context_label(buf, sz, path->encl, path->to_here.container.base,
+			BOU_IS_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype) ?
+					BOU_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype)
 					: NULL,
 			root_empty_name
 		);
@@ -1193,9 +1210,9 @@ int recursive_print_context_label(char *buf, size_t sz,
 	// now we have 'cont' but not necessary 'cont->encl'
 	/* What's the label for our current allocation? */
 	// can we get a field name or index #?
-	if (BOU_IS_UNIQTYPE(cont->bigalloc_or_uniqtype))
+	if (BOU_IS_UNIQTYPE(path->to_here.container.bigalloc_or_uniqtype))
 	{
-		nwritten += append_subobject_label(buf, sz, cont, the_alloc);
+		nwritten += append_subobject_label(buf, sz, path, the_alloc);
 	}
 	else
 	{
@@ -1203,7 +1220,7 @@ int recursive_print_context_label(char *buf, size_t sz,
 		 * We need to ask the allocator. Get it either because
 		 * we're also a bigalloc and have allocated_by, or because
 		 * our container is a bigalloc that has suballocator. */
-		struct big_allocation *containing_bigalloc = BOU_BIGALLOC(cont->bigalloc_or_uniqtype);
+		struct big_allocation *containing_bigalloc = BOU_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype);
 		struct allocator *a = __liballocs_infer_allocator(the_alloc,
 			maybe_the_alloc, containing_bigalloc);
 		char namebuf[4096];
@@ -1221,14 +1238,15 @@ int recursive_print_context_label(char *buf, size_t sz,
 	return nwritten;
 }
 
-/* This is called for allocations and subobjects. */
+/* This is called for allocations and subobjects. Always part of a depth-first walk. */
 static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 		void *obj, struct uniqtype *t, const void *allocsite,
-		struct alloc_containment_ctxt *cont, void *emit_asm_ctxt_as_void)
+		struct alloc_tree_link *link_to_here, void *emit_asm_ctxt_as_void)
 {
 	struct emit_asm_ctxt *ctxt = emit_asm_ctxt_as_void;
+	struct alloc_tree_path *path = (struct alloc_tree_path *) link_to_here; // we are doing DF so can downcast
 	// -1. flush any queued outputs that are from a depth >= our depth
-	drain_queued_output(ctxt, cont->encl_depth);
+	drain_queued_output(ctxt, path->encl_depth);
 	// 0. pad up to the start
 	ptrdiff_t this_obj_offset = (intptr_t) obj - (intptr_t) ctxt->start_address;
 	int ret = 0;
@@ -1240,21 +1258,21 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
      if (snret >= sizeof (arr)) { (arr)[(sizeof (arr)) - 1] = '\0'; } } while (0)
 	// can we get a field name or index #?
-	if (BOU_IS_UNIQTYPE(cont->bigalloc_or_uniqtype))
+	if (BOU_IS_UNIQTYPE(path->to_here.container.bigalloc_or_uniqtype))
 	{
-		if (!cont->maybe_containee_coord)
+		if (!path->to_here.containee_coord)
 		{
 			snprintf(comment, sizeof comment, "BUG: subobj but no coord");
 		}
 		else
 		{
-			if (UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
+			if (UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE(path->to_here.container.bigalloc_or_uniqtype)))
 			{
-				PRINT_TO_ARRAY(comment, "field %s", CONT_UNIQTYPE_FIELD_NAME(cont));
+				PRINT_TO_ARRAY(comment, "field %s", LINK_UNIQTYPE_FIELD_NAME(&path->to_here));
 			}
-			else if (UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE(cont->bigalloc_or_uniqtype)))
+			else if (UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE(path->to_here.container.bigalloc_or_uniqtype)))
 			{
-				PRINT_TO_ARRAY(comment, "idx %d", cont->maybe_containee_coord - 1);
+				PRINT_TO_ARRAY(comment, "idx %d", path->to_here.containee_coord - 1);
 			}
 		}
 	}
@@ -1263,10 +1281,10 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 	// a spot within that context -- and what we're doing is simply
 	// walking the tree.
 	// HACK: we only print a label for arrays or bigallocs
-	if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype)
-			|| UNIQTYPE_IS_ARRAY_TYPE(CONT_UNIQTYPE(cont)))
+	if (BOU_IS_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype)
+			|| UNIQTYPE_IS_ARRAY_TYPE(LINK_UNIQTYPE(&path->to_here)))
 	{
-		int ret = recursive_print_context_label(label, sizeof label, cont,
+		int ret = recursive_print_context_label(label, sizeof label, path,
 			obj, maybe_the_allocation, ctxt->file_bigalloc);
 		if (ret < 0)
 		{
@@ -1285,9 +1303,9 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 			// union case, so must be a uniqtype; allocs can't overlap
 			// (For our hypothetical 'subobjects are another kind of allocation' future:
 			// only 'active' subobjects 'are' allocations in a true sense.)
-			assert(!BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype));
-			struct uniqtype *u = BOU_UNIQTYPE(cont->bigalloc_or_uniqtype);
-			assert(cont->maybe_containee_coord);
+			assert(!BOU_IS_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype));
+			struct uniqtype *u = BOU_UNIQTYPE(path->to_here.container.bigalloc_or_uniqtype);
+			assert(path->to_here.containee_coord);
 			printf("# ASSUMING a union: would need to pad %d bytes for %s of type %s\n",
 				(int) pad, comment, UNIQTYPE_NAME(u));
 			fflush(stdout);
@@ -1297,7 +1315,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		}
 		if (pad > 0)
 		{
-			indent(cont->encl_depth);
+			indent(path->encl_depth);
 			printf(".skip %d # padding before %s of type %s\n",
 				(int) pad, comment, UNIQTYPE_NAME(t));
 			ctxt->emitted_up_to_offset += pad;
@@ -1312,8 +1330,8 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		// create an end label... will get enqueued as we return
 		/* We only emit labels for bigallocs or arrays. NOT 'things
 		 * contained in arrays', but really the thing itself.  */
-		if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype)
-				|| UNIQTYPE_IS_ARRAY_TYPE(CONT_UNIQTYPE(cont)) )
+		if (BOU_IS_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype)
+				|| UNIQTYPE_IS_ARRAY_TYPE(LINK_UNIQTYPE(&path->to_here)) )
 		{
 			PRINT_TO_ARRAY(end_label, "%s.end", label);
 		}
@@ -1332,7 +1350,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 	if (UNIQTYPE_HAS_SUBOBJECTS(t))
 	{
 		/* We're about to start printing the fields of the present thing */
-		indent(cont->encl_depth);
+		indent(path->encl_depth);
 		printf("# begin: %s of type %s\n", comment, UNIQTYPE_NAME(t));
 		// subobjects get walked separately; we don't have to recurse
 	}
@@ -1345,7 +1363,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 	 * containing allocation? Need to check it's allocated by __elf_element_allocator
 	 * and if so, ask it! Ideally we'd have a better way to signal asciizness, since
 	 * we want this code one day to work for any memory, not just a mapped ELF binary. */
-	if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype) &&
+	if (BOU_IS_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype) &&
 			UNIQTYPE_IS_ARRAY_TYPE(t) &&
 			(UNIQTYPE_ARRAY_ELEMENT_TYPE(t) == GET_UNIQTYPE_PTR(unsigned_char$$8)
 			|| UNIQTYPE_ARRAY_ELEMENT_TYPE(t) == GET_UNIQTYPE_PTR(signed_char$$8)))
@@ -1357,7 +1375,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		_Bool indented = 0; // we did this above
 		while (off < sz && NULL != (found_nul = memchr(((char*)obj+off), '\0', sz-off)))
 		{
-			if (!indented) { indent(cont->encl_depth); }
+			if (!indented) { indent(path->encl_depth); }
 			printf(".asciz \"");
 			for (char *c = (char*) obj + off; c < found_nul; ++c)
 			{
@@ -1372,7 +1390,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		if (!found_nul && off < sz)
 		{
 			// no nuls left, but ssme chars, so .ascii
-			if (!indented) { indent(cont->encl_depth); }
+			if (!indented) { indent(path->encl_depth); }
 			printf(".ascii \"");
 			// can't printf (no NUL) so just do a slow but reliable putc loop
 			for (char *c = (char*) obj + off; c < (char*) obj + sz; ++c)
@@ -1411,7 +1429,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 			__uint128_t us;
 		} data = { us: 0 };
 		memcpy(&data, obj, UNIQTYPE_SIZE_IN_BYTES(b));
-		indent(cont->encl_depth);
+		indent(path->encl_depth);
 		switch (mkpair(UNIQTYPE_SIZE_IN_BYTES(b), is_signed))
 		{
 			case mkpair(8, 0):
@@ -1487,7 +1505,7 @@ out:
 			if (!ctxt->queued_end_output) err(EXIT_FAILURE, "could not realloc ctxt->queued_end_output");
 		}
 		int idx = ctxt->queue_nused++;
-		ctxt->queued_end_output[idx].depth = cont->encl_depth;
+		ctxt->queued_end_output[idx].depth = path->encl_depth;
 		asprintf(&ctxt->queued_end_output[idx].output, "%s:", end_label); // next line will indent
 	}
 	return ret;
@@ -1530,12 +1548,9 @@ int main(void)
 	/* How can we ensure that __uniqtype__Elf64_Ehdr will be generated and
 	 * loaded? For now we have put a hack into lib-test, but we need to
 	 * ensure meta-objects have been loaded. */
-	struct alloc_containment_ctxt scope = {
-		.container_base = b->begin,
-		.bigalloc_or_uniqtype = (uintptr_t) b,
-		.maybe_containee_coord = 0,
-		.encl = NULL,
-		.encl_depth = 0
+	struct alloc_tree_pos scope = {
+		.base = b->begin,
+		.bigalloc_or_uniqtype = (uintptr_t) b
 	};
 	/* Walk references, to get the pointer targets. */
 	struct interpreter elf_offset_or_pointer_resolver = {

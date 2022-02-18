@@ -141,23 +141,19 @@ typedef struct lifetime_policy_s
  * Also remember we need to modify this struct so that it encodes a
  * [begin,end) range rather than just a begin offset.
  */
-// FIXME: this is a more general structure than we thought.
-// Perhaps rename it 'alloc_coord'? Not so much a coord as a 'tree pos'
-// It should be possible to reconstruct the exact object
-// address from one of these structs, now that we have the
-// maybe_containee_coord.
-// FIXME: maybe distinguish "tree pos" from "tree path"
-// where only tree path has the encl_* stuff.
+
+// FIXME: the following, formerly alloc_containment_ctxt, is a more general
+// structure than we thought.
+// There's really a few concepts here:
+// a "pos" (can be used to identify a span i.e. its children),
+// a "link" (way to step down a level, from a given pos)
+// and a "path" (series of links)
 // Also remember that a path need not be a path all the way
 // back to the root.
-// FIXME: container_base isn't needed when we have a bigalloc, because
-// the bigalloc records it.
-// There's really a few concepts here:
-// a "span", a "pos" and a "path"
-/*
-// HMM. is this really a branch? It can represent leaves too.
-// Instead of 'branch' and 'pos', maybe 'pos' and 'link'?
-struct alloc_tree_branch
+// It should be possible to reconstruct the exact object
+// address from a pos,
+// and to turn a link into a pos ("follow" the downward link).
+struct alloc_tree_pos
 {
 	void *base;           // base addr of the containing alloc
 	uintptr_t bigalloc_or_uniqtype; // container might be a bigalloc or a uniqtype-described alloc
@@ -169,41 +165,42 @@ struct alloc_tree_branch
 	// since we rarely heap-allocate these things
 	// We could also use the bigalloc *index*, a small integer,
 	// rather than the bigalloc pointer. This is probably worth doing.
-	union { struct {
-		unsigned long  base:48;
-		unsigned short bigalloc_idx:16; // MSB is always 0
-	 };     struct {
-		unsigned long base:48;
-		unsigned      always_1:1;  // to discriminate w.r.t. the above -- CHECK bit order
-		unsigned long uniqtype:47; // could be reduced to 44
-		unsigned      len:32;
-	 } // HMM: how does this compare to our 128-bit pointer-with-bounds type?
+#if 0
+	union {
+		struct {
+			unsigned long _ignored:48;
+			unsigned      is_uniqtype:1;  // to d
+		} which;
+		struct {
+			unsigned long  base:48;
+			unsigned short bigalloc_idx:16; // MSB is always 0
+		} bigalloc;
+		struct {
+			unsigned long base:48;
+			unsigned      always_1:1;  // to discriminate w.r.t. the above -- CHECK bit order
+			unsigned long uniqtype:47; // could be reduced to 44
+			                           // or maybe we want a spinewise compact 32-bit uniqtype id?
+			unsigned      len:32;
+		} uniqtype;
+	   // HMM: how does this compare to our 128-bit pointer-with-bounds type?
 	   // That has a base but no type.
 	   // Its first 64 bits are a raw pointer.
 	   // And it only uses 32 bits for the base, relying on a no-cross-4GB-boundary property (or denorm cases)
 	};
+#endif
 };
-struct alloc_tree_pos
+struct alloc_tree_link
 {
-	struct alloc_tree_branch container;
+	struct alloc_tree_pos container;
 	unsigned containee_coord; // where within the container?
 };
 struct alloc_tree_path
 {
-	struct alloc_tree_pos cur;
+	struct alloc_tree_link to_here;
 	unsigned encl_depth;
 	struct alloc_tree_path *encl;
 };
 
- */
-struct alloc_containment_ctxt
-{
-	void *container_base;           // base addr of the containing alloc
-	uintptr_t bigalloc_or_uniqtype; // container might be a bigalloc or a uniqtype-described alloc
-	unsigned maybe_containee_coord; // where within the container?
-	struct alloc_containment_ctxt *encl; // chain of enclosing contexts...
-	unsigned encl_depth;                 // ... 0 if chain is empty
-};
 #define BOU_BIGALLOC_NOCHECK_(b_o_u) ((struct big_allocation *) ((b_o_u) & UNIQTYPE_PTR_MASK_NOTFLAGS))
 #define BOU_UNIQTYPE_NOCHECK_(b_o_u) ((struct uniqtype *) ((b_o_u) & UNIQTYPE_PTR_MASK_NOTFLAGS))
 
@@ -219,32 +216,32 @@ struct alloc_containment_ctxt
  * the object pointer,
  * its type,
  * and the meaning of its coordinate, e.g. its field name */
-#define CONT_UNIQTYPE_FIELD_NAME(c) ( \
-   ( (BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) && \
-      UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
+#define LINK_UNIQTYPE_FIELD_NAME(l) ( \
+   ( (BOU_IS_UNIQTYPE((l)->container.bigalloc_or_uniqtype)) && \
+      UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype))) ? \
       (UNIQTYPE_COMPOSITE_SUBOBJ_NAMES( \
-         BOU_UNIQTYPE((c)->bigalloc_or_uniqtype) \
-      )[(c)->maybe_containee_coord - 1]) : NULL \
+         BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype) \
+      )[(l)->containee_coord - 1]) : NULL \
 )
-#define CONT_UNIQTYPE_FIELD(c) ( \
- ( (BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) && \
-	UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
-	(struct uniqtype *)(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype)->related[(c)->maybe_containee_coord - 1].un.memb.ptr) \
+#define LINK_UNIQTYPE_FIELD(l) ( \
+ ( (BOU_IS_UNIQTYPE((l)->container.bigalloc_or_uniqtype)) && \
+	UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype))) ? \
+	(struct uniqtype *)(BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype)->related[(l)->containee_coord - 1].un.memb.ptr) \
 	: NULL \
 )
-#define CONT_UNIQTYPE_ARRAY_ELEMENT(c) ( \
-  ((BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) && \
-    UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) \
+#define LINK_UNIQTYPE_ARRAY_ELEMENT(l) ( \
+  ((BOU_IS_UNIQTYPE((l)->container.bigalloc_or_uniqtype)) && \
+    UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype))) \
   ? \
-  (BOU_UNIQTYPE((c)->bigalloc_or_uniqtype)->related[0].un.memb.ptr) \
+  (BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype)->related[0].un.memb.ptr) \
   : NULL \
 )
-#define CONT_UNIQTYPE(c) ( \
-  ((BOU_IS_UNIQTYPE((c)->bigalloc_or_uniqtype)) ? \
-	(UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
-	CONT_UNIQTYPE_ARRAY_ELEMENT(c) : \
-	(UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((c)->bigalloc_or_uniqtype))) ? \
-	 CONT_UNIQTYPE_FIELD(c) \
+#define LINK_UNIQTYPE(l) ( \
+  ((BOU_IS_UNIQTYPE((l)->container.bigalloc_or_uniqtype)) ? \
+	(UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype))) ? \
+	LINK_UNIQTYPE_ARRAY_ELEMENT(l) : \
+	(UNIQTYPE_IS_COMPOSITE_TYPE(BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype))) ? \
+	 LINK_UNIQTYPE_FIELD(l) \
 	: NULL \
 	: /* FIXME: see below */ NULL) \
 )
@@ -257,10 +254,10 @@ struct alloc_containment_ctxt
 struct interpreter
 {
 	const char *name;
-	_Bool (*can_interp)(void *, struct uniqtype *, struct alloc_containment_ctxt *);
-	void *(*do_interp) (void *, struct uniqtype *, struct alloc_containment_ctxt *);
-	_Bool (*may_contain)(void *, struct uniqtype *, struct alloc_containment_ctxt *);
-	uintptr_t (*is_environ)(void *, struct uniqtype *, struct alloc_containment_ctxt *);
+	_Bool (*can_interp)(void *, struct uniqtype *, struct alloc_tree_link *);
+	void *(*do_interp) (void *, struct uniqtype *, struct alloc_tree_link *);
+	_Bool (*may_contain)(void *, struct uniqtype *, struct alloc_tree_link *);
+	uintptr_t (*is_environ)(void *, struct uniqtype *, struct alloc_tree_link *);
 };
 /* Recall: a name resolver is an interpreter of naming languages, which are
  * distinguished from computational languages only by the computational
@@ -301,7 +298,8 @@ fun(void,                    register_suballoc,arg(struct allocated_chunk *,star
  * the refactoring to take these arguments consistently.
  * NOTE that maybe_the_allocation args might not be going far
  * enough... do we want maybe_the_allocation_or_arena? */
-typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *t, const void *allocsite, struct alloc_containment_ctxt *cont, void *arg);
+typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj,
+   struct uniqtype *t, const void *allocsite, struct alloc_tree_link *link_to_here, void *arg);
 /* An 'imposed child bigalloc' is a child c of bigalloc b
  * where c is not allocated_by the suballocator of b.
  * In other words, te allocator that is nominally managing
@@ -331,7 +329,7 @@ fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \
 fun(size_t             ,raw_metadata,  arg(struct allocated_chunk *,start),arg(struct alloc_metadata **, buf)) \
 fun(liballocs_err_t    ,set_type,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
 fun(liballocs_err_t    ,set_site,      arg(struct big_allocation *, maybe_the_allocation), arg(void *, obj), arg(struct uniqtype *,new_t)) /* optional (stack) */\
-fun(int                ,walk_allocations, arg(struct alloc_containment_ctxt *,cont), arg(walk_alloc_cb_t *, cb), arg(void *, arg), arg(void *, begin), arg(void *, end))
+fun(int                ,walk_allocations, arg(struct alloc_tree_pos *,cont), arg(walk_alloc_cb_t *, cb), arg(void *, arg), arg(void *, begin), arg(void *, end))
 
 #define __allocmeta_fun_arg(argt, name) argt
 #define __allocmeta_fun_ptr(rett, name, ...) \
@@ -360,7 +358,7 @@ ALLOC_REFLECTIVE_API(__liballocs_toplevel_fun_decl, __allocmeta_fun_arg)
 /* Depth-first walking necessarily crosses allocators, so it
  * doesn't need to go on the allocator. */
 int __liballocs_walk_allocations_df(
-	struct alloc_containment_ctxt *cont,
+	struct alloc_tree_pos *pos,
 	walk_alloc_cb_t *cb,
 	void *arg
 );
@@ -375,7 +373,7 @@ struct walk_refs_state
 int
 __liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-	struct alloc_containment_ctxt *cont, void *walk_refs_state_as_void);
+	struct alloc_tree_link *link_to_here, void *walk_refs_state_as_void);
 
 /* We use our general cross-allocator depth-first traversal to write an environment walker,
  * parameterised by an interpreter (i.e. many notions of 'environment', to serve the
@@ -407,7 +405,7 @@ struct environ_elt_cb_arg
 int
 __liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-	struct alloc_containment_ctxt *cont, void * /* YES */ walk_environ_state_as_void);
+	struct alloc_tree_link *link_to_here, void * /* YES */ walk_environ_state_as_void);
 
 // we can also ask for the allocator
 struct allocator *alloc_get_allocator(void *obj);

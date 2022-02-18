@@ -11,7 +11,7 @@ static int saw_string_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
 	struct alloc_containment_ctxt *cont, void *arg)
 {
-	// printf("Saw a string: %s\n", (char*)obj);
+	// printf("Saw a string at %p (%06d): %s\n", obj, n, (char*)obj);
 	++n;
 	return 0;
 }
@@ -37,7 +37,8 @@ int main(void)
 	if (!seq_b->suballocator_private) abort();
 	*(struct packed_sequence *) seq_b->suballocator_private = (struct packed_sequence) {
 		.fam = &__string8_nulterm_packed_sequence,
-		.fn_arg = NULL,
+		.enumerate_fn_arg = NULL,
+		.name_fn_arg = NULL,
 		.un = { .metavector_any = NULL },
 		.metavector_nused = 0,
 		.metavector_size = 0,
@@ -45,20 +46,20 @@ int main(void)
 		.starts_bitmap_nwords = 0,
 		.offset_cached_up_to = 0
 	};
-	struct alloc_containment_ctxt ctxt = {
-		.container_base = chunk,
-		.bigalloc_or_uniqtype = (uintptr_t) seq_b,
-		.maybe_containee_coord = 0,
-		.encl = NULL,
-		.encl_depth = 0
+	struct alloc_tree_pos pos = {
+		.base = chunk,
+		.bigalloc_or_uniqtype = (uintptr_t) seq_b
 	};
-	__packed_seq_allocator.walk_allocations(&ctxt, saw_string_cb, NULL, NULL, NULL);
+	__packed_seq_allocator.walk_allocations(&pos, saw_string_cb, NULL, NULL, NULL);
 	assert(n == 131072);
 	n = 0;
-	alloc_walk_allocations(&ctxt, saw_string_cb, NULL, NULL, NULL);
+	alloc_walk_allocations(&pos, saw_string_cb, NULL, NULL, NULL);
 	assert(n == 131072);
 	n = 0;
-	__liballocs_walk_allocations_df(&ctxt, saw_string_cb, NULL);
-	assert(n == 131072);
+	__liballocs_walk_allocations_df(&pos, saw_string_cb, NULL);
+	// HMM. This is visiting each string twice. And that's correct!
+	// After visiting the array, we also visit the individual char that it
+	// contains, because we're depth-first.
+	assert(n == 262144);
 	return 0;
 }

@@ -1625,7 +1625,7 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
  * disambiguate a bigalloc call even in this top-level function.
  */
 int __liballocs_walk_allocations(
-	struct alloc_containment_ctxt *cont,
+	struct alloc_tree_pos *scope,
 	walk_alloc_cb_t *cb,
 	void *arg,
 	void *maybe_range_begin,
@@ -1647,11 +1647,11 @@ int __liballocs_walk_allocations(
 	 * - the bigalloc may have only children
 	 *    - we still honor the flags
 	 *
-	 * Given just an alloc_containment_ctxt, where do we get
+	 * Given just an alloc_tree_path, where do we get
 	 * our flags from? We can include flags in the uniqtype
 	 * as it is always 8-byte-aligned. */
-	assert(cont);
-	uintptr_t flags = (cont->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_FLAGS);
+	assert(scope);
+	uintptr_t flags = (scope->bigalloc_or_uniqtype & UNIQTYPE_PTR_MASK_FLAGS);
 	/* Currently we
 	 * - walk child bigallocs (if asked), then
 	 * - walk suballocator allocations (if asked), then
@@ -1707,17 +1707,23 @@ int __liballocs_walk_allocations(
 	 * So it's not considered imposed.
 	 */
 	int ret = 0;
-	void *walked_up_to = maybe_range_begin ?: cont->container_base;
-	if (BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype))
+	void *walked_up_to = maybe_range_begin ?: scope->base;
+	/* Our path to the child needs an 'encl'. Or does it?
+	 * 'encl' means 'path_to_container'. */
+	if (BOU_IS_BIGALLOC(scope->bigalloc_or_uniqtype))
 	{
-		struct big_allocation *b = BOU_BIGALLOC(cont->bigalloc_or_uniqtype);
-		assert(b->begin == cont->container_base);
-		struct alloc_containment_ctxt new_cont = {
-			.container_base = b->begin,
-			.bigalloc_or_uniqtype = (uintptr_t) b /* no flags set */,
-			.maybe_containee_coord = 1,
-			.encl = cont,
-			.encl_depth = cont->encl_depth + 1
+		struct big_allocation *b = BOU_BIGALLOC(scope->bigalloc_or_uniqtype);
+		assert(b->begin == scope->base);
+		struct alloc_tree_path new_cont = {
+			.to_here = (struct alloc_tree_link) {
+				.container = (struct alloc_tree_pos) {
+					.base = b->begin,
+					.bigalloc_or_uniqtype = (uintptr_t) b /* no flags set */
+				},
+				.containee_coord = 1
+			},
+			.encl = NULL,
+			.encl_depth = 0
 		};
 		if (flags & ALLOC_WALK_BIGALLOC_IMPOSED_CHILDREN)
 		{
@@ -1728,7 +1734,7 @@ int __liballocs_walk_allocations(
 			for (struct big_allocation *child = b->first_child; child;
 				walked_up_to = child->end,
 				child = child->next_sib,
-				++new_cont.maybe_containee_coord)
+				++new_cont.to_here.containee_coord)
 			{
 				// skip any that don't fall within our range
 				if ((uintptr_t) child->end <= (uintptr_t) walked_up_to) continue;
@@ -1740,19 +1746,19 @@ int __liballocs_walk_allocations(
 					// NOTE: this will override the 'coord' as it calls the cb
 					// for its own children; we only pass coords for bigallocs
 					// or for uniqtype containeds
-					ret = b->suballocator->walk_allocations(&new_cont, cb, arg,
+					ret = b->suballocator->walk_allocations(&new_cont.to_here.container, cb, arg,
 						walked_up_to, child->begin);
 					if (ret != 0) return ret;
 					// 2. walk the i.c.
 					ret = cb(b, b->begin, NULL /* FIXME: type */, NULL /* FIXME: allocsite */,
-						&new_cont, arg);
+						&new_cont.to_here, arg);
 					if (ret != 0) return ret;
 				}
 			}
 		}
 		// now there is a range, either from the beginning or from the last i.c.,
 		// to the end, that we haven't walked yet and which by definition only contains normal children
-		ret = b->suballocator->walk_allocations(&new_cont, cb, arg,
+		ret = b->suballocator->walk_allocations(&new_cont.to_here.container, cb, arg,
 			walked_up_to, maybe_range_end ?: b->end);
 		return ret;
 	}
@@ -1766,17 +1772,25 @@ int __liballocs_walk_allocations(
 	/* We've ruled out the bigalloc case, so we're being asked
 	 * to iterate through subobjects given a uniqtype. */
 	// for now, use our iteration macro
+	struct alloc_tree_path path_to_child = (struct alloc_tree_path) {
+		.to_here = (struct alloc_tree_link) {
+			.container = { scope->base, scope->bigalloc_or_uniqtype },
+			.containee_coord = 0 // will update
+		},
+		.encl = NULL,
+		.encl_depth = 0
+	};
 #define suballoc_thing(_i, _t, _offs) do { \
-	cont->maybe_containee_coord = (_i) + 1; \
-	void *base = (void*)(((uintptr_t) cont->container_base) + (_offs)); \
+	path_to_child.to_here.containee_coord = (_i) + 1; \
+	void *base = (void*)(((uintptr_t) path_to_child.to_here.container.base) + (_offs)); \
 	ret = cb(NULL, base, \
 	   (_t), \
 	   NULL /* allocsite */, \
-	   cont, \
+	   &path_to_child.to_here, \
 	   arg); \
 	if (ret != 0) return ret; \
 } while (0)
-	struct uniqtype *u = BOU_UNIQTYPE(cont->bigalloc_or_uniqtype);
+	struct uniqtype *u = BOU_UNIQTYPE(scope->bigalloc_or_uniqtype);
 	if (UNIQTYPE_HAS_SUBOBJECTS(u))
 	{
 		UNIQTYPE_FOR_EACH_SUBOBJECT(u, suballoc_thing);
@@ -1786,7 +1800,7 @@ int __liballocs_walk_allocations(
 }
 
 int
-alloc_walk_allocations(struct alloc_containment_ctxt *cont,
+alloc_walk_allocations(struct alloc_tree_pos *cont,
 	walk_alloc_cb_t *cb,
 	void *arg,
 	void *maybe_range_begin,
@@ -1796,11 +1810,15 @@ struct walk_df_arg
 {
 	walk_alloc_cb_t *cb;
 	void *arg;
+	struct alloc_tree_path path_to_container;
 };
 static int walk_one_df_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-		struct alloc_containment_ctxt *cont, void *walk_df_arg_as_void)
+		struct alloc_tree_link *link, void *walk_df_arg_as_void)
 {
+	// NOT this: struct alloc_tree_path *path = (struct alloc_tree_path *) link; // downcast
+	/* We can't do the downcast. We have to make it so that our
+	 * callee cbs can do te downcast. */
 	/* As a way to signal "skip this subtree" as distinct from
 	 * "terminate the whole walk here", return values mean
 	 *     0: carry on
@@ -1811,9 +1829,9 @@ static int walk_one_df_cb(struct big_allocation *maybe_the_allocation,
 	// mean there isn't. It just means it doesn't know or care. We do
 	// because we don't want to double-walk the substructure (once
 	// with uniqtype, once with the bigalloc child structure).
-	if (t && BOU_IS_BIGALLOC(cont->bigalloc_or_uniqtype))
+	if (t && BOU_IS_BIGALLOC(link->container.bigalloc_or_uniqtype))
 	{
-		for (struct big_allocation *child = BOU_BIGALLOC(cont->bigalloc_or_uniqtype)->first_child;
+		for (struct big_allocation *child = BOU_BIGALLOC(link->container.bigalloc_or_uniqtype)->first_child;
 			child;
 			child = child->next_sib)
 		{
@@ -1828,25 +1846,46 @@ static int walk_one_df_cb(struct big_allocation *maybe_the_allocation,
 			}
 		}
 	}
-	
+
 	struct walk_df_arg *arg = (struct walk_df_arg *) walk_df_arg_as_void;
-	// First, we call back for the present thing (i.e. we are pre-order)
-	int ret = arg->cb(maybe_the_allocation, obj, t, allocsite, cont, arg->arg);
+	/*
+	 * First, we call back for the present thing (i.e. we are pre-order).
+	 * When we call a CB, we guarantee that we give it a path not just a link.
+	 * Our arg gives us the path to the current position.
+	 */
+	struct alloc_tree_path *path_to_container = &arg->path_to_container;
+	struct alloc_tree_path path_to_here = {
+		.to_here = { .container = { link->container.base, link->container.bigalloc_or_uniqtype },
+		             .containee_coord = link->containee_coord },
+		.encl = path_to_container,
+		.encl_depth = 1 + path_to_container->encl_depth
+	};
+	int ret = arg->cb(maybe_the_allocation, obj, t, allocsite, /* upcast */ &path_to_here.to_here,
+		arg->arg);
 	if (ret == -1) return 0; // tell the caller to carry on *its* traversal
 	if (ret) return ret;     // stop immdiately
-	// Now... is this a thing that might contain things?
+	/*
+	 * Now... is this a thing that might contain things?
+	 * We can exit early if not.
+	 */
 	if (!maybe_the_allocation && !t) return 0;
-	struct alloc_containment_ctxt new_scope = {
-		.container_base = obj,
-		.bigalloc_or_uniqtype = (uintptr_t)((void*)maybe_the_allocation ?: (void*)t),
-		.maybe_containee_coord = 0,
-		.encl = cont,
-		.encl_depth = cont->encl_depth + 1
+	// It is, so set it as our new pos, under which we then walk.
+	// We build the path to it, and pass that in our opaque arg.
+	struct alloc_tree_pos new_pos = (struct alloc_tree_pos) {
+		.base = obj,
+		.bigalloc_or_uniqtype = (uintptr_t)((void*)maybe_the_allocation ?: (void*)t)
 	};
-	return __liballocs_walk_allocations(&new_scope, walk_one_df_cb, arg, NULL, NULL);
+	struct walk_df_arg new_arg = {
+		.cb = arg->cb,
+		.arg = arg->arg,
+		.path_to_container = path_to_here
+	};
+	return __liballocs_walk_allocations(&new_pos, walk_one_df_cb,
+		&new_arg, NULL, NULL);
 }
+/* NOTE this is non-recursive. We only call this one at top level. */
 int __liballocs_walk_allocations_df(
-	struct alloc_containment_ctxt *cont,
+	struct alloc_tree_pos *under_here,
 	walk_alloc_cb_t *cb,
 	void *arg
 )
@@ -1856,10 +1895,16 @@ int __liballocs_walk_allocations_df(
 	 * that walks deeper. */
 	struct walk_df_arg walk_df_arg = {
 		.cb = cb,
-		.arg = arg
+		.arg = arg,
+		.path_to_container = { // initially empty
+			.to_here = { .container = { .base = NULL, .bigalloc_or_uniqtype = 0UL },
+			             .containee_coord = 0 },
+			.encl = NULL,
+			.encl_depth = 0
+		}
 	};
 	return __liballocs_walk_allocations(
-		cont,
+		under_here,
 		walk_one_df_cb,
 		&walk_df_arg,
 		NULL,
@@ -1870,7 +1915,7 @@ int __liballocs_walk_allocations_df(
 int
 __liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-	struct alloc_containment_ctxt *cont, void *walk_refs_state_as_void)
+	struct alloc_tree_link *to_here, void *walk_refs_state_as_void)
 {
 	struct walk_refs_state *state = (struct walk_refs_state *) walk_refs_state_as_void;
 	/* To walk references, we walk allocations (our caller is doing that) and
@@ -1879,10 +1924,10 @@ __liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
 	 * - otherwise skip them.
 	 */
 	// 1. is this a reference?
-	if (state->interp->can_interp(obj, t, cont))
+	if (state->interp->can_interp(obj, t, to_here))
 	{
 		int ret = state->ref_cb(maybe_the_allocation,
-			obj, t, allocsite, cont, walk_refs_state_as_void);
+			obj, t, allocsite, to_here, walk_refs_state_as_void);
 		// 'ret' tells us whether or not to keep walking references; non-zero means stop
 		if (ret) return ret;
 		// if we got 0, we still don't want to "continue" per se; we want to cut off
@@ -1892,16 +1937,20 @@ __liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
 	// 2. Is this a thing that might contain references?
 	// We really want our interpreter to help us here.
 	// Even a simple scalar might be a reference, so we really need help.
-	if (!state->interp->may_contain(obj, t, cont)) return -1;
+	if (!state->interp->may_contain(obj, t, to_here)) return -1;
 
 	return 0; // keep going with the depth-first thing
 }
 
+/* This cb can be given to a depth-first walk to enumerate environment elements,
+ * using a given interpreter. */
 int
 __liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-	struct alloc_containment_ctxt *cont, void *walk_environ_state_as_void)
+	struct alloc_tree_link *link, void *walk_environ_state_as_void)
 {
+	// downcast 'link' as we are always doing a depth-first walk
+	struct alloc_tree_path *path = (struct alloc_tree_path *) link;
 	struct walk_environ_state *state = (struct walk_environ_state *) walk_environ_state_as_void;
 	/* To walk environment info, we walk allocations (our caller is doing that) and
 	 * - if they are part of the environment, run our cb on them
@@ -1909,7 +1958,7 @@ __liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
 	 * - otherwise skip them.
 	 */
 	// 1. is this a reference?
-	uintptr_t maybe_environ_key = state->interp->is_environ(obj, t, cont);
+	uintptr_t maybe_environ_key = state->interp->is_environ(obj, t, &path->to_here);
 	if (maybe_environ_key)
 	{
 		// we want to pass the key through to our callback; how?
@@ -1918,7 +1967,7 @@ __liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
 			.key = maybe_environ_key
 		};
 		int ret = state->environ_cb(maybe_the_allocation,
-			obj, t, allocsite, cont, &arg);
+			obj, t, allocsite, &path->to_here, &arg);
 		// 'ret' tells us whether or not to keep walking environment; non-zero means stop
 		if (ret) return ret;
 		// if we got 0, we still don't want to "continue" per se; we want to cut off

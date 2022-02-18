@@ -187,7 +187,7 @@ static const char *get_name(void *obj, char *namebuf, size_t buflen)
 #define WITH_ENT(_ent, seq, toks...) \
     WITH_ENT_MAC(_ent, seq, toks gobble)
 
-static int walk_allocations(struct alloc_containment_ctxt *ctxt,
+static int walk_allocations(struct alloc_tree_pos *scope,
 			walk_alloc_cb_t *cb, void *arg, void *maybe_range_begin,
 			void *maybe_range_end);
 
@@ -403,12 +403,12 @@ static liballocs_err_t get_info(void *obj,
 	return &__liballocs_err_unrecognised_static_object;
 }
 
-static int walk_allocations(struct alloc_containment_ctxt *ctxt,
+static int walk_allocations(struct alloc_tree_pos *pos,
 			walk_alloc_cb_t *cb, void *arg, void *maybe_range_begin,
 			void *maybe_range_end)
 {
-	assert(BOU_IS_BIGALLOC(ctxt->bigalloc_or_uniqtype));
-	struct big_allocation *b = BOU_BIGALLOC(ctxt->bigalloc_or_uniqtype);
+	assert(BOU_IS_BIGALLOC(pos->bigalloc_or_uniqtype));
+	struct big_allocation *b = BOU_BIGALLOC(pos->bigalloc_or_uniqtype);
 	struct packed_sequence *seq = b->suballocator_private;
 	ensure_cached_up_to(b, seq, (uintptr_t) (maybe_range_end ?: b->end) - (uintptr_t) b->begin);
 	/* Use the bitmap, not the metavector (which we may not have). */
@@ -425,10 +425,16 @@ static int walk_allocations(struct alloc_containment_ctxt *ctxt,
 	unsigned long found;
 	bitmap_word_t test_bit;
 	int ret = 0;
+	struct alloc_tree_link link = {
+		.container = { pos->base, pos->bigalloc_or_uniqtype },
+		.containee_coord = bitmap_pre_count // will pre-increment; CARE! it should be idx+1
+	};
 	while ((unsigned long)-1 != (cur_bit_idx = next_bit_idx))
 	{
+		/* Caller gives us a 'pos' ("walk under here"), and
+		 * this loop generates a series of 'link's. */
 		// tell the cb the idx of the sequence element -- must be 1-based
-		ctxt->maybe_containee_coord = n+1;
+		++link.containee_coord;
 		// have we exhausted our range?
 		void *obj = (char*) bitmap_base_addr + (cur_bit_idx << seq->fam->log2_align);
 		if (maybe_range_end && (uintptr_t) maybe_range_end <= (uintptr_t) obj) break;
@@ -457,7 +463,7 @@ static int walk_allocations(struct alloc_containment_ctxt *ctxt,
 			t = seq->fam->types_table[0];
 			actual_sz = padded_sz;
 		}
-		ret = cb(NULL, obj, FIXUP_T(t, actual_sz), /* allocsite */ NULL, ctxt, arg);
+		ret = cb(NULL, obj, FIXUP_T(t, actual_sz), /* allocsite */ NULL, &link, arg);
 		if (ret) return ret;
 	}
 	return ret;
