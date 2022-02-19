@@ -126,7 +126,8 @@ nopreload-alloca \
 uniqtype-make-precise \
 lib-test \
 forward-decls \
-metavec-layout
+metavec-layout \
+packed-seq-walk
 endef
 $(foreach case,$(exit-zero-case-names),$(eval $(call exit-zero-case,$(case))))
 
