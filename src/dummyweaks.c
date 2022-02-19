@@ -253,23 +253,24 @@ struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct alloc
 	return NULL;
 }
 
-struct alloc_containment_ctxt;
-typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *t, const void *allocsite, struct alloc_containment_ctxt *cont, void *arg);
+struct alloc_tree_pos;
+struct alloc_tree_link;
+typedef int walk_alloc_cb_t(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *t, const void *allocsite, struct alloc_tree_link *cont, void *arg);
 int
-__liballocs_walk_allocations(struct alloc_containment_ctxt *cont,
+__liballocs_walk_allocations(struct alloc_tree_pos *cont,
 	walk_alloc_cb_t *cb,
 	void *arg,
 	void *maybe_range_begin,
 	void *maybe_range_end) { return 0; }
 int
-alloc_walk_allocations(struct alloc_containment_ctxt *cont,
+alloc_walk_allocations(struct alloc_tree_pos *cont,
 	walk_alloc_cb_t *cb,
 	void *arg,
 	void *maybe_range_begin,
 	void *maybe_range_end) __attribute__((alias("__liballocs_walk_allocations")));
 
 int __liballocs_walk_allocations_df(
-	struct alloc_containment_ctxt *cont,
+	struct alloc_tree_pos *pos,
 	walk_alloc_cb_t *cb,
 	void *arg
 )
@@ -280,7 +281,7 @@ struct walk_refs_state;
 int
 __liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-	struct alloc_containment_ctxt *cont, void *walk_refs_state_as_void)
+	struct alloc_tree_link *cont, void *walk_refs_state_as_void)
 {
 	return 0;
 }
@@ -288,7 +289,7 @@ struct walk_environ_state;
 int
 __liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
 	void *obj, struct uniqtype *t, const void *allocsite,
-	struct alloc_containment_ctxt *cont, void * /* YES */ walk_environ_state_as_void)
+	struct alloc_tree_link *cont, void * /* YES */ walk_environ_state_as_void)
 {
 	return 0;
 }
