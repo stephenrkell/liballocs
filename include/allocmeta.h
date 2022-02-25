@@ -168,8 +168,8 @@ struct alloc_tree_pos
 #if 0
 	union {
 		struct {
-			unsigned long _ignored:48;
-			unsigned      is_uniqtype:1;  // to d
+			unsigned long _ignore:48;
+			unsigned      is_uniqtype:1;  // to discriminate
 		} which;
 		struct {
 			unsigned long  base:48;
@@ -183,9 +183,12 @@ struct alloc_tree_pos
 			unsigned      len:32;
 		} uniqtype;
 	   // HMM: how does this compare to our 128-bit pointer-with-bounds type?
-	   // That has a base but no type.
-	   // Its first 64 bits are a raw pointer.
-	   // And it only uses 32 bits for the base, relying on a no-cross-4GB-boundary property (or denorm cases)
+	   // Its first 64 bits are a raw pointer, that can include trap bits
+	   // There is a 32-bit base-of-range field but no type [... i.e. type is 'erased']
+	   // And it only uses 32 bits for the base-of-range
+	   // (relying on a no-cross-4GB-boundary property (or denorm cases).
+	   // They don't quite represent the same thing -- a pointer in the middle of an array
+	   // is in fact more like an alloc_tree_link than an alloc_tree_pos.
 	};
 #endif
 };
@@ -236,7 +239,7 @@ struct alloc_tree_path
   (BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype)->related[0].un.memb.ptr) \
   : NULL \
 )
-#define LINK_UNIQTYPE(l) ( \
+#define LINK_LOWER_UNIQTYPE(l) ( \
   ((BOU_IS_UNIQTYPE((l)->container.bigalloc_or_uniqtype)) ? \
 	(UNIQTYPE_IS_ARRAY_TYPE(BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype))) ? \
 	LINK_UNIQTYPE_ARRAY_ELEMENT(l) : \
@@ -245,6 +248,11 @@ struct alloc_tree_path
 	: NULL \
 	: /* FIXME: see below */ NULL) \
 )
+#define LINK_UPPER_UNIQTYPE(l) ( \
+   (BOU_IS_UNIQTYPE((l)->container.bigalloc_or_uniqtype)) ? \
+	BOU_UNIQTYPE((l)->container.bigalloc_or_uniqtype) \
+	: NULL \
+  )
 
 /* PROBLEM: What about if our obj is a top-level allocation, so lies within a bigalloc
  * but has no *enclosing* uniqtype? I guess we can call the allocator's get_type, since
@@ -254,8 +262,8 @@ struct alloc_tree_path
 struct interpreter
 {
 	const char *name;
-	_Bool (*can_interp)(void *, struct uniqtype *, struct alloc_tree_link *);
-	void *(*do_interp) (void *, struct uniqtype *, struct alloc_tree_link *);
+	intptr_t (*can_interp)(void *, struct uniqtype *, struct alloc_tree_link *);
+	void *(*do_interp) (void *, struct uniqtype *, struct alloc_tree_link *, intptr_t how);
 	_Bool (*may_contain)(void *, struct uniqtype *, struct alloc_tree_link *);
 	uintptr_t (*is_environ)(void *, struct uniqtype *, struct alloc_tree_link *);
 };
@@ -368,6 +376,7 @@ struct walk_refs_state
 {
 	struct interpreter *interp;
 	walk_alloc_cb_t *ref_cb;
+	intptr_t seen_how;
 	//void *ref_cb_arg;
 };
 int

@@ -1924,10 +1924,13 @@ __liballocs_walk_refs_cb(struct big_allocation *maybe_the_allocation,
 	 * - otherwise skip them.
 	 */
 	// 1. is this a reference?
-	if (state->interp->can_interp(obj, t, to_here))
+	intptr_t how;
+	if (0 != (how = state->interp->can_interp(obj, t, to_here)))
 	{
+		state->seen_how = how;
 		int ret = state->ref_cb(maybe_the_allocation,
 			obj, t, allocsite, to_here, walk_refs_state_as_void);
+		state->seen_how = 0;
 		// 'ret' tells us whether or not to keep walking references; non-zero means stop
 		if (ret) return ret;
 		// if we got 0, we still don't want to "continue" per se; we want to cut off

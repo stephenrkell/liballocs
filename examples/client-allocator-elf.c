@@ -15,6 +15,8 @@ size_t strlcat(char *dst, const char *src, size_t size);
 #include "librunt.h"
 #include "pageindex.h"
 
+_Bool debug;
+
 /* An ELF file, mapped in memory, consists of
  * a collection of elements that are either
  * headers (or tables thereof)
@@ -916,11 +918,13 @@ struct emit_asm_ctxt
 	struct big_allocation *file_bigalloc;
 };
 
-static _Bool can_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
+static intptr_t can_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
-	return UNIQTYPE_IS_POINTER_TYPE(exp_t);
+	_Bool retval = UNIQTYPE_IS_POINTER_TYPE(exp_t);
+	assert(!retval);
+	return retval;
 }
-static void *do_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
+static void *do_interp_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link, intptr_t how)
 {
 	void *p;
 	memcpy(&p, exp, sizeof p);
@@ -953,12 +957,21 @@ static _Bool is_elf_structure_type(struct uniqtype *t)
 	}
 	return 0;
 }
-static _Bool can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t,
+enum elf_offset_or_pointer_interp
+{
+	EOP_NONE = 0,
+	EOP_POINTER = 1,
+	EOP_OFFSET = 2,
+	EOP_VADDR = 3,
+	EOP_BITS_MASK = 0x7
+};
+static intptr_t can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t,
 	struct alloc_tree_link *link)
 {
 	/* Is it the right type to be an ELF file offset, in a context
 	 * where we understand what it means (i.e. that it really is one)? */
-	if (can_interp_pointer(exp, exp_t, link)) return 1;
+	if (can_interp_pointer(exp, exp_t, link)) return EOP_POINTER;
+
 	static struct uniqtype *offset_t;
 	if (!offset_t)
 	{
@@ -966,15 +979,73 @@ static _Bool can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t,
 	}
 	assert(offset_t);
 	assert(offset_t != (void*)-1);
-	return exp_t == offset_t && is_elf_structure_type(BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype));
-}
-void *do_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
-{
-	/* Resolve the offset to a pointer within the mapping. */
-	if (can_interp_pointer(exp, exp_t, link))
+	/* PROBLEM: Elf64_Off is typedef uint64_t, so any 64-bit unsigned integer will
+	 * hit this. We really need to capture typedefs. That is tricky when we've
+	 * designed that out. But we can do it if we record symidx. Do we want to
+	 * go the whole 'spine' way? Is there some nicer way to do this?
+	 *
+	 * One easier way to do it is to use knowledge of the field name, which we
+	 * can get at. */
+	if (!(exp_t == offset_t
+		&& is_elf_structure_type(BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype))))
 	{
-		return do_interp_pointer(exp, exp_t, link);
+		return EOP_NONE;
 	}
+	/* Note that this also hits for ElfNN_Addrs (say), but it's wrong to treat
+	 * those as offsets if they're vaddrs. We need to split cases. Since we
+	 * can't pattern-match on strings/tokens, hack something up that turns them
+	 * into 64-bit integers. PROBLEM: this doesn't work in gcc (at least up to 8.3):
+	 * "case label does not reduce to an integer constant" even though
+	 * it's happy to use the same expression as a global initializer.
+	 * See GCC bug 89408. For now we use clang for this file (see Makefile).
+	 * Compiling as C++ code could work too, modulo other fixes. */
+#define atomify4(s) \
+    ({ union { uint32_t atom; char buf[4]; } un; \
+       bzero(&un, sizeof un); strncpy(un.buf, (s), 4); un.atom; })
+#define strip_underscore_and_atomify(s) \
+    ({ char *und = memchr((s), '_', strlen(s)); atomify4(und ? und+1 : (s)); })
+#define valpair(strcttag, fld) \
+ ( ((unsigned long) strip_underscore_and_atomify(strcttag)) | (((unsigned long) strip_underscore_and_atomify(fld))<<32) )
+#define lit_atom(str) \
+    ( (unsigned)((str)[0]) | ((unsigned)(((str)[1])<<8)) | ((unsigned)(((str)[2])<<16)) | ((unsigned)(((str)[3])<<24)) )
+#define litpair(str1, str2) \
+    ( ((unsigned long) ( lit_atom(#str1) )) | \
+     (((unsigned long) ( lit_atom(#str2) ))<<32) \
+    )
+	if (debug)
+	{
+		fprintf(stderr, "Within a %s, hit a %s\n",
+				UNIQTYPE_NAME(BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype)),
+				LINK_UNIQTYPE_FIELD_NAME(link));
+	}
+	const char *uniqtype_name = UNIQTYPE_NAME(BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype));
+	const char *field_name = LINK_UNIQTYPE_FIELD_NAME(link);
+	struct uniqtype *ref_target_type = NULL;
+	unsigned long vp = valpair(uniqtype_name, field_name);
+	switch (vp)
+	{
+		// these are offsets
+		case litpair(Ehdr, shoff):   ref_target_type = GET_UNIQTYPE_PTR(ElfW(Shdr)); goto return_offset;
+		case litpair(Ehdr, phoff):   ref_target_type = GET_UNIQTYPE_PTR(ElfW(Phdr)); goto return_offset;
+		case litpair(Shdr, offset):
+		case litpair(Phdr, offset):
+			return_offset: return EOP_OFFSET | (uintptr_t) ref_target_type;
+		/* These are vaddrs. We will need to walk the phdrs and
+		 * figure out which one it falls under, then translate
+		 * to a file offset usin that phdr's translation. */
+		case litpair(Ehdr, entry):
+		case litpair(Shdr, addr):
+		case litpair(Phdr, vaddr):
+		case litpair(Phdr, paddr):
+		case litpair(Sym, value):
+			 return_vaddr: return EOP_VADDR | (uintptr_t) ref_target_type;
+		default:
+			// we hit something we didn't anticipate
+			return EOP_NONE;
+	}
+}
+void *do_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link, intptr_t how)
+{
 	struct alloc_tree_path *elf_elements_path = (struct alloc_tree_path *) link; // can downcast; we are doing DF
 	/* FIXME: searching up the chain like this
 	 * on *every* resolve is expensive. It should only
@@ -986,12 +1057,60 @@ void *do_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct 
 		assert(elf_elements_path->encl);
 		elf_elements_path = elf_elements_path->encl;
 	}
-	ElfW(Off) o;
-	memcpy(&o, exp, sizeof o);
+	void *elf_file_base = BOU_BIGALLOC(elf_elements_path->to_here.container.bigalloc_or_uniqtype)->begin;
+	/* Resolve the offset to a pointer within the mapping. */
+	assert((how & EOP_BITS_MASK) != EOP_NONE);
+	switch (how & EOP_BITS_MASK)
+	{
+		case EOP_POINTER: return do_interp_pointer(exp, exp_t, link, 1);
+		case EOP_OFFSET: {
+			ElfW(Off) o;
+			memcpy(&o, exp, sizeof o);
+			return (void*)((uintptr_t) elf_file_base + o);
+		}
+		case EOP_VADDR: {
+			ElfW(Addr) a;
+			memcpy(&a, exp, sizeof a);
+			ElfW(Phdr) *phdrs = (ElfW(Phdr) *)(elf_file_base +
+					((ElfW(Ehdr) *) elf_file_base)->e_phoff);
+			for (unsigned i = 0; i < ((ElfW(Ehdr) *) elf_file_base)->e_phnum; ++i)
+			{
+				if (phdrs[i].p_type == PT_LOAD &&
+						a >= phdrs[i].p_vaddr &&
+						a < phdrs[i].p_vaddr + phdrs[i].p_filesz)
+				{
+					return (void*)((uintptr_t) elf_file_base +
+							phdrs[i].p_offset +
+							( a - phdrs[i].p_vaddr ));
+				}
+				// INTERESTING CASE: if it's not within filesz, but it's
+				// within memsz. Then it refers to an object which would exist
+				// at run time, but does not exist in the mapped file.
+				// We could generate a undefined sym representing this area,
+				// and output reloc record. But that's straying beyond our remit.
+				// We're trying to represent the file, not the memory image that
+				// the file itself represents.
+			}
+			return NULL;
+		}
+		default: abort();
+	}
+
 	/* interpreters have idempotent allocation semantics
 	 * (and region/GC reclaim semantics? i.e. we never have to worry about
-	 * freeing a result returned by an interpreter? */
-	return (void*)(((uintptr_t) BOU_BIGALLOC(elf_elements_path->to_here.container.bigalloc_or_uniqtype)->begin) + o);
+	 * freeing a result returned by an interpreter?
+	 *
+	 * can imagine 'weak' and 'non-weak' do_interp functions,
+	 * where the no-nweak one will attach a lifetime policy
+	 * (analogy: dlopen)
+	 *
+	 * similarly there are 'get' and 'get_or_create' operations...
+	 * 'get' is like dlopen(_, RTLD_NOLOAD).
+	 *
+	 * a weak get_or_create does make sense, but only if freeing
+	 * is manual anyway, i.e. if create'd, the manual policy applies.
+	 * Doing 'create' always means attaching *some* policy or other.
+	 */
 }
 _Bool may_contain_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, struct alloc_tree_link *link)
 {
@@ -1031,16 +1150,18 @@ uintptr_t is_environ_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t, st
 struct elf_reference
 {
 	unsigned long source_file_offset;
+	struct uniqtype *reference_type;
 	unsigned long target_file_offset; // may be -1, in theory (shouldn't be, for us)
-	const char *target_symname;
+	const char *target_alloc_name;
+	unsigned target_offset_from_alloc_start;
 	struct uniqtype *referenced_type;
+	intptr_t interp_how;
 	// HMM: more here
 };
 struct elf_walk_refs_state
 {
 	struct walk_refs_state ref;
-	void *elf_mapping;
-	size_t elf_mapping_size;
+	struct big_allocation *file_bigalloc;
 	struct elf_reference *buf; // don't copy this; we need to realloc it
 	unsigned buf_capacity;
 	unsigned buf_used;
@@ -1064,13 +1185,13 @@ int seen_elf_reference_or_pointer_cb(struct big_allocation *maybe_the_allocation
 		}
 		state->buf_capacity = new_capacity;
 	}
-	void *target = do_interp_elf_offset_or_pointer(obj, t, link_to_here);
+	void *target = do_interp_elf_offset_or_pointer(obj, t, link_to_here, state->ref.seen_how);
 	unsigned long target_offset;
-	if ((uintptr_t) target >= (uintptr_t) state->elf_mapping &&
-	    (uintptr_t) target <  (uintptr_t) state->elf_mapping + state->elf_mapping_size)
+	if ((uintptr_t) target >= (uintptr_t) state->file_bigalloc->begin &&
+	    (uintptr_t) target <  (uintptr_t) state->file_bigalloc->end)
 	{
 		// the target is within the mapping bounds
-		target_offset = (uintptr_t) target - (uintptr_t) state->elf_mapping;
+		target_offset = (uintptr_t) target - (uintptr_t) state->file_bigalloc->begin;
 	}
 	else
 	{
@@ -1079,23 +1200,22 @@ int seen_elf_reference_or_pointer_cb(struct big_allocation *maybe_the_allocation
 	}
 	struct elf_reference *the_ref = &state->buf[state->buf_used++];
 	*the_ref = (struct elf_reference) {
-		.source_file_offset = (uintptr_t) obj - (uintptr_t) state->elf_mapping,
+		.source_file_offset = (uintptr_t) obj - (uintptr_t) state->file_bigalloc->begin,
+		.reference_type = t,
 		.target_file_offset = (target_offset == (unsigned long) -1) ? (unsigned long) -1 : target_offset,
 		.referenced_type = UNIQTYPE_IS_POINTER_TYPE(t) ?
 				UNIQTYPE_POINTEE_TYPE(t)
-				: /*elf_offset_reference_target_type(
-					BOU_UNIQTYPE(cont->bigalloc_or_uniqtype),
-					obj,
-					cont->container_base) */ NULL /* FIXME */
+				: (struct uniqtype *)(state->ref.seen_how & ~EOP_BITS_MASK)
 	};
-	assert(the_ref->source_file_offset < state->elf_mapping_size);
+	unsigned long file_bigallog_sz =
+		((uintptr_t) state->file_bigalloc->end - (uintptr_t) state->file_bigalloc->begin);
+	assert(the_ref->source_file_offset < file_bigallog_sz);
 	printf("Saw a reference within our mapping, at offset 0x%lx, "
-		"type %s, target offset %lx (absolute: %p, symname %s)\n",
+		"reference type %s, target offset 0x%lx (absolute: %p)\n",
 		(unsigned long) the_ref->source_file_offset,
 		UNIQTYPE_NAME(t),
 		(unsigned long) the_ref->target_file_offset,
-		target,
-		the_ref->target_symname);
+		target);
 	return 0;
 }
 int seen_elf_environ_cb(struct big_allocation *maybe_the_allocation,
@@ -1128,6 +1248,97 @@ int seen_elf_environ_cb(struct big_allocation *maybe_the_allocation,
 		UNIQTYPE_NAME(t),
 		(const char *) arg->key);
 	return 0;
+}
+static int compare_reference_source_address(const void *refent1_as_void, const void *refent2_as_void)
+{
+	struct elf_reference *r1 = (struct elf_reference *) refent1_as_void;
+	struct elf_reference *r2 = (struct elf_reference *) refent2_as_void;
+	return (signed long) r1->source_file_offset - (signed long) r2->source_file_offset;
+}
+static int compare_reference_target_address(const void *refent1_as_void, const void *refent2_as_void)
+{
+	struct elf_reference *r1 = (struct elf_reference *) refent1_as_void;
+	struct elf_reference *r2 = (struct elf_reference *) refent2_as_void;
+	return (signed long) r1->target_file_offset - (signed long) r2->target_file_offset;
+}
+int recursive_print_context_label(char *buf, size_t sz,
+	struct alloc_tree_path *path, void *the_alloc,
+	struct big_allocation *maybe_the_alloc,
+	struct big_allocation *root_empty_name); // forward decl
+/* We are walking objects that *might* be reference targets. The reference
+ * targets themselves are in a sorted array. */
+int __liballocs_name_ref_targets_cb(struct big_allocation *maybe_the_allocation,
+	void *obj, struct uniqtype *t, const void *allocsite,
+	struct alloc_tree_link *link_to_here,
+	void *elf_walk_refs_state_as_void)
+{
+	struct elf_walk_refs_state *state = (struct elf_walk_refs_state *)
+		elf_walk_refs_state_as_void;
+	uintptr_t our_file_offset = (uintptr_t) obj - (uintptr_t) state->file_bigalloc->begin;
+	// printf("Checking whether any ref target falls within file offset 0x%lx, type %s\n",
+	// 	our_file_offset, UNIQTYPE_NAME(t));
+	/* Search the array for a target matching us. What does 'match' mean?
+	 * it means we overlap it *and* we match the type. */
+	/* HMM. This is a lot of bsearches! for potentially few reference
+	 * targets. Is there a better way to record this, maybe as a bitmap?
+	 * Let's leave that as an optimisation. */
+	// search for the first reference target that is >= us, and examine both
+	// it and any later targets that are also >= us
+	unsigned our_size = UNIQTYPE_SIZE_IN_BYTES(t);
+#define proj(t) (t)->target_file_offset
+	// start at the first reference that falls <= our last byte
+	struct elf_reference *found_leq = bsearch_leq_generic(struct elf_reference,
+		/* target val */ our_file_offset + our_size - 1, /*base */ state->buf, /*n*/ state->buf_used,
+		/*proj*/ proj);
+#undef proj
+	if (found_leq) while (found_leq->target_file_offset >= our_file_offset)
+	{
+		printf("Considering ref target 0x%lx\n", (unsigned long) found_leq->target_file_offset);
+		/* The ref points at or higher than us. Possibly way higher. So test:
+		 * do we overlap the ref target? i.e. does the ref fall within our bounds?
+		 * If not, skip to the next lower-addressed ref target, which might also
+		 * fall within our bounds. */
+		if (found_leq->target_file_offset < our_file_offset) break;
+		if (found_leq->target_file_offset < our_file_offset + our_size)
+		{
+			/* OK, we've identified that the reference points within our bounds.
+			 * Does the reference expect a thing of our type? */
+			if (!found_leq->referenced_type || t == found_leq->referenced_type)
+			{
+				// OK, we're a match.
+				// (What if more than one alloc might match this ref?
+				// e.g. if no referenced type is recorded?
+				// For now, we free the existing one and replace it, i.e. always
+				// choose the lowest nameable thing in the containment tree.
+				char buf[4096];
+				int ret = recursive_print_context_label(buf, sizeof buf,
+					link_to_here, obj, maybe_the_allocation,
+					state->file_bigalloc);
+				if (ret > 0)
+				{
+					printf("One of our references is to a thing named %s\n", buf);
+					if (found_leq->target_alloc_name)
+					{
+						printf("Replacing reference target label `%s' with `%s'\n",
+							found_leq->target_alloc_name, buf);
+						free(found_leq->target_alloc_name);
+					}
+					found_leq->target_alloc_name = strdup(buf);
+				}
+				else
+				{
+					printf("One of our references is to a thing we could not name; offset 0x%lx\n",
+						found_leq->target_file_offset);
+				}
+				// FIXME: use seen_how to get the encoding right
+			} else printf("Target type %s does not match ours, %s\n",
+				UNIQTYPE_NAME(found_leq->referenced_type), UNIQTYPE_NAME(t));
+		}
+		// target address gets lower (or equal) each time; don't underrun
+		if (found_leq == state->buf) break;
+		--found_leq;
+	}
+	return 0; // keep going
 }
 
 static void drain_queued_output(struct emit_asm_ctxt *ctxt, unsigned depth)
@@ -1253,6 +1464,7 @@ static int emit_memory_asm_cb(struct big_allocation *maybe_the_allocation,
 	char comment[4096] = "(no comment)"; // FIXME: can change to "allocation" wlog, but not while we're trying to match the diff
 	char label[4096] = "";
 	char end_label[4096] = "";
+	const char *symbolic_ref = NULL;
 	// macro for printing into any of the above arrays
 #define PRINT_TO_ARRAY(arr, fmt, ...) \
 do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
@@ -1281,8 +1493,13 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 	// a spot within that context -- and what we're doing is simply
 	// walking the tree.
 	// HACK: we only print a label for arrays or bigallocs
+	// or array elements that are themselves composites
 	if (BOU_IS_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype)
-			|| UNIQTYPE_IS_ARRAY_TYPE(LINK_UNIQTYPE(&path->to_here)))
+			|| UNIQTYPE_IS_ARRAY_TYPE(LINK_LOWER_UNIQTYPE(&path->to_here))
+			|| (
+			    UNIQTYPE_IS_ARRAY_TYPE(LINK_UPPER_UNIQTYPE(&path->to_here))
+			    && UNIQTYPE_IS_COMPOSITE_TYPE(LINK_LOWER_UNIQTYPE(&path->to_here)))
+		)
 	{
 		int ret = recursive_print_context_label(label, sizeof label, path,
 			obj, maybe_the_allocation, ctxt->file_bigalloc);
@@ -1294,7 +1511,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		}
 	}
 
-#define indent(n) do { for (int i = 0; i < n; ++i) printf(" "); } while (0)
+#define indent(n) do { for (int i = 0; i < n+1; ++i) printf(" "); } while (0)
 	if (ctxt->emitted_up_to_offset != this_obj_offset)
 	{
 		ptrdiff_t pad = this_obj_offset - ctxt->emitted_up_to_offset;
@@ -1331,7 +1548,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		/* We only emit labels for bigallocs or arrays. NOT 'things
 		 * contained in arrays', but really the thing itself.  */
 		if (BOU_IS_BIGALLOC(path->to_here.container.bigalloc_or_uniqtype)
-				|| UNIQTYPE_IS_ARRAY_TYPE(LINK_UNIQTYPE(&path->to_here)) )
+				|| UNIQTYPE_IS_ARRAY_TYPE(LINK_LOWER_UNIQTYPE(&path->to_here)) )
 		{
 			PRINT_TO_ARRAY(end_label, "%s.end", label);
 		}
@@ -1343,6 +1560,113 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		// e.g. to a packed_sequence
 		ret = 0;
 		goto out;
+	}
+
+	/* Is this thing a reference? If so, we need to emit it symbolically.
+	 * FIXME: feels like we've done this before. We do an up-front walk
+	 * of references so that we can emit *referent* labels as we go along. Here we
+	 * seem to be emitting the *reference* label. How should this work?
+	 * When we did the walk, we gathered a bunch of records:
+
+		struct elf_reference
+		{
+			unsigned long source_file_offset;
+			unsigned long target_file_offset; // may be -1, in theory (shouldn't be, for us)
+			const char *target_symname;
+			struct uniqtype *referenced_type;
+			// HMM: more here
+		};
+
+	 * Do those help us emit the reference? Yes I think.
+	 * Currently on our walk, we find only three references:
+
+Saw a reference within our mapping, at offset 0x18, type uint$$64, target offset ffffffff
+ffffffff (absolute: 0x7f28d7963000, symname (null))
+			 -- this is e_entry, which we are failing to resolve because it's a vaddr
+			    and not an offset.
+Saw a reference within our mapping, at offset 0x20, type uint$$64, target offset 40 (abso
+lute: 0x7f28d7562040, symname (null))
+			 -- this is e_phoff
+Saw a reference within our mapping, at offset 0x28, type uint$$64, target offset 3298 (ab
+solute: 0x7f28d7565298, symname (null))
+			 -- this is e_shoff
+
+	 * ... but our symname is always null. The easiest way to
+	 * compute a symname is using an encl_ chain. So we may need to
+	 * (1) gather reference target offsets in one DF walk (when we hit the reference)
+	 * (2) gather reference target names in another DF walk (when we hit the referent)
+	 * (3) what about references that need to be emitted as a vaddr or some other
+	 *     calculation?
+	 *     The issue is the dual of interpretation. We need to calculate the representation
+	 *     for the reference -- or rather, emit the asm that calculates it. This knowledge is
+	 *     in the interpreter. The can_interp() function tells us 'how' the reference has
+	 *     been encoded. We need a dual.
+	 * This feels conceptually screwy. We are returning an opaque token 'how'
+	 * that maps to an encode/decode function. Can we somehow break this out
+	 * into something nicer? The fact that we have _or_ in our elf_offset_or_pointer
+	 * is a bit of a red flag. Maybe 'how' should just be an index for a single-encoding
+	 * function or function pair? Maybe the whole idea of delegateing among interpreters
+	 * should be handled by the 'how' and each 'interpreter' proper should handle only
+	 * a single encoding?
+	 *
+	 * What about arguments? E.g. when we have an ELF vaddr, we might be relative to >1
+	 * phdr, so we need to say which phdr. In theory there could be an unbounded number
+	 * of phdrs, so we can't each to be some reified encoder we can point to. This is an
+	 * argument in favour of letting the interpreter control its own 'how'-space.
+	 *
+	 * What about sizes and lengths? These are references to the end, encoded as offsets
+	 * from a start (and maybe with a scale factor for size). Again, *which* start is
+	 * significant and belongs in 'how'. Mostly we want to specify a thing in offset-space
+	 * (te
+	 *
+	 * In general the 'environment' stuff seems intended to help us here. Environment
+	 * objects can be referenced by their position in the environment buffer, as a more
+	 * compact identifier space, if we need this. I guess phdrs count as environment
+	 * objects. But does any random object with a 'size' count as an environment object?
+	 *
+	 * What's our link with reloc recipes R_arch_TAG? These are answers to 'how', too.
+	 * In short, reloc records are used when it's not possible to encode the reference,
+	 * so we resort to writing a symbolic 'how'.
+	 *
+
++    .quad section.text._start.vaddr # field e_entry
+
++    .quad initial_segment_base_vaddr + (section.text - ehdr) # field p_vaddr
+
++    .quad section.text._end - section.text # field p_filesz
+
++    .quad section.dynamic._end - section.dynamic + section.bss.size # field p_memsz
+
++   .quad section.text._start.vaddr # field e_entry
++.set section.interp.vaddr, initial_segment_base_vaddr + (section.interp - ehdr)
+
+
+	 */
+	intptr_t interp_how;
+	if (0 != (interp_how = can_interp_elf_offset_or_pointer(obj, t, &path->to_here)))
+	{
+		/* 0. what is it referring to? We've found this before, so find our record. */
+#define proj(t) (t)->source_file_offset
+		// start at the first reference that falls <= our last byte
+		struct elf_reference *found_leq = bsearch_leq_generic(struct elf_reference,
+			/* target val */ this_obj_offset,
+			/*base */ ctxt->references->buf, /*n*/ ctxt->references->buf_used,
+			/*proj*/ proj);
+#undef proj
+		assert(found_leq);
+		while (found_leq->reference_type != t) ++found_leq;
+		assert(found_leq && found_leq->source_file_offset == this_obj_offset);
+		if (found_leq->target_alloc_name) symbolic_ref = found_leq->target_alloc_name;
+		/* For now let's just print the nearest preceding object,
+		 * using '+' if we need to create an offset if we need to.
+		 * We might need different treatments for:
+		 * - when we hit an allocation start but the allocation is not named,
+		 *   e.g. a branch into the middle of a packed_seq of instructions:
+		 *   instructions aren't named, but rather than writing an
+		 *   offset from the section start, which would be fragile,
+		 *   we might want to make up an arbitrary name and reference that.
+		 * - any more?
+		 */
 	}
 
 	// we're pre-order; before we descend, print a header
@@ -1427,39 +1751,40 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 		union {
 			__int128_t ss;
 			__uint128_t us;
-		} data = { us: 0 };
-		memcpy(&data, obj, UNIQTYPE_SIZE_IN_BYTES(b));
+		} literal = { .us = 0 };
+		memcpy(&literal, obj, UNIQTYPE_SIZE_IN_BYTES(b));
 		indent(path->encl_depth);
 		switch (mkpair(UNIQTYPE_SIZE_IN_BYTES(b), is_signed))
 		{
 			case mkpair(8, 0):
 			case mkpair(8, 1):
-				printf(".quad %llu # %s", (unsigned long long) data.us, comment);
-				if (is_signed && data.ss < 0) printf(" # really %lld\n", (long long) data.ss); else printf("\n");
+				printf(".quad "); if (symbolic_ref) printf("%s", symbolic_ref); else printf("%llu", (unsigned long long) literal.us);
+				if (!symbolic_ref && is_signed && literal.ss < 0) printf(" # really %lld", (long long) literal.ss);
 				ctxt->emitted_up_to_offset += 8;
 				break;
 			case mkpair(4, 0):
 			case mkpair(4, 1):
-				printf(".long %lu # %s", (unsigned long) data.us, comment);
-				if (is_signed && data.ss < 0) printf(" # really %ld\n", (long) data.ss); else printf("\n");
+				printf(".long "); if (symbolic_ref) printf("%s", symbolic_ref); else printf("%lu", (unsigned long) literal.us);
+				if (!symbolic_ref && is_signed && literal.ss < 0) printf(" # really %ld", (long) literal.ss);
 				ctxt->emitted_up_to_offset += 4;
 				break;
 			case mkpair(2, 0):
 			case mkpair(2, 1):
-				printf(".short %hu # %s", (unsigned short) data.us, comment);
-				if (is_signed && data.ss < 0) printf(" # really %hd\n", (short) data.ss); else printf("\n");
+				printf(".short "); if (symbolic_ref) printf("%s", symbolic_ref); else printf("%hu", (unsigned short) literal.us);
+				if (!symbolic_ref && is_signed && literal.ss < 0) printf(" # really %hd", (short) literal.ss);
 				ctxt->emitted_up_to_offset += 2;
 				break;
 			case mkpair(1, 0):
 			case mkpair(1, 1):
-				printf(".byte %hhu # %s ", (unsigned char) data.us, comment);
-				if (is_signed && data.ss < 0) printf(" # really %hhd\n", (signed char) data.ss); else printf("\n");
+				printf(".byte "); if (symbolic_ref) printf("%s", symbolic_ref); else printf("%hhu", (unsigned char) literal.us);
+				if (!symbolic_ref && is_signed && literal.ss < 0) printf(" # really %hhd", (signed char) literal.ss);
 				ctxt->emitted_up_to_offset += 1;
 				break;
 			default:
 				fprintf(stderr, "Saw surprising size: %u\n", (unsigned) UNIQTYPE_SIZE_IN_BYTES(b));
 				abort();
 		}
+		printf(" # %s\n", comment);
 #undef mkpair
 		/* Integers might be 'pointers' (offsets) too -- it depends on the interpretation
 		 * that we're making. How does this work?
@@ -1517,6 +1842,7 @@ int main(void)
 	// FIXME: we now link in our usedtypes, but that doesn't help because
 	// we didn't finish the macro magic that would make them actually used;
 	// instead we still do need the meta-DSO
+	debug = getenv("DEBUG");
 	assert(NULL != dlopen(__liballocs_meta_libfile_name(__runt_get_exe_realpath()), RTLD_NOW|RTLD_NOLOAD));
 	char *path = getenv("ELF_FILE_TEST_DSO");
 	if (!path) path = getenv("LIBALLOCS_BUILD");
@@ -1552,7 +1878,14 @@ int main(void)
 		.base = b->begin,
 		.bigalloc_or_uniqtype = (uintptr_t) b
 	};
-	/* Walk references, to get the pointer targets. */
+	/* Walk references, to get the pointer targets. We do this using the stock
+	 * __liballocs_walk_refs_cb.
+	 * For each reference we find, we append a record to our buffer,
+	 * recording various things about its source and target. 
+	 * Once we have all the targets, we do *another* DF walk, but *not*
+	 * walking references, but rather, walking targets. For anything that is a
+	 * target, we snarf its name. (Problem: where in the tree counts? Well, we
+	 * recorded the type, so that'll do.) */
 	struct interpreter elf_offset_or_pointer_resolver = {
 		.name = "ELF-offset-or-pointer interpreter",
 		.can_interp = can_interp_elf_offset_or_pointer,
@@ -1569,8 +1902,7 @@ int main(void)
 		.buf = NULL,
 		.buf_capacity = 0,
 		.buf_used = 0,
-		.elf_mapping = mapping,
-		.elf_mapping_size = len
+		.file_bigalloc = b
 	};
 	struct walk_environ_state environ_state = {
 		.interp = &elf_offset_or_pointer_resolver,
@@ -1598,6 +1930,19 @@ int main(void)
 		&reference_state          // ... which our seen_... cb it will get by casting this guy
 	);
 	printf("Saw %u references on our walk\n", (unsigned) reference_state.buf_used);
+	// now sort the refs buffer by its target offset
+	qsort(reference_state.buf, reference_state.buf_used, sizeof *reference_state.buf,
+		compare_reference_target_address);
+	// now look for ref targets
+	__liballocs_walk_allocations_df(
+		&scope,
+		__liballocs_name_ref_targets_cb,
+		&reference_state
+	);
+	/* Now sort the refs buffer by its source offset, so we can find
+	 * ourselves as we do another DF walk. */
+	qsort(reference_state.buf, reference_state.buf_used, sizeof *reference_state.buf,
+		compare_reference_source_address);
 	sleep(3);
 	/* Walk allocations. */
 	struct emit_asm_ctxt ctxt = {
@@ -1615,5 +1960,14 @@ int main(void)
 	);
 	drain_queued_output(&ctxt, 0);
 	if (ctxt.queued_end_output) free(ctxt.queued_end_output);
-	if (reference_state.buf) free(reference_state.buf);
+	if (reference_state.buf)
+	{
+		// FIXME: free anything allocated per-record as well
+		for (unsigned i = 0; i < reference_state.buf_used; ++i)
+		{
+			void *nameptr = reference_state.buf[i].target_alloc_name;
+			if (nameptr) free(nameptr);
+		}
+		free(reference_state.buf);
+	}
 }
