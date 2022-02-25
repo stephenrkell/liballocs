@@ -952,8 +952,10 @@ static _Bool is_elf_structure_type(struct uniqtype *t)
 	// HACK for now
 	for (unsigned n = 1; n < ELF_DATA_NTYPES; ++n)
 	{
-		if (UNIQTYPE_IS_COMPOSITE_TYPE(elf_file_type_table[n]) &&
-			t == elf_file_type_table[n]) return 1;
+		struct uniqtype *real_t = UNIQTYPE_IS_ARRAY_TYPE(elf_file_type_table[n])
+			? UNIQTYPE_ARRAY_ELEMENT_TYPE(elf_file_type_table[n]) : elf_file_type_table[n];
+		if (UNIQTYPE_IS_COMPOSITE_TYPE(real_t) &&
+			t == real_t) return 1;
 	}
 	return 0;
 }
@@ -985,15 +987,9 @@ static intptr_t can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp
 	 * go the whole 'spine' way? Is there some nicer way to do this?
 	 *
 	 * One easier way to do it is to use knowledge of the field name, which we
-	 * can get at. */
-	if (!(exp_t == offset_t
-		&& is_elf_structure_type(BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype))))
-	{
-		return EOP_NONE;
-	}
-	/* Note that this also hits for ElfNN_Addrs (say), but it's wrong to treat
-	 * those as offsets if they're vaddrs. We need to split cases. Since we
-	 * can't pattern-match on strings/tokens, hack something up that turns them
+	 * can get at. We use this below. */
+
+	/* Since we can't pattern-match on strings/tokens, hack something up that turns them
 	 * into 64-bit integers. PROBLEM: this doesn't work in gcc (at least up to 8.3):
 	 * "case label does not reduce to an integer constant" even though
 	 * it's happy to use the same expression as a global initializer.
@@ -1012,13 +1008,15 @@ static intptr_t can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp
     ( ((unsigned long) ( lit_atom(#str1) )) | \
      (((unsigned long) ( lit_atom(#str2) ))<<32) \
     )
+	if (!BOU_IS_UNIQTYPE(link->container.bigalloc_or_uniqtype)) return EOP_NONE;
+	if (!UNIQTYPE_IS_COMPOSITE_TYPE(LINK_UPPER_UNIQTYPE(link))) return EOP_NONE;
 	if (debug)
 	{
-		fprintf(stderr, "Within a %s, hit a %s\n",
-				UNIQTYPE_NAME(BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype)),
-				LINK_UNIQTYPE_FIELD_NAME(link));
+		fprintf(stderr, "Within a %s, hit field %s\n",
+			UNIQTYPE_NAME(LINK_UPPER_UNIQTYPE(link)),
+			LINK_UNIQTYPE_FIELD_NAME(link));
 	}
-	const char *uniqtype_name = UNIQTYPE_NAME(BOU_UNIQTYPE(link->container.bigalloc_or_uniqtype));
+	const char *uniqtype_name = UNIQTYPE_NAME(LINK_UPPER_UNIQTYPE(link));
 	const char *field_name = LINK_UNIQTYPE_FIELD_NAME(link);
 	struct uniqtype *ref_target_type = NULL;
 	unsigned long vp = valpair(uniqtype_name, field_name);
@@ -1032,7 +1030,7 @@ static intptr_t can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp
 			return_offset: return EOP_OFFSET | (uintptr_t) ref_target_type;
 		/* These are vaddrs. We will need to walk the phdrs and
 		 * figure out which one it falls under, then translate
-		 * to a file offset usin that phdr's translation. */
+		 * to a file offset using that phdr's translation. */
 		case litpair(Ehdr, entry):
 		case litpair(Shdr, addr):
 		case litpair(Phdr, vaddr):
@@ -1253,13 +1251,15 @@ static int compare_reference_source_address(const void *refent1_as_void, const v
 {
 	struct elf_reference *r1 = (struct elf_reference *) refent1_as_void;
 	struct elf_reference *r2 = (struct elf_reference *) refent2_as_void;
-	return (signed long) r1->source_file_offset - (signed long) r2->source_file_offset;
+	return (r1->source_file_offset >  r2->source_file_offset) ?
+	   1 : (r1->source_file_offset == r2->source_file_offset) ? 0 : -1;
 }
 static int compare_reference_target_address(const void *refent1_as_void, const void *refent2_as_void)
 {
 	struct elf_reference *r1 = (struct elf_reference *) refent1_as_void;
 	struct elf_reference *r2 = (struct elf_reference *) refent2_as_void;
-	return (signed long) r1->target_file_offset - (signed long) r2->target_file_offset;
+	return (r1->target_file_offset >  r2->target_file_offset) ?
+	   1 : (r1->target_file_offset == r2->target_file_offset) ? 0 : -1;
 }
 int recursive_print_context_label(char *buf, size_t sz,
 	struct alloc_tree_path *path, void *the_alloc,
@@ -1275,8 +1275,8 @@ int __liballocs_name_ref_targets_cb(struct big_allocation *maybe_the_allocation,
 	struct elf_walk_refs_state *state = (struct elf_walk_refs_state *)
 		elf_walk_refs_state_as_void;
 	uintptr_t our_file_offset = (uintptr_t) obj - (uintptr_t) state->file_bigalloc->begin;
-	// printf("Checking whether any ref target falls within file offset 0x%lx, type %s\n",
-	// 	our_file_offset, UNIQTYPE_NAME(t));
+	printf("Checking whether any ref target falls within file offset 0x%lx, type %s\n",
+		our_file_offset, UNIQTYPE_NAME(t));
 	/* Search the array for a target matching us. What does 'match' mean?
 	 * it means we overlap it *and* we match the type. */
 	/* HMM. This is a lot of bsearches! for potentially few reference
@@ -1621,13 +1621,22 @@ solute: 0x7f28d7565298, symname (null))
 	 *
 	 * In general the 'environment' stuff seems intended to help us here. Environment
 	 * objects can be referenced by their position in the environment buffer, as a more
-	 * compact identifier space, if we need this. I guess phdrs count as environment
-	 * objects. But does any random object with a 'size' count as an environment object?
+	 * compact identifier space, if we need this. Also, the idea is that environment
+	 * objects can be identified on an up-front depth-first walk, without needing to
+	 * resolve any references. Clearly, phdrs count as environment objects because they
+	 * are needed to encode vaddrs. But thinking about how 'size' fields are treated as
+	 * references, does it mean any random 'size' field requires that the sized thing is
+	 * an environment object? Yes, that seems inescapable, since the encoding is relative
+	 * to the base of that 'sized' object. I guess it's OK even if every sized object
+	 * gets a position in the environment buffer.
 	 *
 	 * What's our link with reloc recipes R_arch_TAG? These are answers to 'how', too.
 	 * In short, reloc records are used when it's not possible to encode the reference,
-	 * so we resort to writing a symbolic 'how'.
+	 * so we resort to writing a symbolic 'how' in terms of an undefined symbol.
 	 *
+	 * We can think of a 'how' as a little program, just like a reloc method. But in our
+	 * case, we are enumerating those programs, parameterised by a small amount of
+	 * argument information that we also encode into the 'how'. Again, like relocs.
 
 +    .quad section.text._start.vaddr # field e_entry
 
