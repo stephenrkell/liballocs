@@ -83,7 +83,7 @@ void ( __attribute__((constructor(102))) __static_file_allocator_init)(void)
 					query_addr, &__static_file_allocator, containing_mapping, NULL);
 				assert(containing_file);
 				struct allocs_file_metadata *afile =
-						 containing_file->meta.un.opaque_data.data_ptr;	
+						 containing_file->allocator_private;
 				for (unsigned i_seg = 0; i_seg < afile->m.nload; ++i_seg)
 				{
 					union sym_or_reloc_rec *metavector = afile->m.segments[i_seg].metavector;
@@ -209,7 +209,7 @@ struct file_metadata *__static_file_allocator_metadata_by_addr(const void *addr)
 	struct big_allocation *found = __lookup_bigalloc_from_root(
 		addr, &__static_file_allocator, NULL);
 	if (!found) return NULL;
-	struct allocs_file_metadata *meta = found->meta.un.opaque_data.data_ptr;
+	struct allocs_file_metadata *meta = found->allocator_private;
 	assert(meta);
 	return (struct file_metadata *) &meta->m;
 }
@@ -341,9 +341,9 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 		 * - re-augment the mapping sequence with the mappings from the higher
 		 * - free the mapping sequence we grabbed */
 		struct mapping_sequence *upper_seq = (struct mapping_sequence *)
-		     highest_containing_mapping_bigalloc->meta.un.opaque_data.data_ptr;
+		     highest_containing_mapping_bigalloc->allocator_private;
 		struct mapping_sequence *lower_seq = (struct mapping_sequence *)
-		    lowest_containing_mapping_bigalloc->meta.un.opaque_data.data_ptr;
+		    lowest_containing_mapping_bigalloc->allocator_private;
 		void *upper_end = highest_containing_mapping_bigalloc->end;
 		/* Since the plug should have been added to the pre-existing sequence,
 		 * we expect at least two mappings. */
@@ -382,15 +382,8 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		(void*) lowest_containing_mapping_bigalloc->begin, // the file begins at a page boundary
 		file_bigalloc_size,
-		(struct meta_info) {
-			.what = DATA_PTR,
-			.un = {
-				opaque_data: { 
-					.data_ptr = NULL, /* for now... */
-					.free_func = &free_file_metadata
-				}
-			}
-		},
+		NULL, /* allocator_private: nothing for for now... */
+		free_file_metadata,  /* allocator_private_free */
 		containing_mapping_bigalloc,
 		&__static_file_allocator
 	);
@@ -405,7 +398,7 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 		assert(!executable_file_bigalloc);
 		executable_file_bigalloc = b;
 	}
-	b->meta.un.opaque_data.data_ptr = meta;
+	b->allocator_private = meta;
 	_Bool we_are_early = 0;
 	assert(early_lib_handles[0]);
 	for (unsigned i = 0; i < MAX_EARLY_LIBS; ++i)
@@ -454,7 +447,7 @@ void __static_file_allocator_notify_unload(const char *copied_filename)
 		{
 			if (BIGALLOC_IN_USE(b) && b->allocated_by == &__static_file_allocator)
 			{
-				struct allocs_file_metadata *afm = (struct allocs_file_metadata *) b->meta.un.opaque_data.data_ptr;
+				struct allocs_file_metadata *afm = (struct allocs_file_metadata *) b->allocator_private;
 				if (0 == strcmp(copied_filename, afm->m.filename))
 				{
 					/* unload meta-object */
@@ -480,7 +473,7 @@ static liballocs_err_t get_info(void * obj, struct big_allocation *b,
 	if (out_type) *out_type = pointer_to___uniqtype____uninterpreted_byte;
 	if (out_base) *out_base = b->begin;
 	if (out_site) *out_site =
-		((struct allocs_file_metadata *) (b->meta.un.opaque_data.data_ptr))
+		((struct allocs_file_metadata *) (b->allocator_private))
 			->m.load_site;
 	if (out_size) *out_size = (char*) b->end - (char*) b->begin;
 	return NULL;

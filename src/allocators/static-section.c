@@ -47,15 +47,8 @@ struct big_allocation *__static_section_allocator_ensure_big(
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		section_start_addr,
 		shdr->sh_size,
-		(struct meta_info) {
-			.what = DATA_PTR,
-			.un = {
-				opaque_data: { 
-					.data_ptr = (ElfW(Shdr) *) shdr,
-					.free_func = NULL
-				}
-			}
-		},
+		(ElfW(Shdr) *) shdr /* allocator_private */,
+		NULL /* allocator_private_free -- no need to free separately from segment stuff */,
 		containing_segment,
 		&__static_section_allocator /* parent */
 	);
@@ -93,7 +86,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 		if (out_type) *out_type = pointer_to___uniqtype____uninterpreted_byte;;
 		if (out_base) *out_base = object_start;
 		if (out_site) *out_site =
-			((struct file_metadata *) (b->parent->parent->meta.un.opaque_data.data_ptr))
+			((struct file_metadata *) (b->parent->parent->allocator_private))
 					->load_site;
 		if (out_size) *out_size = /*shdr->sh_size*/
 			(char*) b->end - (char*) b->begin;
@@ -101,7 +94,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	}
 	// else we have the containing bigalloc... might be a segment, but we want the file
 	while (b->allocated_by != &__static_file_allocator) b = b->parent;
-	struct file_metadata *fm = (struct file_metadata *) b->meta.un.opaque_data.data_ptr;
+	struct file_metadata *fm = (struct file_metadata *) b->allocator_private;
 	/* Querying by section is pretty rare. And there are not that many
 	 * sections. It doesn't seem worth maintaining a separate sorted
 	 * vector per segment or per file. So we just linear-search the

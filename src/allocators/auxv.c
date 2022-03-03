@@ -150,15 +150,8 @@ void __auxv_allocator_notify_init_stack_mapping_sequence(struct big_allocation *
 	our_bigalloc = __liballocs_new_bigalloc(
 		begin,
 		(char*) end - (char*) begin,
-		(struct meta_info) {
-			.what = DATA_PTR,
-			.un = {
-				opaque_data: {
-					.data_ptr = NULL,
-					.free_func = NULL
-				}
-			}
-		},
+		NULL /* allocator_private */,
+		NULL /* allocator_private_free_func */,
 		NULL,
 		&__auxv_allocator
 	);

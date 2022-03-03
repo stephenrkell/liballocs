@@ -64,15 +64,8 @@ static struct big_allocation *add_bigalloc(void *begin, size_t size)
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		begin,
 		size,
-		(struct meta_info) {
-			.what = DATA_PTR,
-			.un = {
-				opaque_data: {
-					.data_ptr = NULL, // placeholder
-					.free_func = NULL
-				}
-			}
-		},
+		NULL /* allocator_private */,
+		NULL /* allocator_private_free */,
 		NULL,
 		&__mmap_allocator
 	);
@@ -106,15 +99,8 @@ static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_seque
 	struct mapping_sequence *copy = __private_malloc(sizeof (struct mapping_sequence));
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
-	b->meta = (struct meta_info) {
-		.what = DATA_PTR,
-		.un = {
-			opaque_data: {
-				.data_ptr = copy,
-				.free_func = __private_free
-			}
-		}
-	};
+	b->allocator_private = copy;
+	b->allocator_private_free = __private_free;
 	return b;
 }
 
@@ -131,15 +117,9 @@ static struct big_allocation *add_mapping_sequence_bigalloc_nomalloc(struct mapp
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
 
-	b->meta = (struct meta_info) {
-		.what = DATA_PTR,
-		.un = {
-			opaque_data: {
-				.data_ptr = copy,
-				.free_func = __private_free
-			}
-		}
-	};
+	b->allocator_private = copy;
+	b->allocator_private_free = __private_free;
+
 	return b;
 }
 
@@ -233,8 +213,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 		 * existed before the prefix was created. If we identify that
 		 * this is occurring, we simply delete the overlap from the new
 		 * sequence and then continue. */
-		existing_seq = (struct mapping_sequence *)
-			parent_end->meta.un.opaque_data.data_ptr;
+		existing_seq = (struct mapping_sequence *) parent_end->allocator_private;
 		if (!existing_seq)
 		{
 			/* The parent end has a bigalloc but no mapping sequence. HMM. */
@@ -292,11 +271,11 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 		/* If we've been given a mapping sequence of which parent_begin's
 		 * is a suffix, then extend parent_begin to cover the new end
 		 * and copy the new mapping sequence in. */
-		if (mapping_sequence_prefix((struct mapping_sequence *) parent_begin->meta.un.opaque_data.data_ptr,
+		if (mapping_sequence_prefix((struct mapping_sequence *) parent_begin->allocator_private,
 			seq))
 		{
 			__liballocs_extend_bigalloc(parent_begin, seq->end);
-			memcpy(parent_begin->meta.un.opaque_data.data_ptr,
+			memcpy(parent_begin->allocator_private,
 				seq, sizeof *seq);
 			return;
 		}
@@ -312,7 +291,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 		 * so delegate to it if possible. */
 		/* A mapping exists and overlaps a unique existing one. If it's an
 		 * exact match, we can simply return. */
-		existing_seq = (struct mapping_sequence *) parent_begin->meta.un.opaque_data.data_ptr;
+		existing_seq = (struct mapping_sequence *) parent_begin->allocator_private;
 		if (mapping_sequence_suffix(existing_seq, seq) && mapping_sequence_suffix(seq, existing_seq))
 		{
 			return;
@@ -567,7 +546,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 			remaining_length -= PAGE_SIZE;
 			continue; // FIXME: use wide-character string funcs instead
 		}
-		struct mapping_sequence *seq = b->meta.un.opaque_data.data_ptr;
+		struct mapping_sequence *seq = b->allocator_private;
 		
 		/* Are we pre-truncating, post-truncating, splitting or wholesale deleting? */
 		assert(cur >= (char*) b->begin);
@@ -617,14 +596,14 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				__liballocs_truncate_bigalloc_at_end(b, addr);
 				/* Now the bigallocs are in the right place, but their metadata is wrong. */
 				struct mapping_sequence *new_seq = __private_malloc(sizeof (struct mapping_sequence));
-				struct mapping_sequence *orig_seq = b->meta.un.opaque_data.data_ptr;
+				struct mapping_sequence *orig_seq = b->allocator_private;
 				memcpy(new_seq, orig_seq, sizeof (struct mapping_sequence));
 				/* From the first, delete from the hole all the way. */
 				delete_mapping_sequence_span(orig_seq, addr, (char*) old_end - (char*) addr);
 				/* From the second, delete from the old begin to the end of the hole. */
 				delete_mapping_sequence_span(new_seq, b->begin, 
 						((char*) addr + length) - (char*) b->begin);
-				second_half->meta.un.opaque_data.data_ptr = new_seq;
+				second_half->allocator_private = new_seq;
 				/* same free function as before */
 			}
 		}
@@ -670,7 +649,7 @@ void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size
 	struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root(old_addr,
 		&__mmap_allocator, NULL);
 	if (!bigalloc_before) abort();
-	struct mapping_sequence *seq = bigalloc_before->meta.un.opaque_data.data_ptr;
+	struct mapping_sequence *seq = bigalloc_before->allocator_private;
 	if (!seq)
 	{
 		/* It's a chunk malloc'd by our own dlmalloc. HMM. */
@@ -749,7 +728,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		{
 			/* See if we can extend it. */
 			struct mapping_sequence *seq = (struct mapping_sequence *) 
-				bigalloc_before->meta.un.opaque_data.data_ptr;
+				bigalloc_before->allocator_private;
 			_Bool success = augment_sequence(seq, mapped_addr, (char*) mapped_addr + mapped_length, 
 				prot, flags, offset, filename, caller);
 			char *requested_new_end = (char*) mapped_addr + mapped_length;
@@ -1471,7 +1450,7 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 		__adjust_bigalloc_end(executable_mapping_bigalloc,
 			new_end);
 		struct mapping_sequence *seq
-		 = executable_mapping_bigalloc->meta.un.opaque_data.data_ptr;
+		 = executable_mapping_bigalloc->allocator_private;
 		seq->end = new_end;
 		/* If we've expanded... */
 		if ((uintptr_t) new_end > (uintptr_t) old_end)
@@ -1499,7 +1478,7 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 		else if ((uintptr_t) new_end < (uintptr_t) old_end)
 		{
 			struct mapping_sequence *seq
-			 = executable_mapping_bigalloc->meta.un.opaque_data.data_ptr;
+			 = executable_mapping_bigalloc->allocator_private;
 			delete_mapping_sequence_span(seq, new_end, (uintptr_t) old_end - (uintptr_t) new_end);
 			check_mapping_sequence_sanity(seq);
 		}
@@ -1522,7 +1501,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	if (out_type) *out_type = NULL;
 	if (out_base) *out_base = b->begin;
 	if (out_size) *out_size = (char*) b->end - (char*) b->begin;
-	if (out_site) *out_site = ((struct mapping_sequence *) b->meta.un.opaque_data.data_ptr)->
+	if (out_site) *out_site = ((struct mapping_sequence *) b->allocator_private)->
 		mappings[0].caller; // bit of a HACK: just use the first one in the seq
 	
 	// success

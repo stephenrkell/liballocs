@@ -67,15 +67,8 @@ void __stack_allocator_notify_init_stack_region(void *begin, void *end)
 	initial_stack_bigalloc = __liballocs_new_bigalloc(
 		begin,
 		(char*) end - (char*) begin,
-		(struct meta_info) {
-			.what = DATA_PTR,
-			.un = {
-				opaque_data: {
-					.data_ptr = NULL, /* thread a list of *all* stacks through here */
-					.free_func = NULL
-				}
-			}
-		},
+		NULL /* allocator_private */,  /* TODO: thread a list of *all* stacks through here */
+		NULL /* allocator_private_free */,
 		NULL, /* Will fill in auxv bigalloc */
 		&__stack_allocator
 	);
@@ -125,7 +118,7 @@ _Bool __stack_allocator_notify_unindexed_address(const void *ptr)
 	/* Do we claim it? */
 	for (struct big_allocation *b = initial_stack_bigalloc;
 				b;
-				b = (struct big_allocation *) b->meta.un.opaque_data.data_ptr)
+				b = (struct big_allocation *) b->allocator_private)
 	{
 		/* Is the address within a sensible distance of the highest addr of this stack,
 		 * with no intervening mapping between it and 

@@ -254,7 +254,8 @@ static void clear_bigalloc_nomemset(struct big_allocation *b)
 static void clear_bigalloc(struct big_allocation *b)
 {
 	clear_bigalloc_nomemset(b);
-	memset(&b->meta, 0, sizeof b->meta);
+	b->allocator_private = NULL;
+	b->allocator_private_free = NULL;
 }
 
 static void add_child(struct big_allocation *child, struct big_allocation *parent)
@@ -319,9 +320,9 @@ static void bigalloc_del(struct big_allocation *b)
 	}
 	
 	/* Delete the user metadata, if the user told us we need to. */
-	if (b->meta.what == DATA_PTR && b->meta.un.opaque_data.free_func)
+	if (b->allocator_private && b->allocator_private_free)
 	{
-		b->meta.un.opaque_data.free_func(b->meta.un.opaque_data.data_ptr);
+		b->allocator_private_free(b->allocator_private);
 	}
 	if (b->suballocator_private_free) b->suballocator_private_free(b->suballocator_private);
 	struct big_allocation *parent = b->parent;
@@ -368,7 +369,7 @@ void __liballocs_print_l0_to_stream_err(void)
 	{
 		if (BIGALLOC_IN_USE(b) && !b->parent) fprintf(get_stream_err(), "%p-%p %s %p\n",
 				b->begin, b->end, b->allocated_by->name, 
-				b->meta.un.opaque_data.data_ptr
+				b->allocator_private
 		);
 	}
 	
@@ -393,10 +394,11 @@ void __liballocs_report_wild_address(const void *ptr)
 
 static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const void *end);
 static struct big_allocation *bigalloc_new(const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, struct allocator *allocated_by);
+	void *allocator_private, void (*allocator_private_free)(void*), struct allocator *allocated_by);
 
 __attribute__((visibility("protected")))
-struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *allocated_by)
+struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size,
+	void *allocator_private, void(*allocator_private_free)(void*), struct big_allocation *maybe_parent, struct allocator *allocated_by)
 {
 	/* We get called from heap_index when the malloc'd address is a multiple of the 
 	 * page size, is big enough and fills (more-or-less) the alloc'd region. If so,  
@@ -478,7 +480,8 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 	if (parent) SANITY_CHECK_BIGALLOC(parent);
 	
 	/* Grab a new bigalloc. */
-	struct big_allocation *b = bigalloc_new(ptr, size, parent, meta, allocated_by);
+	struct big_allocation *b = bigalloc_new(ptr, size, parent, allocator_private, allocator_private_free,
+		allocated_by);
 	SANITY_CHECK_BIGALLOC(b);
 	
 	BIG_UNLOCK
@@ -486,25 +489,28 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, st
 }
 
 static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator,
+	void *allocator_private, void (*allocator_private_free)(void*), struct allocator *allocated_by, struct allocator *suballocator,
 		void *suballocator_private, void(*suballocator_private_free)(void*));
 
 static struct big_allocation *bigalloc_new(const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, struct allocator *allocated_by)
+	void *allocator_private, void (*allocator_private_free)(void*), struct allocator *allocated_by)
 {
 	struct big_allocation *b = find_free_bigalloc();
 	if (!b) return b;
-	bigalloc_init(b, ptr, size, parent, meta, allocated_by, /* suballocator */ NULL, NULL, NULL);
+	bigalloc_init(b, ptr, size, parent, allocator_private, allocator_private_free,
+		allocated_by, /* suballocator */ NULL, NULL, NULL);
 	return b;
 }
 
 static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator,
+	void *allocator_private, void (*allocator_private_free)(void*),
+	struct allocator *allocated_by, struct allocator *suballocator,
 	void *suballocator_private, void (*suballocator_private_free)(void*))
 {
 	b->begin = (void*) ptr;
 	b->end = (char*) ptr + size;
-	b->meta = meta;
+	b->allocator_private = allocator_private;
+	b->allocator_private_free = allocator_private_free;
 	b->allocated_by = allocated_by;
 	b->suballocator = suballocator;
 	b->suballocator_private = suballocator_private;
@@ -531,10 +537,11 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 }
 
 static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
-	struct meta_info meta, struct allocator *allocated_by, struct allocator *suballocator,
-		void *suballocator_private, void (*suballocator_private_free)(void*))
+	void *allocator_private, void (*allocator_private_free)(void*), struct allocator *allocated_by, struct allocator *suballocator,
+	void *suballocator_private, void (*suballocator_private_free)(void*))
 {
-	bigalloc_init_nomemset(b, ptr, size, parent, meta, allocated_by, suballocator,
+	bigalloc_init_nomemset(b, ptr, size, parent, allocator_private, allocator_private_free,
+		allocated_by, suballocator,
 		suballocator_private, suballocator_private_free);
 
 	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
@@ -721,7 +728,8 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 	struct big_allocation *new_bigalloc = find_free_bigalloc();
 	if (!new_bigalloc) abort();
 	bigalloc_init_nomemset(new_bigalloc, 
-		split_addr, (char*) tmp.end - (char*) split_addr, tmp.parent, tmp.meta, tmp.allocated_by,
+		split_addr, (char*) tmp.end - (char*) split_addr, tmp.parent,
+		tmp.allocator_private, tmp.allocator_private_free, tmp.allocated_by,
 		tmp.suballocator, tmp.suballocator_private, tmp.suballocator_private_free);
 	/* Danger: the new bigalloc now have the *same* metadata as the old one. 
 	 * Our caller sorts this out, since the metadata is opaque to us. */

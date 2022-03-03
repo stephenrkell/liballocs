@@ -89,9 +89,8 @@ static void set_brk_bigalloc(void *curbrk)
 		__brk_bigalloc = __liballocs_new_bigalloc(
 			(void*) phdr_end_addr,
 			(uintptr_t) executable_mapping_bigalloc->end - phdr_end_addr,
-			(struct meta_info) {
-				.what = DATA_PTR
-			},
+			NULL, /* allocator_private */
+			NULL, /* allocator_private_free */
 			executable_mapping_bigalloc,
 			/* allocated_by */ &__brk_allocator
 		);

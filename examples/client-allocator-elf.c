@@ -377,17 +377,14 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 	   DIV_ROUNDING_UP(nbytes_spanned, align), \
 	   BITMAP_WORD_NBITS \
 	)
-	struct meta_info file_info = {
-		.what = DATA_PTR,
-		.un = { opaque_data: { .data_ptr = __builtin_return_address(0), .free_func = NULL } }
-	};
 	struct elf_elements_metadata *elf_meta = calloc(1, offsetof(struct elf_elements_metadata, bitmap)
 			+ sizeof (bitmap_word_t) * BITMAP_NWORDS(mapping_len + trailing_mapping_len, 1));
 	elf_meta->metavector = malloc(metavector_nentries * sizeof *elf_meta->metavector);
 	// create the bigalloc
 	struct big_allocation *elf_b = __liballocs_new_bigalloc(
 		mapping_start, mapping_len + trailing_mapping_len,
-		file_info,
+		__builtin_return_address(0) /* allocator_private */,
+		NULL /* allocator_private_free */,
 		mseq_b,
 		&__elf_file_allocator);
 	assert(elf_b);
@@ -500,9 +497,8 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 						struct big_allocation *seq_b = __liballocs_new_bigalloc(
 							(void*)((uintptr_t) elf_b->begin + shdrs[i].sh_offset),
 							shdrs[i].sh_size,
-							(struct meta_info) {
-								.what = DATA_PTR
-							},
+							NULL /* allocator_private */,
+							NULL /* allocator_private_free */,
 							elf_b, /* parent is the ELF file bigalloc? yes */
 							&__elf_element_allocator /* allocated by */
 						);
@@ -859,7 +855,7 @@ static int elf_elements_walk_allocations(struct alloc_tree_pos *scope,
 			NULL,
 			(void*)((uintptr_t) arena->begin + e->fileoff),
 			elf_precise_type(e->type_idx, e->size),
-			arena->meta.un.opaque_data.data_ptr /* alloc site */,
+			arena->allocator_private /* alloc site */,
 			&link,
 			arg
 		);

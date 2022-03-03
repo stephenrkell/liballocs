@@ -1541,8 +1541,7 @@ struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 	struct big_allocation *the_bigalloc = __lookup_bigalloc_top_level(obj);
 	if (!the_bigalloc) return NULL;
 	assert(the_bigalloc->allocated_by == &__mmap_allocator);
-	assert(the_bigalloc->meta.what == DATA_PTR);
-	struct mapping_sequence *seq = the_bigalloc->meta.un.opaque_data.data_ptr;
+	struct mapping_sequence *seq = the_bigalloc->allocator_private;
 	if (!seq)
 	{
 		/* It's a pool belonging to our own dlmalloc. HMM. Do we pretend it

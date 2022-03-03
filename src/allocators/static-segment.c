@@ -111,17 +111,10 @@ void __static_segment_allocator_notify_define_segment(
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		(void*) segment_start_addr,
 		segment_size,
-		(struct meta_info) {
-			.what = DATA_PTR,
-			.un = {
-				opaque_data: { 
+		&afile->m.segments[loadndx], /* allocator_private */
 					/* HMM. This will often "overflow" the 1-element array. So we
 					 * are really trusting the compiler not to know that. */
-					.data_ptr = &afile->m.segments[loadndx],
-					.free_func = NULL
-				}
-			}
-		},
+		NULL /* allocatoe_private_free */,
 		containing_file,
 		&__static_segment_allocator /* allocated_by */
 	);
@@ -175,7 +168,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	if (out_type) *out_type = pointer_to___uniqtype____uninterpreted_byte;
 	if (out_base) *out_base = b->begin;
 	if (out_site) *out_site =
-			((struct file_metadata *) (b->parent->meta.un.opaque_data.data_ptr))
+			((struct file_metadata *) (b->parent->allocator_private))
 				->load_site;
 	if (out_size) *out_size = (char*) b->end - (char*) b->begin;
 	return NULL;

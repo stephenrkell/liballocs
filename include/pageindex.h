@@ -41,21 +41,6 @@ struct insert
  * for every possible leaf allocator.
  */
 
-/* Each big allocation has some metadata attached. The meaning of 
- * "insert" is down to the individual allocator. */
-struct meta_info
-{
-	enum meta_info_kind { DATA_PTR } what;
-	union
-	{
-		struct
-		{
-			void *data_ptr;
-			void (*free_func)(void*);
-		} opaque_data;
-	} un;
-};
-
 /* A "big allocation" is one that 
  * is suballocated from, or
  * spans at least BIG_ALLOC_THRESHOLD bytes of page-aligned memory. */
@@ -72,7 +57,8 @@ struct big_allocation
 	struct big_allocation *first_child;
 	struct allocator *allocated_by; // should always be parent->suballocator *if* parent has a suballocator -- but it needn't, because suballocation is about small stuff
 	struct allocator *suballocator; // ... suballocated bigallocs may have BOTH small and big children
-	struct meta_info meta;          // metadata for use by the `allocated_by' allocator
+	void *allocator_private;        // metadata for use by the `allocated_by' allocator
+	void (*allocator_private_free)(void*);
 	void *suballocator_private;     // metadata for use by the suballocator, if any -- generic_small uses this to hold its chunk_rec
 	void (*suballocator_private_free)(void*);
 	/* Contemplating adding some common suballocator helpers -- if
@@ -113,7 +99,9 @@ enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute
 void __liballocs_print_l0_to_stream_err(void);
 void __liballocs_report_wild_address(const void *ptr); //__attribute__((visibility("protected")));
 
-struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size, struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a);
+struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size,
+	void *allocator_private, void (*allocator_private_free)(void*),
+	struct big_allocation *maybe_parent, struct allocator *a);
 
 _Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end);

@@ -367,13 +367,8 @@ static struct big_allocation *fresh_big(void *allocptr, size_t bigalloc_size,
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		allocptr,
 		bigalloc_size,
-		(struct meta_info) {
-			/* HMM: we could use an opaque pointer to the "real" insert, but 
-			 * instead we make a copy of that insert. This is perhaps better for
-			 * locality, since the big_allocation record is more likely
-			 * to be in the cache. FIXME: measure this. Would be cleaner to use ptr. */
-			.what = DATA_PTR
-		},
+		NULL /* allocator private */,
+		NULL /* allocator_private_free */,
 		containing_bigalloc,
 		&__generic_malloc_allocator
 	);
