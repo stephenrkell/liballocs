@@ -143,6 +143,8 @@ _Bool __stack_allocator_notify_unindexed_address(const void *ptr)
 			 * the auxv bigalloc and its mmap parent. FIXME: should be a bigalloc
 			 * utility call for this. */
 			__liballocs_pre_extend_bigalloc_recursive(b, ROUND_DOWN_PTR(ptr, PAGE_SIZE));
+			// FIXME: this might mess with alloca bitmaps
+			debug_printf(0, "Warning: unsafe extension of stack bigalloc\n");
 			return 1;
 		}
 	}

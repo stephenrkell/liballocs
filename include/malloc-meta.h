@@ -9,6 +9,10 @@
 #define offsetof(type, member) (__builtin_offsetof(type, member))
 #endif
 
+#ifndef MALLOC_ALIGN
+#define MALLOC_ALIGN 16  /* We assume chunks are aligned to a this-many byte boundary */
+#endif
+
 /* HACK: copied from memtable.h. */
 /* Thanks to Martin Buchholz -- <http://www.wambold.com/Martin/writings/alignof.html> */
 #ifndef ALIGNOF

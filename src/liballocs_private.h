@@ -161,9 +161,11 @@ extern unsigned long __liballocs_aborted_stack;
 extern unsigned long __liballocs_aborted_static;
 extern unsigned long __liballocs_aborted_unknown_storage;
 extern unsigned long __liballocs_hit_heap_case;
+extern unsigned long __liballocs_hit_alloca_case;
 extern unsigned long __liballocs_hit_stack_case;
 extern unsigned long __liballocs_hit_static_case;
 extern unsigned long __liballocs_aborted_unindexed_heap;
+extern unsigned long __liballocs_aborted_unindexed_alloca;
 extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 /* We're allowed to malloc, thanks to __private_malloc(), but we 

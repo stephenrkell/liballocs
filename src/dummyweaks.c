@@ -239,7 +239,8 @@ int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
 	return 0;
 }
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size,
-		struct meta_info meta, struct big_allocation *maybe_parent, struct allocator *a)
+		void *suballocator_private, void (*suballocator_private_free)(void*),
+		struct big_allocation *maybe_parent, struct allocator *a)
 {
 	return NULL;
 }
@@ -380,6 +381,8 @@ struct liballocs_err __liballocs_err_unknown_stack_walk_problem
  = { "unknown stack walk problem" };
 struct liballocs_err __liballocs_err_unindexed_heap_object
  = { "unindexed heap object" };
+struct liballocs_err __liballocs_err_unindexed_alloca_object
+ = { "unindexed alloca object" };
 struct liballocs_err __liballocs_err_unrecognised_alloc_site
  = { "unrecognised alloc site" };
 struct liballocs_err __liballocs_err_unrecognised_static_object

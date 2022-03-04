@@ -981,19 +981,18 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 		add_missing_mappings_from_proc(executable_end_addr);
 		/* Also extend the data segment to account for the current brk. */
 		set_executable_mapping_bigalloc(executable_end_addr);
+		/* brk allocator init can initialize even before systrap -- we
+		 * need to worry about out-of-date __curbrk manually, though. */
+		__brk_allocator_init();
 		/* Before we ask libsystrap to do anything, ensure the file metadata
 		 * for the early libs is in place. This will skip the meta-objects,
 		 * which we're not ready to do yet (it's a dlopen/mmap that we want
 		 * to trap). */
 		__runt_files_init();
 		assert(early_lib_handles[0]);
-		/* We need to have generic malloc init'd by now, because we always
-		 * need to have allocated our memtables before we start getting
-		 * mmap traps. This is only important for the test lib... ordinary
-		 * builds will be preloaded, so will always hit our mmap not libc's. */
-		__generic_malloc_allocator_init();
 		/* Now we're ready to take traps for subsequent mmaps and sbrk. */
 		__liballocs_systrap_init();
+		__brk_allocator_notify_brk(sbrk(0), __builtin_return_address(0));
 		/* Now we can dlopen the meta-objects for the early libs, which librunt
 		 * skipped because it couldn't catch the mmaps happening during dlopen. */
 		load_meta_objects_for_early_libs();
@@ -1432,15 +1431,12 @@ static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *args_as_v
 
 void __mmap_allocator_notify_brk(void *new_curbrk)
 {
-	if (!initialized)
-	{
-		/* HMM. This is called in a signal context so it's probably not 
-		 * safe to just do the init now. But we don't start taking traps until
-		 * we're initialized, so that's okay. BUT see the note in 
-		 * __mmap_allocator_init... before we're initialized, we need
-		 * another mechanism to probe for brk updates. */
-		return;
-	}
+	/* HMM. If we are called in a signal context sit's probably not 
+	 * safe to just do the init now. But we don't start taking traps until
+	 * we're initialized, so that's okay. BUT see the note in 
+	 * __mmap_allocator_init... before we're initialized, we need
+	 * another mechanism to probe for brk updates. */
+
 	/* If we haven't made the bigalloc yet, sbrk needs no action.
 	 * Otherwise we must update the end. */
 	if (executable_mapping_bigalloc)

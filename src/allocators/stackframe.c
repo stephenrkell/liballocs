@@ -331,14 +331,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 		// is still higher than our object's addr, we must have gone past it
 		if (frame_allocation_base > (unsigned char *) obj)
 		{
-			struct insert *heap_info = lookup_object_info(obj, (void**) out_base, 
-				out_size, NULL);
-			if (heap_info)
-			{
-				/* It looks like this is an alloca chunk, so proceed. */
-				// goto do_alloca_as_if_heap; // FIXME: reinstate alloca handling
-			}
-
+			/* Probably an alloca chunk, but we shouldn't have been called. */
 			err = &__liballocs_err_stack_walk_reached_higher_frame;
 			goto abort_stack;
 		}

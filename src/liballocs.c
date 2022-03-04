@@ -486,6 +486,8 @@ struct liballocs_err __liballocs_err_unknown_stack_walk_problem
  = { "unknown stack walk problem" };
 struct liballocs_err __liballocs_err_unindexed_heap_object
  = { "unindexed heap object" };
+struct liballocs_err __liballocs_err_unindexed_alloca_object
+ = { "unindexed alloca object" };
 struct liballocs_err __liballocs_err_unrecognised_alloc_site
  = { "unrecognised alloc site" };
 struct liballocs_err __liballocs_err_unrecognised_static_object
@@ -828,15 +830,17 @@ unsigned long __liballocs_aborted_stack;
 unsigned long __liballocs_aborted_static;
 unsigned long __liballocs_aborted_unknown_storage;
 unsigned long __liballocs_hit_heap_case;
+unsigned long __liballocs_hit_alloca_case;
 unsigned long __liballocs_hit_stack_case;
 unsigned long __liballocs_hit_static_case;
 unsigned long __liballocs_aborted_unindexed_heap;
+unsigned long __liballocs_aborted_unindexed_alloca;
 unsigned long __liballocs_aborted_unrecognised_allocsite;
 
 static void print_exit_summary(void)
 {
 	if (__liballocs_aborted_unknown_storage + __liballocs_hit_static_case + __liballocs_hit_stack_case
-			 + __liballocs_hit_heap_case > 0)
+			 + __liballocs_hit_heap_case + __liballocs_hit_alloca_case > 0)
 	{
 		fprintf(get_stream_err(), "====================================================\n");
 		fprintf(get_stream_err(), "liballocs summary: \n");
@@ -845,9 +849,11 @@ static void print_exit_summary(void)
 		fprintf(get_stream_err(), "queries handled by static case:            % 9ld\n", __liballocs_hit_static_case);
 		fprintf(get_stream_err(), "queries handled by stack case:             % 9ld\n", __liballocs_hit_stack_case);
 		fprintf(get_stream_err(), "queries handled by heap case:              % 9ld\n", __liballocs_hit_heap_case);
+		fprintf(get_stream_err(), "queries handled by alloca case:            % 9ld\n", __liballocs_hit_alloca_case);
 		fprintf(get_stream_err(), "----------------------------------------------------\n");
 		fprintf(get_stream_err(), "queries aborted for unindexed heap:        % 9ld\n", __liballocs_aborted_unindexed_heap);
 		fprintf(get_stream_err(), "queries aborted for unknown heap allocsite:% 9ld\n", __liballocs_aborted_unrecognised_allocsite);
+		fprintf(get_stream_err(), "queries aborted for unindexed alloca:      % 9ld\n", __liballocs_aborted_unindexed_alloca);
 		fprintf(get_stream_err(), "queries aborted for unknown stackframes:   % 9ld\n", __liballocs_aborted_stack);
 		fprintf(get_stream_err(), "queries aborted for unknown static obj:    % 9ld\n", __liballocs_aborted_static);
 		fprintf(get_stream_err(), "====================================================\n");
@@ -1011,7 +1017,11 @@ void __liballocs_post_systrap_init(void)
 	/* For testing, become no-op if systrap was not init'd. */
 	if (__liballocs_systrap_is_initialized)
 	{
-		/* Now we can correctly initialize libdlbind. */
+		/* Now we can correctly initialize libdlbind. Before that,
+		 * since it might malloc, ensure we have brk and generic_malloc
+		 * initialized. */
+		__brk_allocator_init();
+		__generic_malloc_allocator_init();
 		__libdlbind_do_init();
 		__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
 		if (!__liballocs_rt_uniqtypes_obj)

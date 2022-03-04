@@ -46,7 +46,7 @@ struct allocator __brk_allocator = {
 	/* FIXME: meta-protocol implementation */
 };
 
-static void set_brk_bigalloc(void *curbrk)
+static void create_brk_bigalloc(void *curbrk)
 {
 	assert(executable_mapping_bigalloc);
 	// now create the brk bigalloc
@@ -129,18 +129,22 @@ static void update_brk(void *new_curbrk)
 static _Bool initialized;
 static _Bool trying_to_initialize;
 
-void (  __attribute__((constructor(101))) __brk_allocator_init)(void)
+void (  __attribute__((constructor(102))) __brk_allocator_init)(void)
 {
-	// we are initialized by the mmap allocator
-	if (!__mmap_allocator_is_initialized()) return;
+	/* We don't need to be systrap-ready before it makes sense to initialize us.
+	 * BUT our brk is liable to go out of sync with reality until we do.
+	 * The wild address path should be enough to catch this, though, at least
+	 * for queries. For things like malloc hooking, where our brk might edge
+	 * into uncharted territory, we may need a slower path in arena_for_userptr.
+	 */
 	if (!initialized && !trying_to_initialize)
 	{
 		trying_to_initialize = 1;
 		void *curbrk = sbrk(0);
 		/* Make sure the mmap allocator has created a big-enough mapping bigalloc. */
-		__mmap_allocator_notify_brk(curbrk);
+		__mmap_allocator_notify_brk(curbrk); // this is Ok even if mmap allocator is not fully init'd
 		/* Do our init. */
-		set_brk_bigalloc(curbrk);
+		create_brk_bigalloc(curbrk);
 		initialized = 1;
 		trying_to_initialize = 0;
 	}

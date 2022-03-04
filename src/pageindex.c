@@ -949,7 +949,17 @@ struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator
 	BIG_UNLOCK;
 	return b;
 }
-
+__attribute__((visibility("hidden")))
+struct big_allocation *__lookup_bigalloc_under_by_suballocator(const void *mem, struct allocator *sub_a, struct big_allocation *start, void **out_object_start)
+{
+	if (!pageindex) __pageindex_init();
+	int lock_ret;
+	BIG_LOCK
+	assert(sub_a);
+	struct big_allocation *b = find_bigalloc_recursive(start, mem, sub_a, /* suballocator? */ 1);
+	BIG_UNLOCK;
+	return b;
+}
 
 __attribute__((visibility("protected")))
 struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start)

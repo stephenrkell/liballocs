@@ -168,6 +168,7 @@ extern struct liballocs_err __liballocs_err_stack_walk_reached_higher_frame;
 extern struct liballocs_err __liballocs_err_stack_walk_reached_top_of_stack;
 extern struct liballocs_err __liballocs_err_unknown_stack_walk_problem;
 extern struct liballocs_err __liballocs_err_unindexed_heap_object;
+extern struct liballocs_err __liballocs_err_unindexed_alloca_object;
 extern struct liballocs_err __liballocs_err_unrecognised_alloc_site;
 extern struct liballocs_err __liballocs_err_unrecognised_static_object;
 extern struct liballocs_err __liballocs_err_object_of_unknown_storage;
@@ -615,14 +616,14 @@ __liballocs_get_alloc_info
 	 * there's no need to query the allocator. The
 	 * cache entries should record the allocator. */
 
-	struct big_allocation *out_bigalloc;
-	struct allocator *a = __liballocs_leaf_allocator_for(obj, &out_bigalloc);
+	struct big_allocation *the_bigalloc;
+	struct allocator *a = __liballocs_leaf_allocator_for(obj, &the_bigalloc);
 	if (__builtin_expect(!a, 0))
 	{
 		_Bool fixed = __liballocs_notify_unindexed_address(obj);
 		if (fixed)
 		{
-			a = __liballocs_leaf_allocator_for(obj, &out_bigalloc);
+			a = __liballocs_leaf_allocator_for(obj, &the_bigalloc);
 			if (!a) abort();
 		}
 		else
@@ -636,11 +637,11 @@ __liballocs_get_alloc_info
 	 * Those with depth == 0 reflect leaf allocations. */
 	}
 	if (out_allocator) *out_allocator = a;
-	err = a->get_info((void*) obj, out_bigalloc, out_alloc_uniqtype, (void**) out_alloc_start,
+	err = a->get_info((void*) obj, the_bigalloc, out_alloc_uniqtype, (void**) out_alloc_start,
 			out_alloc_size_bytes, out_alloc_site);
 	if (!err || err == &__liballocs_err_unrecognised_alloc_site)
 	{
-		/* We can cache something. */
+		/* We can cache something negative, if we like. */
 	}
 out_nocache:
 	return err;

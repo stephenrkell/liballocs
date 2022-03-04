@@ -38,7 +38,9 @@ void __assert_fail(const char * assertion, const char * file, unsigned int line,
 void __alloca_allocator_notify(void *new_userchunkaddr,
 		unsigned long requested_size, unsigned long *frame_counter,
 		const void *caller, const void *caller_sp, const void *caller_bp);
-void __liballocs_index_delete(void*);
+struct big_allocation;
+void __liballocs_bitmap_delete(struct big_allocation *, void*);
+void __liballocs_bitmap_insert(struct big_allocation *arena, void *new_userchunkaddr, size_t caller_requested_size, const void *caller);
 struct uniqtype; /* forward decl */
 
 /* This *must* match the size of 'struct extended_insert' in heap_index!
@@ -55,7 +57,7 @@ struct uniqtype; /* forward decl */
 
 // This must match the required alignment of an allocation after the insert is added
 #ifndef ALLOCA_ALIGN
-#define ALLOCA_ALIGN ALIGNOF(void *)
+#define ALLOCA_ALIGN 16
 #endif
 
 /* This *must* match the treatment of "early_malloc"'d chunks in malloc_hook_stubs.c. 
@@ -104,25 +106,31 @@ extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_
 	 * Basically we have to do everything that our malloc hooks, allocator wrappers
 	 * and heap indexing code does. ARGH. Maintenance nightmare.... 
 	 * 
-	 * AND only do the indexing things if liballocs is preloaded. Otherwise.... */
+	 * AND only do the indexing things if liballocs is preloaded. Otherwise....
+	 *
+	 * We need to ensure 16-byte alignment, equivalently with malloc. */
 	unsigned long chunk_size = PAD_TO_ALIGN(size + ALLOCA_TRAILER_SIZE, ALLOCA_ALIGN);
-	void *alloc = __builtin_alloca(ALLOCA_HEADER_SIZE + chunk_size);
+	void *alloc = __builtin_alloca(PAD_TO_ALIGN(ALLOCA_HEADER_SIZE, ALLOCA_ALIGN) + chunk_size);
+	/* The alloca-returned pointer may be only 8-byte-aligned. Since we asked for
+	 * 16 extra bytes but we only need 8, we *will* waste 8 bytes, either at the
+	 * beginning or the end of the returned chunk. They just become a hole on the stack;
+	 * we don't track them. */
+	void *userchunk = (void*)(PAD_TO_ALIGN((unsigned long) alloc + ALLOCA_HEADER_SIZE, ALLOCA_ALIGN));
 #ifndef LIBALLOCS_NO_ZERO
-	__builtin_memset((char*) alloc + ALLOCA_HEADER_SIZE, 0, chunk_size);
+	__builtin_memset(userchunk, 0, chunk_size);
 #endif
-	/* write the usable size into the first word, then return the rest. */
-	*(unsigned long *)alloc = chunk_size;
+	// write the usable size into the word preceding the userchunk, then return the userchunk.
+	*((unsigned long *)userchunk - 1) = chunk_size;
 	
 	/* We add only the "usable size" part, because that is what the heap index code
 	 * can see, and that is the code that will be consuming this value. */
 	*frame_counter += chunk_size;
 	
 	/* Note that we pass the caller directly; __current_allocsite is not required. */
-	void *userptr = (char*) alloc + ALLOCA_HEADER_SIZE;
-	__alloca_allocator_notify(userptr, size, frame_counter, caller,
+	__alloca_allocator_notify(userchunk, size, frame_counter, caller,
 		__liballocs_get_sp(), __liballocs_get_bp());
 	
-	return userptr;
+	return userchunk;
 }
 
 void __liballocs_unindex_stack_objects_below(void *);

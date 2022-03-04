@@ -115,6 +115,7 @@ _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, cons
 struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr, const void *end);
 struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_under_by_suballocator(const void *mem, struct allocator *sub_a, struct big_allocation *start, void **out_object_start) __attribute__((visibility("hidden")));
 struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start);
 struct big_allocation *__lookup_bigalloc_from_root_by_suballocator(const void *mem, struct allocator *sub_a, void **out_object_start);
 struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));

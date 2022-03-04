@@ -424,7 +424,7 @@ void *__liballocs_get_alloc_base(void *); /* alias of __liballocs_get_base */
 extern struct allocator __stack_allocator;
 extern struct allocator __stackframe_allocator;
 extern struct allocator __mmap_allocator; /* mmaps */
-extern struct allocator __sbrk_allocator; /* sbrk() */
+extern struct allocator __brk_allocator; /* sbrk() */
 extern struct allocator __static_file_allocator;
 extern struct allocator __static_segment_allocator;
 extern struct allocator __static_section_allocator;
@@ -468,7 +468,7 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 void __static_file_allocator_notify_unload(const char *copied_filename);
 
 void __brk_allocator_notify_brk(void *new_curbrk, const void *caller) __attribute__((visibility("hidden")));
-void __brk_allocator_init(void) __attribute__((visibility("hidden"),constructor(101)));
+void __brk_allocator_init(void) __attribute__((visibility("hidden"),constructor(102)));
 extern struct big_allocation *__brk_bigalloc __attribute__((visibility("hidden")));
 _Bool __brk_allocator_notify_unindexed_address(const void *mem);
 

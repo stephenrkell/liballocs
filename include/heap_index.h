@@ -4,86 +4,10 @@
 #include <stdbool.h>
 #include "liballocs_config.h"
 #include "pageindex.h"
+#include "malloc-meta.h"
+#include "bitmap.h"
 
-/* Firstly the memtable stuff.
- * FIXME: this should go away, in favour of a per-arena bitmap. */
- 
-#include "memtable.h"
-#define entry_coverage_in_bytes 512
-typedef struct entry entry_type;
-extern void *index_begin_addr;
-extern void *index_end_addr;
-
-// #define IS_DEEP_ENTRY(e) (!(e)->present && (e)->removed && (e)->distance != 63)
-#define IS_BIGALLOC_ENTRY(e) (!(e)->present && (e)->removed && (e)->distance == 63)
-#define IS_EMPTY_ENTRY(e) (!(e)->present && !(e)->removed)
-
-#define INDEX_LOC_FOR_ADDR(a) MEMTABLE_ADDR_WITH_TYPE(index_region, entry_type, \
-		entry_coverage_in_bytes, \
-		index_begin_addr, index_end_addr, (a))
-#define INDEX_BIN_START_ADDRESS_FOR_ADDR(a) MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
-		entry_coverage_in_bytes, \
-		index_begin_addr, index_end_addr, (a))
-#define INDEX_BIN_END_ADDRESS_FOR_ADDR(a) ((char*)(MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
-		entry_coverage_in_bytes, \
-		index_begin_addr, index_end_addr, ((char*)(a)))) + entry_coverage_in_bytes)
-#define ADDR_FOR_INDEX_LOC(e) MEMTABLE_ENTRY_RANGE_BASE_WITH_TYPE(index_region, entry_type, \
-		entry_coverage_in_bytes, index_begin_addr, index_end_addr, (e))
-
-extern struct entry *index_region __attribute__((weak));
 int safe_to_call_malloc __attribute__((weak));
-
-/* "Distance" is a right-shifted offset within a memory region. */
-#define DISTANCE_UNIT_SHIFT 3
-/* NOTE: make sure that "distance" is wide enough to store offsets up to
- * entry_size_in_bytes bytes long! */
-
-static inline ptrdiff_t entry_to_offset(struct entry e) 
-{ 
-	assert(e.present); 
-	return e.distance << DISTANCE_UNIT_SHIFT; 
-}
-static inline struct entry offset_to_entry(ptrdiff_t o) 
-{ 
-	return (struct entry) { .present = 1, .removed = 0, .distance = o >> DISTANCE_UNIT_SHIFT }; 
-}
-static inline void *entry_ptr_to_addr(struct entry *p_e)
-{
-	if (!p_e->present) return NULL;
-	return MEMTABLE_ENTRY_RANGE_BASE_WITH_TYPE(
-		index_region,
-		entry_type,
-		entry_coverage_in_bytes,
-		index_begin_addr,
-		index_end_addr,
-		p_e)
-	+ entry_to_offset(*p_e);
-}
-static inline void *entry_to_same_range_addr(struct entry e, void *same_range_ptr)
-{
-	if (!e.present) return NULL;
-	return MEMTABLE_ADDR_RANGE_BASE_WITH_TYPE(
-		index_region,
-		entry_type,
-		entry_coverage_in_bytes,
-		index_begin_addr,
-		index_end_addr,
-		same_range_ptr) + entry_to_offset(e);
-}
-static inline struct entry addr_to_entry(void *a)
-{
-	if (a == NULL) return (struct entry) { .present = 0, .removed = 0, .distance = 0 };
-	else return offset_to_entry(
-		MEMTABLE_ADDR_RANGE_OFFSET_WITH_TYPE(
-			index_region, entry_type, entry_coverage_in_bytes, 
-			index_begin_addr, index_end_addr,
-			a
-		)
-	);
-}
-
-void __liballocs_index_delete(void *userptr);
-void __liballocs_index_insert(void *new_userchunkaddr, size_t requested_size, const void *caller);
 
 /* A thread-local variable to override the "caller" arguments. 
  * Platforms without TLS have to do without this feature. */
@@ -124,7 +48,7 @@ extern struct allocator __generic_malloc_allocator;
 
 #include "pageindex.h"
 
-struct insert *lookup_object_info(const void *mem, 
+struct insert *lookup_object_info(struct big_allocation *arena, void *mem,
 		void **out_object_start, size_t *out_object_size, 
 		void **ignored) __attribute__((weak));
 
@@ -183,12 +107,18 @@ struct insert *lookup_object_info(const void *mem,
  */
 
 size_t malloc_usable_size(void *ptr);
-static void *userptr_to_allocptr(void *userptr) { return userptr; }
-static void *allocptr_to_userptr(void *allocptr) { return allocptr; }
 static size_t allocsize_to_usersize(size_t usersize) { return usersize; }
 static size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
-static size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr_to_allocptr(userptr))); }
+static size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr)); }
 static size_t allocsize(void *allocptr) { return malloc_usable_size(allocptr); }
+
+struct arena_bitmap_info
+{
+	unsigned long nwords;
+	bitmap_word_t *bitmap;
+	void *bitmap_base_addr;
+};
+void __free_arena_bitmap_and_info(void *info  /* really struct arena_bitmap_info * */);
 
 /* Chunks can also have lifetime policies attached, if we are built
  * with support for this.
