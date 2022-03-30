@@ -377,9 +377,9 @@ static liballocs_err_t get_info(void *obj,
 		// it's at count_before in the metavector, e.g. if there's 0 earlier bits set it's at idx 0
 		void *metavector_found = (void*)((uintptr_t)seq->un.metavector_any +
 			(count_before)*(1u<<(seq->fam->one_plus_log2_metavector_entry_size_bytes - 1)));
-		struct uniqtype *found_t;
-		size_t sz;
-		void *base;
+		struct uniqtype *found_t = NULL;
+		size_t sz = (size_t)-1;
+		void *base = NULL;
 		WITH_ENT(metavector_found, seq, { \
 			found_t = seq->fam->types_table[ent->type_idx];
 			sz = (ent->size_nalign << seq->fam->log2_align) - ent->size_delta_nbytes;
@@ -448,8 +448,8 @@ static int walk_allocations(struct alloc_tree_pos *pos,
 			(uintptr_t) b->end - (uintptr_t) obj :
 			((next_bit_idx - cur_bit_idx) << seq->fam->log2_align);
 		void *ent = (char*) seq->un.metavector_any + n * METAVECTOR_ENTRY_SIZE_BYTES(seq);
-		size_t actual_sz;
-		struct uniqtype *t;
+		size_t actual_sz = (size_t) -1;
+		struct uniqtype *t = NULL;
 		// NOTE that we might not have a metavector, i.e. sz might be 0
 		if (METAVECTOR_ENTRY_SIZE_BYTES(seq) > 0)
 		{
