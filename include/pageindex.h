@@ -1,5 +1,6 @@
 #ifndef LIBALLOCS_PAGEINDEX_H_
 #define LIBALLOCS_PAGEINDEX_H_
+#include <assert.h>
 #include "vas.h"
 
 struct entry
