@@ -507,8 +507,7 @@ static void bitmap_delete(struct big_allocation *arena, void *userptr/*, size_t 
 	/* The address *must* be in our tracked range. Assert this. */
 	assert(info->bitmap_base_addr == ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS));
 	assert((uintptr_t) userptr >= (uintptr_t) info->bitmap_base_addr);
-	bitmap_clear_l(bitmap, ((uintptr_t) userptr - (uintptr_t) info->bitmap_base_addr) / 
-			(MALLOC_ALIGN * BITMAP_WORD_NBITS));
+	bitmap_clear_l(bitmap, ((uintptr_t) userptr - (uintptr_t) info->bitmap_base_addr) / MALLOC_ALIGN);
 
 #ifdef TRACE_HEAP_INDEX
 	fprintf(stderr, "*** Deleting entry for chunk %p, from bitmap at %p\n", 
