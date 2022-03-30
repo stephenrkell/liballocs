@@ -88,6 +88,7 @@ static void set_metadata_inner(struct big_allocation *b,
 	assert(0 == 
 		((uintptr_t) ptr - (uintptr_t) b->begin) % PRIVATE_MALLOC_ALIGN
 	);
+	assert((uintptr_t) ptr >= (uintptr_t) b->begin);
 	bitmap_set_b(
 		(bitmap_word_t *) b->suballocator_private,
 		((uintptr_t) ptr - (uintptr_t) b->begin) / PRIVATE_MALLOC_ALIGN
