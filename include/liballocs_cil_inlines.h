@@ -41,7 +41,7 @@ void __alloca_allocator_notify(void *new_userchunkaddr,
 struct big_allocation;
 struct uniqtype; /* forward decl */
 
-/* This *must* match the size of 'struct extended_insert' in heap_index!
+/* This *must* match the size of 'struct extended_insert' in generic_malloc_index!
  * But we don't include that header right now, to avoid perturbing the
  * inclusion order of the rest of this translation unit.
  * HACK: We do not need the lifetime insert for alloca so it is never included. */

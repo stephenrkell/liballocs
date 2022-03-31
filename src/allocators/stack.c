@@ -34,8 +34,6 @@ static _Bool initialized;
 rlim_t __stack_lim_cur __attribute__((visibility("protected")));
 rlim_t __stack_lim_max __attribute__((visibility("protected")));
 
-struct suballocated_chunk_rec; // FIXME: remove once heap_index has been refactored
-
 static struct big_allocation *initial_stack_bigalloc;
 
 void (__attribute__((constructor(101))) __stack_allocator_init)(void)

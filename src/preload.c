@@ -9,7 +9,7 @@
 #include <link.h>
 #include <assert.h>
 #include <sys/types.h>
-/* We make very heavy use of malloc_usable_size in heap_index. But we also 
+/* We make very heavy use of malloc_usable_size in generic_malloc_index. But we also 
  * override it -- twice! -- once in mallochooks, to intercept the early_malloc
  * case, and once here to intercept the stack (alloca) case. 
  * 
@@ -85,8 +85,8 @@ size_t __wrap_malloc_usable_size (void *ptr) __attribute__((visibility("protecte
 size_t malloc_usable_size (void *ptr) __attribute__((alias("__wrap_malloc_usable_size"),visibility("default")));
 size_t __wrap_malloc_usable_size (void *ptr)
 {
-	/* We use this all the time in heap_index. 
-	 * BUT because heap_index addresses can be on the stack too, 
+	/* We use this all the time in generic_malloc_index. 
+	 * BUT because generic_malloc_index addresses can be on the stack too, 
 	 * in the case of alloca, we need to intercept this case
 	 * and handle it appropriately. 
 	 * 

@@ -468,7 +468,7 @@ __attribute__((visibility("protected")))
 struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size,
 	void *allocator_private, void(*allocator_private_free)(void*), struct big_allocation *maybe_parent, struct allocator *allocated_by)
 {
-	/* We get called from heap_index when the malloc'd address is a multiple of the 
+	/* We get called from generic_malloc_index when the malloc'd address is a multiple of the 
 	 * page size, is big enough and fills (more-or-less) the alloc'd region. If so,  
 	 * create a bigalloc record including the caller-supplied metadata. We will fish 
 	 * it out in get_alloc_info. */

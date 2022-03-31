@@ -13,7 +13,7 @@
 #include "relf.h"
 #include "liballocs_private.h"
 #include "pageindex.h"
-#include "heap_index.h"
+#include "generic_malloc_index.h"
 
 // this is a bug-finding hack to detect bogus/corrupt chunk pointers... can remove
 #define BIGGEST_SANE_ALLOCA 33554431ul /* 32MB - 1byte */

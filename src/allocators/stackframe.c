@@ -33,8 +33,6 @@ static _Bool initialized;
 
 static void *main_bp; // beginning of main's stack frame
 
-struct suballocated_chunk_rec; // FIXME: remove once heap_index has been refactored
-
 static struct frame_uniqtype_and_offset
 pc_to_frame_uniqtype(const void *addr);
 

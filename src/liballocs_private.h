@@ -18,7 +18,7 @@ typedef bool _Bool;
 #include <stddef.h>
 #include <stdint.h>
 #include <link.h>
-#include "heap_index.h" /* includes memtable */
+#include "generic_malloc_index.h" /* includes memtable */
 #include "systrap.h"
 
 #include "liballocs.h"
@@ -204,6 +204,13 @@ static struct uniqtype *get_type(void *obj) \
 	if (err) return NULL; \
 	return out; \
 }
+
+#ifndef MIN
+#define MIN(a, b) ((a)<(b)?(a):(b))
+#endif
+#ifndef MAX
+#define MAX(a, b) ((a)>(b)?(a):(b))
+#endif
 
 void update_rt_uniqtypes_obj(void *handle, void *old_base);
 

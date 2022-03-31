@@ -32,7 +32,7 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 #include "liballocs_config.h"
 #include "memtable.h"
 #include "uniqtype.h"
-struct insert; // instead of heap_index.h
+struct insert; // instead of generic_malloc_index.h
 struct allocator; // instead of allocmeta.h
 
 // FIXME: please, please get rid of this
