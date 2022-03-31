@@ -215,7 +215,8 @@ void (__attribute__((constructor(101))) __pageindex_init)(void)
 		__private_malloc_heap_limit = (void*)((uintptr_t) __private_malloc_heap_base
 			+ heapsz);
 		/* It's just a mapping sequence, init. */
-		struct mapping_sequence seq = (struct mapping_sequence) {
+		static struct mapping_sequence seq;
+		seq = (struct mapping_sequence) {
 			.begin = __private_malloc_heap_base,
 			.end =  __private_malloc_heap_limit,
 			.filename = NULL,
@@ -230,7 +231,7 @@ void (__attribute__((constructor(101))) __pageindex_init)(void)
 				.caller = /* &&mmap_return_site */ 0
 			} }
 		};
-		struct big_allocation *b = __add_mapping_sequence_bigalloc_nomalloc(&seq);
+		struct big_allocation *b = __add_mapping_sequence_bigalloc_nocopy(&seq);
 		/* What about the bitmap? 1GB of 16B regions is 64Mbits or 8Mbytes.
 		 * We don't want to spend that much up-front. But we don't have to!
 		 * We allocate the bitmap in our own heap, which is MAP_NORESERVE. */
@@ -239,11 +240,24 @@ void (__attribute__((constructor(101))) __pageindex_init)(void)
 		size_t bitmap_alloc_size_bytes = DIVIDE_ROUNDING_UP(
 			DIVIDE_ROUNDING_UP(range_size_bytes, PRIVATE_MALLOC_ALIGN),
 			8) + sizeof (struct insert);
-		b->suballocator_private = __private_malloc(bitmap_alloc_size_bytes);
+		/* FIXME: also want to create one of these?
+		struct arena_bitmap_info
+		{
+			unsigned long nwords;
+			bitmap_word_t *bitmap;
+			void *bitmap_base_addr;
+		};
+		*/
+		/* we use the real dlmalloc just this once, because we can't set the bit
+		 * before the bitmap is created */
+		void *__real_dlmalloc(size_t size);
+		b->suballocator_private = __real_dlmalloc(bitmap_alloc_size_bytes);
+	dlmalloc_return_site:
 		assert((uintptr_t) b->suballocator_private >= (uintptr_t) __private_malloc_heap_base);
 		assert((uintptr_t) b->suballocator_private + bitmap_alloc_size_bytes
 			< (uintptr_t) __private_malloc_heap_limit);
-		// FIXME: set the insert, if we really care
+		__private_malloc_set_metadata(b->suballocator_private, bitmap_alloc_size_bytes,
+			&&dlmalloc_return_site);
 		// FIXME: this is an interesting case of an unclassifiable allocation site,
 		// by our current 'dumpallocs.ml' classifier. It is sized (syntactically)
 		// in bytes but allocated (semantically) in bitmap_word_t units, and rests

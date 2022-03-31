@@ -73,60 +73,31 @@ static struct big_allocation *add_bigalloc(void *begin, size_t size)
 	return b;
 }
 
-/* This looks like Guillaume code. Why does it exist?
- *
- * 74a9081c
- * This prevents infinite recursion after an mmap call caused by a malloc
- * heap extension.
- *
- * So the problem is that malloc may do an mmap which may
- * require allocating a new mapping sequence (new heap arena), which
- * may do a malloc
- * ... and so on ...
- * without forward progress.
- *
- * What's the right way to do this? We want to always be able to create a
- * mapping sequence without doing a malloc. Suppose we can arrange that. So then
- * what if a user malloc triggers an mmap? Then that should be OK because it
- * won't trigger another malloc.
- *
- * So in short I think Guillaume's solution is good enough for now.
- */
-static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
+static struct big_allocation *add_mapping_sequence_bigalloc_nocopy(struct mapping_sequence *seq,
+	void(*free_fn)(void*))
 {
 	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
 	if (!b) abort();
+	b->allocator_private = seq;
+	b->allocator_private_free = free_fn;
+	return b;
+}
+static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
+{
 	struct mapping_sequence *copy = __private_malloc(sizeof (struct mapping_sequence));
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
+	struct big_allocation *b = add_mapping_sequence_bigalloc_nocopy(seq, __private_free);
 	b->allocator_private = copy;
 	b->allocator_private_free = __private_free;
 	return b;
 }
-
-static struct big_allocation *add_mapping_sequence_bigalloc_nomalloc(struct mapping_sequence *seq) {
-	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
-	if (!b) abort();
-
-	static struct mapping_sequence mapping_sequence_pool[64];
-	static struct mapping_sequence *next_free_mapping_seq = mapping_sequence_pool;
-
-	assert(next_free_mapping_seq < mapping_sequence_pool + 64);
-
-	struct mapping_sequence *copy = next_free_mapping_seq++;
-	if (!copy) abort();
-	memcpy(copy, seq, sizeof (struct mapping_sequence));
-
-	b->allocator_private = copy;
-	b->allocator_private_free = __private_free;
-
-	return b;
-}
-
+/* This function is used only for the single statically-allocated mapping sequence
+ * representing the private malloc heap, that we create during pageindex init. */
 __attribute__((visibility("hidden")))
-struct big_allocation *__add_mapping_sequence_bigalloc_nomalloc(struct mapping_sequence *seq)
+struct big_allocation *__add_mapping_sequence_bigalloc_nocopy(struct mapping_sequence *seq)
 {
-	return add_mapping_sequence_bigalloc_nomalloc(seq);
+	return add_mapping_sequence_bigalloc_nocopy(seq, NULL);
 }
 
 static _Bool mapping_entry_equal(struct mapping_entry *e1,
@@ -758,17 +729,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		_Bool success = augment_sequence(&new_seq, mapped_addr, (char*) mapped_addr + mapped_length, 
 				prot, flags, offset, filename, caller);
 		if (!success) abort();
-		if (!__private_realloc_active && !__private_memalign_active && !__private_posix_memalign_active
-				&& !__private_calloc_active && !__private_malloc_active)
-		{
-			add_mapping_sequence_bigalloc(&new_seq);
-		}
-		else /* HMM -- probably an mmap from the private malloc. Not sure */
-		{
-			// HACK: Try to avoid infinite recursion by using a static version.
-			// FIXME: Will fail if called too many times
-			add_mapping_sequence_bigalloc_nomalloc(&new_seq);
-		}
+		add_mapping_sequence_bigalloc(&new_seq);
 	}
 }
 void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_t length, 
