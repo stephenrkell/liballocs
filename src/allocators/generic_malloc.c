@@ -93,71 +93,39 @@ int safe_to_call_malloc;
 #pragma GCC diagnostic ignored "-Wpragmas"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverflow"
-static void check_impl_sanity(void)
-{
-	assert(PAGE_SIZE == sysconf(_SC_PAGE_SIZE));
-	assert(LOG_PAGE_SIZE == integer_log2(PAGE_SIZE));
-}
+
 /* First, re-enable the overflow pragma, to be conservative. */
 #pragma GCC diagnostic warning "-Woverflow"
 /* Now, if we have "pop", we will restore it to its actual former setting. */
 #pragma GCC diagnostic pop
 #pragma GCC diagnostic warning "-Wpragmas"
 
-static _Bool tried_to_init;
-
-static void
-do_init(void)
-{
-	/* Optionally delay, for attaching a debugger. */
-	if (getenv("HEAP_INDEX_DELAY_INIT")) sleep(8);
-
-	/* Check sanity of compile-time logic. */
-	check_impl_sanity();
-	
-	/* If we're already trying to initialize, or have already
-	 * tried, don't try recursively/again. */
-	if (tried_to_init) return;
-	tried_to_init = 1;
-}
-
-void post_init(void) __attribute__((visibility("hidden")));
-void __liballocs_malloc_post_init(void) __attribute__((alias("post_init")));
+__attribute__((visibility("hidden")))
 void post_init(void)
 {
-	do_init();
 }
+void __liballocs_malloc_post_init(void) __attribute__((alias("post_init")));
 
-void __generic_malloc_allocator_init(void) __attribute__((visibility("hidden")));
+__attribute__((visibility("hidden")))
 void __generic_malloc_allocator_init(void)
 {
-	do_init();
+	post_init();
 }
 
 static inline struct insert *insert_for_chunk(void *userptr);
 static void bitmap_delete(struct big_allocation *arena, void *userptr);
-
 static void 
-bitmap_insert(struct big_allocation *arena, void *new_userchunkaddr, size_t requested_size, const void *caller);
+bitmap_insert(struct big_allocation *arena, void *allocptr, size_t requested_size, const void *caller);
 
-void __liballocs_bitmap_insert(struct big_allocation *arena, void *new_userchunkaddr, size_t requested_size,
+void __generic_malloc_bitmap_insert(struct big_allocation *arena, void *allocptr, size_t requested_size,
 		const void *caller)
 {
-	bitmap_insert(arena, new_userchunkaddr, requested_size, caller);
+	bitmap_insert(arena, allocptr, requested_size, caller);
 }
-
 static unsigned long bitmap_insert_count;
 
-#define SHOULD_PROMOTE_TO_BIGALLOC(userchunk) \
-	(malloc_usable_size(userchunk) \
-				 > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072)
-/* We used to apply a hack which helps performance: if a malloc chunk begins
- * within a very short distance of a page boundary, pretend that it begins
- * on the page boundary, for the purposes of bigallocs. This is to ensure
- * that queries on the first page of a large object don't go down a slower
- * path. FIXME: I've a feeling it currently breaks some alloca cases.
- * ARGH. It actually breaks everything, because we need to undo the offset
- * when interpreting the block's uniqtype. Don't do it, for now. */
+#define SHOULD_PROMOTE_TO_BIGALLOC(userchunk, usable_size) \
+	((usable_size) > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072)
 
 // this is only used for promotion
 static struct big_allocation *fresh_big(void *allocptr, size_t bigalloc_size,
@@ -171,43 +139,20 @@ static struct big_allocation *fresh_big(void *allocptr, size_t bigalloc_size,
 		containing_bigalloc,
 		&__generic_malloc_allocator
 	);
-		
 	if (!b) abort();
 	return b;
 }
-
-static struct big_allocation *become_big(void *allocptr, size_t bigalloc_size, 
-	struct insert ins, struct big_allocation *containing_bigalloc)
-{
-	/* It's only legal call this if allocptr is already an allocation. */
-	return fresh_big(allocptr, bigalloc_size, containing_bigalloc);
-}
-
-static struct big_allocation *ensure_big(void *addr)
+static struct big_allocation *ensure_big(void *addr, size_t size)
 {
 	void *start;
 	struct big_allocation *maybe_already = __lookup_bigalloc_from_root(addr,
 		&__generic_malloc_allocator, &start);
 	if (maybe_already) return maybe_already;
-	
-	size_t size;
-	const void *site;
-	struct uniqtype *t;
-	liballocs_err_t err = __generic_heap_get_info(addr, __lookup_deepest_bigalloc(addr),
-		&t, &start, &size, &site);
-	if (err && err != &__liballocs_err_unrecognised_alloc_site) abort();
-	
-	return become_big(start, size, t ? (struct insert) {
-						.alloc_site_flag = 1,
-						.alloc_site = (uintptr_t) t
-					} : (struct insert) {
-						.alloc_site_flag = 0,
-						.alloc_site = (uintptr_t) site
-					}, __lookup_deepest_bigalloc(start));
+	return fresh_big(addr, size, __lookup_deepest_bigalloc(addr));
 }
 
 // FIXME: I think bigallocs can grow at the beginning as well as at the end.
-// That would really screw this up. Figure out whether that could affect us...
+// That would really screw up our bitmap. Figure out whether that could affect us...
 // only some bigallocs, like mapping sequences maybe, can do this.
 static void check_arena_bitmap(struct big_allocation *arena)
 {
@@ -244,51 +189,12 @@ struct big_allocation *arena_for_userptr(void *userptr)
 	struct big_allocation *b = __lookup_bigalloc_from_root_by_suballocator(userptr,
 		&__generic_malloc_allocator, NULL);
 	// what if we get no b? probably means we're not initialized, e.g. a malloc
-	// happening during __runt_files_init. What should happen? We should be using
-	// early malloc, I guess, but that doesn't solve the problem. We have no
-	// bigalloc, so we have no bitmap. I think we can 'remember' early_malloc's
-	// allocations and transfer them to the real bitmap wen we create that.
-	if (unlikely(!b && !__liballocs_systrap_is_initialized))
-	{
-		/* We might have just edged past the end of the brk bigalloc,
-		 * so search backwards. FIXME: this logic should be in the wild address
-		 * function, or something. But that is only called on queries, not on
-		 * bigalloc lookups or similar. Probably there should be a common
-		 * path. */
-		if (big_allocations[2].begin) // HACK: bigalloc 1 is the private malloc heap
-		{
-#define MAX_BRK_PAGES_TO_SEARCH 128
-			unsigned long search_pagenum = PAGENUM(userptr);
-			while (search_pagenum > 0 && pageindex[search_pagenum] == 0)
-			{
-				if (search_pagenum - PAGENUM(userptr) > MAX_BRK_PAGES_TO_SEARCH) break;
-				--search_pagenum;
-			}
-			if (pageindex[search_pagenum])
-			{
-				// have we found the brk allocator? test the highest address on the page
-				if (__lookup_bigalloc_from_root(
-						(void*)((search_pagenum<<LOG_PAGE_SIZE) + ((1ul<<LOG_PAGE_SIZE)-1)),
-						&__brk_allocator, NULL))
-				{
-					__brk_allocator_notify_brk(sbrk(0), __builtin_return_address(0));
-				}
-			}
-		}
-		else
-		{
-			// we have no bigallocs... nothing
-			__mmap_allocator_init();
-		}
-		// try again
-		b = __lookup_bigalloc_from_root_by_suballocator(userptr,
-			&__generic_malloc_allocator, NULL);
-	}
+	// happening during __runt_files_init.
 	assert(b);
 	return b;
 }
 
-static void bitmap_insert(struct big_allocation *arena, void *new_userchunkaddr, size_t caller_requested_size, const void *caller)
+static void bitmap_insert(struct big_allocation *arena, void *allocptr, size_t caller_requested_size, const void *caller)
 {
 	int lock_ret;
 	BIG_LOCK
@@ -306,28 +212,24 @@ static void bitmap_insert(struct big_allocation *arena, void *new_userchunkaddr,
 	assert(info->bitmap_base_addr == ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS)); // start of coverage (not of bitmap)
 	void *bitmap_end_addr = (void*)((uintptr_t) info->bitmap_base_addr +       // limit of coverage
 		((struct arena_bitmap_info *) arena->suballocator_private)->nwords * MALLOC_ALIGN * BITMAP_WORD_NBITS);
-	assert((uintptr_t) new_userchunkaddr <= (uintptr_t) bitmap_end_addr);
+	assert((uintptr_t) allocptr <= (uintptr_t) bitmap_end_addr);
 	
 #ifdef TRACE_HEAP_INDEX
 	/* Check the recently freed list for this pointer. Delete it if we find it. */
 	for (int i = 0; i < RECENTLY_FREED_SIZE; ++i)
 	{
-		if (recently_freed[i] == new_userchunkaddr)
+		if (recently_freed[i] == allocptr)
 		{ 
 			recently_freed[i] = NULL;
 			next_recently_freed_to_replace = &recently_freed[i];
 		}
 	}
 #endif
-
-	/* Make sure the parent bigalloc knows we're suballocating it. */
-	char *allocptr = new_userchunkaddr;
-	size_t alloc_usable_size = malloc_usable_size(new_userchunkaddr);
-	size_t caller_usable_size = caller_usable_size_for_chunk_and_malloc_usable_size(new_userchunkaddr,
+	size_t alloc_usable_size = malloc_usable_size(allocptr);
+	size_t caller_usable_size = caller_usable_size_for_chunk_and_malloc_usable_size(allocptr,
 			alloc_usable_size);
-	struct insert *p_insert = insert_for_chunk_and_caller_usable_size(new_userchunkaddr,
+	struct insert *p_insert = insert_for_chunk_and_caller_usable_size(allocptr,
 		caller_usable_size);
-
 	/* Populate our extra in-chunk fields */
 	p_insert->alloc_site_flag = 0U;
 	p_insert->alloc_site = (uintptr_t) caller;
@@ -355,7 +257,7 @@ static void bitmap_insert(struct big_allocation *arena, void *new_userchunkaddr,
 	struct big_allocation *this_chunk_bigalloc = NULL;
 	/* Metadata remains in the chunk */
 	if (caller_usable_size > biggest_allocated_object) biggest_allocated_object = caller_usable_size;
-	if (__builtin_expect(SHOULD_PROMOTE_TO_BIGALLOC(new_userchunkaddr), 0))
+	if (__builtin_expect(SHOULD_PROMOTE_TO_BIGALLOC(allocptr, alloc_usable_size), 0))
 	{
 		void *bigalloc_begin = allocptr;
 		assert(caller_requested_size <= alloc_usable_size - insert_size);
@@ -373,13 +275,13 @@ after_promotion:
 	/* DEBUGGING: sanity check entire bin */
 #ifdef TRACE_HEAP_INDEX
 	fprintf(stderr, "***[%09ld] Inserting user chunk at %p into bitmap at %p\n", 
-		bitmap_insert_count, new_userchunkaddr, bitmap);
+		bitmap_insert_count, allocptr, bitmap);
 #endif
 #if !defined(NDEBUG) || defined(TRACE_HEAP_INDEX)
 	++bitmap_insert_count;
 #endif
 	/* Add it to the bitmap.  */
-	bitmap_set_l(bitmap, (new_userchunkaddr - info->bitmap_base_addr) / MALLOC_ALIGN);
+	bitmap_set_l(bitmap, (allocptr - info->bitmap_base_addr) / MALLOC_ALIGN);
 
 	BIG_UNLOCK
 }
@@ -497,7 +399,7 @@ out:
 #endif
 	BIG_UNLOCK
 }
-void __liballocs_bitmap_delete(struct big_allocation *arena, void *userptr/*, size_t freed_usable_size*/)
+void __generic_malloc_bitmap_delete(struct big_allocation *arena, void *userptr/*, size_t freed_usable_size*/)
 {
 	bitmap_delete(arena, userptr);
 }
@@ -603,52 +505,6 @@ void post_nonnull_nonzero_realloc(void *userptr,
 
 	/* If the old alloc has gone away, do the malloc_hooks call the free hook on it? 
 	 * YES: it was done before the realloc, in the pre-hook. */
-}
-
-static inline unsigned char *rfind_nonzero_byte(unsigned char *one_beyond_start, unsigned char *last_good_byte)
-{
-#define SIZE (sizeof (unsigned long))
-#define IS_ALIGNED(p) (((uintptr_t)(p)) % (SIZE) == 0)
-
-	unsigned char *p = one_beyond_start;
-	/* Do the unaligned part */
-	while (!IS_ALIGNED(p))
-	{
-		--p;
-		if (p < last_good_byte) return NULL;
-		if (*p != 0) return p;
-	}
-	// now p is aligned and any address >=p is not the one we want
-	// (if we had an aligned pointer come in, we don't want it -- it's one_beyond_start)
-
-	/* Do the aligned part. */
-	while (p-SIZE >= last_good_byte)
-	{
-		p -= SIZE;
-		unsigned long v = *((unsigned long *) p);
-		if (v != 0ul)
-		{
-			// HIT -- but what is the highest nonzero byte?
-			int nlzb = nlzb64(v); // in range 0..7
-			return p + SIZE - 1 - nlzb;
-		}
-	}
-	// now we have tested all bytes from p upwards
-	// and p-SIZE < last_good_byte
-	long nbytes_remaining = p - last_good_byte;
-	assert(nbytes_remaining < SIZE);
-	assert(nbytes_remaining >= 0);
-	
-	/* Do the unaligned part */
-	while (p > last_good_byte)
-	{
-		--p;
-		if (*p != 0) return p;
-	}
-	
-	return NULL;
-#undef IS_ALIGNED
-#undef SIZE
 }
 
 static

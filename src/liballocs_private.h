@@ -186,8 +186,6 @@ char *__liballocs_private_strndup(const char *s, size_t n);
 extern _Bool __liballocs_systrap_is_initialized;
 void __liballocs_post_systrap_init(void);
 
-void __generic_malloc_allocator_init(void);
-
 /* If this weak function is defined, it will be called when we've loaded
  * the metadata for one object. */
 int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *meta_object_handle) __attribute__((weak));

@@ -329,7 +329,7 @@ fun(unsigned long      ,get_size,      arg(void *, obj))  /* size? */ \
 fun(const char *       ,get_name,      arg(void *, obj), arg(char *, namebuf), arg(size_t, buflen))  /* name? */ \
 fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
 fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct big_allocation *, maybe_alloc), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
-fun(struct big_allocation *,ensure_big,arg(void *, obj)) \
+fun(struct big_allocation *,ensure_big,arg(void *, obj), arg(size_t, sz)) \
 fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static*/ \
 fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
 fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
@@ -538,6 +538,10 @@ void __alloca_allocator_init(void);
 void __generic_malloc_allocator_init(void);
 void __generic_small_allocator_init(void);
 void __generic_uniform_allocator_init(void);
+
+void __generic_malloc_bitmap_insert(struct big_allocation *arena, void *allocptr, size_t requested_size,
+		const void *caller);
+void __generic_malloc_bitmap_delete(struct big_allocation *arena, void *userptr/*, size_t freed_usable_size*/);
 
 liballocs_err_t __generic_heap_get_info(void * obj, struct big_allocation *maybe_bigalloc, 
 	struct uniqtype **out_type, void **out_base, 

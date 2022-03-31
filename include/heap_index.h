@@ -70,7 +70,7 @@ struct insert *lookup_object_info(struct big_allocation *arena, void *mem,
  *    ____________________....________.._______..
  *   |____________________....______|_.._|_____..|
  *   |<----------------------------------------->|  malloc-usable
- *   |<------------------------------------>|       caller-usable
+ *   |<------------------------------------>|       caller-usable (this is not a mistake -- see below)
  *   |<---------------------------->|       |       requested by caller
  *                                  |<--->| |       padding to _Alignof (struct insert)  (maybe empty)
  *                                        |<-->|    size of insert

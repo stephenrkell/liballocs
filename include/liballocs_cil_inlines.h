@@ -39,8 +39,6 @@ void __alloca_allocator_notify(void *new_userchunkaddr,
 		unsigned long requested_size, unsigned long *frame_counter,
 		const void *caller, const void *caller_sp, const void *caller_bp);
 struct big_allocation;
-void __liballocs_bitmap_delete(struct big_allocation *, void*);
-void __liballocs_bitmap_insert(struct big_allocation *arena, void *new_userchunkaddr, size_t caller_requested_size, const void *caller);
 struct uniqtype; /* forward decl */
 
 /* This *must* match the size of 'struct extended_insert' in heap_index!

@@ -856,8 +856,46 @@ static struct big_allocation *find_bigalloc_recursive(struct big_allocation *sta
 	 * this address except via the pageindex. */
 	if (!start)
 	{
-		start = &big_allocations[pageindex[PAGENUM(addr)]];
-		if (start == &big_allocations[0]) return NULL;
+		bigalloc_num_t startnum = pageindex[PAGENUM(addr)];
+		if (!startnum)
+		{
+			if (unlikely(!startnum && !__liballocs_systrap_is_initialized))
+			{
+				/* Early on, we might have just edged past the end of the brk bigalloc,
+				 * so search backwards. You might think this logic should be in the wild
+				 * address function, but that is only called on queries, not on bigalloc
+				 * lookups. Probably there should be a common path. */
+				if (big_allocations[2].begin) // HACK: bigalloc 1 is the private malloc heap
+				{
+		#define MAX_BRK_PAGES_TO_SEARCH 128
+					unsigned long search_pagenum = PAGENUM(addr);
+					while (search_pagenum > 0 && pageindex[search_pagenum] == 0)
+					{
+						if (search_pagenum - PAGENUM(addr) > MAX_BRK_PAGES_TO_SEARCH) break;
+						--search_pagenum;
+					}
+					if (pageindex[search_pagenum])
+					{
+						// have we found the brk allocator? test the highest address on the page
+						if (__lookup_bigalloc_from_root(
+								(void*)((search_pagenum<<LOG_PAGE_SIZE) + ((1ul<<LOG_PAGE_SIZE)-1)),
+								&__brk_allocator, NULL))
+						{
+							__brk_allocator_notify_brk(sbrk(0), __builtin_return_address(0));
+						}
+					}
+				}
+				else
+				{
+					// we have no bigallocs... nothing
+					__mmap_allocator_init();
+				}
+				// try again
+				startnum = pageindex[PAGENUM(addr)];
+				if (!startnum) goto found_nothing;
+			}
+		}
+		start = &big_allocations[startnum];
 		while (start->parent) start = start->parent;
 	}
 
@@ -878,6 +916,7 @@ static struct big_allocation *find_bigalloc_recursive(struct big_allocation *sta
 	}
 	
 	/* We didn't find an overlapping child, so we fail. */
+found_nothing:
 	return NULL;
 }
 static struct big_allocation *find_bigalloc_under_pageindex(const void *addr, struct allocator *a)

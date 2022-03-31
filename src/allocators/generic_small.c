@@ -445,13 +445,14 @@ int __index_small_alloc(void *ptr, int level, unsigned size_bytes)
 		 * This means we need to promote our immediately containing alloc.
 		 * We need to get its info first. */
 		void *containing_alloc_base;
+		size_t sz = (size_t) -1;
 		liballocs_err_t err = a->get_info(ptr, /* maybe_the_alloc? NO GAH GAH */ /*container*/ NULL,
-			NULL, &containing_alloc_base, NULL, NULL);
+			NULL, &containing_alloc_base, &sz, NULL);
 		if (err && err != &__liballocs_err_unrecognised_alloc_site) abort();
 		// HMM. We're asking generic_malloc to ensure its own arena base (bigalloc_base) is big.
 		// That won't work. Our chunk *should* be a real malloc alloc and it's not.
 		// But also we're reutrning the wrong bigalloc base.
-		container = a->ensure_big(containing_alloc_base);
+		container = a->ensure_big(containing_alloc_base, sz);
 		// we will set up the chunk below
 	}
 	/* Else we hit the parent allocation, and it's already a bigalloc. */
