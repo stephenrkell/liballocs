@@ -31,7 +31,7 @@ my_libdir = $(libdir)
 my_lib_DATA = lib/interp-pad.o
 
 liballocs_includedir = $(includedir)/liballocs
-liballocs_include_HEADERS = include/heap_index.h include/malloc_usable_size_hack.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/memtable.h include/fake-libunwind.h include/allocsites.h
+liballocs_include_HEADERS = include/heap_index.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/memtable.h include/fake-libunwind.h include/allocsites.h
 
 bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types
 #tools/objdumpallocs-llvm
