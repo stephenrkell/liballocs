@@ -18,9 +18,7 @@
 #define _GNU_SOURCE
 
 #include <sys/types.h>
-/* liballocs definitely defines these internally */
-size_t malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
-size_t __real_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
+size_t malloc_usable_size(void *ptr);
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -30,19 +28,10 @@ size_t __real_malloc_usable_size(void *ptr) __attribute__((visibility("protected
 #include <errno.h>
 #include <assert.h>
 #include <pthread.h>
-#ifdef MALLOC_USABLE_SIZE_HACK
-#include <dlfcn.h>
-extern "C" {
-static inline size_t malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
-}
-#else
-size_t malloc_usable_size(void *ptr);
-#endif
 #include "liballocs_private.h"
 #include "relf.h"
 
 #define ALLOC_EVENT_QUALIFIERS __attribute__((visibility("hidden")))
-
 #include "alloc_events.h"
 
 #include "malloc-meta.h"
@@ -79,10 +68,6 @@ int __currently_freeing;
 int __currently_allocating;
 #endif
 
-#ifdef MALLOC_USABLE_SIZE_HACK
-#include "malloc_usable_size_hack.h"
-#endif
-
 #ifdef TRACE_HEAP_INDEX
 /* Size the circular buffer of recently freed chunks */
 #define RECENTLY_FREED_SIZE 100
@@ -97,22 +82,6 @@ static void **next_recently_freed_to_replace = &recently_freed[0];
 unsigned long biggest_allocated_object __attribute__((visibility("protected")));
 unsigned long biggest_unpromoted_object __attribute__((visibility("protected")));
 int safe_to_call_malloc;
-
-#ifndef LOOKUP_CACHE_SIZE
-#define LOOKUP_CACHE_SIZE 4
-#endif
-
-struct lookup_cache_entry;
-static void install_cache_entry(void *object_start,
-	size_t usable_size, unsigned short depth, _Bool is_deepest,
-	struct insert *insert);
-static void invalidate_cache_entries(void *object_start,
-	unsigned short depths_mask,
-	struct insert *ins, signed nentries);
-static int cache_clear_deepest_flag_and_update_ins(void *object_start,
-	unsigned short depths_mask,
-	struct insert *ins, signed nentries,
-	struct insert *new_ins);
 
 /* The (unsigned) -1 conversion here provokes a compiler warning,
  * which we suppress. There are two ways of doing this.
@@ -456,7 +425,6 @@ static void bitmap_delete(struct big_allocation *arena, void *userptr/*, size_t 
 	 */
 
 	assert(userptr != NULL);
-	// cache invalidation
 	void *allocptr = userptr;
 	__liballocs_uncache_all(allocptr, malloc_usable_size(allocptr));
 	
@@ -527,8 +495,6 @@ out:
 		next_recently_freed_to_replace = &recently_freed[0];
 	}
 #endif
-	invalidate_cache_entries(userptr, (unsigned short) -1, NULL, -1);
-	
 	BIG_UNLOCK
 }
 void __liballocs_bitmap_delete(struct big_allocation *arena, void *userptr/*, size_t freed_usable_size*/)
@@ -685,107 +651,8 @@ static inline unsigned char *rfind_nonzero_byte(unsigned char *one_beyond_start,
 #undef SIZE
 }
 
-#ifndef LOOKUP_CACHE_SIZE
-#define LOOKUP_CACHE_SIZE 4
-#endif
-struct lookup_cache_entry
-{
-	void *object_start;
-	size_t usable_size:60;
-	unsigned short depth:3;
-	unsigned short is_deepest:1;
-	struct insert *insert;
-} lookup_cache[LOOKUP_CACHE_SIZE];
-static struct lookup_cache_entry *next_to_evict = &lookup_cache[0];
-
-static void check_cache_sanity(void)
-{
-#ifndef NDEBUG
-	for (int i = 0; i < LOOKUP_CACHE_SIZE; ++i)
-	{
-		assert(!lookup_cache[i].object_start 
-				|| (INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert)
-					&& lookup_cache[i].depth <= 2));
-	}
-#endif
-}
-
-static void install_cache_entry(void *object_start,
-	size_t object_size,
-	unsigned short depth, 
-	_Bool is_deepest,
-	struct insert *insert)
-{
-	check_cache_sanity();
-	/* our "insert" should always be the insert that describes the object,
-	 * NOT one that chains into the suballocs table. */
-	assert(INSERT_DESCRIBES_OBJECT(insert));
-	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
-	*next_to_evict = (struct lookup_cache_entry) {
-		object_start, object_size, depth, is_deepest, insert
-	}; // FIXME: thread safety
-	// don't immediately evict the entry we just created
-	next_to_evict = &lookup_cache[(next_to_evict + 1 - &lookup_cache[0]) % LOOKUP_CACHE_SIZE];
-	assert(next_to_evict >= &lookup_cache[0] && next_to_evict < &lookup_cache[LOOKUP_CACHE_SIZE]);
-	check_cache_sanity();
-}
-
-static void invalidate_cache_entries(void *object_start,
-	unsigned short depths_mask,
-	struct insert *ins,
-	signed nentries)
-{
-	unsigned ninvalidated = 0;
-	check_cache_sanity();
-	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
-	{
-		if ((!object_start || object_start == lookup_cache[i].object_start)
-				&& (!ins || ins == lookup_cache[i].insert)
-				&& (0 != (1<<lookup_cache[i].depth & depths_mask))) 
-		{
-			lookup_cache[i] = (struct lookup_cache_entry) {
-				NULL, 0, 0, 0, NULL
-			};
-			next_to_evict = &lookup_cache[i];
-			check_cache_sanity();
-			++ninvalidated;
-			if (nentries > 0 && ninvalidated >= nentries) return;
-		}
-	}
-	check_cache_sanity();
-}
-
-static int cache_clear_deepest_flag_and_update_ins(void *object_start,
-	unsigned short depths_mask,
-	struct insert *ins,
-	signed nentries,
-	struct insert *new_ins)
-{
-	unsigned ncleared = 0;
-	// we might be used to restore the cache invariant, so don't check
-	// check_cache_sanity();
-	assert(ins);
-	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
-	{
-		if ((!object_start || object_start == lookup_cache[i].object_start)
-				&& (ins == lookup_cache[i].insert)
-				&& (0 != (1<<lookup_cache[i].depth & depths_mask))) 
-		{
-			lookup_cache[i].is_deepest = 0;
-			lookup_cache[i].insert = new_ins;
-			check_cache_sanity();
-			++ncleared;
-			if (nentries > 0 && ncleared >= nentries) return ncleared;
-		}
-	}
-	check_cache_sanity();
-	return ncleared;
-}
-
 static
 struct insert *lookup(struct big_allocation *arena, void *mem, void **out_object_start);
-static
-struct insert *lookup_nocache(struct big_allocation *arena, void *mem, void **out_object_start);
 
 static 
 struct insert *object_insert(const void *obj, struct insert *ins)
@@ -793,7 +660,7 @@ struct insert *object_insert(const void *obj, struct insert *ins)
 	return ins;
 }
 
-/* A client-friendly lookup function with cache. */
+/* A client-friendly lookup function. */
 struct insert *lookup_object_info(struct big_allocation *arena,
 	void *mem, void **out_object_start, size_t *out_object_size, void **ignored)
 {
@@ -803,78 +670,20 @@ struct insert *lookup_object_info(struct big_allocation *arena,
 	   in the fast-path functions, we bail here.  */
 	if (!big_allocations[1].begin) return NULL;
 	
-	/* Try matching in the cache. NOTE: how does this impact bigalloc and deep-indexed 
-	 * entries? In all cases, we cache them here. We also keep a "is_deepest" flag
-	 * which tells us (conservatively) whether it's known to be the deepest entry
-	 * indexing that storage. In this function, we *only* return a cache hit if the 
-	 * flag is set. (In lookup(), this logic is different.) */
-	check_cache_sanity();
 	void *l01_object_start = NULL;
 	struct insert *found_l01 = NULL;
-	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
-	{
-		if (lookup_cache[i].object_start && 
-				(char*) mem >= (char*) lookup_cache[i].object_start && 
-				(char*) mem < (char*) lookup_cache[i].object_start + lookup_cache[i].usable_size)
-		{
-			// possible hit
-			if (lookup_cache[i].depth == 1 || lookup_cache[i].depth == 0)
-			{
-				l01_object_start = lookup_cache[i].object_start;
-				found_l01 = lookup_cache[i].insert;
-			}
-			
-			if (lookup_cache[i].is_deepest)
-			{
-				// HIT!
-				assert(lookup_cache[i].object_start);
-	#if defined(TRACE_DEEP_HEAP_INDEX) || defined(TRACE_HEAP_INDEX)
-				fprintf(stderr, "Cache hit at pos %d (%p) with alloc site %p\n", i, 
-						lookup_cache[i].object_start, (void*) (uintptr_t) lookup_cache[i].insert->alloc_site);
-				fflush(stderr);
-	#endif
-				assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
-
-				if (out_object_start) *out_object_start = lookup_cache[i].object_start;
-				if (out_object_size) *out_object_size = lookup_cache[i].usable_size;
-				// ... so ensure we're not about to evict this guy
-				if (next_to_evict - &lookup_cache[0] == i)
-				{
-					next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
-					assert(next_to_evict - &lookup_cache[0] < LOOKUP_CACHE_SIZE);
-				}
-				assert(INSERT_DESCRIBES_OBJECT(lookup_cache[i].insert));
-				return lookup_cache[i].insert;
-			}
-		}
-	}
-	
-	// didn't hit cache, but we may have seen the l01 entry
 	struct insert *found;
 	void *object_start;
 	unsigned short depth = 1;
-	if (found_l01)
-	{
-		/* CARE: the cache's p_ins points to the alloc's insert, even if it's been
-		 * moved (in the suballocated case). So we re-lookup the physical insert here. */
-		found = insert_for_chunk(l01_object_start);
-	}
-	else
-	{
-		found = lookup_nocache(arena, mem, &l01_object_start);
-	}
+	found = lookup(arena, mem, &l01_object_start);
 	size_t size;
-
 	if (found)
 	{
 		assert(l01_object_start);
 		size = usersize(l01_object_start);
 		object_start = l01_object_start;
 		_Bool is_deepest = INSERT_DESCRIBES_OBJECT(found);
-		
-		// cache the l01 entry
-		install_cache_entry(object_start, size, 1, is_deepest, object_insert(object_start, found));
-		
+
 		if (!is_deepest)
 		{
 			assert(l01_object_start);
@@ -890,9 +699,6 @@ struct insert *lookup_object_info(struct big_allocation *arena,
 				object_start = deep_object_start;
 				found = found_deeper;
 				size = deep_object_size;
-				// cache this too
-				//g_entry(object_start, size, 2 /* FIXME */, 1 /* FIXME */, 
-				//	found);
 			}
 			else
 			{
@@ -913,43 +719,6 @@ struct insert *lookup_object_info(struct big_allocation *arena,
 
 static
 struct insert *lookup(struct big_allocation *arena, void *mem, void **out_object_start) 
-{
-	// first, try the cache
-	check_cache_sanity();
-	for (unsigned i = 0; i < LOOKUP_CACHE_SIZE; ++i)
-	{
-		if (lookup_cache[i].object_start && 
-				lookup_cache[i].depth <= 1 && 
-				(char*) mem >= (char*) lookup_cache[i].object_start && 
-				(char*) mem < (char*) lookup_cache[i].object_start + lookup_cache[i].usable_size)
-		{
-			// HIT!
-			struct insert *real_ins = object_insert(lookup_cache[i].object_start, lookup_cache[i].insert);
-#if defined(TRACE_DEEP_HEAP_INDEX) || defined(TRACE_HEAP_INDEX)
-			fprintf(stderr, "Cache[l01] hit at pos %d (%p) with alloc site %p\n", i, 
-					lookup_cache[i].object_start, (void*) (uintptr_t) real_ins->alloc_site);
-			fflush(stderr);
-#endif
-			assert(INSERT_DESCRIBES_OBJECT(real_ins));
-			
-			if (out_object_start) *out_object_start = lookup_cache[i].object_start;
-
-			// ... so ensure we're not about to evict this guy
-			if (next_to_evict - &lookup_cache[0] == i)
-			{
-				next_to_evict = &lookup_cache[(i + 1) % LOOKUP_CACHE_SIZE];
-				assert(next_to_evict - &lookup_cache[0] < LOOKUP_CACHE_SIZE);
-			}
-			// return the possibly-SUBALLOC insert -- not the one from the cache
-			return insert_for_chunk(lookup_cache[i].object_start);
-		}
-	}
-	
-	return lookup_nocache(arena, mem, out_object_start);
-}
-
-static
-struct insert *lookup_nocache(struct big_allocation *arena, void *mem, void **out_object_start)
 {
 	size_t object_minimum_size = 0;
 	struct arena_bitmap_info *info = arena->suballocator_private;

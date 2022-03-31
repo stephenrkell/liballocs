@@ -961,11 +961,11 @@ int ( __attribute__((constructor(103))) __liballocs_global_init)(void)
 	const char *debug_level_str = getenv("LIBALLOCS_DEBUG_LEVEL");
 	if (debug_level_str) __liballocs_debug_level = atoi(debug_level_str);
 
-	if (!orig_dlopen && safe_to_call_malloc) // might have been done by a pre-init call to our preload dlopen
+	if (!orig_dlopen) // might have been done by a pre-init call to our preload dlopen
 	{
-		orig_dlopen = dlsym(RTLD_NEXT, "dlopen");
+		orig_dlopen = fake_dlsym(RTLD_NEXT, "dlopen");
 		assert(orig_dlopen);
-		orig_memmove = dlsym(RTLD_NEXT, "memmove");
+		orig_memmove = fake_dlsym(RTLD_NEXT, "memmove");
 		assert(orig_memmove);
 	}
 

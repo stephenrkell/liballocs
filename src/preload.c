@@ -55,7 +55,6 @@ int sigaction(int signum, const struct __libc_sigaction *act,
 /* We should be safe to use it once malloc is initialized. */
 // #define safe_to_use_bigalloc (__liballocs_is_initialized)
 #define safe_to_use_bigalloc (pageindex)
-#define safe_to_call_dlsym (safe_to_call_malloc)
 
 /* some signalling to malloc hooks */
 _Bool __avoid_libdl_calls;

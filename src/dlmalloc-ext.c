@@ -40,6 +40,9 @@ static void set_metadata(void *ptr, size_t size, const void *allocsite)
 	// FIXME: set the insert
 	// FIXME: this is just index_insert. Make it so
 }
+
+// FIXME: for meta-completeness, our allocations should have an insert.
+
 __attribute__((visibility("hidden")))
 void __private_malloc_set_metadata(void *ptr, size_t size, const void *allocsite)
 {
@@ -59,39 +62,25 @@ static void clear_metadata(void *ptr)
 	// FIXME: this is just index_delete. Make it so.
 }
 
-/* We keep these thread-local flags to avoid reentrancy.
- * But that is no longer a risk, because our dlmalloc does not mmap,
- * so there is no risk it will trigger another private malloc call. */
-_Bool __thread __private_malloc_active __attribute__((visibility("hidden")));
 void *__wrap_dlmalloc(size_t size)
 {
-	__private_malloc_active = 1;
 	void *ret = __real_dlmalloc(size);
 	if (ret) set_metadata(ret, size, __builtin_return_address(0));
-	__private_malloc_active = 0;
 	return ret;
 }
-_Bool __thread __private_calloc_active __attribute__((visibility("hidden")));
 void *__wrap_dlcalloc(size_t nmemb, size_t size)
 {
-	__private_calloc_active = 1;
 	void *ret = __real_dlcalloc(nmemb, size);
 	if (ret) set_metadata(ret, size, __builtin_return_address(0));
-	__private_calloc_active = 0;
 	return ret;
 }
-_Bool __thread __private_free_active __attribute__((visibility("hidden")));
 void __wrap_dlfree(void *ptr)
 {
-	__private_free_active = 1;
 	clear_metadata(ptr);
 	__real_dlfree(ptr);
-	__private_free_active = 0;
 }
-_Bool __thread __private_realloc_active __attribute__((visibility("hidden")));
 void *__wrap_dlrealloc(void *ptr, size_t size)
 {
-	__private_realloc_active = 1;
 	if (ptr) clear_metadata(ptr);
 	// don't mess with the size-zero case, because it means free()
 	if (!size) { __wrap_dlfree(ptr); return NULL; }
@@ -99,34 +88,24 @@ void *__wrap_dlrealloc(void *ptr, size_t size)
 	// FIXME: better to copy the old metadata, not set new?
 	// FIXME: all this should be common to generic-malloc.c, extracted/macroised somehow
 	if (ret && size > 0) set_metadata(ret, size, __builtin_return_address(0));
-	__private_realloc_active = 0;
 	return ret;
 }
-_Bool __thread __private_memalign_active __attribute__((visibility("hidden")));
 void *__wrap_dlmemalign(size_t boundary, size_t size)
 {
-	__private_memalign_active = 1;
 	void *ret = __real_dlmemalign(boundary, size);
 	if (ret) set_metadata(ret, size, __builtin_return_address(0));
-	__private_memalign_active = 0;
 	return ret;
 }
-_Bool __thread __private_posix_memalign_active __attribute__((visibility("hidden")));
 int __wrap_dlposix_memalign(void **memptr, size_t alignment, size_t size)
 {
-	__private_posix_memalign_active = 1;
 	int ret = __real_dlposix_memalign(memptr, alignment, size);
 	if (ret) set_metadata(*memptr, size, __builtin_return_address(0));
-	__private_posix_memalign_active = 0;
 	return ret;
 }
 
-_Bool __thread __private_malloc_usable_size_active __attribute__((visibility("hidden")));
 size_t __wrap_dlmalloc_usable_size(void *userptr)
 {
-  __private_malloc_usable_size_active = 1;
   size_t ret = __real_dlmalloc_usable_size(userptr);
-  __private_malloc_usable_size_active = 0;
   return ret - sizeof (struct insert);
 }
 
