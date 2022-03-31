@@ -4,9 +4,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include "liballocs_private.h"
 #include "malloc-meta.h"
 #include "pageindex.h"
+#include "vas.h"
 
 /* Here we lightly extend dlmalloc so that we can probe whether a chunk
  * belongs to it or not. We use liballocs's bigallocs to do this. */
@@ -18,52 +20,10 @@ void *__real_dlmemalign(size_t boundary, size_t size);
 int __real_dlposix_memalign(void **memptr, size_t alignment, size_t size);
 size_t __real_dlmalloc_usable_size(void *userptr);
 
-static
+__attribute__((visibility("hidden")))
 struct allocator __private_malloc_allocator = (struct allocator) {
 	.name = "liballocs private malloc"
 };
-
-#define PRIVATE_MALLOC_ALIGN 16
-#define LOG_PRIVATE_MALLOC_ALIGN 4
-
-static void check_bitmap(struct big_allocation *b)
-{
-	size_t current_meta_size;
-	if (b->suballocator)
-	{
-		assert(b->suballocator == &__private_malloc_allocator);
-		current_meta_size = __real_dlmalloc_usable_size(b->suballocator_private);
-	}
-	else
-	{
-		b->suballocator = &__private_malloc_allocator;
-		b->suballocator_private = NULL;
-		current_meta_size = 0;
-	}
-	// now check that the bitmap is big enough
-	size_t range_size_bytes = (uintptr_t) b->end - (uintptr_t) b->begin;
-	size_t bitmap_alloc_size_bytes = DIVIDE_ROUNDING_UP(
-		DIVIDE_ROUNDING_UP(range_size_bytes, PRIVATE_MALLOC_ALIGN),
-		8
-	) + sizeof (struct insert);
-	if (current_meta_size < bitmap_alloc_size_bytes)
-	{
-		/* We also allocate the bitmap using the same allocator.
-		 * Is this a recipe for disaster, e.g. if that triggers
-		 * another mmap? *That* may trigger a use of the static
-		 * pool of mapping_sequences, but should be OK. */
-		b->suballocator_private = __real_dlrealloc(b->suballocator_private,
-			bitmap_alloc_size_bytes);
-		// FIXME: set the insert, if we really care
-		// FIXME: this is an interesting case of an unclassifiable allocation site,
-		// by our current 'dumpallocs.ml' classifier. It is sized (syntactically)
-		// in bytes but allocated (semantically) in bitmap_word_t units, and rests
-		// on the assumption that when we scale down a whole number of pages,
-		// we get some whole number of bitmap_word_ts, but we don't care about
-		// the actual number... we care only that we have one bit per
-		// PRIVATE_MALLOC_ALIGN bytes.
-	}
-}
 
 /* Keeping metadata for the chunks we allocate ourselves is good for
  * our meta-completeness; we do it mostly like we would for an ordinary
@@ -84,7 +44,6 @@ static struct early_chunk_meta {
 static void set_metadata_inner(struct big_allocation *b,
 	void *ptr, size_t size, const void *allocsite)
 {
-	check_bitmap(b);
 	assert(0 == 
 		((uintptr_t) ptr - (uintptr_t) b->begin) % PRIVATE_MALLOC_ALIGN
 	);
@@ -97,7 +56,7 @@ static void set_metadata_inner(struct big_allocation *b,
 }
 static void transfer_early_chunks(struct big_allocation *b)
 {
-	// transfer the early chunks
+	// transfer the early chunks into the bitmap we are using for their starts
 	for (struct early_chunk_meta *p = &early_chunks_meta[0];
 				p != p_first_free_early_chunk_meta;
 				++p)
@@ -124,11 +83,32 @@ static void set_metadata(void *ptr, size_t size, const void *allocsite)
 			if (early_chunks_meta[0].chunk_addr_shr) transfer_early_chunks(b);
 			set_metadata_inner(b, ptr, size, allocsite);
 		}
-		else
+		else if (!b)
 		{
+			/* Maybe systrap is done now, but it wasn't when we last called?
+			 * HMM, if systrap is done then we'll have a mapping bigalloc.
+			 */
 			/* dlmalloc might have made a new arena mmap, which we didn't trap
 			 * because... WHY? It should call our mmap wrapper in preload.c,
-			 * which should record the mapping. */
+			 * which should record the mapping.
+			 *
+			 * In the malloc-in-exe test case we are actually getting a pointer
+			 * into sbrk(). This shouldn't happen because our dlmalloc does
+			 * not use sbrk.
+			 *
+			 * Well, it might not be sbrk. AH, it isn't!
+			 * It is after our *auxiliary* mappings of the executable.
+			 *
+			 * It's confusing because there are two copies of dlmalloc
+			 * in this test case.
+			 *
+			 * What's happening is that the mmap happened when systrapping
+			 * was not enabled. But we missed it wen we were walking the
+			 * mappings because *we were walking the mappings when it happened!*. */
+			abort();
+		}
+		else /* this is the really wacky case: top-level is not mmap */
+		{
 			abort();
 		}
 	}
@@ -236,6 +216,7 @@ size_t __wrap_dlmalloc_usable_size(void *userptr)
   return ret - sizeof (struct insert);
 }
 
+/* This is used by libmallochooks. That is a giant HACK. */
 _Bool __private_malloc_is_chunk_start(void *ptr) __attribute__((visibility("hidden")));
 _Bool __private_malloc_is_chunk_start(void *ptr)
 {
@@ -249,4 +230,34 @@ _Bool __private_malloc_is_chunk_start(void *ptr)
 	      && b->suballocator == &__private_malloc_allocator) return 1;
 	// FIXME: actually check the chunk-start thing, duh
 	return 0;
+}
+
+void *__private_malloc_heap_base __attribute__((visibility("hidden")));
+void *__private_malloc_heap_limit __attribute__((visibility("hidden")));
+static void *emulated_curbrk;
+void *emulated_sbrk(intptr_t increment)
+{
+	if (!emulated_curbrk) emulated_curbrk = __private_malloc_heap_base;
+	if (increment > 0)
+	{
+		// we only return an error if we can't allocate any more at all
+		// FIXME: is this correct? matches my memory of glibc's logic...
+		if (emulated_curbrk == __private_malloc_heap_limit)
+		{
+			errno = ENOMEM;
+			return (void*) -1;
+		}
+		emulated_curbrk = MINPTR(
+			__private_malloc_heap_limit,
+			(void*)((uintptr_t) emulated_curbrk + increment)
+		);
+	}
+	else if (increment < 0)
+	{
+		emulated_curbrk = MAXPTR(
+			__private_malloc_heap_base,
+			(void*)((uintptr_t) emulated_curbrk + increment)
+		);
+	}
+	return emulated_curbrk;
 }

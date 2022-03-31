@@ -194,31 +194,48 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		errno = -(int) (size_t) ret;
 		ret = MAP_FAILED;
 	}
-
-	/* We only start hooking mmap after we read /proc, which is also when we 
-	 * enable the systrap stuff. */
-	if (!__liballocs_systrap_is_initialized || length > BIGGEST_BIGALLOC
-		//|| 
-		//	(is_self_call(__builtin_return_address(0))
-		//	&& )
-		// ... actually, observing our own mmaps might be... okay? CARE, because
-		// the mmap allocator does call malloc itself, for its metadata, so we might
-		// become reentrant at this point, which we *don't* want. Note that we're
-		// not in a signal handler here; this path is only for LD_PRELOAD-based hooking,
-		// and we don't trap our own mmap syscalls, so things are slightly less hairy than
-		// they otherwise might be.
-		// Current approach: mmap allocator tests for private malloc active, and 
-		// just does a more minimalist metadata-free bigalloc creation in such cases.
-		// FIXME: whatever we decide to do here, also do it for mremap and munmap
-	)
+	if (length > BIGGEST_BIGALLOC)
 	{
 		// skip hooking logic
 		return ret;
 	}
-	
+
+	/* We want to hook our own mmaps. However,
+	 *
+	 * - The mmap allocator does call malloc itself, for its metadata, so we might
+	 * become reentrant at this point, which we *don't* want. E.g. since
+	 * right now we haven't yet returned the mapping we just made
+	 * to the malloc that is calling us, doing another private malloc
+	 * will reentrantly do another mmap.
+	 *
+	 * Current approach: mmap allocator tests for private malloc active, and 
+	 * just does a more minimalist metadata-free bigalloc creation in such cases.
+	 * FIXME: whatever we decide to do here, also do it for mremap and munmap
+	 *
+	 * Note that we're
+	 * not in a signal handler here; this path is only for LD_PRELOAD-based hooking,
+	 * and we don't trap our own mmap syscalls, so things are slightly less hairy than
+	 * they otherwise might be.
+	 *
+	 * However, what about early calls? When !__liballocs_systrap_is_initialized,
+	 * we will have to later do a /proc/.../maps pass to fill in bigallocs. If we
+	 * hook our own calls now, we will get finer-grained partial information
+	 * which we then can't reconcile with the coarser-grained full information
+	 * that we get when walking /proc. E.g. the /proc line will merge two adjacent
+	 * anonymous mappings even though one of ours will have 'caller' set so will
+	 * not be mergeable by the mapping_sequence code.
+	 *
+	 * We want to trap the early mmap self-calls because we need to see the bigalloc
+	 * that our private malloc
+	 */
+
 	if (!MMAP_RETURN_IS_ERROR(ret))
 	{
-		__mmap_allocator_notify_mmap(ret, addr, length, prot, flags, fd, offset, __builtin_return_address(0));
+		if (!__liballocs_systrap_is_initialized) return ret; // HACK
+		(__liballocs_systrap_is_initialized
+			? __mmap_allocator_notify_mmap
+			: __mmap_allocator_notify_mmap/*_no_private_malloc*/)
+		(ret, addr, length, prot, flags, fd, offset, __builtin_return_address(0));
 	}
 	else
 	{

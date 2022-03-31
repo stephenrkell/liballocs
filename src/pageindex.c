@@ -198,6 +198,60 @@ void (__attribute__((constructor(101))) __pageindex_init)(void)
 			(void*) (MAXIMUM_USER_ADDRESS + 1), (const void *) 0x410000000000ul);
 		if (pageindex == MAP_FAILED) abort();
 		debug_printf(3, "pageindex at %p\n", pageindex);
+
+		/* For now, make our heap region quite large, but not so large that
+		 * we wouldn't want it in our pageindex. FIXME: We want to downscale
+		 * this by defining *two* private mallocs: one for stuff that is
+		 * O(nbigallocs) and one for stuff that is O(usedmem). The theory
+		 * is that only the nbigallocs one needs to have a 'no-mmap' property. */
+		size_t heapsz = 1*1024*1024*1024ul;
+		/* 1GB is 256K pages, or 512kB of shorts in the pageindex. It's still too
+		 * much, but fine for now. */
+		int prot = PROT_READ|PROT_WRITE;
+		int flags = MAP_ANONYMOUS|MAP_NORESERVE|MAP_PRIVATE;
+		__private_malloc_heap_base = mmap(NULL, heapsz, prot, flags, -1, 0);
+	mmap_return_site:
+		if (MMAP_RETURN_IS_ERROR(__private_malloc_heap_base)) abort();
+		__private_malloc_heap_limit = (void*)((uintptr_t) __private_malloc_heap_base
+			+ heapsz);
+		/* It's just a mapping sequence, init. */
+		struct mapping_sequence seq = (struct mapping_sequence) {
+			.begin = __private_malloc_heap_base,
+			.end =  __private_malloc_heap_limit,
+			.filename = NULL,
+			.nused = 1,
+			.mappings = { [0] = (struct mapping_entry) {
+				.begin = __private_malloc_heap_base,
+				.end = __private_malloc_heap_limit,
+				.prot = prot,
+				.flags = flags & ~MAP_NORESERVE,
+				.offset = 0,
+				.is_anon = 1,
+				.caller = /* &&mmap_return_site */ 0
+			} }
+		};
+		struct big_allocation *b = __add_mapping_sequence_bigalloc_nomalloc(&seq);
+		/* What about the bitmap? 1GB of 16B regions is 64Mbits or 8Mbytes.
+		 * We don't want to spend that much up-front. But we don't have to!
+		 * We allocate the bitmap in our own heap, which is MAP_NORESERVE. */
+		b->suballocator = &__private_malloc_allocator;
+		size_t range_size_bytes = (uintptr_t) b->end - (uintptr_t) b->begin;
+		size_t bitmap_alloc_size_bytes = DIVIDE_ROUNDING_UP(
+			DIVIDE_ROUNDING_UP(range_size_bytes, PRIVATE_MALLOC_ALIGN),
+			8) + sizeof (struct insert);
+		b->suballocator_private = __private_malloc(bitmap_alloc_size_bytes);
+		assert((uintptr_t) b->suballocator_private >= (uintptr_t) __private_malloc_heap_base);
+		assert((uintptr_t) b->suballocator_private + bitmap_alloc_size_bytes
+			< (uintptr_t) __private_malloc_heap_limit);
+		// FIXME: set the insert, if we really care
+		// FIXME: this is an interesting case of an unclassifiable allocation site,
+		// by our current 'dumpallocs.ml' classifier. It is sized (syntactically)
+		// in bytes but allocated (semantically) in bitmap_word_t units, and rests
+		// on the assumption that when we scale down a whole number of pages,
+		// we get some whole number of bitmap_word_ts, but we don't care about
+		// the actual number... we care only that we have one bit per
+		// PRIVATE_MALLOC_ALIGN bytes.
+
 	}
 }
 

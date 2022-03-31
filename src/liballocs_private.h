@@ -88,6 +88,7 @@ struct mapping_sequence
 _Bool __augment_mapping_sequence(struct mapping_sequence *cur, 
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename,
 	void *caller);
+struct big_allocation *__add_mapping_sequence_bigalloc_nomalloc(struct mapping_sequence *seq);
 
 extern struct big_allocation *executable_mapping_bigalloc;
 extern struct big_allocation *executable_file_bigalloc;
@@ -118,6 +119,12 @@ extern _Bool __thread __private_malloc_usable_size_active;
 void *__private_malloc(size_t);
 void *__private_realloc(void*, size_t);
 void __private_free(void *);
+void __private_malloc_init(void) __attribute__((constructor(101)));
+extern void *__private_malloc_heap_base;
+extern void *__private_malloc_heap_limit;
+extern struct allocator __private_malloc_allocator;
+#define PRIVATE_MALLOC_ALIGN 16
+#define LOG_PRIVATE_MALLOC_ALIGN 4
 
 extern FILE *stream_err;
 FILE *get_stream_err(void);

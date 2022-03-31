@@ -286,7 +286,7 @@ struct big_allocation *arena_for_userptr(void *userptr)
 		 * function, or something. But that is only called on queries, not on
 		 * bigalloc lookups or similar. Probably there should be a common
 		 * path. */
-		if (big_allocations[1].begin)
+		if (big_allocations[2].begin) // HACK: bigalloc 1 is the private malloc heap
 		{
 #define MAX_BRK_PAGES_TO_SEARCH 128
 			unsigned long search_pagenum = PAGENUM(userptr);

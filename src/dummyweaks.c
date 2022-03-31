@@ -389,3 +389,5 @@ struct liballocs_err __liballocs_err_unrecognised_static_object
  = { "unrecognised static object" };
 struct liballocs_err __liballocs_err_object_of_unknown_storage
  = { "object of unknown storage" };
+
+void *emulated_sbrk(long int n) { return (void*)-1; }

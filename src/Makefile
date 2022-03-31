@@ -216,7 +216,7 @@ nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
 # of which libsystrap already has a copy, so borrow that (HACK)
 vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: actually in trap-syscalls but should be in libsystrap
 dlmalloc.a: dlmalloc.o
-dlmalloc.o: CFLAGS += -DHAVE_MORECORE=0 -DUSE_DL_PREFIX -fPIC
+dlmalloc.o: CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=0 -DHAVE_MORECORE=1 -DMSPACES=1 -DMORECORE=emulated_sbrk -DUSE_DL_PREFIX -fPIC
 dlmalloc-ext.o: CFLAGS += -fPIC
 # FIXME: instead of these ldflags,
 # write a ldscript and include it on the command line.

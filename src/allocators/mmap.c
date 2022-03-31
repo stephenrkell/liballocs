@@ -123,6 +123,12 @@ static struct big_allocation *add_mapping_sequence_bigalloc_nomalloc(struct mapp
 	return b;
 }
 
+__attribute__((visibility("hidden")))
+struct big_allocation *__add_mapping_sequence_bigalloc_nomalloc(struct mapping_sequence *seq)
+{
+	return add_mapping_sequence_bigalloc_nomalloc(seq);
+}
+
 static _Bool mapping_entry_equal(struct mapping_entry *e1,
 		struct mapping_entry *e2)
 {
@@ -757,7 +763,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		{
 			add_mapping_sequence_bigalloc(&new_seq);
 		}
-		else /* HMM -- probably an mmap from the private malloc. Not sure*/
+		else /* HMM -- probably an mmap from the private malloc. Not sure */
 		{
 			// HACK: Try to avoid infinite recursion by using a static version.
 			// FIXME: Will fail if called too many times
@@ -1364,7 +1370,8 @@ static _Bool extend_current(struct mapping_sequence *cur, struct maps_entry *ent
 				  ((ent->r == 'r') ? PROT_READ : 0)
 				| ((ent->w == 'w') ? PROT_WRITE : 0)
 				| ((ent->x == 'x') ? PROT_EXEC : 0),
-				(ent->p == 'p' ? MAP_PRIVATE : MAP_SHARED),
+				(ent->p == 'p' ? MAP_PRIVATE : MAP_SHARED)
+				| (!filename ? MAP_ANONYMOUS : 0),
 				ent->offset,
 				filename, NULL);
 };
