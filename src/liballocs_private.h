@@ -18,9 +18,7 @@ typedef bool _Bool;
 #include <stddef.h>
 #include <stdint.h>
 #include <link.h>
-#include "generic_malloc_index.h" /* includes memtable */
 #include "systrap.h"
-
 #include "liballocs.h"
 
 #ifndef likely

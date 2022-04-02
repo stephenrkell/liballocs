@@ -100,7 +100,7 @@ static void create_brk_bigalloc(void *curbrk)
 	 * NOTE that there will also be a nested allocation under it, that is the
 	 * static allocator's segment bigalloc. We don't consider the sbrk area
 	 * to be a child of that; it's a sibling. FIXME: is this okay? */
-	__brk_bigalloc->suballocator = &__generic_malloc_allocator;
+	__brk_bigalloc->suballocator = &__global_malloc_allocator;
 }
 
 static void update_brk(void *new_curbrk)

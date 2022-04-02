@@ -1,13 +1,13 @@
-#ifndef __HEAP_INDEX_H
-#define __HEAP_INDEX_H
+#ifndef _GENERIC_MALLOC_INDEX_H
+#define _GENERIC_MALLOC_INDEX_H
 
 #include <stdbool.h>
+#include <pthread.h>
 #include "liballocs_config.h"
 #include "pageindex.h"
 #include "malloc-meta.h"
 #include "bitmap.h"
-
-int safe_to_call_malloc __attribute__((weak));
+#include "liballocs_private.h" /* HMM. Are we OK being private to liballocs? Probably yes. */
 
 /* A thread-local variable to override the "caller" arguments. 
  * Platforms without TLS have to do without this feature. */
@@ -25,33 +25,6 @@ extern size_t __current_allocsz;
 extern int __currently_freeing;
 extern int __currently_allocating;
 #endif
-
-/* Now the stuff to do with the metadata 'insert'.
- * This will stick around. */
-
-// FIXME: this needs to be per-arena, probably
-// in the bigalloc or a malloc'd bit of suballocator-private metadata
-extern unsigned long biggest_unpromoted_object __attribute__((weak,visibility("protected")));
-
-/* Inserts describing objects have user addresses. They may have the flag set or unset. */
-#define INSERT_DESCRIBES_OBJECT(ins) \
-	(!((ins)->alloc_site) || (char*)((uintptr_t)((unsigned long long)((ins)->alloc_site))) >= MINIMUM_USER_ADDRESS)
-#define INSERT_IS_NULL(p_ins) (!(p_ins)->alloc_site && !(p_ins)->alloc_site_flag)
-
-/* What's the most space that a malloc header will use? 
- * We use this figure to guess when an alloc has been satisfied with mmap().  
- * Making it too big hurts performance but not correctness. */
-#define MAXIMUM_MALLOC_HEADER_OVERHEAD 16
-
-struct allocator;
-extern struct allocator __generic_malloc_allocator;
-
-#include "pageindex.h"
-
-struct insert *lookup_object_info(struct big_allocation *arena, void *mem,
-		void **out_object_start, size_t *out_object_size, 
-		void **ignored) __attribute__((weak));
-
 
 /* Generic heap indexing implementation.
  * This can index any malloc-like heap, and do so pretty quickly.
@@ -107,16 +80,27 @@ struct insert *lookup_object_info(struct big_allocation *arena, void *mem,
  */
 
 size_t malloc_usable_size(void *ptr);
-static size_t allocsize_to_usersize(size_t usersize) { return usersize; }
-static size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
-static size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr)); }
-static size_t allocsize(void *allocptr) { return malloc_usable_size(allocptr); }
+static inline size_t allocsize_to_usersize(size_t usersize) { return usersize; }
+static inline size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
+static inline size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr)); }
+static inline size_t allocsize(void *allocptr) { return malloc_usable_size(allocptr); }
 
 struct arena_bitmap_info
 {
 	unsigned long nwords;
 	bitmap_word_t *bitmap;
 	void *bitmap_base_addr;
+	pthread_mutex_t mutex;
+	unsigned long bitmap_insert_count;
+	unsigned long biggest_allocated_object;
+	unsigned long biggest_unpromoted_object;
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+	/* Size the circular buffer of recently freed chunks */
+#define RECENTLY_FREED_SIZE 100
+	/* Keep a circular buffer of recently freed chunks */
+	void *recently_freed[RECENTLY_FREED_SIZE];
+	void **next_recently_freed_to_replace; = &recently_freed[0];
+#endif
 };
 void __free_arena_bitmap_and_info(void *info  /* really struct arena_bitmap_info * */);
 
@@ -201,5 +185,416 @@ static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr)
 }
 #endif
 #endif
+
+// this is only used for promotion
+static inline struct big_allocation *__generic_malloc_fresh_big(struct allocator *a, void *allocptr, size_t bigalloc_size,
+	struct big_allocation *containing_bigalloc)
+{
+	struct big_allocation *b = __liballocs_new_bigalloc(
+		allocptr,
+		bigalloc_size,
+		NULL /* allocator private */,
+		NULL /* allocator_private_free */,
+		containing_bigalloc,
+		a
+	);
+	if (!b) abort();
+	return b;
+}
+static inline struct big_allocation *__generic_malloc_ensure_big(struct allocator *a, void *addr, size_t size)
+{
+	void *start;
+	struct big_allocation *maybe_already = __lookup_bigalloc_from_root(addr,
+		a, &start);
+	if (maybe_already) return maybe_already;
+	return __generic_malloc_fresh_big(a, addr, size, __lookup_deepest_bigalloc(addr));
+}
+
+static inline
+struct big_allocation *arena_for_userptr(struct allocator *a, void *userptr)
+{
+	struct big_allocation *b = __lookup_bigalloc_from_root_by_suballocator(userptr,
+		a, NULL);
+	// what if we get no b? probably means we're not initialized, e.g. a malloc
+	// happening during __runt_files_init.
+	assert(b);
+	return b;
+}
+
+/* We use a big lock to protect access to our bitmap. Ideally we would
+ * just do lock-free CAS for bitmap updates. */
+#ifndef NO_PTHREADS
+#define BIG_LOCK \
+	lock_ret = pthread_mutex_lock(&info->mutex); \
+	assert(lock_ret == 0);
+#define BIG_UNLOCK \
+	lock_ret = pthread_mutex_unlock(&info->mutex); \
+	assert(lock_ret == 0);
+#else
+#define BIG_LOCK
+#define BIG_UNLOCK
+#endif
+
+#define SHOULD_PROMOTE_TO_BIGALLOC(userchunk, usable_size) \
+	((usable_size) > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072)
+
+static inline void __generic_malloc_index_insert(struct big_allocation *arena, void *allocptr, size_t caller_requested_size, const void *caller)
+{
+	int lock_ret;
+	assert(arena);
+	// first check we have a bitmap and that it's big enough
+	/* FIXME: I think bigallocs can grow at the beginning as well as at the end.
+	 * That would really screw up our bitmap. Figure out whether that could affect us...
+	 * only some bigallocs, like mapping sequences maybe, can do this. */
+	struct arena_bitmap_info *info = arena->suballocator_private;
+	if (__builtin_expect(!info, 0))
+	{
+		info = arena->suballocator_private = __private_malloc(sizeof (*info));
+		arena->suballocator_private_free = __free_arena_bitmap_and_info;
+		info->nwords = 0;
+		info->bitmap = NULL;
+		/* Mutex is recursive only because assertion failures sometimes want to do
+		 * asprintf, so try to re-acquire our mutex. */
+		info->mutex = (pthread_mutex_t) PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+		info->bitmap_insert_count = 0;
+		info->biggest_allocated_object = 0;
+		info->biggest_unpromoted_object = 0;
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+		info->next_recently_freed_to_replace = &info->recently_freed[0];
+		bzero(info->recently_freed, sizeof info->recently_freed);
+#endif
+	}
+	BIG_LOCK
+	uintptr_t bitmap_base_addr = (uintptr_t)ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS);
+	unsigned long total_words = ((uintptr_t)(ROUND_UP_PTR(arena->end, MALLOC_ALIGN*BITMAP_WORD_NBITS))
+			- bitmap_base_addr)
+			/ (MALLOC_ALIGN * BITMAP_WORD_NBITS);
+	if (__builtin_expect(info->nwords < total_words, 0))
+	{
+		info->bitmap = __private_realloc(info->bitmap, total_words * sizeof (bitmap_word_t));
+		if (!info->bitmap) abort();
+		info->nwords = total_words;
+		info->bitmap_base_addr = (void*)bitmap_base_addr;
+	}
+	bitmap_word_t *bitmap = info->bitmap;
+	/* The address *must* be in our tracked range. Assert this. */
+	assert(info->bitmap_base_addr == ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS)); // start of coverage (not of bitmap)
+	void *bitmap_end_addr = (void*)((uintptr_t) info->bitmap_base_addr +       // limit of coverage
+		((struct arena_bitmap_info *) arena->suballocator_private)->nwords * MALLOC_ALIGN * BITMAP_WORD_NBITS);
+	assert((uintptr_t) allocptr <= (uintptr_t) bitmap_end_addr);
+
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+	/* Check the recently freed list for this pointer. Delete it if we find it. */
+	for (int i = 0; i < RECENTLY_FREED_SIZE; ++i)
+	{
+		if (info->recently_freed[i] == allocptr)
+		{
+			info->recently_freed[i] = NULL;
+			info->next_recently_freed_to_replace = &recently_freed[i];
+		}
+	}
+#endif
+	size_t alloc_usable_size = malloc_usable_size(allocptr); // FIXME: per-allocator call
+	size_t caller_usable_size = caller_usable_size_for_chunk_and_malloc_usable_size(allocptr,
+			alloc_usable_size);
+	struct insert *p_insert = insert_for_chunk_and_caller_usable_size(allocptr,
+		caller_usable_size);
+	/* Populate our extra in-chunk fields */
+	p_insert->alloc_site_flag = 0U;
+	p_insert->alloc_site = (uintptr_t) caller;
+
+#if 0 // def PRECISE_REQUESTED_ALLOCSIZE
+	/* FIXME: this isn't really the insert size. It's the insert plus padding.
+	 * I'm not sure why/whether we need this. */
+	ext_insert->insert_size = alloc_usable_size - caller_requested_size;
+#define insert_size ext_insert->insert_size
+#else
+/* In this case, alignment might mean that we padded the actual request
+ * to *more* than requested_size + insert_size.
+ * In general caller_requested_size <= alloc_usable_size - insert_size */
+#define insert_size (sizeof (struct insert))
+#endif
+#if 0 // def LIFETIME_POLICIES
+	// alloca does not have a lifetime_insert
+	if (arena->suballocator != &__alloca_allocator)
+	{
+		ext_insert->lifetime = MANUAL_DEALLOCATION_FLAG;
+	}
+#endif
+	/* Metadata remains in the chunk */
+	info->biggest_allocated_object = MAX(caller_usable_size, info->biggest_allocated_object);
+	if (__builtin_expect(SHOULD_PROMOTE_TO_BIGALLOC(allocptr, alloc_usable_size), 0))
+	{
+		void *bigalloc_begin = allocptr;
+		assert(caller_requested_size <= alloc_usable_size - insert_size);
+		// bigalloc size is the caller-usable size
+		struct big_allocation *this_chunk_b = __generic_malloc_fresh_big(arena->suballocator,
+			allocptr, caller_usable_size, arena);
+		if (!this_chunk_b) abort();
+	}
+	else
+	{
+		info->biggest_unpromoted_object = MAX(caller_usable_size, info->biggest_unpromoted_object);
+	}
+#undef insert_size
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+	fprintf(stderr, "***[%09ld] Inserting user chunk at %p into bitmap at %p\n",
+		info->bitmap_insert_count, allocptr, bitmap);
+#endif
+#if !defined(NDEBUG) || defined(TRACE_GENERIC_MALLOC_INDEX)
+	++info->bitmap_insert_count;
+#endif
+	/* Add it to the bitmap. */
+	bitmap_set_l(bitmap, (allocptr - info->bitmap_base_addr) / MALLOC_ALIGN);
+out:
+	BIG_UNLOCK
+}
+
+static inline void __generic_malloc_index_delete(struct big_allocation *arena, void *userptr/*, size_t freed_usable_size*/)
+{
+	/* The freed_usable_size is not strictly necessary. It was added
+	 * for handling realloc after-the-fact. In this case, by the time we
+	 * get called, the usable size has already changed. However, after-the-fact
+	 * was a broken way to handle realloc() when we are using trailers, because in
+	 * the case of a *smaller* realloc'd size, where the realloc happens in-place,
+	 * realloc() would overwrite our insert with its own (regular heap metadata)
+	 * trailer.
+	 */
+	assert(userptr != NULL);
+	void *allocptr = userptr;
+	__liballocs_uncache_all(allocptr, malloc_usable_size(allocptr)); // FIXME: per-allocator call
+
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+	/* Check the recently-freed list for this pointer. We will warn about
+	 * a double-free if we hit it. */
+	for (int i = 0; i < RECENTLY_FREED_SIZE; ++i)
+	{
+		if (recently_freed[i] == userptr)
+		{
+			fprintf(stderr, "*** Double free detected for alloc chunk %p\n",
+				userptr);
+			return;
+		}
+	}
+#endif
+	/* Are we a bigalloc? */
+	struct big_allocation *b = __lookup_bigalloc_under(userptr, arena->suballocator,
+		arena, NULL);
+	/* If so, we promoted this entry into the bigalloc index. We still
+	 * kept its metadata locally, though. */
+	if (__builtin_expect(b != NULL, 0))
+	{
+		void *allocptr = userptr;
+		unsigned long size = malloc_usable_size(allocptr); // FIXME: use per-alloc call
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+		fprintf(stderr, "*** Unindexing bigalloc entry for alloc chunk %p (size %lu)\n",
+				allocptr, size);
+#endif
+		__liballocs_delete_bigalloc_at(userptr, arena->suballocator);
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+		*info->next_recently_freed_to_replace = userptr;
+		++info->next_recently_freed_to_replace;
+		if (info->next_recently_freed_to_replace == &info->recently_freed[RECENTLY_FREED_SIZE])
+		{
+			info->next_recently_freed_to_replace = &info->recently_freed[0];
+		}
+#endif
+		return;
+	}
+	int lock_ret;
+	struct arena_bitmap_info *info = (struct arena_bitmap_info *) arena->suballocator_private;
+	BIG_LOCK
+	bitmap_word_t *bitmap = info->bitmap;
+	/* The address *must* be in our tracked range. Assert this. */
+	assert(info->bitmap_base_addr == ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS));
+	assert((uintptr_t) userptr >= (uintptr_t) info->bitmap_base_addr);
+	bitmap_clear_l(bitmap, ((uintptr_t) userptr - (uintptr_t) info->bitmap_base_addr) /
+			(MALLOC_ALIGN * BITMAP_WORD_NBITS));
+
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+	fprintf(stderr, "*** Deleting entry for chunk %p, from bitmap at %p\n",
+		userptr, bitmap);
+#endif
+
+	/* (old comment; still true?) FIXME: we need a big lock around realloc()
+	 * to avoid concurrent in-place realloc()s messing with the other inserts we access. */
+
+out:
+#ifdef TRACE_GENERIC_MALLOC_INDEX
+	*info->next_recently_freed_to_replace = userptr;
+	++info->next_recently_freed_to_replace;
+	if (info->next_recently_freed_to_replace == &info->recently_freed[RECENTLY_FREED_SIZE])
+	{
+		info->next_recently_freed_to_replace = &info->recently_freed[0];
+	}
+#endif
+	BIG_UNLOCK
+}
+
+static inline
+void __generic_malloc_index_reinsert_after_resize(struct allocator *a,
+	void *userptr,
+	size_t modified_size,
+	size_t old_usable_size,
+	size_t requested_size,
+	const void *caller, void *new_allocptr)
+{
+	if (new_allocptr && new_allocptr != userptr)
+	{
+		/* FIXME: check the new type metadata against the old! We can probably do this
+		 * in a way that's uniform with memcpy... the new chunk will take its type
+		 * from the realloc site, and we then check compatibility on the copy. */
+		__generic_malloc_index_insert(arena_for_userptr(a, new_allocptr), new_allocptr,
+			requested_size, __current_allocsite ?: caller);
+		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
+		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
+		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
+		/* FIXME: THIS IS BROKEN when using lifetime extension: userptr is not
+		 * pointing to valid memory but is read through... */
+#ifndef LIFETIME_POLICIES
+		__notify_copy(new_allocptr, userptr,
+			caller_usable_size_for_chunk_and_malloc_usable_size(userptr, old_usable_size));
+#endif
+	}
+	else // !new_allocptr || new_allocptr == userptr
+	{
+		/* Re-index at the same start address. The old usable size
+		 * is the *modified* size, i.e. we modified it before
+		 * allocating it, so we pass it as the modified_size to
+		 * __generic_malloc_index_insert. */
+		// FIXME: is this right? what if new_allocptr is null?
+		__generic_malloc_index_insert(arena_for_userptr(a, userptr), userptr, requested_size,
+			__current_allocsite ? __current_allocsite : caller);
+	}
+
+	/* Are we a bigalloc? */
+	struct big_allocation *b = __lookup_bigalloc_from_root(userptr, a, NULL);
+	if (new_allocptr == userptr && modified_size < old_usable_size && b)
+	{
+		__liballocs_truncate_bigalloc_at_end(b, (char*) userptr + modified_size);
+	}
+}
+
+/* A client-friendly lookup function. */
+static inline
+struct insert *lookup_object_info(struct big_allocation *arena,
+	void *mem, void **out_object_start, size_t *out_object_size, void **ignored)
+{
+	/* Unlike our malloc hooks, we might get called before initialization,
+	   e.g. if someone tries to do a lookup before the first malloc of the
+	   program's execution. Rather than putting an initialization check
+	   in the fast-path functions, we bail here.  */
+	if (!big_allocations[1].begin) return NULL;
+
+	void *object_start = NULL;
+	struct insert *found_ins = NULL;  //lookup(arena, mem, &l01_object_start);
+	unsigned short depth = 1;
+	size_t object_minimum_size = 0;
+	struct arena_bitmap_info *info = arena->suballocator_private;
+	assert(info->bitmap_base_addr == ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS));
+	unsigned start_idx = ((uintptr_t) mem - (uintptr_t) info->bitmap_base_addr) / MALLOC_ALIGN;
+	/* OPTIMISATION: since we have a maximum object size,
+	 * fake out the bitmap so that we bound the backward search */
+	unsigned long nbits_hidden = 0;
+#ifdef NDEBUG
+	void *fake_bitmap_base_addr = ROUND_DOWN_PTR((uintptr_t) mem -
+		(uintptr_t) info->biggest_unpromoted_object, MALLOC_ALIGN*BITMAP_WORD_NBITS);
+	if ((uintptr_t) fake_bitmap_base_addr > (uintptr_t) info->bitmap_base_addr)
+	{
+		nbits_hidden = BITMAP_WORD_NBITS *
+			(((uintptr_t) fake_bitmap_base_addr - (uintptr_t) info->bitmap_base_addr) /
+			(MALLOC_ALIGN * BITMAP_WORD_NBITS));
+	}
+#endif
+	assert(nbits_hidden % BITMAP_WORD_NBITS == 0);
+	unsigned long found_bitidx = bitmap_rfind_first_set_leq_l(
+		info->bitmap + (nbits_hidden / BITMAP_WORD_NBITS),
+		info->bitmap + info->nwords,
+		start_idx - nbits_hidden, NULL);
+	if (found_bitidx != (unsigned long) -1)
+	{
+		found_bitidx += nbits_hidden;
+		object_start = info->bitmap_base_addr + (MALLOC_ALIGN * found_bitidx);
+		found_ins = insert_for_chunk(object_start);
+	}
+	//fprintf(stderr, "Heap index lookup failed for %p with "
+	//	"cur_head %p, object_minimum_size %zu, seen_object_starting_earlier %d\n",
+	//	mem, cur_head, object_minimum_size, (int) seen_object_starting_earlier);
+	if (found_ins)
+	{
+		assert(object_start);
+		if (out_object_start) *out_object_start = object_start;
+		if (out_object_size) *out_object_size = usersize(object_start);
+	}
+	assert(!found_ins || INSERT_DESCRIBES_OBJECT(found_ins));
+	return found_ins;
+}
+
+static inline
+liballocs_err_t __generic_malloc_get_info(struct allocator *a,
+	void *obj, struct big_allocation *maybe_the_allocation,
+	struct uniqtype **out_type, void **out_base,
+	unsigned long *out_size, const void **out_site)
+{
+	++__liballocs_hit_heap_case;
+	/* For heap allocations, we look up the allocation site.
+	 * (This also yields an offset within a toplevel object.)
+	 * Then we translate the allocation site to a uniqtypes rec location.
+	 * (For direct calls in eagerly-loaded code, we can cache this information
+	 * within uniqtypes itself. How? Make uniqtypes include a hash table with
+	 * initial contents mapping allocsites to uniqtype recs. This hash table
+	 * is initialized during load, but can be extended as new allocsites
+	 * are discovered, e.g. indirect ones.)
+	 */
+	struct insert *heap_info = NULL;
+	void *base;
+	size_t caller_usable_size;
+	/* NOTE: bigallocs already have the size adjusted to exclude the insert. */
+	if (maybe_the_allocation && maybe_the_allocation->allocated_by == a)
+	{
+		/* Promoted allocation: we already have the metadata. */
+		base = maybe_the_allocation->begin;
+		caller_usable_size = (char*) maybe_the_allocation->end - (char*) maybe_the_allocation->begin;
+		heap_info = insert_for_chunk_and_caller_usable_size(base, caller_usable_size
+			+ sizeof (struct extended_insert));
+	}
+	else
+	{
+		size_t alloc_usable_chunksize = 0;
+		heap_info = lookup_object_info(arena_for_userptr(a, obj),
+			obj, &base, &alloc_usable_chunksize, NULL);
+		if (!heap_info)
+		{
+			/* For an unindexed non-promoted chunk, we don't know the base, so
+			 * we don't know the logical size. We don't know anything. Note that
+			 * for promoted chunks, we might know the size and base because we
+			 * can promote to bigalloc knowing just the original base pointer, from
+			 * which malloc_usable_size() can do the rest. */
+			++__liballocs_aborted_unindexed_heap;
+			return &__liballocs_err_unindexed_heap_object;
+		}
+		assert(base);
+		caller_usable_size = caller_usable_size_for_chunk_and_malloc_usable_size(base,
+			alloc_usable_chunksize);
+	}
+	assert(heap_info);
+	if (out_base) *out_base = base;
+	if (out_size) *out_size = caller_usable_size;
+	if (out_type || out_site) return extract_and_output_alloc_site_and_type(
+		heap_info, out_type, (void**) out_site);
+	// no error
+	return NULL;
+}
+
+static inline
+liballocs_err_t __generic_malloc_set_type(struct allocator *a, struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type)
+{
+	struct insert *ins = lookup_object_info(arena_for_userptr(a, obj), obj, NULL, NULL, NULL);
+	if (!ins) return &__liballocs_err_unindexed_heap_object;
+	ins->alloc_site = (uintptr_t) new_type;
+	ins->alloc_site_flag = 1; // meaning it's a type, not a site
+	return NULL;
+}
+
 
 #endif

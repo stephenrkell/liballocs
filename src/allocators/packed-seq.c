@@ -221,9 +221,6 @@ static unsigned find_idx(struct uniqtype *u, struct packed_sequence_family *fam)
 #define MAX(a, b) ((a)>(b)?(a):(b))
 #endif
 
-#ifndef unlikely
-#define unlikely(cond) __builtin_expect( (cond), 0 )
-#endif
 static void ensure_cached_up_to(struct big_allocation *b, struct packed_sequence *seq, unsigned offset)
 {
 	if (seq->offset_cached_up_to < offset)

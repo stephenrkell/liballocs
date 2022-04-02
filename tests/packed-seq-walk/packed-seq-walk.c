@@ -26,14 +26,14 @@ int main(void)
 	assert(pageindex[PAGENUM(chunk)]);
 
 	struct big_allocation *seq_b = __lookup_bigalloc_from_root(chunk,
-		&__generic_malloc_allocator, NULL);
-	assert(seq_b->allocated_by == &__generic_malloc_allocator);
+		&__default_lib_malloc_allocator, NULL);
+	assert(seq_b->allocated_by == &__default_lib_malloc_allocator);
 
 	seq_b->suballocator = &__packed_seq_allocator;
 	seq_b->suballocator_private = malloc(sizeof (struct packed_sequence));
 	seq_b->suballocator_private_free = __packed_seq_free;
 	// FIXME: clear type info? do we need to?
-	__generic_malloc_allocator.set_type(seq_b, chunk, NULL);
+	__default_lib_malloc_allocator.set_type(seq_b, chunk, NULL);
 	if (!seq_b->suballocator_private) abort();
 	*(struct packed_sequence *) seq_b->suballocator_private = (struct packed_sequence) {
 		.fam = &__string8_nulterm_packed_sequence,

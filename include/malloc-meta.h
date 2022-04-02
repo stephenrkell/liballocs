@@ -31,4 +31,14 @@
 #define CHUNK_SIZE_WITH_TRAILER(sz, trailer_t, trailer_align_t) \
     PAD_TO_ALIGN(sz + sizeof (trailer_t), ALIGNOF(trailer_align_t))
 
+/* Inserts describing objects have user addresses. They may have the flag set or unset. */
+#define INSERT_DESCRIBES_OBJECT(ins) \
+	(!((ins)->alloc_site) || (char*)((uintptr_t)((unsigned long long)((ins)->alloc_site))) >= MINIMUM_USER_ADDRESS)
+#define INSERT_IS_NULL(p_ins) (!(p_ins)->alloc_site && !(p_ins)->alloc_site_flag)
+
+/* What's the most space that a malloc header will use?
+ * We use this figure to guess when an alloc has been satisfied with mmap().
+ * Making it too big hurts performance but not correctness. */
+#define MAXIMUM_MALLOC_HEADER_OVERHEAD 16
+
 #endif

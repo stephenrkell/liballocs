@@ -177,12 +177,13 @@ struct allocator __sbrk_allocator; /* sbrk() */
 struct allocator __static_allocator; /* ldso; nests under file? */
 struct allocator __auxv_allocator; /* nests under stack? */
 struct allocator __alloca_allocator; /* nests under stack? */
-struct allocator __generic_malloc_allocator; /* covers all chunks */
+struct allocator __default_lib_malloc_allocator = (struct allocator) {}; /* covers all chunks */
 struct allocator __generic_small_allocator; /* usual suballoc impl */
 struct allocator __generic_uniform_allocator; /* usual suballoc impl */
-struct allocator __generic_malloc_allocator;
 struct allocator __packed_seq_allocator;
 struct packed_sequence_family { long pad[10]; } __string8_nulterm_packed_sequence; // HACK
+
+extern struct allocator __global_malloc_allocator __attribute__((weak,alias("__default_lib_malloc_allocator"))); /* covers all chunks */
 
 struct liballocs_err *__liballocs_get_alloc_info(const void *obj, 
 	struct allocator **out_allocator, const void **out_alloc_start,

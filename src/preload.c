@@ -52,13 +52,6 @@ int sigaction(int signum, const struct __libc_sigaction *act,
 #define __libc_sigaction sigaction
 #endif
 
-/* We should be safe to use it once malloc is initialized. */
-// #define safe_to_use_bigalloc (__liballocs_is_initialized)
-#define safe_to_use_bigalloc (pageindex)
-
-/* some signalling to malloc hooks */
-_Bool __avoid_libdl_calls;
-
 /* NOTE that our wrappers are all init-on-use. This is because 
  * we might get called very early, and even if we're not trying to
  * intercept the early calls, we still need to be able to delegate. 
@@ -124,7 +117,7 @@ size_t __wrap_malloc_usable_size (void *ptr)
 				== &__mmap_allocator
 			||
 			big_allocations[pageindex[(uintptr_t) ptr >> LOG_PAGE_SIZE]].allocated_by
-				== &__generic_malloc_allocator
+				== &__global_malloc_allocator
 			;
 	_Bool is_definitely_stack = 
 		(   // anywhere on the initial stack
@@ -255,7 +248,7 @@ int munmap(void *addr, size_t length)
 		assert(orig_munmap);
 	}
 	
-	if (!safe_to_use_bigalloc || is_self_call(__builtin_return_address(0)))
+	if (!__liballocs_systrap_is_initialized)
 	{
 		return orig_munmap(addr, length);
 	}
@@ -292,7 +285,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 			? orig_mremap(old_addr, old_size, new_size, flags, new_address) \
 			: orig_mremap(old_addr, old_size, new_size, flags))
 	
-	if (!safe_to_use_bigalloc || is_self_call(__builtin_return_address(0))) 
+	if (!__liballocs_systrap_is_initialized)
 	{
 		return DO_ORIG_CALL;
 	}
@@ -351,12 +344,9 @@ sighandler_t signal(int signum, sighandler_t handler)
 	static sighandler_t (*orig_signal)(int, sighandler_t);
 	
 	sighandler_t ret;
-	_Bool we_set_flag = 0;
-	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
 	if (!orig_signal)
 	{
-		if (__avoid_libdl_calls && !we_set_flag) abort();
-		orig_signal = dlsym(RTLD_NEXT, "signal");
+		orig_signal = fake_dlsym(RTLD_NEXT, "signal");
 		if (!orig_signal) abort();
 	}
 
@@ -367,7 +357,6 @@ sighandler_t signal(int signum, sighandler_t handler)
 		ret = SIG_ERR;
 	} else ret = orig_signal(signum, handler);
 out:
-	if (we_set_flag) __avoid_libdl_calls = 0;
 	return ret;
 }
 
@@ -377,12 +366,9 @@ int sigaction(int signum, const struct __libc_sigaction *act,
 	static int (*orig_sigaction)(int, const struct __libc_sigaction *, struct __libc_sigaction *);
 	
 	int ret;
-	_Bool we_set_flag = 0;
-	if (!__avoid_libdl_calls) { we_set_flag = 1; __avoid_libdl_calls = 1; }
 	if (!orig_sigaction)
 	{
-		if (__avoid_libdl_calls && !we_set_flag) abort();
-		orig_sigaction = dlsym(RTLD_NEXT, "sigaction");
+		orig_sigaction = fake_dlsym(RTLD_NEXT, "sigaction");
 		if (!orig_sigaction) abort();
 	}
 	
@@ -392,7 +378,6 @@ int sigaction(int signum, const struct __libc_sigaction *act,
 		ret = orig_sigaction(SIGILL, NULL, oldact);
 	} else ret = orig_sigaction(signum, act, oldact);
 out:
-	if (we_set_flag) __avoid_libdl_calls = 0;
 	return ret;
 }
 

@@ -984,9 +984,6 @@ int ( __attribute__((constructor(103))) __liballocs_global_init)(void)
 	 * 
 	 * It seems that option 1 is better. 
 	 */
-	/* Initialize the generic malloc thingy first, because libdl will want to malloc 
-	 * when we call it. */
-	__generic_malloc_allocator_init();
 	__mmap_allocator_init();
 	__static_file_allocator_init();
 	
@@ -1017,11 +1014,9 @@ void __liballocs_post_systrap_init(void)
 	/* For testing, become no-op if systrap was not init'd. */
 	if (__liballocs_systrap_is_initialized)
 	{
-		/* Now we can correctly initialize libdlbind. Before that,
-		 * since it might malloc, ensure we have brk and generic_malloc
-		 * initialized. */
+		/* Now we can correctly initialize libdlbind. It might malloc,
+		 * ensure we have what we need initialized. */
 		__brk_allocator_init();
-		__generic_malloc_allocator_init();
 		__libdlbind_do_init();
 		__liballocs_rt_uniqtypes_obj = dlcreate("duniqtypes");
 		if (!__liballocs_rt_uniqtypes_obj)

@@ -596,7 +596,7 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 		// if (!parent->suballocator) parent->suballocator = allocated_by;
 		// else if (parent->suballocator != allocated_by
 		// 	&& !(parent == executable_data_segment_mapping_bigalloc
-		// 		 && parent->suballocator == &__generic_malloc_allocator)
+		// 		 && parent->suballocator == &__default_lib_malloc_allocator)
 		// 	// && parent != auxv_bigalloc
 		// ) abort();
 	}

@@ -13,7 +13,7 @@
 #include <link.h>
 #include "relf.h"
 
-/* dHide these symbols */
+/* Hide these symbols */
 #define HIDDEN __attribute__((visibility("hidden")))
 #define HOOK_ATTRIBUTES HIDDEN
 

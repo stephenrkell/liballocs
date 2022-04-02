@@ -432,8 +432,9 @@ extern struct allocator __static_symbol_allocator;
 extern struct allocator __auxv_allocator; /* nests under stack? */
 extern struct allocator __alloca_allocator; /* nests under stack? */
 extern struct allocator __packed_seq_allocator;
+extern struct allocator __default_lib_malloc_allocator;
+extern struct allocator __global_malloc_allocator;
 // FIXME: These are indexes, not allocators
-extern struct allocator __generic_malloc_allocator; /* covers all chunks */
 extern struct allocator __generic_small_allocator; /* usual suballoc impl */
 extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 // extern struct allocator __global_malloc_allocator;
@@ -442,7 +443,7 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 
 // FIXME: we should probably have per-allocator headers for the stuff below
 
-#define ALLOCATOR_HANDLE_LIFETIME_INSERT(a) ((a) == &__generic_malloc_allocator)
+#define ALLOCATOR_HANDLE_LIFETIME_INSERT(a) ((a) == &__default_lib_malloc_allocator)
 
 void __mmap_allocator_init(void) __attribute__((constructor(101)));
 void __mmap_allocator_notify_brk(void *new_curbrk);
@@ -535,7 +536,6 @@ void init_frames_info(struct allocs_file_metadata *file) __attribute__((visibili
 
 void __auxv_allocator_init(void) __attribute__((constructor(101)));
 void __alloca_allocator_init(void);
-void __generic_malloc_allocator_init(void);
 void __generic_small_allocator_init(void);
 void __generic_uniform_allocator_init(void);
 

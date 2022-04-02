@@ -112,8 +112,7 @@ void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, 
 
 		unsigned long bytes_to_unindex = malloc_usable_size(cur_userchunk);
 		assert(ALLOCA_ALIGN == MALLOC_ALIGN);
-		// equal alignments so we can just abuse the generic malloc functions
-		__generic_malloc_bitmap_delete(b, cur_userchunk);
+		__generic_malloc_index_delete(b, cur_userchunk);
 		assert(bytes_to_unindex < BIGGEST_SANE_ALLOCA);
 		total_unindexed += bytes_to_unindex;
 		if (total_unindexed >= total_to_unindex)
@@ -265,7 +264,7 @@ void __alloca_allocator_notify(void *new_userchunkaddr,
 
 	ensure_arena_covers_addr(b, new_userchunkaddr);
 	/* index it */
-	__generic_malloc_bitmap_insert(b, new_userchunkaddr, requested_size, caller);
+	__generic_malloc_index_insert(b, new_userchunkaddr, requested_size, caller);
 	
 #undef __liballocs_get_alloc_base /* inlcache HACKaround */
 	assert(__liballocs_get_alloc_base(new_userchunkaddr));

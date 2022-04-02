@@ -11,6 +11,32 @@
 #include "liballocs_private.h"
 #include "allocsites.h"
 #include "relf.h"
+#include "generic_malloc_index.h" /* FIXME: want to remove this */
+
+/* These definitions need to go somewhere. But they are used mostly by our
+ * hooks, not by the allocsites routines in the rest of this file. */
+#ifndef NO_TLS
+__thread void *__current_allocsite;
+__thread void *__current_allocfn;
+__thread size_t __current_allocsz;
+__thread int __currently_freeing;
+__thread int __currently_allocating;
+#else
+void *__current_allocsite;
+void *__current_allocfn;
+size_t __current_allocsz;
+int __currently_freeing;
+int __currently_allocating;
+#endif
+// ditto this!
+#include "allocmeta.h"
+__attribute__((visibility("hidden")))
+void __free_arena_bitmap_and_info(void *info /* really struct arena_bitmap_info * */)
+{
+	struct arena_bitmap_info *the_info = info;
+	if (the_info && the_info->bitmap) __private_free(the_info->bitmap);
+	if (the_info) __private_free(the_info);
+}
 
 /* Each allocsite is logically assigned a contiguous
  * ID, defined as the sum of its index in the allocsite array
