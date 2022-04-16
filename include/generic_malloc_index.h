@@ -273,6 +273,7 @@ static inline void __generic_malloc_index_insert(struct big_allocation *arena, v
 	{
 		info->bitmap = __private_realloc(info->bitmap, total_words * sizeof (bitmap_word_t));
 		if (!info->bitmap) abort();
+		bzero(info->bitmap + info->nwords, (total_words - info->nwords) * sizeof (bitmap_word_t));
 		info->nwords = total_words;
 		info->bitmap_base_addr = (void*)bitmap_base_addr;
 	}
