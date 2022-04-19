@@ -238,18 +238,12 @@ struct big_allocation *arena_for_userptr(struct allocator *a, void *userptr)
 #define SHOULD_PROMOTE_TO_BIGALLOC(userchunk, usable_size) \
 	((usable_size) > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072)
 
-static inline void __generic_malloc_index_insert(struct big_allocation *arena, void *allocptr, size_t caller_requested_size, const void *caller)
+static inline void ensure_has_info(struct big_allocation *arena)
 {
-	int lock_ret;
-	assert(arena);
-	// first check we have a bitmap and that it's big enough
-	/* FIXME: I think bigallocs can grow at the beginning as well as at the end.
-	 * That would really screw up our bitmap. Figure out whether that could affect us...
-	 * only some bigallocs, like mapping sequences maybe, can do this. */
-	struct arena_bitmap_info *info = arena->suballocator_private;
-	if (__builtin_expect(!info, 0))
+	if (__builtin_expect(!arena->suballocator_private, 0))
 	{
-		info = arena->suballocator_private = __private_malloc(sizeof (*info));
+		struct arena_bitmap_info *info;
+		arena->suballocator_private = info = __private_malloc(sizeof (*info));
 		arena->suballocator_private_free = __free_arena_bitmap_and_info;
 		info->nwords = 0;
 		info->bitmap = NULL;
@@ -263,9 +257,19 @@ static inline void __generic_malloc_index_insert(struct big_allocation *arena, v
 		info->next_recently_freed_to_replace = &info->recently_freed[0];
 		bzero(info->recently_freed, sizeof info->recently_freed);
 #endif
+		info->bitmap_base_addr = ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS);
 	}
-	BIG_LOCK
+}
+
+static inline void ensure_has_bitmap_to_current_end(struct big_allocation *arena)
+{
 	uintptr_t bitmap_base_addr = (uintptr_t)ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS);
+	/* Assert the beginning hasn't changed. */
+	/* FIXME: I think bigallocs can grow at the beginning as well as at the end.
+	 * That would really screw up our bitmap. Figure out whether that could affect us...
+	 * only some bigallocs, like mapping sequences maybe, can do this. */
+	struct arena_bitmap_info *info = arena->suballocator_private;
+	assert(bitmap_base_addr == (uintptr_t) info->bitmap_base_addr);
 	unsigned long total_words = ((uintptr_t)(ROUND_UP_PTR(arena->end, MALLOC_ALIGN*BITMAP_WORD_NBITS))
 			- bitmap_base_addr)
 			/ (MALLOC_ALIGN * BITMAP_WORD_NBITS);
@@ -275,8 +279,18 @@ static inline void __generic_malloc_index_insert(struct big_allocation *arena, v
 		if (!info->bitmap) abort();
 		bzero(info->bitmap + info->nwords, (total_words - info->nwords) * sizeof (bitmap_word_t));
 		info->nwords = total_words;
-		info->bitmap_base_addr = (void*)bitmap_base_addr;
 	}
+}
+
+static inline void __generic_malloc_index_insert(struct big_allocation *arena, void *allocptr, size_t caller_requested_size, const void *caller)
+{
+	int lock_ret;
+	assert(arena);
+	// first check we have a bitmap and that it's big enough
+	ensure_has_info(arena);
+	struct arena_bitmap_info *info = arena->suballocator_private;
+	BIG_LOCK
+	ensure_has_bitmap_to_current_end(arena);
 	bitmap_word_t *bitmap = info->bitmap;
 	/* The address *must* be in our tracked range. Assert this. */
 	assert(info->bitmap_base_addr == ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS)); // start of coverage (not of bitmap)
@@ -491,6 +505,8 @@ struct insert *lookup_object_info(struct big_allocation *arena,
 	struct insert *found_ins = NULL;  //lookup(arena, mem, &l01_object_start);
 	unsigned short depth = 1;
 	size_t object_minimum_size = 0;
+	ensure_has_info(arena);
+	ensure_has_bitmap_to_current_end(arena);
 	struct arena_bitmap_info *info = arena->suballocator_private;
 	assert(info->bitmap_base_addr == ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS));
 	unsigned start_idx = ((uintptr_t) mem - (uintptr_t) info->bitmap_base_addr) / MALLOC_ALIGN;
