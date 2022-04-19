@@ -275,12 +275,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
             #  For any defined allocator function `malloc', we append
             #  -Wl,--defsym,malloc=__wrap___real_malloc
             #  -Wl,--wrap,__real_malloc
-            #
             #  i.e. to link in the callee-side instrumentation.
-            # For standard allocators, these are defined in liballocs_nonshared.a.
-            # For user-specific allocators, we have generated the callee wrappers
-            # ourselves, earlier, in  *only* do this for non-wrappers,
-            # i.e. for actual allocators.
+            # For standard allocators, the wrap-reals are defined in liballocs_nonshared.a.
+            # For user-specific allocators, we have already generated them ourselves,
+            # earlier, in generateAllocStubsObject (i.e. with caller wrappers). We *only* do this
+            # for functions that actually allocate, not for malloc wrapper functions. For now,
+            # that means we do it only for the case of generic-small ('suballocator',
+            # LIBALLOCS_SUB_ALLOC_FNS), falling back to the nonshared for mallocs.
             syms = [x for x in self.allWrappedSymNames() \
                 if x not in self.symNamesForFns(self.allWrapperAllocFns() + self.allAllocSzFns() + \
                     self.allWrapperFreeFns())]
@@ -298,7 +299,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # argument in order to get the callee instr. Internal calls are wired up properly.
             # Next, to allow lib-to-exe calls to hit the callee instr,
             # use objcopy to rename them
-            # ARGH. This won't work because objcopy can't rename dynsys 
+            # ARGH. This won't work because objcopy can't rename dynsyms
             pass
             # what allocator fns does it define globally?
             # grep for global symbols -- an upper-case letter after the symname is the giveaway
@@ -710,9 +711,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
             if ret != 0:
                 return ret
             finalItemsAndOpts = self.flatOptions(opts) + [x for x in thisLinkOutputOptions] \
+              + finalLinkArgs + extraFinalLinkArgs \
               + ["-o", finalLinkOutput] \
-              + [relocFilename] + linkItemsDeferred \
-              + finalLinkArgs + extraFinalLinkArgs
+              + [relocFilename] + linkItemsDeferred
         else:
             finalItemsAndOpts = self.flatOptions(self.phaseOptions[Phase.LINK]) + \
                 self.flatItems(self.itemsForPhases({Phase.LINK}))
