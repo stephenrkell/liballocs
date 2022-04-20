@@ -36,9 +36,23 @@
 	(!((ins)->alloc_site) || (char*)((uintptr_t)((unsigned long long)((ins)->alloc_site))) >= MINIMUM_USER_ADDRESS)
 #define INSERT_IS_NULL(p_ins) (!(p_ins)->alloc_site && !(p_ins)->alloc_site_flag)
 
-/* What's the most space that a malloc header will use?
+/* What's the most space that a malloc insert will use?
  * We use this figure to guess when an alloc has been satisfied with mmap().
  * Making it too big hurts performance but not correctness. */
 #define MAXIMUM_MALLOC_HEADER_OVERHEAD 16
+
+struct insert
+{
+	unsigned alloc_site_flag:1;
+	union
+	{
+		unsigned long alloc_site:47;
+		unsigned lowbits:3; /* FIXME: do these really coincide with low-order of allocsite? */
+	};
+	union  __attribute__((packed))
+	{
+		unsigned bits:16; /* used to store alloc site in compact form */
+	} un;
+} __attribute__((packed));
 
 #endif

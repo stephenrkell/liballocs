@@ -121,22 +121,17 @@ void __free_arena_bitmap_and_info(void *info  /* really struct arena_bitmap_info
  * we should be able to fit this in.
  * For now, strip out the lifetime policies support.
  */
-#ifdef LIFETIME_POLICIES
-typedef LIFETIME_INSERT_TYPE lifetime_insert_t;
+typedef /*LIFETIME_INSERT_TYPE*/ uint8_t lifetime_insert_t;
 #define LIFETIME_POLICY_FLAG(id) (0x1 << (id))
 // By convention lifetime policy 0 is the manual deallocation policy
 #define MANUAL_DEALLOCATION_POLICY 0
 #define MANUAL_DEALLOCATION_FLAG LIFETIME_POLICY_FLAG(MANUAL_DEALLOCATION_POLICY)
 // Manual deallocation is not an "attached" policy
 #define HAS_LIFETIME_POLICIES_ATTACHED(lti) ((lti) & ~(MANUAL_DEALLOCATION_FLAG))
-#endif
 
-#if 0
 struct extended_insert
 {
-#ifdef LIFETIME_POLICIES
 	lifetime_insert_t lifetime;
-#endif
 #ifdef PRECISE_REQUESTED_ALLOCSIZE
 	/* Include any padding inserted such that
 	 * usable_size - insert_size = requested_size */
@@ -147,8 +142,6 @@ struct extended_insert
 	 * See insert_for_chunk. */
 	struct insert base;
 } __attribute__((packed)); // Alignment from the end guaranteed by ourselves
-#endif
-#define extended_insert insert
 
 static inline size_t caller_usable_size_for_chunk_and_malloc_usable_size(void *userptr,
 	size_t alloc_usable_size)
@@ -177,14 +170,14 @@ static inline struct insert *insert_for_chunk(void *userptr)
 		caller_usable_size_for_chunk(userptr));
 }
 
-#if 0
-#ifdef LIFETIME_POLICIES
+static inline struct extended_insert *extended_insert_for_chunk(void *userptr)
+{
+	return NULL; /* FIXME: restore this */
+}
 static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr)
 {
 	return &extended_insert_for_chunk(userptr)->lifetime;
 }
-#endif
-#endif
 
 // this is only used for promotion
 static inline struct big_allocation *__generic_malloc_fresh_big(struct allocator *a, void *allocptr, size_t bigalloc_size,

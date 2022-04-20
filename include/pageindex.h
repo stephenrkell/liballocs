@@ -3,32 +3,9 @@
 #include <assert.h>
 #include "vas.h"
 
-struct entry
-{
-	unsigned present:1;
-	unsigned removed:1;  /* whether this link is in the "removed" state in Harris's algorithm */
-	unsigned distance:6; /* distance from the base of this entry's region, in 8-byte units */
-} __attribute__((packed));
-struct insert;
-struct ptrs 
-{
-	struct entry next;
-	struct entry prev;
-} __attribute__((packed));
-struct insert
-{
-	unsigned alloc_site_flag:1;
-	unsigned long alloc_site:(ADDR_BITSIZE-1);
-	union  __attribute__((packed))
-	{
-		struct ptrs ptrs;
-		unsigned bits:16;
-	} un;
-} __attribute__((packed));
-
 /* We maintain two structures:
  *
- * - a list of "big allocations";
+ * - an array of "big allocations";
  * - an index mapping from page numbers to
  *      the deepest big allocation that completely spans that page.
  *   (this was formerly called the "level 0 index", and only mapped to
@@ -41,11 +18,6 @@ struct insert
  * are made out of a bigalloc, we can handle all that stuff here once
  * for every possible leaf allocator.
  */
-
-/* A "big allocation" is one that 
- * is suballocated from, or
- * spans at least BIG_ALLOC_THRESHOLD bytes of page-aligned memory. */
-#define BIG_ALLOC_THRESHOLD (16*PAGE_SIZE)
 
 struct allocator;
 struct big_allocation
