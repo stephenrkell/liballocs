@@ -368,10 +368,15 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
     def getStubGenCompileArgs(self):
         if "LIBRUNT" in os.environ:
-            include_dir = os.environ["LIBRUNT"] + "/include"
+            runt_include_dir = os.environ["LIBRUNT"] + "/include"
         else:
-            include_dir = self.getLibAllocsBaseDir() + "/contrib/libsystrap/contrib/librunt/include"
-        return ["-I" + include_dir, "-DRELF_DEFINE_STRUCTURES"]
+            runt_include_dir = self.getLibAllocsBaseDir() + "/contrib/libsystrap/contrib/librunt/include"
+        if "LIBMALLOCHOOKS" in os.environ:
+            mallochooks_include_dir = os.environ["LIBMALLOCHOOKS"] + "/"
+        else:
+            mallochooks_include_dir = self.getLibAllocsBaseDir() + "/contrib/libmallochooks"
+        return ["-I" + runt_include_dir, "-DRELF_DEFINE_STRUCTURES", \
+                "-I" + mallochooks_include_dir]
             
     def generateAllocStubsObject(self):
         # make a temporary file for the stubs
