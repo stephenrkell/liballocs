@@ -547,40 +547,42 @@ class AllocsCompilerWrapper(CompilerWrapper):
             return stubs_bin
             
     def getLiballocsLinkArgs(self):
-        liballocsLinkArgs = ["-L" + self.getLinkPath()]
+        # some link args need to go late-ish on the command line, others early-ish
+        liballocsLeftishLinkArgs = ["-L" + self.getLinkPath()]
+        liballocsRightishLinkArgs = []
         if self.doingFinalLink() and not self.doingStaticLink() and not self.linkingSharedObject():
             # we're building a dynamically linked executable
-            liballocsLinkArgs += ["-Wl,--dynamic-linker," + self.getLibAllocsBaseDir() + "/lib/allocsld.so"]
-            liballocsLinkArgs += [self.getLibAllocsBaseDir() + "lib/interp-pad.o"]
-            liballocsLinkArgs += ["-Wl,-rpath," + self.getRunPath()]
+            liballocsLeftishLinkArgs += ["-Wl,--dynamic-linker," + self.getLibAllocsBaseDir() + "/lib/allocsld.so"]
+            liballocsLeftishLinkArgs += [self.getLibAllocsBaseDir() + "lib/interp-pad.o"]
+            liballocsLeftishLinkArgs += ["-Wl,-rpath," + self.getRunPath()]
             if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                liballocsLinkArgs += [self.getLdLibBase()]
+                liballocsRightishLinkArgs += [self.getLdLibBase()]
             else: # FIXME: weak linkage one day; FIXME: don't clobber as-neededness
                 # HACK: why do we need --as-needed? try without.
                 # NO NO NO! linker chooses the path of weakness, i.e. instead of 
                 # using symbols from _noop.so, uses 0 and doesn't depend on noop.
                 # AHA: the GNU linker has this handy --push-state thing...
-                liballocsLinkArgs += self.getDummyWeakLinkArgs(True, True)
+                liballocsRightishLinkArgs += self.getDummyWeakLinkArgs(True, True)
         elif self.linkingSharedObject():
             # We're building a shared library, so simply add liballocs_noop.o; 
             # only link directly if we're disabling the preload approach
             if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                liballocsLinkArgs += ["-L" + self.getLinkPath()]
-                liballocsLinkArgs += ["-Wl,-rpath," + self.getRunPath()]
-                liballocsLinkArgs += [getLdLibBase()]
+                liballocsLeftishLinkArgs += ["-L" + self.getLinkPath()]
+                liballocsLeftishLinkArgs += ["-Wl,-rpath," + self.getRunPath()]
+                liballocsLeftishLinkArgs += [getLdLibBase()]
             else: # FIXME: weak linkage one day....
-                liballocsLinkArgs += self.getDummyWeakLinkArgs(True, False)
+                liballocsRightishLinkArgs += self.getDummyWeakLinkArgs(True, False)
             # note: we leave the shared library with 
             # dangling dependencies on __wrap_
             # and unused __real_
         elif self.doingStaticLink():
             # we're building a statically linked executable
             if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
-                liballocsLinkArgs += [self.getLdLibBase()]
+                liballocsRightishLinkArgs += [self.getLdLibBase()]
             else:
                 # no load-time overriding; do link-time overriding 
                 # by using the full liballocs library in archive form
-                liballocsLinkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + ".a"]
+                liballocsRightishLinkArgs += [self.getLinkPath() + "/lib" + self.getLibNameStem() + ".a"]
         else:
             assert not self.doingFinalLink()
             # we're building a relocatable object. Don't add anything, because
@@ -588,8 +590,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # will be used to link the eventual output, so that is the right time
             # to fill in the extra undefineds that we're inserting.
             pass
-        liballocsLinkArgs += ["-ldl"]
-        return liballocsLinkArgs
+        liballocsRightishLinkArgs += ["-ldl"]
+        return liballocsLeftishLinkArgs, liballocsRightishLinkArgs
     
     def main(self):
         # un-export CC from the env if it's set to allocscc, because 
@@ -632,6 +634,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # - CHECK for used allocators and generate/link caller stubs (currently we generate them unconditionally)
 
         finalLinkArgs = []
+        finalLinkArgsSavedForEnd = []
         stubsLinkArgs = []
         # if we're building an executable, append the magic objects
         # -- and link with the noop *shared* library, to be interposable.
@@ -655,15 +658,25 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # FIXME: is it really true that the alloc caller stubs goes only in a final link?
             # Or might we also want it to go in a non-final link?
             # In fact it NEEDS to go in the non-final link so that --wrap can have its effect.
+            # When final-linking one big .o file, --wrap will do nothing.
+            # What about malloc-in-exe stubs for indexing?
+            # We used to pull these in at the end (liballocs_nonshared.a, __wrap___real_malloc),
+            # having got the defsyms from fixupLinkedRelocObject(). We need to do it at
+            # the end so we can tell if we define 'malloc' or whatever. So maybe we can
+            # just generate a separate stubs file at that time... it should also alias
+            # __global_malloc_allocator.
+            # Are we going to fall foul of --wrap not working?
             stubsObject = self.generateAllocStubsObject()
             # CARE: we must insert the wrapper object on the cmdline *before* any 
             # archive that is providing the wrapped functions -- e.g. libc. 
             # HACK: the easiest way is to insert it first, it appears.
             stubsLinkArgs = [stubsObject] + stubsLinkArgs
             # we need to export-dynamic, s.t. __is_a is linked from liballocs
-            # FIXME: I no longer understand this
+            # FIXME: I no longer understand this. Try deleting it / see what happens
             finalLinkArgs += ["-Wl,--export-dynamic"]
-            finalLinkArgs += self.getLiballocsLinkArgs()
+            leftishLinkArgs, rightishLinkArgs = self.getLiballocsLinkArgs()
+            finalLinkArgs += leftishLinkArgs
+            finalLinkArgsSavedForEnd += rightishLinkArgs
 
         # HACK: if we're linking, always link to a .o and then separately to whatever output file
         allLinkOutputOptions = {"-pie", "-shared", "--pic-executable", \
@@ -716,9 +729,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
             if ret != 0:
                 return ret
             finalItemsAndOpts = self.flatOptions(opts) + [x for x in thisLinkOutputOptions] \
-              + finalLinkArgs + extraFinalLinkArgs \
+              + [relocFilename] + finalLinkArgs + extraFinalLinkArgs \
               + ["-o", finalLinkOutput] \
-              + [relocFilename] + linkItemsDeferred
+              + linkItemsDeferred + finalLinkArgsSavedForEnd
         else:
             finalItemsAndOpts = self.flatOptions(self.phaseOptions[Phase.LINK]) + \
                 self.flatItems(self.itemsForPhases({Phase.LINK}))
