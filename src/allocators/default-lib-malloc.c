@@ -1,6 +1,10 @@
 /* This file uses GNU C extensions */
 #define _GNU_SOURCE
 
+/* We need to create global hooks, not hidden */
+#define ALLOC_EVENT_ATTRIBUTES
+#define ALLOC_EVENT(s) __liballocs_malloc_ ## s
+
 #include <sys/types.h>
 size_t malloc_usable_size(void *ptr);
 #include <stdio.h>
@@ -17,9 +21,6 @@ size_t malloc_usable_size(void *ptr);
 #include "pageindex.h"
 #include "generic_malloc_index.h"
 #include "malloc-meta.h"
-
-/* This is the default, but go with it anyway. */
-#define ALLOC_EVENT_ATTRIBUTES __attribute__((visibility("hidden")))
 
 /* Stuff we need to generate glue goes in here. */
 #include "../tools/stubgen.h" /* HACK */

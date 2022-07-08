@@ -132,7 +132,9 @@ event_hooks.o event_hooks_nonshared.o: CFLAGS += \
 # files from the makefiles. So we always want to run these rules. HMM.
 vpath malloc_hook_stubs_wrap.c $(LIBMALLOCHOOKS)
 vpath malloc_hook_stubs_preload.c $(LIBMALLOCHOOKS)
+vpath malloc_hook_stubs_wrapdl.c $(LIBMALLOCHOOKS)
 vpath event_hooks.c $(LIBMALLOCHOOKS)
+malloc_hook_stubs_wrapdl.o: CFLAGS += -DWRAPDL_WRAPPER_PREFIX=__wrap___real_
 
 ifneq ($(TRACE_HEAP_INDEX),)
 CFLAGS += -DTRACE_HEAP_INDEX
@@ -206,10 +208,10 @@ $(ALL_OBJS): CFLAGS += -no-integrated-cpp \
 # event_hooks.c is macroised so that we can create special versions of it.
 # This version is used when we link an executable including its own malloc impl.
 # FIXME: this should be made more uniform, as part of the allocator/stub-generation refactoring.
-event_hooks_nonshared.o: CFLAGS += -D'ALLOC_EVENT(s)=__liballocs_malloc_\#\#s' -DALLOC_EVENT_ATTRIBUTES=
+event_hooks.o event_hooks_nonshared.o: CFLAGS += -D'ALLOC_EVENT(s)=__liballocs_malloc_\#\#s' -DALLOC_EVENT_ATTRIBUTES=
 event_hooks_nonshared.o: event_hooks.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o "$@" $+
-nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o
+nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o malloc_hook_stubs_wrapdl.o
 	$(LD) -r -o "$@" $+
 
 # we include our own malloc impl, for which we use dlmalloc

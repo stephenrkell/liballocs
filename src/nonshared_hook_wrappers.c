@@ -23,7 +23,7 @@
 #include "hook_protos.h"
 #undef HOOK_PREFIX
 /* Prototype the __terminal_hook_* functions. */
-#define HOOK_PREFIX(i) __terminal_ ## i
+#define HOOK_PREFIX(i) __terminal_hook_ ## i
 #include "hook_protos.h"
 
 /* This is like the usual wrap hooks, except we use libdl to 
@@ -44,6 +44,7 @@
  * allocates, or ensuring the first call through all these hooks (which
  * is the only one that should need dlsym()) does not itself come from dlsym. */
 
+#if 0
 void __terminal_hook_init(void) {}
 
 void * __terminal_hook_malloc(size_t size, const void *caller)
@@ -121,15 +122,49 @@ int __wrap___real_posix_memalign(void **memptr, size_t alignment, size_t size)
 		return 0;
 	}
 }
+#endif
+
+/* This is called from preload.c's 'malloc_usable_size' (also named '__wrap_malloc_usable_size';
+ * we link liballocs_preload.so with --wrap malloc_usable_size).
+ * It seems to exist so that we have a version of malloc_usable_size that can also handle alloca
+ * chunks, in the generic index functions. By calling out to this symbol, we ensure that if there
+ * is an in-exe malloc_usable_size, we connect with it. We could use dlsym to get it instead;
+ * then we'd be calling through a function pointer, which might not be great.
+ *
+ * How do we ensure that our global malloc_usable_size, say coming from the executable's own
+ * malloc, runs the preload version and not a vanilla malloc-only version? We don't; it's enough
+ * that *our own calls* to malloc_usable_size get directed to our own wrapper, which --wrap ensures.
+ *
+ * To clear up this mess, we need to get rid of the preload.c malloc_usable_size altogether.
+ * It's surprisingly not straighforward. We could parameterise our generic malloc functions by
+ * their usable-size function, but that means more function pointering. Instead we need to
+ * intervene at link time: defsym the UND references to a malloc_usable_size-alike so that
+ * they hit the right target. Since all uses of our generic_malloc_index functions should
+ * soon be in a stubgen context, this is doable. Use a special alias and then defsym it
+ * at link time.
+ *
+ * Also, we arguably do want
+ * to take over the in-exe malloc_usable_size if we want to 'extended service' it. (Ditto for
+ * dladdr, but that is moot because few programs define their own dladdr.) Do we need a better
+ * story, e.g. LD_AUDIT, for forming bindings into the executable? Even LD_AUDIT may not be
+ * enough if there is pre-binding (possible even in PIEs, e.g. with R_arch_RELATIVE).
+ * I think actually there's a case for *not* extended-servicing malloc_usable_size() -- it is
+ * pretty clearly intended as part of the interface of a single specific malloc implementation.
+ */
 size_t __mallochooks_malloc_usable_size(void *ptr)
 {
 	return malloc_usable_size(ptr);
 }
+/* Why do we need this? Do we ever dlsym it? It seems we used to use it in preload.c
+ * before switching to the __mallochooks_ alias, so I guess we kept this for transition. */
 size_t __real_malloc_usable_size(void *ptr)
 {
 	return malloc_usable_size(ptr);
 }
-/* Some impls don't provide posix_memalign. */
+/* Some impls don't provide posix_memalign. But our hooks will always use
+ * boring old memalign. Why do we provide this? It just calls around into
+ * boring old memalign. Since --wrap never references __real_, it will
+ * only be used if we dlsym it or bind to it directly. */
 size_t __real_posix_memalign(void **memptr, size_t alignment, size_t size) __attribute__((weak));
 size_t __real_posix_memalign(void **memptr, size_t alignment, size_t size)
 {
