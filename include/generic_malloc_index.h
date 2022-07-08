@@ -335,9 +335,10 @@ static inline void __generic_malloc_index_insert(struct big_allocation *arena, v
 	{
 		void *bigalloc_begin = allocptr;
 		assert(caller_requested_size <= alloc_usable_size - insert_size);
-		// bigalloc size is the caller-usable size
+		// bigalloc size was the caller-usable size -- WHY? requested size seems better,
+		// because then e.g. if caller is creating an arena, it knows how big it is
 		struct big_allocation *this_chunk_b = __generic_malloc_fresh_big(arena->suballocator,
-			allocptr, caller_usable_size, arena);
+			allocptr, caller_requested_size, arena);
 		if (!this_chunk_b) abort();
 	}
 	else
