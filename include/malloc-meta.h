@@ -44,12 +44,14 @@
 struct insert
 {
 	unsigned alloc_site_flag:1;
-	union
+	unsigned long alloc_site:47;
+#if 0
+	union __attribute__((packed))
 	{
-		unsigned long alloc_site:47;
 		unsigned lowbits:3; /* FIXME: do these really coincide with low-order of allocsite? */
 	};
-	union  __attribute__((packed))
+#endif
+	union __attribute__((packed))
 	{
 		unsigned bits:16; /* used to store alloc site in compact form */
 	} un;
