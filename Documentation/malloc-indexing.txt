@@ -1,0 +1,155 @@
+Currently the preload case looks like this
+
+      /-- client exe or .so--\/-------------------liballocs_preload.so-------------------\/----libc.so---
+bound by:     ld --wrap      ld.so           ld           .-------------ld           dlsym
+      +--------+    +--------+    +--------+    +--------+  ld+--------+`-->+--------+    +--------+
+      |        |--->|        |--->|        |--->|        |--->|        |    |        |--->|        |
+      |        |<---|        |<---|        |<---|        |<---|        |    |        |<---|        |
+      +--------+    +--------+    +--------+    +--------+<--.+--------+ .--+--------+    +--------+
+     client code   allocstubs.i stubs_preload.c event_hooks.c ----------' stubs_preload.c  actual
+                                 (entry point) -D__next_hook_* (indexing)   (termination)  malloc
+source:             stubgen.h    libmallochooks libmallochooks stubgen.h   libmallochooks
+                                                               +liballocs
+which API?                      |             |
+                            user|user     hook|hook
+
+The in-exe case is a bit dfferent. nonshared_hook_wrappers.o is linked
+together with event_hooks_nonshared.o to create liballocs_nonshared.a, a
+pathway by which in-executable malloc calls can get directed to our
+event hooks (pre_alloc, post_nonnull_nonzero_realloc) et al, which
+all gets linked in non-sharedly and calls out cross-DSO to liballocs.
+
+                                                         liballocs_preload.so
+      /---------------------------------------------exe------\/--------\/------------exe-----------\
+bound by:     ld --wrap    ld --wrap         ld           .--------------ld          dlsym          
+      +--------+    +--------+    +--------+    +--------+ld.so--------+ `->+--------+    +--------+
+      |        |--->|        |--->|        |--->|        |--->|        |    |        |--->|        |
+      |        |<---|        |<---|        |<---|        |<---|        |    |        |<---|        |
+      +--------+    +--------+    +--------+    +--------+<--.+--------+ .--+--------+    +--------+
+     client code   allocstubs.i nonshared_hook_ event_hooks.c`----------' nonshared_hook_  actual
+                                  _wrappers.c  -D__next_hook_* (indexing)   wrappers.c     malloc
+                   (__wrap_*) (__wrap___real_*)-DALLOC_EVENT=           (__terminal_hook_*)
+                    stubgen.h    liballocs      libmallochooks stubgen.h    liballocs
+                                   (* 1)                       +liballocs     (* 2)
+which API?                      |             |             |
+                            user|user     hook|hook    event|
+                                         (* 3)
+
+The executable is linked with -lallocs --wrap malloc  (and others likewise)
+and allocscompilerwrapper.py does a two-stage link (to relocatable; to
+final) to facilitate this: we use the first-stage output to detect which
+allocation functions are present, the second to wrap the *__real_* aliases
+(the front-door aliases are already wrapped, as caller-side instrumentation,
+while the __wrap___real_ ones do the callee-side indexing). The
+__wrap___real_* ones get defsym'd to the unqualified symbol name, thereby
+taking over for dynamic linking purposes.
+
+(* 1): morally these __wrap___real_* functions belong in libmallochooks.
+They are just standard hook wrappers calling the corresponding hook_*
+function. Now mostly done... see below.
+
+(* 2): libmallochooks has a 'wrapdl' file which we could use to provide
+these terminal hooks. For now (CHECK) they are hard-coded in nonshared_hook_wrappers.c.
+HMM. Was this because we actually do something different, e.g. with
+"__def_" syms? Can we avoid this using a multistage 'ld -r'? The issue
+is that we necessarily rename the 'real' function, e.g. 'malloc' now
+denotes our hook, not the 'malloc' that is being linked into the exe. A
+different name is no good, even if we fix up local references to use it,
+because we need to catch calls from a DSO, or calls when malloc is
+looked up using dlsym(). So in order to get a reference to the real
+malloc, we need to know an alias for it. ** This also means that we
+never do plain old --wrap-based hooking. We *must* do renaming too. All
+because of incoming references from outside the current DSO. This is in
+allocscompilerwrapper.py: we defsym sym=__wrap___real_sym. FIXME: I think
+we no longer use the nonshared ones.
+
+    This is interesting: we have two layers of wrapping (__wrap_X and
+    __wrap___real_X) but the global alias (X) goes to the *middle* one,
+    i.e. bypasses the outer wrapper and goes straight to the inner.
+    Or does it? It doesn't have to! Can snarf caller address from
+    either side of a DSO boundary.
+
+(* 3): the hook API is narrower than the user API. Why? It saves
+per-instrumentation effort in cases where userapi call A can be
+expressed in terms of call B. In theory it might slow things down, if a
+given malloc implementation has optimised call A but not call B. E.g. a
+calloc emulated as {malloc;bzero} might miss a zero-page copy-on-write
+optimisation. Arguably bzero could be optimised equivalently, e.g. via a
+page-swapping facility, but the necessary facilities might not exist.
+Ideally we would give instrumentation clients the choice here:
+instrument calloc or not. Can use the presence of macro
+__next_hook_calloc to test for this? Ideally just the absence of a
+hook_calloc would be enough to tell us to emulate calloc. 'Us' is the
+user2hook wrappers, *not* the user instrumentation.
+
+FIXME: check the above diagrams/notes still correct after the generic malloc
+indexing rewrite.
+
+FIXME: remove nonshared_hooks_wrappers. It does almost nothing already. Update
+diagram accordingly. Update comments in allocscompilerwrapper.py.
+
+FIXME: eliminate the nonshared machinery. Instead just drop an extra
+hooks object into the link when we see 'malloc' or whatever,
+so that we take over 'malloc' and do the indexing.
+    ** If we create a linker plugin that does "extended wrapping",
+       will it help with this? Clearly a bit.
+    ** Then integrate libmallochooks, i.e. what my older note was saying:
+
+        It would be nice to refactor libmallochooks so that it generates a file
+        mallochooks.o  which drops into the link
+        and can be customised with
+        method  (preload or wrap or wrapdl)
+        symlist (which symbols do we want? malloc, calloc, realloc, free, memalign, posix_memalign, malloc_usable_size)
+        list of hook layers ('event' and 'terminal')
+        HOOK_PREFIX  (how does this fit in? it should really be called HOOK_IDENT())
+        ALLOC_EVENT  (if using 'event'... it should really be called ALLOC_EVENT_IDENT())
+
+        PROBLEM: in the 'wrap' case, it also needs to generate linker flags for
+        the output binary. That's OK -- we can do that by generating a .mk file.
+
+        PROBLEM: is this going the way we want? i.e. to replace allocscompilerwrapper.py
+        with a gold plugin? I guess the gold plugin can just call out to libmallochooks's
+        makefile to generate the objects it needs, and process the .mk file with a simple
+        parsing hack.
+
+        (Q. What about calls into the exe's malloc from a DSO? These *are* caught
+        because we rename the 'real' malloc, and the wrapper gets the name 'malloc'.
+        Q. WHERE is this done?
+        A. In allocscompilerwrapper.py:
+                           def_args = [["--defsym", sym + "=__def_" + sym, \
+                         "--defsym", "__real_" + sym + "=__def_" + sym, \
+                         ] for sym in wrappedDefs]
+        Q. How will we get the same effect in libmallochooks?
+        A. By ensuring our generated hooks object goes first in the link.
+
+        are not caught. The DSO could, in principle, be linked with everything
+        as far as the final dlsym, i.e. everything but the malloc.)
+
+        Can we do globalize here?
+        Can we do 'unbind' here (perhaps by actually doing the -z muldefs thing)?
+        No. We can't quite do those because they can't be run in a single link step.
+        They require us to modify the *input* file.
+        Right thing: skip this in libmallochooks but do it in our linker plugin,
+        as a pre-pass.
+
+FIXME: ... remove the use of malloc_usable_size in generic_malloc_index.h.
+A per-allocator call should be used, passed as an argument if necessary.
+There are only a few places it's called.
+Useful search regex: caller_usable_size_for_chunk|[^_]malloc_usable_size|[^_](usersize|allocsize)\(
+
+FIXME: then eliminate __mallochooks_malloc_usable_size.
+It is only used in preload.c
+and tries to be generic: guess whether we have an alloca chunk or a global-malloc chunk,
+and call onwards accordingly. We should just never use this and always call the global
+malloc_usable_size. i.e. it will have no reason to exist if we've done the previous step.
+
+FIXME: there was a nasty non-orthogonality in the 'deep' indexing
+instrumentation. IIRC, too much happens in the stubgen.h-generated stubs,
+and our env vars are non-orthogonal. Fix this here?
+
+FIXME: then eliminate the whole two-stage link machinery.
+
+FIXME: then eliminate the compiler wrapper. With all that wrap/globalize/unbind stuff
+gone away, and the two-stage link, it should be toolsub'able quite easily.
+
+

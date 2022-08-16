@@ -1,0 +1,110 @@
+/* Callee wrappers are the __wrap___real_X ones,
+ * responsible for indexing.
+ * For these we link with both --defsym,X=__wrap___real_X and --wrap __real_X.
+ * This will make user calls go to __wrap_real_X    (called as X)
+ * which then do a combined allocate-and-index call (e.g. hook_malloc)
+ *     (for the nonshared_hooks.c case)
+ * OR         do indexing around a call to __real_X looked up by fake_dlsym
+ *     (for 'suballoc' generic-small allocators, generated via stubgen.h;
+ *      this relies on a "__real_X" symbol actually existing, which we
+ *      create in allocscompilerwrapper.py as an alias of __def_*)
+ * 
+ * */
+
+/* To replace generic-malloc.c we want something like this... */
+DEFINE_MALLOC_INDEXING_SHIM_AND_ALLOCATOR( \
+   namefrag, \
+   mallocsym_list, \
+   make_usersym_for_mallocsym, \
+)
+
+/* ... and to replace generic-small.c we want something like this... */
+DEFINE_SMALLALLOC_INDEXING_SHIM_AND_ALLOCATOR( \
+   namefrag, \
+   mallocsym_list, \
+   make_usersym_for_mallocsym, \
+  
+  
+  
+
+            #  For any defined allocator function `malloc', we append
+            #  -Wl,--defsym,malloc=__wrap___real_malloc
+            #  -Wl,--wrap,__real_malloc
+
+/* FIXME: currently we use a "trailer" at the end of the chunk, to store
+ * metadata.
+ * BUT
+ * finding the trailer requires a well-known (global) malloc_usable_size call, whereas
+ * different allocators bring different metadata. So it should be a per-allocator
+ * call.
+ * Could use headers instead of trailers, but then this less extensible:
+            the user's chunk base is now different from the allocator's, so
+            other malloc API calls (mallinfo, etc.) on the same chunk no longer work
+            unless we wrap them all.
+ * The right way is probably to override malloc_usable_size() and dispatch
+ * to the right allocator's... i.e. like dladdr and the libunwind functions,
+ * this is a function that we not-so-secretly override with an 'improved',
+ * more powerful version.
+ */
+
+
+/* libmallochooks defines a bunch of 'events' into which it can
+ * factor incoming malloc/calloc/realloc/free/... calls for
+ * convenient instrumentation such as "pre_alloc", 
+ * "post_nonnull_nonzero_realloc", and so on.
+ * A client requests these hooks by building
+ * a copy of 'event_hooks.c' in a suitably crafted preprocessor
+ * environment, mostly defining __next_hook_*  -- usually as
+ * __terminal_hook_*, which gives control back to the core
+ * libmallochooks code, for dispatching to the actual function.
+ * In libmallochooks there are a few different backends for doing
+ * this dispatching, depending on how both the malloc and the hooks
+ * are to be linked in: wrap for old-fashioned link-time wrapping,
+ * preload for LD_PRELOAD, and wrapdl for our tricky case of 'two
+ * layers of hooks' (caller-side and callee-side) in the malloc-in-
+ * exe case. Preloading naturally supports two layers just fine
+ * -- but ld --wrap using the hypothetical symbols __wrap___real_* and
+ * __real___real_* doesn't quite work.
+ *
+ * Is it true that preloading handles two layers just fine? Sort of.
+ * In what we preload, there is a caller element (snarfing the return
+ * address, if a facade wrapper didn't set the thread-local) and a callee
+ * element (actually doing the indexing). This works 
+ * least in the cases we care about -- facade-in-client-exe,
+ * malloc-in-DSO. In exotic cases it might not work.
+ *
+ * Do we want a
+ * strict separation between caller-side and callee-side instrumentation?
+ *
+ * Do we ever generate a wrapper for immediate callers of a bona-fide
+ * allocation function, like an in-exe malloc? Yes, in malloc-in-exe
+ * we have 'make_caller_wrapper(malloc, p)' and so on.
+ * Presumably, any code that calls malloc should call 
+ 
+ * Another
+ * issue is that our preloaded instrumentation provides a fallback
+ * caller-side wrapper, by snarfing __builtin_return_address
+ *
+ * Since we implement these event hooks, include the header.
+ * We also give the prototypes hidden visibility here, although that
+ * relaly achieves little (visibility of the definition is much
+ * more important; we also control that, of course). */
+
+// from nonshared-hook-wrappers.c:
+/* This is like the usual wrap hooks, except we use libdl to 
+ * get the __real_ function. It's useful when the __real_ function
+ * is itself link-time-wrapped (--wrap __real_malloc)
+ * for insertion of another layer of wrappers. In such a situation,
+ * a reference to __real_malloc would bind us back to the top-level
+ * __wrap_malloc, and a reference to __real___real_malloc would bind
+ * to __real_malloc which is an undefined symbol (it's never actually
+ * defined). Attempts to --defsym __real_malloc don't work, because
+ * they are themselves subject to wrapping: --defsym __real_malloc=malloc
+ * will give us __wrap_malloc again.
+ *
+ * The fact that our terminating case uses libdl is now a source of the
+ * usual problems: are we on a callchain from within libdl, e.g. dlsym()
+ * doing its calloc()? If so, we should ourselves be sure not to call 
+ * dlsym(). Two solutions suggest themselves: using our own dlsym() that never
+ * allocates, or ensuring the first call through all these hooks (which
+ * is the only one that should need dlsym()) does not itself come from dlsym. */

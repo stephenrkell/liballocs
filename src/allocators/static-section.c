@@ -102,6 +102,16 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	 * 
 	 * - fall within our parent bigalloc (segment);
 	 * - have SHF_ALLOC.
+	 *
+	 * FIXME: would be better simply not to create bigallocs for the ones
+	 * that are not SHF_ALLOC or don't fall within their parent segment.
+	 * Also, it's interesting that in the 192 bits taken up by {first_child,
+	 * next_sib, prev_sib} we could fit 12 bigalloc numbers in an array.
+	 * Maybe children_first12, children_more (private-malloc'd) would be
+	 * better? Would allow us to keep children sorted in address order.
+	 * (There is also lots of scope to make struct big_allocation smaller,
+	 * if that turns out to matter e.g. for cache reasons. Pointers between
+	 * bigallocs are extravagant when they all live in the same array.)
 	 */
 	for (unsigned i = 0; i < fm->ehdr->e_shnum; ++i)
 	{

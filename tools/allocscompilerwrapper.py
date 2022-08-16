@@ -275,7 +275,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
             #  For any defined allocator function `malloc', we append
             #  -Wl,--defsym,malloc=__wrap___real_malloc
             #  -Wl,--wrap,__real_malloc
-            #  i.e. to link in the callee-side instrumentation.
+            #  i.e. to link in the callee-side instrumentation (__wrap___real_malloc)
+            #  to be called immediately after the call*er*-side instrumentation (__wrap_malloc).
             # For standard allocators, the wrap-reals are defined in liballocs_nonshared.a.
             # For user-specific allocators, we have already generated them ourselves,
             # earlier, in generateAllocStubsObject (i.e. with caller wrappers). We *only* do this
