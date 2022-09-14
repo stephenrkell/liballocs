@@ -66,11 +66,11 @@ It does this extension mostly transparently. In particular,
     - ... or even recompile it!
     - so long as you have debugging information
     - exception: custom allocators (alloca() and obstacks are fine)
-        + for these: annotate and relink, but usually no code changes (see doc/custom-allocators.md)
+        + for these: annotate and relink, but usually no code changes (see Documentation/custom-allocators.md)
 
 * most of the time, the slowdown is not noticeable
     - slowdowns I've seen are mostly under 5% 
-    - ongoing work is reducing these further (see doc/projects.md)
+    - ongoing work is reducing these further (see Documentation/projects.md)
     - some code patterns do fare worse 
         + main one: non-malloc-like custom allocators
 

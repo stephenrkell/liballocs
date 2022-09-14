@@ -5,8 +5,8 @@ bound by:     ld --wrap      ld.so           ld           .-------------ld      
       +--------+    +--------+    +--------+    +--------+  ld+--------+`-->+--------+    +--------+
       |        |--->|        |--->|        |--->|        |--->|        |    |        |--->|        |
       |        |<---|        |<---|        |<---|        |<---|        |    |        |<---|        |
-      +--------+    +--------+    +--------+    +--------+<--.+--------+ .--+--------+    +--------+
-     client code   allocstubs.i stubs_preload.c event_hooks.c ----------' stubs_preload.c  actual
+      +--------+    +--------+    +--------+    +--------+<-. +--------+ .--+--------+    +--------+
+     client code   allocstubs.i   user2hook.c   user2event.c '----------' stubs_preload.c  actual
                                  (entry point) -D__next_hook_* (indexing)   (termination)  malloc
 source:             stubgen.h    libmallochooks libmallochooks stubgen.h   libmallochooks
                                                                +liballocs
