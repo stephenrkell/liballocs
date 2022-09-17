@@ -3,7 +3,7 @@ SRCROOT := $(realpath $(dir $(THIS_MAKEFILE))/..)
 
 default: all
 
-SYMLINKS := liballocs_nonshared.a liballocs_preload.a liballocs_preload.so \
+SYMLINKS := liballocs_preload.a liballocs_preload.so \
     liballocs_dummyweaks.o liballocs_dummyweaks.so liballocs.a \
     liballocs.so allocsld.so
 

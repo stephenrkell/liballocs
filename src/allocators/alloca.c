@@ -19,9 +19,22 @@
 #define BIGGEST_SANE_ALLOCA 33554431ul /* 32MB - 1byte */
 
 extern struct allocator __alloca_allocator;
+
+static
+size_t usable_size(void *ptr)
+{
+	return *(((unsigned long *) ptr) - 1);
+}
+
+__attribute__((visibility("hidden")))
+size_t __alloca_usable_size(void *ptr)
+{
+	return usable_size(ptr);
+}
+
 struct big_allocation *alloca_arena_for_userptr(void *userptr, struct big_allocation *b)
 {
-	assert(malloc_usable_size(userptr) <= BIGGEST_SANE_ALLOCA);
+	assert(usable_size(userptr) <= BIGGEST_SANE_ALLOCA);
 	if (b)
 	{
 		return (b->allocated_by == &__stackframe_allocator) ? b :
@@ -47,15 +60,16 @@ liballocs_err_t __alloca_get_info(void *obj, struct big_allocation *b,
 	struct arena_bitmap_info *info = b->suballocator_private;
 	// if we haven't allocated a bitmap, there's nothing there
 	assert(info);
-	if (!info || NULL == (heap_info = lookup_object_info(alloca_arena_for_userptr(obj, b),
-		obj, &base, &alloc_usable_chunksize, NULL)))
+	if (!info || NULL == (heap_info = lookup_object_info(
+		alloca_arena_for_userptr(obj, b),
+		obj, &base, &alloc_usable_chunksize, NULL, usable_size)))
 	{
 		/* For an unindexed chunk, we don't know the base, so we don't know anything. */
 		++__liballocs_aborted_unindexed_alloca;
 		return &__liballocs_err_unindexed_alloca_object;
 	}
 	assert(base);
-	caller_usable_size = caller_usable_size_for_chunk_and_malloc_usable_size(base,
+	caller_usable_size = caller_usable_size_for_chunk_and_usable_size(base,
 		alloc_usable_chunksize);
 	assert(heap_info);
 	if (out_base) *out_base = base;
@@ -108,11 +122,11 @@ void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, 
 			+ (cur_bit_idx * ALLOCA_ALIGN));
 		debug_printf(0, "Walking an alloca chunk at %p (bitmap base: %p) idx %d\n", cur_userchunk,
 			(void*) info->bitmap_base_addr, (int) cur_bit_idx);
-		struct insert *cur_insert = insert_for_chunk(cur_userchunk);
+		struct insert *cur_insert = insert_for_chunk(cur_userchunk, usable_size);
 
-		unsigned long bytes_to_unindex = malloc_usable_size(cur_userchunk);
+		unsigned long bytes_to_unindex = usable_size(cur_userchunk);
 		assert(ALLOCA_ALIGN == MALLOC_ALIGN);
-		__generic_malloc_index_delete(b, cur_userchunk);
+		__generic_malloc_index_delete(b, cur_userchunk, usable_size);
 		assert(bytes_to_unindex < BIGGEST_SANE_ALLOCA);
 		total_unindexed += bytes_to_unindex;
 		if (total_unindexed >= total_to_unindex)
@@ -235,7 +249,7 @@ void __alloca_allocator_notify(void *new_userchunkaddr,
 		unsigned long requested_size, unsigned long *frame_counter,
 		const void *caller, const void *sp_at_caller, const void *bp_at_caller)
 {
-	assert(malloc_usable_size(new_userchunkaddr) <= BIGGEST_SANE_ALLOCA);
+	assert(usable_size(new_userchunkaddr) <= BIGGEST_SANE_ALLOCA);
 	/* 1. We need to register the current frame as a "big" allocation, or
 	 *    if it already is "big", to extend that to cover the current extent.
 	 *    NOTE also that the "cracks" case suddenly becomes important: 
@@ -264,7 +278,7 @@ void __alloca_allocator_notify(void *new_userchunkaddr,
 
 	ensure_arena_covers_addr(b, new_userchunkaddr);
 	/* index it */
-	__generic_malloc_index_insert(b, new_userchunkaddr, requested_size, caller);
+	__generic_malloc_index_insert(b, new_userchunkaddr, requested_size, caller, usable_size);
 	
 #undef __liballocs_get_alloc_base /* inlcache HACKaround */
 	assert(__liballocs_get_alloc_base(new_userchunkaddr));

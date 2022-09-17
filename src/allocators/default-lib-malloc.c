@@ -1,7 +1,8 @@
 /* This file uses GNU C extensions */
 #define _GNU_SOURCE
 
-/* We need to create global hooks, not hidden */
+/* We need to create global hooks, not hidden.
+ * Must match how we pull in libmallochooks source files in src/Makefile. */
 #define ALLOC_EVENT_ATTRIBUTES
 #define ALLOC_EVENT(s) __liballocs_malloc_ ## s
 
@@ -23,12 +24,21 @@ size_t malloc_usable_size(void *ptr);
 #include "malloc-meta.h"
 
 /* Stuff we need to generate glue goes in here. */
-#include "../tools/stubgen.h" /* HACK */
+#include "../tools/stubgen.h" /* this pathname is a HACK */
 
-/* This file should contain stuff that "could be generated", although
- * for now we're only generating some of it. */
-
-ALLOC_EVENT_INDEXING_DEFS(__default_lib_malloc)
+/* To be the "default lib malloc" means the one that any preloads
+ * in this, preloaded library, will override. */
+// FIXME: this indirect call is potentially slow. Could we instead use an ifunc?
+static size_t __default_lib_malloc_usable_size(void *ptr)
+{
+	static size_t (*real_malloc_usable_size)(void *);
+	if (!real_malloc_usable_size)
+	{
+		real_malloc_usable_size = fake_dlsym(RTLD_NEXT, "malloc_usable_size");
+	}
+	return real_malloc_usable_size(ptr);
+}
+ALLOC_EVENT_INDEXING_DEFS(__default_lib_malloc, __default_lib_malloc_usable_size)
 
 /* By default, the 'malloc' first in libraries' link order, i.e. the one */
 /* our preload sits in front of, is deemed the global malloc. But if the */

@@ -10,6 +10,7 @@ CIL_INSTALL := @cil_install@
 export CIL_INSTALL
 export TOOLSUB
 export ELFTIN
+export LIBMALLOCHOOKS
 
-CFLAGS := -I@librunt@/include @LIBALLOCSTOOL_CFLAGS@
+CFLAGS := -I@librunt@/include -I@libmallochooks@/include @LIBALLOCSTOOL_CFLAGS@
 export CFLAGS

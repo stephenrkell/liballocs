@@ -9,19 +9,6 @@
 #include <link.h>
 #include <assert.h>
 #include <sys/types.h>
-/* We make very heavy use of malloc_usable_size in generic_malloc_index. But we also 
- * override it -- twice! -- once in mallochooks, to intercept the early_malloc
- * case, and once here to intercept the stack (alloca) case. 
- * 
- * We want to be very careful with the visibility of this symbol, so that references
- * we make always go straight to our definition, not via the PLT. So declare it
- * as protected. NOTE that it will always make at least one call through the PLT, 
- * because the underlying logic is in libc. FIXME: all this is messed up and doesn't
- * seem to work. What we want is to avoid two PLT indirections (one is unavoidable). */
-size_t malloc_usable_size(void *ptr) /*__attribute__((visibility("protected")))*/;
-size_t __real_malloc_usable_size(void *ptr) /*__attribute__((visibility("protected")))*/;
-size_t __wrap_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
-size_t __mallochooks_malloc_usable_size(void *ptr) __attribute__((visibility("protected")));
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -68,20 +55,24 @@ int sigaction(int signum, const struct __libc_sigaction *act,
  * So I think the differences are only on 32-bit platforms. 
  * For now, just alias mmap64 to mmap. */
 
+extern void *__curbrk;
 /* Stop gcc from tail-call-opt'ing the __mallochooks_ call, because 
  * it has made it impossible to debug linkage problems. */
 #pragma GCC push_options
 #pragma GCC optimize("no-optimize-sibling-calls")
-
-extern void *__curbrk;
-size_t __wrap_malloc_usable_size (void *ptr) __attribute__((visibility("protected")));
-size_t malloc_usable_size (void *ptr) __attribute__((alias("__wrap_malloc_usable_size"),visibility("default")));
-size_t __wrap_malloc_usable_size (void *ptr)
+size_t malloc_or_alloca_usable_size(void *ptr)
 {
-	/* We use this all the time in generic_malloc_index. 
-	 * BUT because generic_malloc_index addresses can be on the stack too, 
+	/* Since generic_malloc_index addresses can be on the stack too, 
 	 * in the case of alloca, we need to intercept this case
 	 * and handle it appropriately. 
+	 *
+	 * We used to use this function all the time in generic_malloc_index.
+	 * But now it's just a debugging utility.
+	 * The generic indexing inlines are now parameterised by a size-getting
+	 * function appropriate to the allocator.
+	 * We also override malloc_usable_size, below, to return whatever
+	 * the allocator says is the usable size (often smaller than what
+	 * malloc_usable_size() would return, owing to inserts).
 	 * 
 	 * How can we detect the stack case quickly?
 	 * We could just ask the pageindex.
@@ -133,18 +124,42 @@ size_t __wrap_malloc_usable_size (void *ptr)
 	
 	if (is_definitely_stack)
 	{
-		return *(((unsigned long *) ptr) - 1);
+		return __alloca_usable_size(ptr);
 	}
 	if (is_definitely_not_stack)
 	{
-		return //__real_malloc_usable_size(ptr);
-			__mallochooks_malloc_usable_size(ptr);
+		return malloc_usable_size(ptr);
 	}
 	return (__liballocs_get_allocator_upper_bound(ptr) == &__stack_allocator)
-		? *(((unsigned long *) ptr) - 1)
-		: __mallochooks_malloc_usable_size(ptr);
+		? __alloca_usable_size(ptr)
+		: malloc_usable_size(ptr);
 }
 #pragma GCC pop_options
+
+/* Cross-DSO calls to malloc_usable_size() land here.
+ * FIXME: libmallochooks should really hook this. We need a way
+ * to handle the case where the exe includes its own malloc
+ * defining malloc_usable_size. */
+size_t malloc_usable_size(void *ptr)
+{
+	/* How do we get the allocator? We can't ask for the deepest
+	 * allocator because malloc chunks can be suballocated.
+	 * Instead we query the address *one before*. This should
+	 * get us the parent allocator -- we assume that a malloc
+	 * cannot allocate the very first address in its arena.
+	 *
+	 * How do we know the allocator we get is a malloc? Since
+	 * the 'struct allocator's functions are generated wrappers
+	 * around the inlines (which have a wider argument signature)
+	 * this is non-trivial. So let's not do it. Just call a size
+	 * function if one exists.
+	 */
+	struct big_allocation *b = __lookup_deepest_bigalloc((void*)(((uintptr_t) ptr) - 1));
+	if (!b) return (size_t) -1;
+	if (!b->suballocator) return (size_t) -1;
+	if (!b->suballocator->get_size) return (size_t) -1;
+	return b->suballocator->get_size(ptr);
+}
 
 extern int _etext;
 static 

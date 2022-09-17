@@ -445,6 +445,8 @@ extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
 
 #define ALLOCATOR_HANDLE_LIFETIME_INSERT(a) ((a) == &__default_lib_malloc_allocator)
 
+size_t __alloca_usable_size(void *ptr);
+
 void __mmap_allocator_init(void) __attribute__((constructor(101)));
 void __mmap_allocator_notify_brk(void *new_curbrk);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 

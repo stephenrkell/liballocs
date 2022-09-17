@@ -373,9 +373,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
         else:
             runt_include_dir = self.getLibAllocsBaseDir() + "/contrib/libsystrap/contrib/librunt/include"
         if "LIBMALLOCHOOKS" in os.environ:
-            mallochooks_include_dir = os.environ["LIBMALLOCHOOKS"] + "/"
+            mallochooks_include_dir = os.environ["LIBMALLOCHOOKS"] + "/include"
         else:
-            mallochooks_include_dir = self.getLibAllocsBaseDir() + "/contrib/libmallochooks"
+            mallochooks_include_dir = self.getLibAllocsBaseDir() + "/contrib/libmallochooks/include"
         return ["-I" + runt_include_dir, "-DRELF_DEFINE_STRUCTURES", \
                 "-I" + mallochooks_include_dir]
             
@@ -642,31 +642,38 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # Recall that if we're building a shared object, we don't need to
         # link in the alloc stubs, because we will use symbol interposition
         # to get control into our stubs. OH, but wait. We still have custom
-        # allocation functions, and we want them to set the alloc site. 
+        # allocation functions, and we want them to set the alloc site.
         # So we do want to link in the wrappers. Do we need to rewrite
         # references to __real_X after this?
         for sym in self.allWrappedSymNames():
             stubsLinkArgs += ["-Wl,--wrap," + sym]
         if self.doingFinalLink():
-            # Each allocation function, e.g. xmalloc, is linked with --wrap.
-            # If we're outputting a shared library, we leave it like this,
+            # Caller-side stubs:
+            # For each declared allocator wrapper (facade) function, e.g. xmalloc,
+            # we generate a wrapper and link with --wrap.
+            # FIXME: used to say "If we're outputting a shared library, we leave it like this,
             # with dangling references to __wrap_xmalloc,
-            # and an unused implementation of __real_xmalloc.
-            # If we're outputting an executable, 
-            # then we link a thread-local variable "__liballocs_current_allocsite"
-            # into the executable,
-            # and for each allocation function, we link a generated stub.
+            # and possibly a not-yet-bound-to implementation of xmalloc....
+            # [whereas] if we're outputting an executable, ...
+            # for each allocation function, we link a generated stub."
+            # (And also link in a thread-local variable "__liballocs_current_allocsite".)
+            # But if that's true, WHERE does __wrap_xmalloc get generated?
+            # It looks like we always generate it.
             # FIXME: is it really true that the alloc caller stubs goes only in a final link?
             # Or might we also want it to go in a non-final link?
-            # In fact it NEEDS to go in the non-final link so that --wrap can have its effect.
-            # When final-linking one big .o file, --wrap will do nothing.
-            # What about malloc-in-exe stubs for indexing?
+            # In fact it NEEDS to go in the non-final .linked.o link so that --wrap can have its effect.
+            # When final-linking one big .o file, --wrap will do nothing (def/ref same-file issue).
+            # FIXME: want to use 'xwrap' to move this to the end link... then we can
+            # parameterise the stubgen.h generation macros by "is it defined? is it referenced?"
+            #
+            # What about callee-side malloc-in-exe stubs for indexing?
             # We used to pull these in at the end (liballocs_nonshared.a, __wrap___real_malloc),
             # having got the defsyms from fixupLinkedRelocObject(). We need to do it at
             # the end so we can tell if we define 'malloc' or whatever. So maybe we can
             # just generate a separate stubs file at that time... it should also alias
             # __global_malloc_allocator.
-            # Are we going to fall foul of --wrap not working?
+            # Again are we going to fall foul of --wrap not working? For intra-exe cases, yes!
+            # FIXME: skip the separate file!
             stubsObject = self.generateAllocStubsObject()
             # CARE: we must insert the wrapper object on the cmdline *before* any 
             # archive that is providing the wrapped functions -- e.g. libc. 
@@ -674,7 +681,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             stubsLinkArgs = [stubsObject] + stubsLinkArgs
             # we need to export-dynamic, s.t. __is_a is linked from liballocs
             # FIXME: I no longer understand this. Try deleting it / see what happens
-            finalLinkArgs += ["-Wl,--export-dynamic"]
+            # finalLinkArgs += ["-Wl,--export-dynamic"]
             leftishLinkArgs, rightishLinkArgs = self.getLiballocsLinkArgs()
             finalLinkArgs += leftishLinkArgs
             finalLinkArgsSavedForEnd += rightishLinkArgs

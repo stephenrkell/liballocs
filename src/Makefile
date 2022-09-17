@@ -5,7 +5,7 @@ srcdir := $(SRCROOT)/src
 include $(SRCROOT)/config.mk
 
 CFLAGS += -DIN_LIBRUNT_DSO
-CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS) \
+CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS)/include \
    -I$(LIBSYSTRAP)/include -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused \
    $(LIBALLOCSTOOL_CFLAGS)
 ifeq ($(DEBUG),)
@@ -64,11 +64,12 @@ default: all # autotools likes an 'all' target (I think)
 TARGETS += liballocs_preload.so    # the main binary
 TARGETS += liballocs_preload.a     # in archive form, for extending libraries to link in (libcrunch)
 TARGETS += liballocs.so            # nasty linker script for clients, working around uniqueness problem
-TARGETS += liballocs_nonshared.a   # uniqtypes and (own-malloc) allocator stubs; linker script points to this, s.t. client exes (-lallocs) get this linked in statically
+                                   # FIXME: this has little reason to exist, although could perhaps
+                                   # be repurposed as futzing with ld.so->allocsld.so (etc) if sane
 TARGETS += liballocs.a             # the main binary usable for statically-linked client exes -- no uniqueness problem
 TARGETS += liballocs_dummyweaks.so # non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
 TARGETS += liballocs_dummyweaks.o  # non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
-                                   # (what do client solibs get? easiest is just to treat them like exes, *except* I *think* they don't get nonshared_hooks.o)
+                                   # (what do client solibs get? easiest is just to treat them like exes, modulo non-overrideyness)
 
 # Keep a list of all the linked binaries we produce
 SOLIB_TARGETS := $(filter-out liballocs.so,$(filter %.so,$(TARGETS)))
@@ -98,6 +99,7 @@ endif
 # Don't use allocscc to compile liballocs!
 # if CC is allocscc, unset it
 ifeq ($(notdir $(CC)),allocscc)
+$(warning Setting CC to cc, not allocscc)
 export CC := cc
 endif
 
@@ -117,24 +119,33 @@ LDFLAGS += -fuse-ld=gold
 # template code). So we are still committed to using gold to link liballocs
 # owing to binutils issue 13600 is fixed.
 
-export BUILD_MALLOC_HOOKS := event
 # FIXME: if/when LTO is fixed, we can revert to using ld -r
 # to create __next_hook_* aliases when composing malloc wrappers. For now we
 # use the C preprocessor.
-event_hooks.o event_hooks_nonshared.o: CFLAGS += \
--D__next_hook_init=__terminal_hook_init \
--D__next_hook_malloc=__terminal_hook_malloc \
--D__next_hook_free=__terminal_hook_free \
--D__next_hook_realloc=__terminal_hook_realloc \
--D__next_hook_memalign=__terminal_hook_memalign 
-# GRR. We can't include the Makerules now that we need to build the hooks by 
-# two different methods. Also, we can't get dependency information about these
-# files from the makefiles. So we always want to run these rules. HMM.
-vpath malloc_hook_stubs_wrap.c $(LIBMALLOCHOOKS)
-vpath malloc_hook_stubs_preload.c $(LIBMALLOCHOOKS)
-vpath malloc_hook_stubs_wrapdl.c $(LIBMALLOCHOOKS)
-vpath event_hooks.c $(LIBMALLOCHOOKS)
-malloc_hook_stubs_wrapdl.o: CFLAGS += -DWRAPDL_WRAPPER_PREFIX=__wrap___real_
+user2hook.o: CFLAGS += \
+-D__next_hook_init=hook_init \
+-D__next_hook_malloc=hook_malloc \
+-D__next_hook_free=hook_free \
+-D__next_hook_realloc=hook_realloc \
+-D__next_hook_memalign=hook_memalign
+hook2event.o: CFLAGS += -D'HOOK_PREFIX(s)=__terminal_hook_\#\#s' -D'ALLOC_EVENT(s)=__liballocs_malloc_\#\#s'
+terminal-indirect-dlsym.o: CFLAGS += -Ddlsym_nomalloc=fake_dlsym
+vpath user2hook.c $(LIBMALLOCHOOKS)/src
+vpath hook2event.c $(LIBMALLOCHOOKS)/src
+vpath terminal-indirect-dlsym.c $(LIBMALLOCHOOKS)/src
+# HOOK_PREFIX computes the symbol names that the wrappers call. hook2event
+# always generates hook_* and calls {*} u {event hook names}
+user2hook.o: CFLAGS += -D'HOOK_PREFIX(s)=hook_\#\#s'
+# MALLOC_PREFIX computes the symbol names that will get looked up by the terminal hooks
+# -- we had this as __wrap___real_ because of the nonshared copy, but we also need the
+# preload copy. Instead of a nonshared lib, we use the toolchain side (compiler wrapper,
+# or rather ldplugin/toolsub) to add the instrumentation into the built DSO.
+#terminal-indirect-dlsym.o: CFLAGS += -D'MALLOC_PREFIX(s)=__wrap___real_\#\#s'
+MALLOCHOOKS_OBJS := user2hook.o hook2event.o terminal-indirect-dlsym.o
+# NOTE: a version of these needs to get linked in to every
+# output binary that defines a malloc... but with different
+# ALLOC_EVENT mangling. This will be done in our toolchain stuff
+# soon-ish.
 
 ifneq ($(TRACE_HEAP_INDEX),)
 CFLAGS += -DTRACE_HEAP_INDEX
@@ -154,11 +165,12 @@ CFLAGS += -fno-omit-frame-pointer
 endif
 ALLOCATOR_OBJS := $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
 #$(info ALLOCATORS_OBJS is $(ALLOCATOR_OBJS))
-MAIN_OBJS := liballocs.o event_hooks.o $(UTIL_OBJS) $(ALLOCATOR_OBJS)
-HOOKS_WRAP_OBJS := malloc_hook_stubs_wrap.o
+MAIN_OBJS := liballocs.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 NOPRELOAD_OBJS := #uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
-NONSHARED_OBJS := nonshared_hooks.o # does *not* go in liballocs.a -- FIXME: why not? recall that liballocs.a is only for static-linked client binaries (exe or solib). Otherwise we get _nonshared.a, from the liballocs.so linker script. Probably, liballocs.a should include this, e.g. a client static-linked exe needs this if it defines its own malloc.
-PRELOAD_OBJS := preload.o malloc_hook_stubs_preload.o
+ # recall that liballocs.a is only for static-linked client binaries (exe or solib).
+ # What should liballocs.a include? E.g. does a client static-linked exe need this
+ # if it defines its own malloc?
+PRELOAD_OBJS := preload.o user2hook.o
 ifneq ($(TEST),)
 # We have a noop version of the systrap object, which
 # used to be linked into liballocs_test.so because
@@ -176,10 +188,9 @@ SYSTRAP_OBJS := systrap.o
 endif
 
 # Generate deps.
-ALL_OBJS := $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(NONSHARED_OBJS) $(PRELOAD_OBJS) $(HOOKS_WRAP_OBJS) $(SYSTRAP_OBJS)
+ALL_OBJS := $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(SYSTRAP_OBJS)
 # enumerate src files backwards from our .o files
-# -- HACK: nonshared_hooks.o is not built from .c source
-DEP_OBJS := $(filter-out $(NONSHARED_OBJS),$(ALL_OBJS))
+DEP_OBJS := $(ALL_OBJS)
 C_SRC := $(sort $(patsubst %.o,%.c,$(DEP_OBJS)))
 # Becuase of our vpath'd rules, we can't do patsubst on the source path to get the
 # obj path... $< will be something wacky. Instead, work from the object file.
@@ -205,15 +216,6 @@ endif
 $(ALL_OBJS): CFLAGS += -no-integrated-cpp \
 -wrapper $(TOOLSUB)/wrapper/example/constructor-priority-checker/wrapper
 
-# event_hooks.c is macroised so that we can create special versions of it.
-# This version is used when we link an executable including its own malloc impl.
-# FIXME: this should be made more uniform, as part of the allocator/stub-generation refactoring.
-event_hooks.o event_hooks_nonshared.o: CFLAGS += -D'ALLOC_EVENT(s)=__liballocs_malloc_\#\#s' -DALLOC_EVENT_ATTRIBUTES=
-event_hooks_nonshared.o: event_hooks.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o "$@" $+
-nonshared_hooks.o: event_hooks_nonshared.o nonshared_hook_wrappers.o malloc_hook_stubs_wrapdl.o
-	$(LD) -r -o "$@" $+
-
 # we include our own malloc impl, for which we use dlmalloc
 # of which libsystrap already has a copy, so borrow that (HACK)
 vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: actually in trap-syscalls but should be in libsystrap
@@ -231,10 +233,7 @@ PRIVATE_MALLOC_WRAPPED_LDFLAGS := -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
  -Wl,--defsym,__private_free=__wrap_dlfree \
  -Wl,--defsym,__private_realloc=__wrap_dlrealloc \
  -Wl,--defsym,__private_memalign=__wrap_dlmemalign \
- -Wl,--defsym,__private_posix_memalign=__wrap_dlposix_memalign \
- -Wl,--defsym,__real_dlmalloc_usable_size=dlmalloc_usable_size
-# FIXME: document this ^^^ hack for malloc_usable_size... can't remember why it's needed.
-# Is it simply because we don't wrap it? in libmallochooks?
+ -Wl,--defsym,__private_posix_memalign=__wrap_dlposix_memalign
 PRIVATE_MALLOC_PLAIN_LDFLAGS := -Wl,--defsym,__private_malloc=dlmalloc \
  -Wl,--defsym,__private_calloc=dlcalloc \
  -Wl,--defsym,__private_free=dlfree \
@@ -255,10 +254,9 @@ $(SOLIB_TARGETS): dlmalloc.a
 $(SOLIB_TARGETS): EXCLUDE_LIBS += dlmalloc.a:libsystrap.a
 
 LIBALLOCS_PRELOAD_A_OBJS := dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS)
-LIBALLOCS_NONSHARED_A_OBJS := $(NOPRELOAD_OBJS) $(NONSHARED_OBJS)
-LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(HOOKS_WRAP_OBJS)
+LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS)
 
-liballocs_preload.so: LDFLAGS += -Wl,--wrap,malloc_usable_size $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
+liballocs_preload.so: LDFLAGS += $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
 liballocs_preload.so: LDFLAGS += -Wl,-Map,liballocs_preload.so.map
 liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a
 liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
@@ -306,7 +304,6 @@ liballocs_preload.so: $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
 %.a:
 	$(AR) r "$@" $+
 liballocs_preload.a: $(LIBALLOCS_PRELOAD_A_OBJS)
-liballocs_nonshared.a: $(LIBALLOCS_NONSHARED_A_OBJS)
 liballocs.a: $(LIBALLOCS_A_OBJS)
 
 ifeq ($(USE_FAKE_LIBUNWIND),)
@@ -357,7 +354,7 @@ clean:
 .PHONY: install
 install: all
 	${INSTALL} liballocs_preload.so $(srcdir)/liballocs.so liballocs_dummyweaks.so ${libdir}
-	${INSTALL_DATA} liballocs_preload.a liballocs_nonshared.a liballocs.a liballocs_dummyweaks.o ${libdir}
+	${INSTALL_DATA} liballocs_preload.a liballocs.a liballocs_dummyweaks.o ${libdir}
 
 vpath %.h $(srcdir)/%.h
 

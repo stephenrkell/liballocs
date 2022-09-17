@@ -43,22 +43,26 @@ extern int __currently_allocating;
  *    ____________________....________.._______..
  *   |____________________....______|_.._|_____..|
  *   |<----------------------------------------->|  malloc-usable
- *   |<------------------------------------>|       caller-usable (this is not a mistake -- see below)
- *   |<---------------------------->|       |       requested by caller
- *                                  |<--->| |       padding to _Alignof (struct insert)  (maybe empty)
- *                                        |<-->|    size of insert
- *   |<--------------------------------------->|    how much we actually request from malloc
- *                                          |  <>|  possible padding added by malloc     (maybe empty)
- *                                          |<-->|  **the actual insert** is always at base + malloc_usable - sizeof insert
+ *   |<------------------------------------>|    :  caller-usable (this is not a mistake -- see below)
+ *   |<---------------------------->|    :  :    :  requested by caller
+ *                                  |<--->| :    :  padding to _Alignof (struct insert)  (maybe empty)
+ *                                  :    :|<-->| :  size of insert
+ *   |<--------------------------------------->| :  how much we actually request from malloc
+ *                                  :    :  :  |z|  possible padding added by malloc     (maybe empty)
+ *                                  :    :  |<-->|  **the actual insert** is always at base + malloc_usable - sizeof insert
  *
  *   FIXME: this means inserts may be misaligned.
  *   In practice this seems not to happen, because
  *   malloc pads to a #words and inserts at word-sized.
+ *   We can easily fix this by rounding down to _Alignof (struct insert).
+ *   (A perverse malloc might pad even more, s.t. this rounding-down
+ *   doesn't hit the boundary we rounded up to, but a later one. That's fine.)
  *
  * - 'requested size' means the size requested by the caller
- * - 'malloc usable size' means the size returned by malloc_usable_size(),
- *      which includes our trailer space
- *      (just 'usable size' by default also means this)
+ * - 'malloc usable size' means the size returned by malloc_usable_size() or
+ *      any comparable size-getting function (we parameterise on this).
+ *      This size includes our trailer space
+ *      (and just unqualified 'usable size' by default also means this)
  * - 'caller-usable size' means the size that the caller is actually free to use
  *      (our malloc-usable-size wrapper returns *this*).
  *
@@ -78,12 +82,11 @@ extern int __currently_allocating;
  * malloc_usable_size. So the allocation size returned by liballocs should reflect
  * that. So we should round down the size at the point of sizing the array.
  */
-
-size_t malloc_usable_size(void *ptr);
+typedef size_t sizefn_t(void*);
 static inline size_t allocsize_to_usersize(size_t usersize) { return usersize; }
 static inline size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
-static inline size_t usersize(void *userptr) { return allocsize_to_usersize(malloc_usable_size(userptr)); }
-static inline size_t allocsize(void *allocptr) { return malloc_usable_size(allocptr); }
+static inline size_t usersize(void *userptr, sizefn_t *sizefn) { return allocsize_to_usersize(sizefn(userptr)); }
+static inline size_t allocsize(void *allocptr, sizefn_t *sizefn) { return sizefn(allocptr); }
 
 struct arena_bitmap_info
 {
@@ -143,7 +146,7 @@ struct extended_insert
 	struct insert base;
 } __attribute__((packed)); // Alignment from the end guaranteed by ourselves
 
-static inline size_t caller_usable_size_for_chunk_and_malloc_usable_size(void *userptr,
+static inline size_t caller_usable_size_for_chunk_and_usable_size(void *userptr,
 	size_t alloc_usable_size)
 {
 	return alloc_usable_size - sizeof (struct insert);
@@ -159,24 +162,24 @@ insert_for_chunk_and_caller_usable_size(void *userptr, size_t caller_usable_size
 
 	return (struct insert *)insertptr;
 }
-static inline size_t caller_usable_size_for_chunk(void *userptr)
+static inline size_t caller_usable_size_for_chunk(void *userptr, sizefn_t *sizefn)
 {
-	return caller_usable_size_for_chunk_and_malloc_usable_size(userptr,
-			malloc_usable_size(userptr));
+	return caller_usable_size_for_chunk_and_usable_size(userptr,
+			sizefn(userptr));
 }
-static inline struct insert *insert_for_chunk(void *userptr)
+static inline struct insert *insert_for_chunk(void *userptr, sizefn_t *sizefn)
 {
 	return insert_for_chunk_and_caller_usable_size(userptr,
-		caller_usable_size_for_chunk(userptr));
+		caller_usable_size_for_chunk(userptr, sizefn));
 }
 
-static inline struct extended_insert *extended_insert_for_chunk(void *userptr)
+static inline struct extended_insert *extended_insert_for_chunk(void *userptr, sizefn_t *sizefn)
 {
 	return NULL; /* FIXME: restore this */
 }
-static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr)
+static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr, sizefn_t *sizefn)
 {
-	return &extended_insert_for_chunk(userptr)->lifetime;
+	return &extended_insert_for_chunk(userptr, sizefn)->lifetime;
 }
 
 // this is only used for promotion
@@ -203,14 +206,23 @@ static inline struct big_allocation *__generic_malloc_ensure_big(struct allocato
 	return __generic_malloc_fresh_big(a, addr, size, __lookup_deepest_bigalloc(addr));
 }
 
+static inline void ensure_has_info(struct big_allocation *arena);
+
 static inline
 struct big_allocation *arena_for_userptr(struct allocator *a, void *userptr)
 {
 	struct big_allocation *b = __lookup_bigalloc_from_root_by_suballocator(userptr,
 		a, NULL);
-	// what if we get no b? probably means we're not initialized, e.g. a malloc
-	// happening during __runt_files_init.
-	assert(b);
+	/* What if we get no b? probably means we're not initialized, e.g. a malloc
+	 * happening during __runt_files_init.
+	 * What about a fresh arena? How does its suballocator get set up? */
+	if (!b)
+	{
+		b = __lookup_deepest_bigalloc(userptr);
+		assert(!b->suballocator);
+		b->suballocator = a;
+		ensure_has_info(b);
+	}
 	return b;
 }
 
@@ -275,7 +287,12 @@ static inline void ensure_has_bitmap_to_current_end(struct big_allocation *arena
 	}
 }
 
-static inline void __generic_malloc_index_insert(struct big_allocation *arena, void *allocptr, size_t caller_requested_size, const void *caller)
+static inline void __generic_malloc_index_insert(struct big_allocation *arena,
+	void *allocptr, size_t caller_requested_size, const void *caller,
+	sizefn_t *sizefn)
+		/* Technically we needn't pass sizefn, but this is faster
+		 * than b->suballocator->get_size
+		 * because the compiler will know which function it is. */
 {
 	int lock_ret;
 	assert(arena);
@@ -302,8 +319,8 @@ static inline void __generic_malloc_index_insert(struct big_allocation *arena, v
 		}
 	}
 #endif
-	size_t alloc_usable_size = malloc_usable_size(allocptr); // FIXME: per-allocator call
-	size_t caller_usable_size = caller_usable_size_for_chunk_and_malloc_usable_size(allocptr,
+	size_t alloc_usable_size = sizefn(allocptr);
+	size_t caller_usable_size = caller_usable_size_for_chunk_and_usable_size(allocptr,
 			alloc_usable_size);
 	struct insert *p_insert = insert_for_chunk_and_caller_usable_size(allocptr,
 		caller_usable_size);
@@ -359,7 +376,9 @@ out:
 	BIG_UNLOCK
 }
 
-static inline void __generic_malloc_index_delete(struct big_allocation *arena, void *userptr/*, size_t freed_usable_size*/)
+static inline void __generic_malloc_index_delete(struct big_allocation *arena,
+	void *userptr/*, size_t freed_usable_size*/,
+	sizefn_t *sizefn)
 {
 	/* The freed_usable_size is not strictly necessary. It was added
 	 * for handling realloc after-the-fact. In this case, by the time we
@@ -371,7 +390,7 @@ static inline void __generic_malloc_index_delete(struct big_allocation *arena, v
 	 */
 	assert(userptr != NULL);
 	void *allocptr = userptr;
-	__liballocs_uncache_all(allocptr, malloc_usable_size(allocptr)); // FIXME: per-allocator call
+	__liballocs_uncache_all(allocptr, sizefn(allocptr)); // FIXME: per-allocator call
 
 #ifdef TRACE_GENERIC_MALLOC_INDEX
 	/* Check the recently-freed list for this pointer. We will warn about
@@ -394,7 +413,7 @@ static inline void __generic_malloc_index_delete(struct big_allocation *arena, v
 	if (__builtin_expect(b != NULL, 0))
 	{
 		void *allocptr = userptr;
-		unsigned long size = malloc_usable_size(allocptr); // FIXME: use per-alloc call
+		unsigned long size = sizefn(allocptr); // FIXME: use per-alloc call
 #ifdef TRACE_GENERIC_MALLOC_INDEX
 		fprintf(stderr, "*** Unindexing bigalloc entry for alloc chunk %p (size %lu)\n",
 				allocptr, size);
@@ -446,7 +465,7 @@ void __generic_malloc_index_reinsert_after_resize(struct allocator *a,
 	size_t modified_size,
 	size_t old_usable_size,
 	size_t requested_size,
-	const void *caller, void *new_allocptr)
+	const void *caller, void *new_allocptr, sizefn_t *sizefn)
 {
 	if (new_allocptr && new_allocptr != userptr)
 	{
@@ -454,7 +473,7 @@ void __generic_malloc_index_reinsert_after_resize(struct allocator *a,
 		 * in a way that's uniform with memcpy... the new chunk will take its type
 		 * from the realloc site, and we then check compatibility on the copy. */
 		__generic_malloc_index_insert(arena_for_userptr(a, new_allocptr), new_allocptr,
-			requested_size, __current_allocsite ?: caller);
+			requested_size, __current_allocsite ?: caller, sizefn);
 		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
 		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
 		 * buffer, or a fresh buffer allocated on an "exactly one live per thread" basis). */
@@ -462,7 +481,7 @@ void __generic_malloc_index_reinsert_after_resize(struct allocator *a,
 		 * pointing to valid memory but is read through... */
 #ifndef LIFETIME_POLICIES
 		__notify_copy(new_allocptr, userptr,
-			caller_usable_size_for_chunk_and_malloc_usable_size(userptr, old_usable_size));
+			caller_usable_size_for_chunk_and_usable_size(userptr, old_usable_size));
 #endif
 	}
 	else // !new_allocptr || new_allocptr == userptr
@@ -473,7 +492,7 @@ void __generic_malloc_index_reinsert_after_resize(struct allocator *a,
 		 * __generic_malloc_index_insert. */
 		// FIXME: is this right? what if new_allocptr is null?
 		__generic_malloc_index_insert(arena_for_userptr(a, userptr), userptr, requested_size,
-			__current_allocsite ? __current_allocsite : caller);
+			__current_allocsite ? __current_allocsite : caller, sizefn);
 	}
 
 	/* Are we a bigalloc? */
@@ -487,7 +506,8 @@ void __generic_malloc_index_reinsert_after_resize(struct allocator *a,
 /* A client-friendly lookup function. */
 static inline
 struct insert *lookup_object_info(struct big_allocation *arena,
-	void *mem, void **out_object_start, size_t *out_object_size, void **ignored)
+	void *mem, void **out_object_start, size_t *out_object_size, void **ignored,
+	sizefn_t *sizefn)
 {
 	/* Unlike our malloc hooks, we might get called before initialization,
 	   e.g. if someone tries to do a lookup before the first malloc of the
@@ -526,7 +546,7 @@ struct insert *lookup_object_info(struct big_allocation *arena,
 	{
 		found_bitidx += nbits_hidden;
 		object_start = info->bitmap_base_addr + (MALLOC_ALIGN * found_bitidx);
-		found_ins = insert_for_chunk(object_start);
+		found_ins = insert_for_chunk(object_start, sizefn);
 	}
 	//fprintf(stderr, "Heap index lookup failed for %p with "
 	//	"cur_head %p, object_minimum_size %zu, seen_object_starting_earlier %d\n",
@@ -535,14 +555,14 @@ struct insert *lookup_object_info(struct big_allocation *arena,
 	{
 		assert(object_start);
 		if (out_object_start) *out_object_start = object_start;
-		if (out_object_size) *out_object_size = usersize(object_start);
+		if (out_object_size) *out_object_size = usersize(object_start, sizefn);
 	}
 	assert(!found_ins || INSERT_DESCRIBES_OBJECT(found_ins));
 	return found_ins;
 }
 
 static inline
-liballocs_err_t __generic_malloc_get_info(struct allocator *a,
+liballocs_err_t __generic_malloc_get_info(struct allocator *a, sizefn_t *sizefn,
 	void *obj, struct big_allocation *maybe_the_allocation,
 	struct uniqtype **out_type, void **out_base,
 	unsigned long *out_size, const void **out_site)
@@ -573,7 +593,7 @@ liballocs_err_t __generic_malloc_get_info(struct allocator *a,
 	{
 		size_t alloc_usable_chunksize = 0;
 		heap_info = lookup_object_info(arena_for_userptr(a, obj),
-			obj, &base, &alloc_usable_chunksize, NULL);
+			obj, &base, &alloc_usable_chunksize, NULL, sizefn);
 		if (!heap_info)
 		{
 			/* For an unindexed non-promoted chunk, we don't know the base, so
@@ -585,7 +605,7 @@ liballocs_err_t __generic_malloc_get_info(struct allocator *a,
 			return &__liballocs_err_unindexed_heap_object;
 		}
 		assert(base);
-		caller_usable_size = caller_usable_size_for_chunk_and_malloc_usable_size(base,
+		caller_usable_size = caller_usable_size_for_chunk_and_usable_size(base,
 			alloc_usable_chunksize);
 	}
 	assert(heap_info);
@@ -598,14 +618,16 @@ liballocs_err_t __generic_malloc_get_info(struct allocator *a,
 }
 
 static inline
-liballocs_err_t __generic_malloc_set_type(struct allocator *a, struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type)
+liballocs_err_t __generic_malloc_set_type(struct allocator *a,
+	struct big_allocation *maybe_the_allocation, void *obj,
+	struct uniqtype *new_type, sizefn_t *sizefn)
 {
-	struct insert *ins = lookup_object_info(arena_for_userptr(a, obj), obj, NULL, NULL, NULL);
+	struct insert *ins = lookup_object_info(arena_for_userptr(a, obj), obj,
+		NULL, NULL, NULL, sizefn);
 	if (!ins) return &__liballocs_err_unindexed_heap_object;
 	ins->alloc_site = (uintptr_t) new_type;
 	ins->alloc_site_flag = 1; // meaning it's a type, not a site
 	return NULL;
 }
-
 
 #endif

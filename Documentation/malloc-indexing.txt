@@ -20,7 +20,7 @@ event hooks (pre_alloc, post_nonnull_nonzero_realloc) et al, which
 all gets linked in non-sharedly and calls out cross-DSO to liballocs.
 
                                                          liballocs_preload.so
-      /---------------------------------------------exe------\/--------\/------------exe-----------\
+      /-------------------------exe--------------------------\/--------\/------------exe-----------\
 bound by:     ld --wrap    ld --wrap         ld           .--------------ld          dlsym          
       +--------+    +--------+    +--------+    +--------+ld.so--------+ `->+--------+    +--------+
       |        |--->|        |--->|        |--->|        |--->|        |    |        |--->|        |
