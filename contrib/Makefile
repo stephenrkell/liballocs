@@ -119,11 +119,13 @@ varlist += TOOLSUB
 
 # ----------------------------elftin
 
+# any librunt will do because we just need relf.h
+LIBRUNT ?= $(CONTRIB)/libsystrap/contrib/librunt
 .PHONY: build-elftin
 build-elftin:
 	$(MAKE) -C elftin/normrelocs normrelocs
 	$(MAKE) -C elftin/abs2und abs2und sym2und
-	$(MAKE) -C elftin/xwrap-ldplugin xwrap-ldplugin.so
+	LIBRUNT=$(LIBRUNT) $(MAKE) -C elftin/xwrap-ldplugin xwrap-ldplugin.so
 CONFIG_MK += \nELFTIN ?= $(CONTRIB)/elftin\n
 varlist += ELFTIN
 
