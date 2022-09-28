@@ -5,6 +5,7 @@ srcdir := $(SRCROOT)/src
 include $(SRCROOT)/config.mk
 
 CFLAGS += -DIN_LIBRUNT_DSO
+CFLAGS += -DIN_LIBALLOCS_DSO
 CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS)/include \
    -I$(LIBSYSTRAP)/include -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused \
    $(LIBALLOCSTOOL_CFLAGS)
@@ -37,6 +38,7 @@ $(MAKECMDGOALS):
 else
 # the rest
 vpath %.c $(srcdir)
+vpath %.lds $(srcdir)
 vpath %.c $(srcdir)/allocators
 vpath dlmalloc.c $(LIBSYSTRAP)/contrib
 
@@ -222,24 +224,9 @@ vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: actually in trap-syscalls but shou
 dlmalloc.a: dlmalloc.o
 dlmalloc.o: CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=0 -DHAVE_MORECORE=1 -DMSPACES=1 -DMORECORE=emulated_sbrk -DUSE_DL_PREFIX -fPIC
 dlmalloc-ext.o: CFLAGS += -fPIC
-# FIXME: instead of these ldflags,
-# write a ldscript and include it on the command line.
-# This should let us make the defined symbols .hidden or .internal, whereas
-# currently these 'private' symbols have public visibility
 PRIVATE_MALLOC_WRAPPED_LDFLAGS := -Wl,--wrap,dlmalloc -Wl,--wrap,dlcalloc \
  -Wl,--wrap,dlfree -Wl,--wrap,dlrealloc -Wl,--wrap,dlmemalign -Wl,--wrap,dlposix_memalign \
- -Wl,--defsym,__private_malloc=__wrap_dlmalloc \
- -Wl,--defsym,__private_calloc=__wrap_dlcalloc \
- -Wl,--defsym,__private_free=__wrap_dlfree \
- -Wl,--defsym,__private_realloc=__wrap_dlrealloc \
- -Wl,--defsym,__private_memalign=__wrap_dlmemalign \
- -Wl,--defsym,__private_posix_memalign=__wrap_dlposix_memalign
-PRIVATE_MALLOC_PLAIN_LDFLAGS := -Wl,--defsym,__private_malloc=dlmalloc \
- -Wl,--defsym,__private_calloc=dlcalloc \
- -Wl,--defsym,__private_free=dlfree \
- -Wl,--defsym,__private_realloc=dlrealloc \
- -Wl,--defsym,__private_memalign=dlmemalign \
- -Wl,--defsym,__private_posix_memalign=dlposix_memalign
+ -Wl,--wrap,dlmalloc_usable_size
 # We put dlmalloc in a library so that --exclude-libs=dlmalloc.a will hide its symbols
 # in our output .so, so that they don't override anything in the rest of the program.
 # NOTE: __private_strdup is defined explicitly in liballocs.c and dummyweaks.c
@@ -252,11 +239,13 @@ $(SOLIB_TARGETS): dlmalloc.a
 # HACKETY HACK: ld.gold seems to require we use the colon separator, and just give the filename
 # not its fully qualified pathname
 $(SOLIB_TARGETS): EXCLUDE_LIBS += dlmalloc.a:libsystrap.a
+$(SOLIB_TARGETS): LDFLAGS += -Wl,-z,initfirst
 
 LIBALLOCS_PRELOAD_A_OBJS := dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS)
 LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS)
 
 liballocs_preload.so: LDFLAGS += $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
+liballocs_preload.so: private-malloc-wrapped.lds
 liballocs_preload.so: LDFLAGS += -Wl,-Map,liballocs_preload.so.map
 liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a
 liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
@@ -334,7 +323,7 @@ liballocs_dummyweaks.o: dummyweaks.o
 # FIXME: it shouldn't. But unclear how else to satisfy the dependency on __private_strdup
 # in libcrunch's _stubs.so.
 vpath %.o $(LIBRUNT)/lib
-liballocs_dummyweaks.so: LDFLAGS += $(PRIVATE_MALLOC_PLAIN_LDFLAGS)
+liballocs_dummyweaks.so: private-malloc-plain.lds
 liballocs_dummyweaks.so: LDLIBS += $(PRIVATE_MALLOC_LDLIBS)
 liballocs_dummyweaks.so: dummyweaks.o librunt_dummyweaks.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)  -Wl,--exclude-libs="$(EXCLUDE_LIBS)"

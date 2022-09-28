@@ -1,13 +1,16 @@
 #ifndef _GENERIC_MALLOC_INDEX_H
 #define _GENERIC_MALLOC_INDEX_H
 
+/* Note: you have to be _GNU_SOURCE to use this file. */
+
 #include <stdbool.h>
 #include <pthread.h>
 #include "liballocs_config.h"
+#include "liballocs.h"
+#include "liballocs_ext.h"
 #include "pageindex.h"
 #include "malloc-meta.h"
 #include "bitmap.h"
-#include "liballocs_private.h" /* HMM. Are we OK being private to liballocs? Probably yes. */
 
 /* A thread-local variable to override the "caller" arguments. 
  * Platforms without TLS have to do without this feature. */
@@ -24,6 +27,22 @@ extern void *__current_allocfn;
 extern size_t __current_allocsz;
 extern int __currently_freeing;
 extern int __currently_allocating;
+#endif
+
+/* HACK while we can't create protected symbols in linker scripts
+ * (__liballocs_private_malloc = __private_malloc and so on ). */
+#ifdef IN_LIBALLOCS_DSO
+//void *__private_malloc(size_t);
+#define __liballocs_private_malloc __private_malloc
+//void *__private_realloc(void *, size_t);
+#define __liballocs_private_realloc __private_realloc
+//void *__private_calloc(size_t, size_t);
+#define __liballocs_private_calloc __private_calloc
+//void *__private_free(void *);
+#define __liballocs_private_free __private_free
+//void __free_arena_bitmap_and_info(void *info);
+#define __liballocs_free_arena_bitmap_and_info __free_arena_bitmap_and_info
+#define __liballocs_extract_and_output_alloc_site_and_type extract_and_output_alloc_site_and_type
 #endif
 
 /* Generic heap indexing implementation.
@@ -243,13 +262,34 @@ struct big_allocation *arena_for_userptr(struct allocator *a, void *userptr)
 #define SHOULD_PROMOTE_TO_BIGALLOC(userchunk, usable_size) \
 	((usable_size) > /* HACK: default glibc lower mmap threshold: 128 kB */ 131072)
 
+/* If this is being linked into a client exe, as part of our malloc-hooking
+ * approach (the in-exe case), we are generating a load of outgoing references
+ * to liballocs. They all need to be stubbed out in the not-preloaded case.
+ * What's a better way of doing that?
+ *
+ * I think the only symbols are __private_malloc, __private_realloc, __private_free,
+ * big_allocations, __free_arena_bitmap_and_info. They should all be 'protected'
+ * or have protected aliases that are used in this function.
+ *
+ * If indexing is built in to a binary, it should link -lallocs. Then, references
+ * to liballocs are all ifuncs which resolve to the real routines if liballocs.so
+ * is in the preload position, or dummy ones otherwise. allocsld.so is just a
+ * link to liballocs.so. Allocsld does *not* force liballocs.so into the preload
+ * position, because it is the interpreter of liballocs-built binaries. Perhaps
+ * it should do this if it is 'invoked' but not if 'requested'.
+ *
+ * To generate these ifuncs, and the dummy functions, we still need a spec of
+ * the liballocs binary interface.
+ * We could have a version script that does this. Or we could have a dwarfidl file
+ * that does it.*/
+
 static inline void ensure_has_info(struct big_allocation *arena)
 {
 	if (__builtin_expect(!arena->suballocator_private, 0))
 	{
 		struct arena_bitmap_info *info;
-		arena->suballocator_private = info = __private_malloc(sizeof (*info));
-		arena->suballocator_private_free = __free_arena_bitmap_and_info;
+		arena->suballocator_private = info = __liballocs_private_malloc(sizeof (*info));
+		arena->suballocator_private_free = __liballocs_free_arena_bitmap_and_info;
 		info->nwords = 0;
 		info->bitmap = NULL;
 		/* Mutex is recursive only because assertion failures sometimes want to do
@@ -280,7 +320,7 @@ static inline void ensure_has_bitmap_to_current_end(struct big_allocation *arena
 			/ (MALLOC_ALIGN * BITMAP_WORD_NBITS);
 	if (__builtin_expect(info->nwords < total_words, 0))
 	{
-		info->bitmap = __private_realloc(info->bitmap, total_words * sizeof (bitmap_word_t));
+		info->bitmap = __liballocs_private_realloc(info->bitmap, total_words * sizeof (bitmap_word_t));
 		if (!info->bitmap) abort();
 		bzero(info->bitmap + info->nwords, (total_words - info->nwords) * sizeof (bitmap_word_t));
 		info->nwords = total_words;
@@ -347,7 +387,8 @@ static inline void __generic_malloc_index_insert(struct big_allocation *arena,
 	}
 #endif
 	/* Metadata remains in the chunk */
-	info->biggest_allocated_object = MAX(caller_usable_size, info->biggest_allocated_object);
+	info->biggest_allocated_object = /* max */ (caller_usable_size > info->biggest_allocated_object) ?
+		caller_usable_size : info->biggest_allocated_object;
 	if (__builtin_expect(SHOULD_PROMOTE_TO_BIGALLOC(allocptr, alloc_usable_size), 0))
 	{
 		void *bigalloc_begin = allocptr;
@@ -360,7 +401,8 @@ static inline void __generic_malloc_index_insert(struct big_allocation *arena,
 	}
 	else
 	{
-		info->biggest_unpromoted_object = MAX(caller_usable_size, info->biggest_unpromoted_object);
+		info->biggest_unpromoted_object = /* max */ (caller_usable_size > info->biggest_unpromoted_object)
+			? caller_usable_size : info->biggest_unpromoted_object;
 	}
 #undef insert_size
 #ifdef TRACE_GENERIC_MALLOC_INDEX
@@ -611,7 +653,7 @@ liballocs_err_t __generic_malloc_get_info(struct allocator *a, sizefn_t *sizefn,
 	assert(heap_info);
 	if (out_base) *out_base = base;
 	if (out_size) *out_size = caller_usable_size;
-	if (out_type || out_site) return extract_and_output_alloc_site_and_type(
+	if (out_type || out_site) return __liballocs_extract_and_output_alloc_site_and_type(
 		heap_info, out_type, (void**) out_site);
 	// no error
 	return NULL;

@@ -15,8 +15,9 @@ int main(void)
 	struct uniqtype *t = __liballocs_get_alloc_type(a);
 	printf("type is %p\n", t);
 	// it's actually an array of 1 int
-	assert(UNIQTYPE_IS_ARRAY_TYPE(t)
-		&& UNIQTYPE_ARRAY_ELEMENT_TYPE(t) == &__uniqtype__int);
+	assert(UNIQTYPE_IS_ARRAY_TYPE(t));
+	struct uniqtype *el_t = UNIQTYPE_ARRAY_ELEMENT_TYPE(t);
+	assert(el_t == &__uniqtype__int);
 	
 	return 0;
 }

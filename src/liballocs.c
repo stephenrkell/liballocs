@@ -825,17 +825,20 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 
 void *__liballocs_main_bp; // beginning of main's stack frame
 
-/* counters */
-unsigned long __liballocs_aborted_stack;
-unsigned long __liballocs_aborted_static;
-unsigned long __liballocs_aborted_unknown_storage;
-unsigned long __liballocs_hit_heap_case;
-unsigned long __liballocs_hit_alloca_case;
-unsigned long __liballocs_hit_stack_case;
-unsigned long __liballocs_hit_static_case;
-unsigned long __liballocs_aborted_unindexed_heap;
-unsigned long __liballocs_aborted_unindexed_alloca;
-unsigned long __liballocs_aborted_unrecognised_allocsite;
+/* Counters -- these are mostly liballocs-internal and therefore hidden,
+ * but the ones to do with heap allocation might get ref'd from other
+ * DSOs. Also we may find that we want ot inline some paths
+ * into clients, in which case others may have to become more visible. */
+unsigned long __liballocs_aborted_stack __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_static __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_unknown_storage __attribute__((visibility("hidden")));;
+unsigned long __liballocs_hit_heap_case __attribute__((visibility("protected")));
+unsigned long __liballocs_hit_alloca_case __attribute__((visibility("hidden")));;
+unsigned long __liballocs_hit_stack_case __attribute__((visibility("hidden")));;
+unsigned long __liballocs_hit_static_case __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_unindexed_heap __attribute__((visibility("protected")));;
+unsigned long __liballocs_aborted_unindexed_alloca __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_unrecognised_allocsite __attribute__((visibility("protected")));;
 
 static void print_exit_summary(void)
 {
@@ -1251,6 +1254,7 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 	return (struct uniqtype *) returned;
 }
 
+__attribute__((visibility("hidden")))
 liballocs_err_t extract_and_output_alloc_site_and_type(
     struct insert *p_ins,
     struct uniqtype **out_type,
@@ -1363,6 +1367,11 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 	/* return success */
 	return NULL;
 }
+liballocs_err_t __liballocs_extract_and_output_alloc_site_and_type(
+    struct insert *p_ins,
+    struct uniqtype **out_type,
+    void **out_site
+) __attribute__((visibility("protected"),alias("extract_and_output_alloc_site_and_type")));
 
 #ifdef __liballocs_get_base
 #undef __liballocs_get_base

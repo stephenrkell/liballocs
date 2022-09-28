@@ -11,6 +11,11 @@
 #include "liballocs_private.h"
 #include "allocsites.h"
 #include "relf.h"
+/* This alias needs to go before generic_malloc_index.h because of
+ * the aliasing HACK in that file, which will #define __liballocs_free_arena_bitmap_and_info. */
+void __liballocs_free_arena_bitmap_and_info(void *info)
+__attribute__((alias("__free_arena_bitmap_and_info")));
+
 #include "generic_malloc_index.h" /* FIXME: want to remove this */
 
 /* These definitions need to go somewhere. But they are used mostly by our

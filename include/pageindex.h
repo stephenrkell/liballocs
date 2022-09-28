@@ -59,7 +59,7 @@ struct big_allocation
 extern struct big_allocation big_allocations[] __attribute__((weak));
 extern struct big_allocation __liballocs_big_allocations[] __attribute__((weak));
 
-void __pageindex_init(void) __attribute__((visibility("hidden"),constructor(101)));
+void __pageindex_init(void) __attribute__((constructor(101)));
 typedef uint16_t bigalloc_num_t;
 
 // FIXME: protected stuff should be in private header only. This is now a public header.
@@ -76,7 +76,7 @@ struct big_allocation *__liballocs_new_bigalloc(const void *ptr, size_t size,
 	void *allocator_private, void (*allocator_private_free)(void*),
 	struct big_allocation *maybe_parent, struct allocator *a);
 
-_Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a) __attribute__((visibility("hidden")));
+_Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a);
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end);
 _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_begin);
 _Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin);
@@ -86,13 +86,13 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, const void *end) __attribute__((visibility("hidden")));
 
 struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr, const void *end);
-struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start) __attribute__((visibility("hidden")));
-struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start) __attribute__((visibility("hidden")));
-struct big_allocation *__lookup_bigalloc_under_by_suballocator(const void *mem, struct allocator *sub_a, struct big_allocation *start, void **out_object_start) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_under_pageindex(const void *mem, struct allocator *a, void **out_object_start);
+struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start);
+struct big_allocation *__lookup_bigalloc_under_by_suballocator(const void *mem, struct allocator *sub_a, struct big_allocation *start, void **out_object_start);
 struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct allocator *a, void **out_object_start);
 struct big_allocation *__lookup_bigalloc_from_root_by_suballocator(const void *mem, struct allocator *sub_a, void **out_object_start);
-struct big_allocation *__lookup_bigalloc_top_level(const void *mem) __attribute__((visibility("hidden")));
-struct big_allocation *__lookup_deepest_bigalloc(const void *mem) __attribute__((visibility("hidden")));
+struct big_allocation *__lookup_bigalloc_top_level(const void *mem);
+struct big_allocation *__lookup_deepest_bigalloc(const void *mem);
 
 struct allocator *__liballocs_get_allocator_upper_bound(const void *obj) __attribute__((visibility("protected")));
 struct allocator *__liballocs_ool_get_allocator(const void *obj) __attribute__((visibility("protected")));

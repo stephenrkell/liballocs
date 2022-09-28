@@ -50,6 +50,9 @@ struct big_allocation;
 
 uint16_t *pageindex __attribute__((visibility("protected")));
 
+__attribute__((visibility("protected")))
+struct big_allocation big_allocations[/*NBIGALLOCS*/1];
+
 __thread void *__current_allocfn;
 __thread _Bool __currently_allocating;
 __thread void *__current_allocsite;
@@ -254,6 +257,30 @@ struct big_allocation *__lookup_bigalloc_from_root(const void *mem, struct alloc
 {
 	return NULL;
 }
+__attribute__((visibility("protected")))
+struct big_allocation *__lookup_deepest_bigalloc(const void *mem)
+{ return NULL; }
+
+__attribute__((visibility("protected")))
+struct big_allocation *__lookup_bigalloc_under_by_suballocator(const void *mem, struct allocator *sub_a,
+    struct big_allocation *start, void **out_object_start)
+{
+	return NULL;
+}
+__attribute__((visibility("protected")))
+struct big_allocation *__lookup_bigalloc_from_root_by_suballocator(const void *mem, struct allocator *sub_a, void **out_object_start)
+{ return NULL; }
+
+__attribute__((visibility("protected")))
+struct big_allocation *__lookup_bigalloc_under(const void *mem, struct allocator *a, struct big_allocation *start, void **out_object_start)
+{ return NULL; }
+
+_Bool __liballocs_truncate_bigalloc_at_end(struct big_allocation *b, const void *new_end)
+{ return 1; }
+
+__attribute__((visibility("protected")))
+_Bool __liballocs_delete_bigalloc_at(const void *begin, struct allocator *a)
+{ return 1; }
 
 struct alloc_tree_pos;
 struct alloc_tree_link;
@@ -334,7 +361,7 @@ void __notify_copy(void *dest, const void *src, unsigned long n)
 const char *__liballocs_meta_libfile_name(const char *objname) { return NULL; }
 
 /* GIANT HACK:
- * This is in this file because:
+ * This *non*-dummy code is in this file because:
  * - librunt/liballocs_systrap clients end up needing it, including
  *      libcrunch_stubs.so
  * - --defsym __private_strdup=strdup doesn't work with ld.gold (internal error),
@@ -342,8 +369,17 @@ const char *__liballocs_meta_libfile_name(const char *objname) { return NULL; }
  */
 /* __private_malloc is defined by our Makefile as __wrap_dlmalloc.
  * Since dlmalloc does not include a strdup, we need to define
- * that explicitly. */
-void *__private_malloc(size_t len);
+ * that explicitly.
+ *
+ * Why is an outgoing reference to __private_malloc all right?
+ * In *both* liballocs_dummyweaks.so and liballocs_preload.so,
+ * we link in a full dlmalloc, so this will be a defined reference.
+ * In liballocs_dummyweaks.o, we have no __private_malloc and so
+ * the resulting DSO will have an outgoing weak reference to this
+ * private malloc, but that won't prevent us from running.
+ * (FIXME: ... but libcrunch stubs probably only if we link with -z dynamic-undefined-weak?)
+ */
+void *__private_malloc(size_t len) __attribute__((weak)); /* weak ref */
 char *__liballocs_private_strdup(const char *s) __attribute__((weak));
 char *__liballocs_private_strdup(const char *s)
 {
@@ -392,3 +428,36 @@ struct liballocs_err __liballocs_err_object_of_unknown_storage
  = { "object of unknown storage" };
 
 void *emulated_sbrk(long int n) { return (void*)-1; }
+
+void *__liballocs_private_realloc(void*, size_t);
+void __liballocs_private_free(void *);
+
+void __liballocs_free_arena_bitmap_and_info(void *info  /* really struct arena_bitmap_info * */);
+
+unsigned long __liballocs_aborted_stack __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_static __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_unknown_storage __attribute__((visibility("hidden")));;
+unsigned long __liballocs_hit_heap_case __attribute__((visibility("protected")));
+unsigned long __liballocs_hit_alloca_case __attribute__((visibility("hidden")));;
+unsigned long __liballocs_hit_stack_case __attribute__((visibility("hidden")));;
+unsigned long __liballocs_hit_static_case __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_unindexed_heap __attribute__((visibility("protected")));;
+unsigned long __liballocs_aborted_unindexed_alloca __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_unrecognised_allocsite __attribute__((visibility("protected")));;
+
+__attribute__((visibility("protected")))
+liballocs_err_t __liballocs_extract_and_output_alloc_site_and_type(
+    struct insert *p_ins,
+    struct uniqtype **out_type,
+    void **out_site
+) { return NULL; }
+
+void *__liballocs_private_malloc(size_t sz)
+{ return NULL; }
+void *__liballocs_private_realloc(void *ptr, size_t sz)
+{ return NULL; }
+void __liballocs_free_arena_bitmap_and_info(void *info)
+{}
+void __liballocs_uncache_all(const void *allocptr, unsigned long size)
+{}
+

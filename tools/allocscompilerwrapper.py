@@ -157,109 +157,16 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 self.printErrors(errfile)
                 return ret  # give up now
 
-            # Now deal with wrapped functions
-            wrappedFns = self.allWrappedSymNames()
-            self.debugMsg("Looking for wrapped functions that need unbinding\n")
-            wrappedDefs = self.listDefinedSymbolsMatching(filename, wrappedFns)
-            self.debugMsg("Got %s\n" % (str(wrappedDefs)))
-            if wrappedDefs != []:
-                # Defs are often ref'd, so we need to unbind. We unbind the allocsite syms
-                # *and* --prefer-non-section-relocs. 
-                # This will give us a file with __def_ and __ref_ symbols
-                # for the allocation function. We then rename these to 
-                # __real_ and __wrap_ respectively. 
-                backup_filename = os.path.splitext(filename)[0] + ".backup.o"
-                self.debugMsg("Found that we may need to unbind symbols [%s]... making backup as %s\n" % \
-                    (", ".join(wrappedDefs), backup_filename))
-                cp_ret = subprocess.call(["cp", filename, backup_filename], stderr=errfile)
-                if cp_ret != 0:
-                    self.printErrors(errfile)
-                    return cp_ret
-                # mungings to do (the order matters!):
-                # 1. globalize any local allocation functions, and normalize relocs afterwards
-                #       MONSTER HACK: globalize a symbol if it's a named alloc fn. 
-                #       This is needed e.g. for SPEC benchmark bzip2
-                local_syms_list_cmd = [self.getLibAllocsBaseDir() + "/tools/to-globalize.sh"] \
-                 + [filename] \
-                 + [sym for sym in wrappedDefs]
-                local_syms_list = subprocess.Popen(local_syms_list_cmd, stdout=subprocess.PIPE).communicate()[0].decode()
-                self.debugMsg("Any to globalize? %s\n" % local_syms_list)
-                syms_to_globalize = local_syms_list.split("\n")
-                if syms_to_globalize != []:
-                    # do the globalize
-                    objcopy_ret = subprocess.call( \
-                     ["objcopy"] \
-                     + [opt for seq in [["--globalize-symbol", sym] for sym in syms_to_globalize if sym != ""] for opt in seq] \
-                     + [filename], stderr=errfile)
-                    if objcopy_ret != 0:
-                        self.printErrors(errfile)
-                        return objcopy_ret
-                    normrelocs_cmd = [os.environ.get("ELFTIN") + "/normrelocs/normrelocs"] \
-                     + [filename] \
-                     + [s for s in syms_to_globalize if s != ""]
-                    self.debugMsg("Did globalizing objcopy; normrelocs cmd is %s\n" % str(normrelocs_cmd))
-                    # objcopy succeeded, so do normrelocs
-                    # (instead of --prefer-non-section-relocs)
-                    normrelocs_ret = subprocess.call(normrelocs_cmd, stderr=errfile)
-                    if normrelocs_ret != 0:
-                        self.printErrors(errfile)
-                        return normrelocs_ret
-                    self.debugMsg("Did normrelocs\n")
-                # 2. unbind any defined allocation functions
-                # if we have ELFTIN set, use that to specify our abs2und
-                # PROBLEM: will ELFTIN be set? Only during liballocs build, but
-                # we are running. We need a script that will set our env.
-                # But a toolsub-based wrapper will be a good place for that.
-                unbind_cmd = ["env"] + \
-                 (["ABS2UND=" + os.environ.get("ELFTIN") + "/abs2und/abs2und"] \
-                   if "ELFTIN" in os.environ else []) + \
-                 [self.getLibAllocsBaseDir() + "/tools/objcopy-unbind-syms.sh"] \
-                 + [filename] \
-                 + [sym for sym in wrappedDefs]
-                self.debugMsg("cmdstring for objcopy (unbind) is " + " ".join(unbind_cmd) + "\n")
-                objcopy_ret = subprocess.call(unbind_cmd, stderr=errfile)
-                if objcopy_ret != 0:
-                    self.debugMsg("problem doing objcopy (unbind) (ret %d)\n" % objcopy_ret)
-                    self.printErrors(errfile)
-                    return objcopy_ret
-                # 3. turn __def_/__ref_ symbols into unprefixed and __wrap_
-                # one more objcopy to rename the __def_ and __ref_ symbols
-                self.debugMsg("Renaming __def_ and __ref_ alloc symbols\n")
-                # instead of objcopying to replace __def_<sym> with <sym>,
-                # we use ld -r to define <sym> and __real_<sym> as *extra* symbols
-                # ... and also ensure __def_ is global, while we're at it
-                ref_args = [["--redefine-sym", "__ref_" + sym + "=__wrap_" + sym] for sym in wrappedDefs]
-                objcopy_ret = subprocess.call(["objcopy"] \
-                 + [opt for seq in ref_args for opt in seq] \
-                 + [filename], stderr=errfile)
-                if objcopy_ret != 0:
-                    self.printErrors(errfile)
-                    return objcopy_ret
-                tmp_filename = os.path.splitext(filename)[0] + ".tmp.o"
-                cp_ret = subprocess.call(["cp", filename, tmp_filename], stderr=errfile)
-                if cp_ret != 0:
-                    self.printErrors(errfile)
-                    return cp_ret
-                def_args = [["--defsym", sym + "=__def_" + sym, \
-                    "--defsym", "__real_" + sym + "=__def_" + sym, \
-                    ] for sym in wrappedDefs]
-                ld_ret = subprocess.call(["ld", "-r"] \
-                 + [opt for seq in def_args for opt in seq] \
-                 + [tmp_filename, "-o", filename], stderr=errfile)
-                if ld_ret != 0:
-                    self.debugMsg("problem doing ld -r (__real_ = __def_) (ret %d)\n" % ld_ret)
-                    self.printErrors(errfile)
-                    return ld_ret
-
+            # Now deal with globalizing wrapped functions
             self.debugMsg("Looking for wrapped functions that need globalizing\n")
             # grep for local symbols -- a lower-case letter after the symname is the giveaway
             cmdstring = "nm -fposix --defined-only \"%s\" | egrep \"^(%s) [a-z] \"" \
-                % (filename, "|".join(wrappedFns))
+                % (filename, "|".join(self.allWrappedSymNames()))
             self.debugMsg("cmdstring is %s\n" % cmdstring)
             grep_ret = subprocess.call(["sh", "-c", cmdstring], stderr=errfile)
             if grep_ret == 0:
                 self.debugMsg("Found that we need to globalize\n")
-                globalize_pairs = [["--globalize-symbol", sym] for sym in wrappedFns]
+                globalize_pairs = [["--globalize-symbol", sym] for sym in self.allWrappedSymNames()]
                 objcopy_ret = subprocess.call(["objcopy"] \
                  + [opt for pair in globalize_pairs for opt in pair] \
                  + [filename])
@@ -268,66 +175,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
             self.debugMsg("No need to globalize\n")
             return 0
 
-    def fixupLinkedRelocObject(self, filename, errfile):
-        self.debugMsg("Fixing up linked output object: %s\n" % filename)
-        wrappedFns = self.allWrappedSymNames()
-        with (self.makeErrFile(os.path.realpath(filename) + ".fixuplog", "w+") if not errfile else errfile) as errfile:
-            #  For any defined allocator function `malloc', we append
-            #  -Wl,--defsym,malloc=__wrap___real_malloc
-            #  -Wl,--wrap,__real_malloc
-            #  i.e. to link in the callee-side instrumentation (__wrap___real_malloc)
-            #  to be called immediately after the call*er*-side instrumentation (__wrap_malloc).
-            # For standard allocators, the wrap-reals are defined in liballocs_nonshared.a.
-            # For user-specific allocators, we have already generated them ourselves,
-            # earlier, in generateAllocStubsObject (i.e. with caller wrappers). We *only* do this
-            # for functions that actually allocate, not for malloc wrapper functions. For now,
-            # that means we do it only for the case of generic-small ('suballocator',
-            # LIBALLOCS_SUB_ALLOC_FNS), falling back to the nonshared for mallocs.
-            syms = [x for x in self.allWrappedSymNames() \
-                if x not in self.symNamesForFns(self.allWrapperAllocFns() + self.allAllocSzFns() + \
-                    self.allWrapperFreeFns())]
-            matches = self.listDefinedSymbolsMatching(filename, syms)
-            return (0, sum([["-Wl,--defsym," + m + "=__wrap___real_" + m, "-Wl,--wrap,__real_" + m] \
-              for m in matches], []))
-            
-            # for any allocator symbols that it defines, we must
-            # 1. link in the callee-side stubs it needs
-            #          (CAN'T do that now of course -- assume it's already been done)
-            # 2. rename __wrap___real_<allocator> to <allocator> 
-            #       and <allocator> to something arbitrary
-            # In this way, local callers must already have had the extra 
-            #   --wrap __real_<allocator> 
-            # argument in order to get the callee instr. Internal calls are wired up properly.
-            # Next, to allow lib-to-exe calls to hit the callee instr,
-            # use objcopy to rename them
-            # ARGH. This won't work because objcopy can't rename dynsyms
-            pass
-            # what allocator fns does it define globally?
-            # grep for global symbols -- an upper-case letter after the symname is the giveaway
-#                cmdstring = "nm -fposix --extern-only --defined-only \"%s\" | sed 's/ [A-Z] [0-9a-f ]\\+$//' | egrep \"^__wrap___real_(%s)$\""\
-#                    % (filename, "|".join(wrappedFns))
-#                self.debugMsg("cmdstring is %s\n" % cmdstring)
-#                wrappedRealNames = subprocess.Popen(["sh", "-c", cmdstring], stderr=errfile, stdout=subprocess.PIPE).communicate()[0].split("\n")
-#                self.debugMsg("output was %s\n" % wrappedRealNames)
-#                if len(wrappedRealNames) > 0:
-#                    # firstly do the bare (non-wrap-real-prefixed) ones
-#                    bareNames = [sym[len("__wrap___real_"):] for sym in wrappedRealNames]
-#                    self.debugMsg("Renaming __wrap___real_* alloc symbols: %s\n" % bareNames)
-#                    redefine_args = [["--redefine-sym", sym + "=" + "__liballocs_bare_" + sym] \
-#                        for sym in bareNames if sym != ""]
-#                    objcopy_ret = subprocess.call(["objcopy"] \
-#                     + [opt for seq in redefine_args for opt in seq] \
-#                     + [filename], stderr=errfile)
-#                    if objcopy_ret != 0:
-#                        self.printErrors(errfile)
-#                        return objcopy_ret
-#                    redefine_args = [["--redefine-sym", "__wrap___real_" + sym + "=" + sym] \
-#                       for sym in bareNames if sym != ""]
-#                    objcopy_ret = subprocess.call(["objcopy"] \
-#                     + [opt for seq in redefine_args for opt in seq] \
-#                     + [filename], stderr=errfile)
-        return (0, [])
-        
     def doPostLinkMetadataBuild(self, outputFile, stripRelocs):
         # We've just output an object, so invoke make to collect the allocsites, 
         # with our target name as the file we've just built, using META_BASE 
@@ -376,176 +223,278 @@ class AllocsCompilerWrapper(CompilerWrapper):
             mallochooks_include_dir = os.environ["LIBMALLOCHOOKS"] + "/include"
         else:
             mallochooks_include_dir = self.getLibAllocsBaseDir() + "/contrib/libmallochooks/include"
-        return ["-I" + runt_include_dir, "-DRELF_DEFINE_STRUCTURES", \
-                "-I" + mallochooks_include_dir]
-            
-    def generateAllocStubsObject(self):
+        if "LIBALLOCSTOOL" in os.environ:
+            liballocstool_include_dir = os.environ["LIBALLOCSTOOL"] + "/include"
+        else:
+            liballocstool_include_dir = self.getLibAllocsBaseDir() + "/contrib/liballocstool/include"
+        return ["-I" + runt_include_dir, "-I", liballocstool_include_dir, \
+                "-I" + mallochooks_include_dir] #"-DRELF_DEFINE_STRUCTURES", \
+
+    def generateAllocatorMods(self, linkedRelocFilename, errfile):
         # make a temporary file for the stubs
         # -- we derive the name from the output binary,
         # -- ... and bail if it's taken? NO, because we want repeat builds to succeed
         stubsfile_name = self.getOutputFilename(Phase.LINK) + ".allocstubs.c"
-        with open(stubsfile_name, "w") as stubsfile:
-            self.debugMsg("stubsfile is %s\n" % stubsfile.name)
-            stubsfile.write("#include \"" + self.getStubGenHeaderPath() + "\"\n")
-
-            def writeArgList(fnName, fnSig):
-                stubsfile.write("#define arglist_%s(make_arg) " % fnName)
-                ndx = 0
-                for c in fnSig: 
-                    if ndx != 0:
-                        stubsfile.write(", ")
-                    stubsfile.write("make_arg(%d, %c)" % (ndx, c))
-                    ndx += 1
-                stubsfile.write("\n")
-                stubsfile.write("#define rev_arglist_%s(make_arg) " % fnName)
-                ndx = len(fnSig) - 1
-                for c in fnSig[::-1]: # reverse
-                    if ndx != len(fnSig) - 1:
-                        stubsfile.write(", ")
-                    stubsfile.write("make_arg(%d, %c)" % (ndx, c))
-                    ndx -= 1
-                stubsfile.write("\n")
-                stubsfile.write("#define arglist_nocomma_%s(make_arg) " % fnName)
-                ndx = 0
-                for c in fnSig: 
-                    stubsfile.write("make_arg(%d, %c)" % (ndx, c))
-                    ndx += 1
-                stubsfile.write("\n")
-                stubsfile.write("#define rev_arglist_nocomma_%s(make_arg) " % fnName)
-                ndx = len(fnSig) - 1
-                for c in fnSig[::-1]: # reverse
-                    stubsfile.write("make_arg(%d, %c)" % (ndx, c))
-                    ndx -= 1
-                stubsfile.write("\n")
-
-            # generate caller-side alloc stubs
-            for allocFn in self.allAllocFns():
-                m = re.match("(.*)\((.*)\)(.?)", allocFn)
-                fnName = m.groups()[0]
-                fnSig = m.groups()[1]
-                retSig = m.groups()[2]
-                writeArgList(fnName, fnSig)
-                sizendx = self.findFirstUpperCase(fnSig)
-                if sizendx != -1:
-                    # it's a size char, so flag that up
-                    stubsfile.write("#define size_arg_%s make_argname(%d, %c)\n" % (fnName, sizendx, fnSig[sizendx]))
+        self.debugMsg("Doing allocator mods given linked output object: %s\n" % \
+            linkedRelocFilename)
+        stubsLinkArgs = ["-Wl,-plugin=" + os.environ.get("ELFTIN") + "/xwrap-ldplugin/xwrap-ldplugin.so"]
+        for sym in self.allWrappedSymNames():
+             stubsLinkArgs += ["-Wl,-plugin-opt=" + sym]
+        definedMatches = self.listDefinedSymbolsMatching(linkedRelocFilename, self.allWrappedSymNames())
+        with (self.makeErrFile(os.path.realpath(linkedRelocFilename) + ".fixuplog", "w+") if not errfile else errfile) as errfile:
+            with open(stubsfile_name, "w") as stubsfile:
+                self.debugMsg("stubsfile is %s\n" % stubsfile.name)
+                # For any defined allocator function `malloc', we want to interpose on it.
+                # We used to do this by appending
+                #  -Wl,--defsym,malloc=__wrap___real_malloc
+                #  -Wl,--wrap,__real_malloc
+                # i.e. to link in the callee-side instrumentation (__wrap___real_malloc)
+                # to be called immediately after the call*er*-side instrumentation (__wrap_malloc).
+                # For standard allocators, the wrap-reals were defined in liballocs_nonshared.a.
+                # -- NOT ANY MORE! What should happen? using libmallochooks.
+                # If we do 
+                # ALLOC_EVENT_INDEXING_DEFS(__global_malloc, __global_malloc_usable_size)
+                # ... what do we get? and what --wrap or --defsyms do we need?
+                # The short answer is that we get the indexing event hook defs and a
+                # 'struct allocator', but not the malloc hooks.
+                # we still need the equivalents of nonshared_hook_wrappers.o and malloc_hook_stubs_wrapdl.o.
+                # We need them somehow, perhaps by including the relevant mallochooks .c file.
+                if "malloc" in definedMatches:
+                    # we are going to xwrap the whole malloc API,
+                    # but we still have the two-stage process: our callee-side wrappers
+                    # are the __wrap_malloc (user-to-user),
+                    # so we need to create a __wrap___real_malloc
+                    # that does the indexing.
+                    # We create these by doing user2hook and hook2event (always called hook_*).
+                    # This generates the __wrap_ user2hook, calling __wrap___real_
+                    stubsfile.write('#define _GNU_SOURCE\n') # see generic_malloc_index.h
+                    stubsfile.write('#undef MALLOC_PREFIX\n')
+                    stubsfile.write('#define MALLOC_PREFIX(s) __wrap___real_##s\n')
+                    stubsfile.write('#undef HOOK_PREFIX\n')
+                    stubsfile.write('#define HOOK_PREFIX(s) hook_##s\n')
+                    stubsfile.write('#include "../src/user2hook.c"\n')
+                    stubsfile.write('#undef HOOK_PREFIX\n')
+                    stubsfile.write('#undef MALLOCHOOKS_HOOKAPI_\n') # HACK; hookapi.h should not be include-guarded
+                    #stubsfile.write('#define HOOK_PREFIX(s) __terminal_hook_##s\n')
+                    #stubsfile.write('#include "mallochooks/hookapi.h"\n')
+                    stubsfile.write('#define ALLOC_EVENT(s) __global_malloc_##s\n')
+                    stubsfile.write('#define HOOK_PREFIX(s) __terminal_hook_##s\n')
+                    stubsfile.write('#include "../src/hook2event.c"\n')
+                    # set the prefix that will get dlsym'd. But what is it?
+                    # It can't be 'no prefix'... it has to be __real_. Remember
+                    # we're actually defining the mallocs locally this time, so
+                    # '__real_malloc' is a real symbol.
+                    stubsfile.write('#undef MALLOC_PREFIX\n')
+                    stubsfile.write('#define MALLOC_PREFIX(s) __real_##s\n')
+                    stubsfile.write('#define dlsym_nomalloc fake_dlsym\n')
+                    stubsfile.write('#undef HOOK_PREFIX\n')
+                    stubsfile.write('#define MALLOC_DLSYM_TARGET get_link_map(__terminal_hook_malloc) \n')
+                    stubsfile.write('#include "../src/terminal-indirect-dlsym.c"\n')
+                    # FIXME: how do we "xwrap some more", i.e. also xwrap the __real_s?
+                    # Does this even work?
+                    # Our .allocstubs .o file as above will generate a __wrap___real_malloc function
+                    # and a __wrap_malloc function.
+                    # The __wrap_malloc is the first one, then needs to call __wrap___real_malloc.
+                    # In this file, __wrap_malloc will be generated s.t. it calls __real_malloc.
+                    # So we should be able to address this change locally.
+                    # Maybe just by #define __real_malloc __wrap___real_malloc?
+                    # Then our global malloc will be the *caller-side* wrapper.
+                    # I think that is NOT correct, because these need to wrap UNDs,
+                    # and if (e.g.) we use allocscc to link another DSO that calls out
+                    # to this malloc,
+                    # we will still insert a caller-side wrapper so get TWO of them.
+                    # Can we fix this by linking the caller DSOs --wrap *but* not
+                    # including the __wrap_* in them, but rather in the caller object?
+                    # I think yes so long as we special-case malloc: __wrap_malloc goes in
+                    # liballocs. It could be an alias of 'malloc' because we set
+                    # __current_allocsite if we don't currently have it.
+                    # Would be nice if we could avoid all this special-casing,
+                    # and just figure out at link time what needs to be generated
+                    # and where it can live.
+                    #
+                    # What comes out of this:
+                    # __wrap_malloc calls __wrap___real_malloc which calls event hooks and real malloc
+                    # output DSO's global 'malloc' becomes __wrap_malloc (thanks to xwrap semantics)
+                    # terminal hooks look for "__real_malloc" -- in WHAT object?
+                    stubsfile.write('#define __real_malloc __wrap___real_malloc\n')
+                    stubsfile.write('#define __real_free __wrap___real_free\n')
+                    stubsfile.write('#define __real_calloc __wrap___real_calloc\n')
+                    stubsfile.write('#define __real_realloc __wrap___real_realloc\n')
+                    stubsfile.write('#define __real_free __wrap___real_free\n')
+                    stubsfile.write('#define __real_memalign __wrap___real_memalign\n')
                 else:
-                    # If there's no size arg, it's a typed allocation primitive, and 
-                    # the size is the size of the thing it returns. How can we get
-                    # at that? Have we built the typeobj already? No, because we haven't
-                    # even built the binary. But we have built the .o, including the
-                    # one containing the "real" allocator function. Call a helper
-                    # to do this.
-                    size_find_command = [self.getLibAllocsBaseDir() \
-                        + "/tools/find-allocated-type-size", fnName] + [ \
-                        objfile for objfile in passedThroughArgs if objfile.endswith(".o")]
-                    self.debugMsg("Calling " + " ".join(size_find_command) + "\n")
-                    outp = subprocess.Popen(size_find_command, stdout=subprocess.PIPE).communicate()[0].decode()
-                    self.debugMsg("Got output: " + outp + "\n")
-                    # we get lines of the form <number> \t <explanation>
-                    # so just chomp the first number
-                    outp_lines = outp.split("\n")
-                    if (len(outp_lines) < 1 or outp_lines[0] == ""):
-                        self.debugMsg("No output from %s" % " ".join(size_find_command))
-                        return 1  # give up now
-                    sz = int(outp_lines[0].split("\t")[0])
-                    stubsfile.write("#define size_arg_%s %d\n" % (fnName, sz))
-                if allocFn in self.allL1OrWrapperAllocFns():
-                    stubsfile.write("make_caller_wrapper(%s, %s)\n" % (fnName, retSig))
-                elif allocFn in self.allAllocSzFns():
-                    stubsfile.write("make_size_caller_wrapper(%s, %s)\n" % (fnName, retSig))
-                else:
-                    stubsfile.write("make_suballocator_alloc_caller_wrapper(%s, %s)\n" % (fnName, retSig))
-                # for genuine allocators (not wrapper fns), also make a callee wrapper
-                if allocFn in self.allSubAllocFns(): # FIXME: cover non-sub clases
-                    stubsfile.write("make_callee_wrapper(%s, %s)\n" % (fnName, retSig))
-                stubsfile.flush()
-            # also do caller-side subfree wrappers
-            for freeFn in self.allSubFreeFns():
-                m = re.match("(.*)\((.*)\)(->([a-zA-Z0-9_]+))", freeFn)
-                fnName = m.groups()[0]
-                fnSig = m.groups()[1]
-                allocFnName = m.groups()[3]
-                ptrndx = fnSig.find('P')
-                if ptrndx != -1:
-                    # it's a ptr, so flag that up
-                    stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
-                writeArgList(fnName, fnSig)
-                stubsfile.write("make_suballocator_free_caller_wrapper(%s, %s)\n" % (fnName, allocFnName))
-                stubsfile.flush()
-                if allocFn in self.allSubFreeFns(): # FIXME: cover non-sub and non-void clases
-                    stubsfile.write("make_void_callee_wrapper(%s)\n" % (fnName))
-            # also do caller-side free (non-sub) -wrappers
-            for freeFn in self.allL1OrWrapperFreeFns():
-                m = re.match("(.*)\((.*)\)", freeFn)
-                fnName = m.groups()[0]
-                fnSig = m.groups()[1]
-                ptrndx = fnSig.find('P')
-                if ptrndx != -1:
-                    # it's a ptr, so flag that up
-                    stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
-                writeArgList(fnName, fnSig)
-                stubsfile.write("make_free_caller_wrapper(%s)\n" % fnName)
-                stubsfile.flush()
-            # now we compile the C file ourselves, rather than cilly doing it, 
-            # because it's a special magic stub
-            stubs_pp = os.path.splitext(stubsfile.name)[0] + ".i"
-            stubs_bin = os.path.splitext(stubsfile.name)[0] + ".o"
-            # We *should* pass through some options here, like -DNO_TLS. 
-            # To do "mostly the right thing", we preprocess with 
-            # most of the user's options, 
-            # then compile with a more tightly controlled set
-            extraFlags = self.getStubGenCompileArgs()
-            extraFlags += ["-fPIC"]
-            # WHERE do we get relf.h, in the librunt era?
-            # Bit of a hack: in the contrib. FIXME FIXME.
-            stubs_pp_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-E", "-Wp,-P"] + extraFlags + ["-o", stubs_pp, \
-                "-I" + self.getLibAllocsBaseDir() + "/tools", \
-                "-I" + self.getLibAllocsBaseDir() + "/include", \
-                ] \
-                + [arg for arg in self.phaseItems[Phase.PREPROCESS] if arg.startswith("-D")] \
-                + [stubsfile.name]
-            self.debugMsg("Preprocessing stubs file %s to %s with command %s\n" \
-                % (stubsfile.name, stubs_pp, " ".join(stubs_pp_cmd)))
-            ret_stubs_pp = subprocess.call(stubs_pp_cmd)
-            if ret_stubs_pp != 0:
-                self.debugMsg("Could not preproces stubs file %s: compiler returned %d\n" \
-                    % (stubsfile.name, ret_stubs_pp))
-                exit(1)
-            # now erase the '# ... file ' lines that refer to our stubs file,
-            # and add some line breaks
-            # -- HMM, why not just erase all #line directives? i.e. preprocess with -P?
-            # We already do this.
-            # NOTE: the "right" thing to do is keep the line directives
-            # and replace the ones pointing to stubgen.h
-            # with ones pointing at the .i file itself, at the appropriate line numbers.
-            # This is tricky because our insertion of newlines will mess with the
-            # line numbers.
-            # Though, actually, we should only need a single #line directive.
-            # Of course this is only useful if the .i file is kept around.
-            stubs_sed_cmd = ["sed", "-r", "-i", "s^#.*allocs.*/stubgen\\.h\" *[0-9]* *$^^\n " \
-            + "/__real_|__wrap_|__current_/ s^[;\\{\\}]^&\\n^g", stubs_pp]
-            ret_stubs_sed = subprocess.call(stubs_sed_cmd)
-            if ret_stubs_sed != 0:
-                self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
-                    % (stubs_pp, ret_stubs_sed))
-                exit(1)
-            stubs_cc_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
-                "-I" + self.getLibAllocsBaseDir() + "/tools", \
-                stubs_pp]
-            self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
-                % (stubs_pp, stubs_bin, " ".join(stubs_cc_cmd)))
-            stubs_output = None
-            try:
-                stubs_output = subprocess.check_output(stubs_cc_cmd, stderr=subprocess.STDOUT)
-            except subprocess.CalledProcessError as e:
-                self.debugMsg("Could not compile stubs file %s: compiler returned %d and said %s\n" \
-                    % (stubs_pp, e.returncode, str(e.output)))
-                exit(1)
-            if stubs_output != "":
-                self.debugMsg("Compiling stubs file %s: compiler said \"%s\"\n" \
-                    % (stubs_pp, stubs_output))
-            return stubs_bin
+                    stubsfile.write('#define RELF_DEFINE_STRUCTURES\n')
+                stubsfile.write("#include \"" + self.getStubGenHeaderPath() + "\"\n")
+                # For the case of generic-small ('suballocator', LIBALLOCS_SUB_ALLOC_FNS),
+                # the caller and callee stuff gets generated at the same time
+                def writeArgList(fnName, fnSig):
+                    stubsfile.write("#define arglist_%s(make_arg) " % fnName)
+                    ndx = 0
+                    for c in fnSig: 
+                        if ndx != 0:
+                            stubsfile.write(", ")
+                        stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                        ndx += 1
+                    stubsfile.write("\n")
+                    stubsfile.write("#define rev_arglist_%s(make_arg) " % fnName)
+                    ndx = len(fnSig) - 1
+                    for c in fnSig[::-1]: # reverse
+                        if ndx != len(fnSig) - 1:
+                            stubsfile.write(", ")
+                        stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                        ndx -= 1
+                    stubsfile.write("\n")
+                    stubsfile.write("#define arglist_nocomma_%s(make_arg) " % fnName)
+                    ndx = 0
+                    for c in fnSig: 
+                        stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                        ndx += 1
+                    stubsfile.write("\n")
+                    stubsfile.write("#define rev_arglist_nocomma_%s(make_arg) " % fnName)
+                    ndx = len(fnSig) - 1
+                    for c in fnSig[::-1]: # reverse
+                        stubsfile.write("make_arg(%d, %c)" % (ndx, c))
+                        ndx -= 1
+                    stubsfile.write("\n")
+
+                # generate caller-side alloc stubs
+                for allocFn in self.allAllocFns():
+                    m = re.match("(.*)\((.*)\)(.?)", allocFn)
+                    fnName = m.groups()[0]
+                    fnSig = m.groups()[1]
+                    retSig = m.groups()[2]
+                    writeArgList(fnName, fnSig)
+                    sizendx = self.findFirstUpperCase(fnSig)
+                    if sizendx != -1:
+                        # it's a size char, so flag that up
+                        stubsfile.write("#define size_arg_%s make_argname(%d, %c)\n" % (fnName, sizendx, fnSig[sizendx]))
+                    else:
+                        # If there's no size arg, it's a typed allocation primitive, and 
+                        # the size is the size of the thing it returns. How can we get
+                        # at that? Have we built the typeobj already? No, because we haven't
+                        # even built the binary. But we have built the .o, including the
+                        # one containing the "real" allocator function. Call a helper
+                        # to do this.
+                        size_find_command = [self.getLibAllocsBaseDir() \
+                            + "/tools/find-allocated-type-size", fnName] + [ \
+                            objfile for objfile in passedThroughArgs if objfile.endswith(".o")]
+                        self.debugMsg("Calling " + " ".join(size_find_command) + "\n")
+                        outp = subprocess.Popen(size_find_command, stdout=subprocess.PIPE).communicate()[0].decode()
+                        self.debugMsg("Got output: " + outp + "\n")
+                        # we get lines of the form <number> \t <explanation>
+                        # so just chomp the first number
+                        outp_lines = outp.split("\n")
+                        if (len(outp_lines) < 1 or outp_lines[0] == ""):
+                            self.debugMsg("No output from %s" % " ".join(size_find_command))
+                            return 1  # give up now
+                        sz = int(outp_lines[0].split("\t")[0])
+                        stubsfile.write("#define size_arg_%s %d\n" % (fnName, sz))
+                    if allocFn in self.allL1OrWrapperAllocFns():
+                        stubsfile.write("make_caller_wrapper(%s, %s)\n" % (fnName, retSig))
+                    elif allocFn in self.allAllocSzFns():
+                        stubsfile.write("make_size_caller_wrapper(%s, %s)\n" % (fnName, retSig))
+                    else:
+                        stubsfile.write("make_suballocator_alloc_caller_wrapper(%s, %s)\n" % (fnName, retSig))
+                    # for genuine allocators (not wrapper fns), also make a callee wrapper
+                    if allocFn in self.allSubAllocFns(): # FIXME: cover non-sub clases
+                        stubsfile.write("make_callee_wrapper(%s, %s)\n" % (fnName, retSig))
+                    stubsfile.flush()
+                # also do caller-side subfree wrappers
+                for freeFn in self.allSubFreeFns():
+                    m = re.match("(.*)\((.*)\)(->([a-zA-Z0-9_]+))", freeFn)
+                    fnName = m.groups()[0]
+                    fnSig = m.groups()[1]
+                    allocFnName = m.groups()[3]
+                    ptrndx = fnSig.find('P')
+                    if ptrndx != -1:
+                        # it's a ptr, so flag that up
+                        stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
+                    writeArgList(fnName, fnSig)
+                    stubsfile.write("make_suballocator_free_caller_wrapper(%s, %s)\n" % (fnName, allocFnName))
+                    stubsfile.flush()
+                    if allocFn in self.allSubFreeFns(): # FIXME: cover non-sub and non-void clases
+                        stubsfile.write("make_void_callee_wrapper(%s)\n" % (fnName))
+                # also do caller-side free (non-sub) -wrappers
+                for freeFn in self.allL1OrWrapperFreeFns():
+                    m = re.match("(.*)\((.*)\)", freeFn)
+                    fnName = m.groups()[0]
+                    fnSig = m.groups()[1]
+                    ptrndx = fnSig.find('P')
+                    if ptrndx != -1:
+                        # it's a ptr, so flag that up
+                        stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
+                    writeArgList(fnName, fnSig)
+                    stubsfile.write("make_free_caller_wrapper(%s)\n" % fnName)
+                    stubsfile.flush()
+                if "malloc" in definedMatches:
+                    stubsfile.write('#include "generic_malloc_index.h"\n')
+                    stubsfile.write('\nALLOC_EVENT_INDEXING_DEFS(__global_malloc, malloc_usable_size)\n')
+                    stubsfile.flush()
+                    for sym in definedMatches:
+                        # FIXME: only do this if the original sym was export-dynamic'd,
+                        # and only for malloc-family syms
+                        stubsLinkArgs += [ "-Wl,--export-dynamic-symbol," + "__real_" + sym]
+
+                # now we compile the C file ourselves, rather than cilly doing it, 
+                # because it's a special magic stub
+                stubs_pp = os.path.splitext(stubsfile.name)[0] + ".i"
+                stubs_bin = os.path.splitext(stubsfile.name)[0] + ".o"
+                # We *should* pass through some options here, like -DNO_TLS. 
+                # To do "mostly the right thing", we preprocess with 
+                # most of the user's options, 
+                # then compile with a more tightly controlled set
+                extraFlags = self.getStubGenCompileArgs()
+                extraFlags += ["-fPIC"]
+                # WHERE do we get relf.h, in the librunt era?
+                # Bit of a hack: in the contrib. FIXME FIXME.
+                stubs_pp_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-E", "-Wp,-dD", "-Wp,-P"] \
+                    + extraFlags + ["-o", stubs_pp, \
+                    "-I" + self.getLibAllocsBaseDir() + "/tools", \
+                    "-I" + self.getLibAllocsBaseDir() + "/include", \
+                    ] \
+                    + [arg for arg in self.phaseItems[Phase.PREPROCESS] if arg.startswith("-D")] \
+                    + [stubsfile.name] #, "-Wp,-P"]
+                self.debugMsg("Preprocessing stubs file %s to %s with command %s\n" \
+                    % (stubsfile.name, stubs_pp, " ".join(stubs_pp_cmd)))
+                ret_stubs_pp = subprocess.call(stubs_pp_cmd)
+                if ret_stubs_pp != 0:
+                    self.debugMsg("Could not preproces stubs file %s: compiler returned %d\n" \
+                        % (stubsfile.name, ret_stubs_pp))
+                    exit(1)
+                # now erase the '# ... file ' lines that refer to our stubs file,
+                # and add some line breaks
+                # -- HMM, why not just erase all #line directives? i.e. preprocess with -P?
+                # We already do this.
+                # NOTE: the "right" thing to do is keep the line directives
+                # and replace the ones pointing to stubgen.h
+                # with ones pointing at the .i file itself, at the appropriate line numbers.
+                # This is tricky because our insertion of newlines will mess with the
+                # line numbers.
+                # Though, actually, we should only need a single #line directive.
+                # Of course this is only useful if the .i file is kept around.
+                #stubs_sed_cmd = ["sed", "-r", "-i", "s^#.*allocs.*/stubgen\\.h\" *[0-9]* *$^^\n " \
+                #+ "/__real_|__wrap_|__current_/ s^[;\\{\\}]^&\\n^g", stubs_pp]
+                #ret_stubs_sed = subprocess.call(stubs_sed_cmd)
+                #if ret_stubs_sed != 0:
+                #    self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
+                #        % (stubs_pp, ret_stubs_sed))
+                #    exit(1)
+                stubs_cc_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
+                    "-I" + self.getLibAllocsBaseDir() + "/tools", \
+                    stubs_pp]
+                self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
+                    % (stubs_pp, stubs_bin, " ".join(stubs_cc_cmd)))
+                stubs_output = None
+                try:
+                    stubs_output = subprocess.check_output(stubs_cc_cmd, stderr=subprocess.STDOUT)
+                except subprocess.CalledProcessError as e:
+                    self.debugMsg("Could not compile stubs file %s: compiler returned %d and said %s\n" \
+                        % (stubs_pp, e.returncode, str(e.output)))
+                    exit(1) # exit the whole process?!
+                if stubs_output != b'':
+                    self.debugMsg("Compiling stubs file %s: compiler said \"%s\"\n" \
+                        % (stubs_pp, stubs_output))
+                return (stubs_bin, stubsLinkArgs)
             
     def getLiballocsLinkArgs(self):
         # some link args need to go late-ish on the command line, others early-ish
@@ -636,7 +585,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
         finalLinkArgs = []
         finalLinkArgsSavedForEnd = []
-        stubsLinkArgs = []
         # if we're building an executable, append the magic objects
         # -- and link with the noop *shared* library, to be interposable.
         # Recall that if we're building a shared object, we don't need to
@@ -645,43 +593,14 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # allocation functions, and we want them to set the alloc site.
         # So we do want to link in the wrappers. Do we need to rewrite
         # references to __real_X after this?
-        for sym in self.allWrappedSymNames():
-            stubsLinkArgs += ["-Wl,--wrap," + sym]
         if self.doingFinalLink():
-            # Caller-side stubs:
-            # For each declared allocator wrapper (facade) function, e.g. xmalloc,
-            # we generate a wrapper and link with --wrap.
-            # FIXME: used to say "If we're outputting a shared library, we leave it like this,
-            # with dangling references to __wrap_xmalloc,
-            # and possibly a not-yet-bound-to implementation of xmalloc....
-            # [whereas] if we're outputting an executable, ...
-            # for each allocation function, we link a generated stub."
-            # (And also link in a thread-local variable "__liballocs_current_allocsite".)
-            # But if that's true, WHERE does __wrap_xmalloc get generated?
-            # It looks like we always generate it.
-            # FIXME: is it really true that the alloc caller stubs goes only in a final link?
-            # Or might we also want it to go in a non-final link?
-            # In fact it NEEDS to go in the non-final .linked.o link so that --wrap can have its effect.
-            # When final-linking one big .o file, --wrap will do nothing (def/ref same-file issue).
-            # FIXME: want to use 'xwrap' to move this to the end link... then we can
-            # parameterise the stubgen.h generation macros by "is it defined? is it referenced?"
-            #
-            # What about callee-side malloc-in-exe stubs for indexing?
-            # We used to pull these in at the end (liballocs_nonshared.a, __wrap___real_malloc),
-            # having got the defsyms from fixupLinkedRelocObject(). We need to do it at
-            # the end so we can tell if we define 'malloc' or whatever. So maybe we can
-            # just generate a separate stubs file at that time... it should also alias
-            # __global_malloc_allocator.
-            # Again are we going to fall foul of --wrap not working? For intra-exe cases, yes!
-            # FIXME: skip the separate file!
-            stubsObject = self.generateAllocStubsObject()
-            # CARE: we must insert the wrapper object on the cmdline *before* any 
-            # archive that is providing the wrapped functions -- e.g. libc. 
-            # HACK: the easiest way is to insert it first, it appears.
-            stubsLinkArgs = [stubsObject] + stubsLinkArgs
             # we need to export-dynamic, s.t. __is_a is linked from liballocs
             # FIXME: I no longer understand this. Try deleting it / see what happens
-            # finalLinkArgs += ["-Wl,--export-dynamic"]
+            finalLinkArgs += ["-Wl,--export-dynamic"]
+            # ANSWER: it breaks uniqtype uniquing, because in-exe uniqtypes
+            # (put into .o files by usedtypes / link-used-types) really need to be export-dynamic'd.
+            # We should really do all this at link time,
+            # allowing us to be selective about what gets export-dynamic'd.
             leftishLinkArgs, rightishLinkArgs = self.getLiballocsLinkArgs()
             finalLinkArgs += leftishLinkArgs
             finalLinkArgsSavedForEnd += rightishLinkArgs
@@ -726,21 +645,25 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 stripRelocsAfterMetadataBuild = True
             else:
                 stripRelocsAfterMetadataBuild = False
-            allArgs = self.flatOptions(opts) + extraFirstOpts + stubsLinkArgs + linkItemsIncluded
+            allArgs = self.flatOptions(opts) + extraFirstOpts + linkItemsIncluded
             assert("-o" not in self.flatItems(self.itemsForPhases({Phase.LINK})))
             self.debugMsg("running underlying compiler once to link with reloc output, with args: " + \
                 " ".join(allArgs) + "\n")
             ret = self.runCompiler(allArgs, {FAKE_RELOC_LINK})
             if ret != 0:
                 return ret
-            ret, extraFinalLinkArgs = self.fixupLinkedRelocObject(relocFilename, None)
+            # Q. what did this fixup step do? A. For any defined allocator function `malloc', append
+            #  -Wl,--defsym,malloc=__wrap___real_malloc
+            #  -Wl,--wrap,__real_malloc
+            extraFile, extraFinalLinkArgs = self.generateAllocatorMods(relocFilename, None)
+            self.debugMsg("generated allocator mods; got %s, %s\n" % (extraFile, str(extraFinalLinkArgs)))
             if ret != 0:
                 return ret
             finalItemsAndOpts = self.flatOptions(opts) + [x for x in thisLinkOutputOptions] \
-              + [relocFilename] + finalLinkArgs + extraFinalLinkArgs \
+              + [extraFile] + [relocFilename] + finalLinkArgs + extraFinalLinkArgs \
               + ["-o", finalLinkOutput] \
               + linkItemsDeferred + finalLinkArgsSavedForEnd
-        else:
+        else: # not doing final link, i.e. our invoker was doing link-to-reloc
             finalItemsAndOpts = self.flatOptions(self.phaseOptions[Phase.LINK]) + \
                 self.flatItems(self.itemsForPhases({Phase.LINK}))
         

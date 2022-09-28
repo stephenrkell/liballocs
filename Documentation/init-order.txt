@@ -1,0 +1,258 @@
+The liballocs_preload.so binary is marked with DF_1_INITFIRST flag, to
+try to get it initialized early.
+
+However, this is not foolproof, e.g. if another DSO also sets the flag.
+Ideally, allocsld.so would include some sort of intervention to force it
+to be the first initialized DSO. However, it's not clear how to achieve
+that.
+
+For a long time we got by with tolerating later initialization. The main
+issue is reentrancy of instrmentation, especially malloc
+instrumentation. If a hooked malloc call is the first thing to call into
+liballocs, we are stuffed unless those hooks support reentrancy, because
+initializing liballocs is sure to do various mallocs, even 
+
+We used to support reentrancy by detecting reentrant calls and
+delegating to our non-hooked private malloc. However, that meant that
+e.g. chunks malloc'd (really calloc'd) by the dynamic linker could be
+issued out of multiple heaps, each with its own free function. It's not
+good to have to hook free to disambiguate the chunks. Basically we used
+to rely on this happening only for early chunks that were never freed.
+
+To simplify malloc hooking in libmallochooks, I decided to abort on
+reentrancy and make it the client code's problem, e.g. using fake_dlsym
+(guaranteeing never to malloc) to find the underlying malloc. However,
+that doesn't help us if the client program is doing a bona fide malloc,
+e.g. in its initializer. The 'simple-multi-alloc' test case does exactly
+this, as it uses GNOME glib which tries to malloc at init time. The only
+fix was to set DF_1_INITFIRST so that liballocs is already initialized
+when this happens.
+
+Below are my debugging notes for this problem, showing stack traces
+where the problems are occurring (and the old way of 'solving'/avoiding
+it).
+
+reentrancy in malloc -- why is this happening now?
+We are trying to do mmap allocator init and meta-obj loading
+
+Hardware watchpoint 3: we_are_active
+
+Old value = false
+New value = true
+__terminal_hook_malloc (size=48, caller=0x7ffff6397a25)
+    at /home/stephen/work/devel/libmallochooks.hg/src/terminal-indirect-dlsym.c:72
+72              GET_UNDERLYING(void*, malloc, size_t);
+(gdb) bt
+#0  __terminal_hook_malloc (size=48, caller=0x7ffff6397a25)
+    at /home/stephen/work/devel/libmallochooks.hg/src/terminal-indirect-dlsym.c:72
+#1  0x00007ffff69aac13 in hook_malloc (size=32, caller=0x7ffff6397a25)
+    at /home/stephen/work/devel/libmallochooks.hg/src/hook2event.c:64
+#2  0x00007ffff69c96ec in calloc (nmemb=1, size=32)
+    at /home/stephen/work/devel/libmallochooks.hg/src/user2hook.c:26
+#3  0x00007ffff6397a25 in ?? () from /lib/x86_64-linux-gnu/libdl.so.2
+#4  0x00007ffff63972e6 in dlopen () from /lib/x86_64-linux-gnu/libdl.so.2
+#5  0x00007ffff6c2a9d5 in dlopen (
+    filename=0x7ffff5a96768 "/usr/lib/meta/var/local/stephen/work/devel/liballocs.git/tests/simple-multi-alloc/simple-multi-alloc-meta.so", flag=262) at /var/local/stephen/work/devel/librunt.git/src/..//src/preload.c:111
+#6  0x00007ffff69a7039 in load_and_init_all_metadata_for_one_object (info=0x7fffffffc3b0, size=64, 
+    data=0x7fffb6296f90) at /var/local/stephen/work/devel/liballocs.git/src/..//src/liballocs.c:786
+#7  0x00007ffff66efbc7 in dl_iterate_phdr () from /lib/x86_64-linux-gnu/libc.so.6
+#8  0x00007ffff6c2b24a in dl_iterate_phdr (callback=callback@entry=0x7ffff6c28040 <dl_for_one_phdr_cb>, 
+    data=data@entry=0x7fffffffc480) at /var/local/stephen/work/devel/librunt.git/src/..//src/preload.c:368
+#9  0x00007ffff6c283a4 in dl_for_one_object_phdrs (handle=<optimized out>, callback=<optimized out>, 
+    data=<optimized out>) at /var/local/stephen/work/devel/librunt.git/src/..//src/librunt.c:106
+#10 0x00007ffff69c70b1 in load_metadata (meta=0x7fffb6296f90, handle=0x7ffff7fed190)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/allocators/static-file.c:222
+#11 0x00007ffff69c7227 in load_meta_objects_for_early_libs ()
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/allocators/static-file.c:245
+#12 0x00007ffff69be81a in __mmap_allocator_init ()
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/allocators/mmap.c:965
+#13 0x00007ffff69b0456 in find_bigalloc_recursive (start=0x0, addr=0x55555555c260, 
+    a=0x7ffff6dbce20 <__global_malloc_allocator>, match_suballocator=true)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/pageindex.c:893
+#14 0x00007ffff69b100c in __lookup_bigalloc_from_root_by_suballocator (mem=0x55555555c260, 
+    sub_a=0x7ffff6dbce20 <__global_malloc_allocator>, out_object_start=0x0)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/pageindex.c:1093
+#15 0x00007ffff69b8ada in arena_for_userptr (a=0x7ffff6dbce20 <__global_malloc_allocator>, 
+    userptr=0x55555555c260)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//include/generic_malloc_index.h:233
+#16 0x00007ffff69b9a80 in __liballocs_malloc_post_successful_alloc (allocptr=0x55555555c260, 
+    modified_size=16, modified_alignment=8, requested_size=4, requested_alignment=8, caller=0x7ffff68136b3)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/allocators/default-lib-malloc.c:41
+#17 0x00007ffff69aac43 in hook_malloc (size=4, caller=0x7ffff68136b3)
+    at /home/stephen/work/devel/libmallochooks.hg/src/hook2event.c:66
+#18 0x00007ffff69c96b7 in malloc (size=4) at /home/stephen/work/devel/libmallochooks.hg/src/user2hook.c:19
+#19 0x00007ffff68136b3 in ?? () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#20 0x00007ffff6813c1c in g_private_get () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#21 0x00007ffff67e78dd in g_slice_alloc () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#22 0x00007ffff67b7dee in g_hash_table_new_full () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#23 0x00007ffff67d9f6b in ?? () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#24 0x00007ffff7fd337a in ?? () from /lib64/ld-linux-x86-64.so.2
+#25 0x00007ffff7fd3476 in ?? () from /lib64/ld-linux-x86-64.so.2
+
+
+=====================
+
+old simple-multi-alloc used to go like this:
+(looks similar!)
+
+
+
+#0  dl_iterate_phdr (callback=callback@entry=0x7f50fdd7c410 <dl_for_one_phdr_cb>, 
+    data=data@entry=0x7ffc2a08ea90)
+    at /root/project/contrib/libsystrap/contrib/librunt/src/..//src/preload.c:344
+#1  0x00007f50fdd7c753 in dl_for_one_object_phdrs (handle=handle@entry=0x555555781170, 
+    callback=callback@entry=0x7f50fdb1b2b0 <vaddr_bounds_cb>, data=data@entry=0x7ffc2a08eaf0)
+    at /root/project/contrib/libsystrap/contrib/librunt/src/..//src/librunt.c:106
+#2  0x00007f50fdb1b629 in get_dso_vaddr_bounds (handle=0x555555781170)
+    at /root/project/src/..//src/allocators/static-file.c:150
+#3  __static_file_allocator_notify_load (handle=0x555555781170, 
+    load_site=load_site@entry=0x55afc0601420 <_start>)
+    at /root/project/src/..//src/allocators/static-file.c:282
+#4  0x00007f50fdb0189c in __runt_files_init ()
+    at /root/project/contrib/libsystrap/contrib/librunt/src/..//src/files.c:187
+#5  0x00007f50fdb005cf in __mmap_allocator_init () at /root/project/src/..//src/allocators/mmap.c:958
+#6  0x00007f50fdb0df8f in find_bigalloc_recursive (match_suballocator=true, 
+    a=0x7f50fdf08ea0 <__global_malloc_allocator>, addr=0x55afc1814260, start=0x0)
+    at /root/project/src/..//src/pageindex.c:891
+#7  __lookup_bigalloc_from_root_by_suballocator (mem=mem@entry=0x55afc1814260, 
+    sub_a=sub_a@entry=0x7f50fdf08ea0 <__global_malloc_allocator>, 
+    out_object_start=out_object_start@entry=0x0) at /root/project/src/..//src/pageindex.c:1090
+#8  0x00007f50fdb12df6 in arena_for_userptr (userptr=0x55afc1814260, 
+    a=0x7f50fdf08ea0 <__global_malloc_allocator>)
+    at /root/project/src/..//include/generic_malloc_index.h:209
+#9  __liballocs_malloc_post_successful_alloc (allocptr=0x55afc1814260, modified_size=<optimized out>, 
+    modified_alignment=<optimized out>, requested_size=4, requested_alignment=<optimized out>, 
+    caller=0x7f50fd76cee3) at /root/project/src/..//src/allocators/default-lib-malloc.c:31
+#10 0x00007f50fdb0a4fd in hook_malloc (size=size@entry=4, caller=0x7f50fd76cee3)
+    at /root/project/contrib/libmallochooks/event_hooks.c:50
+#11 0x00007f50fdb1ec6c in malloc (size=4)
+    at /root/project/contrib/libmallochooks/malloc_hook_stubs_preload.c:409
+#12 0x00007f50fd76cee3 in ?? () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#13 0x00007f50fd76d43c in g_private_get () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#14 0x00007f50fd7448bd in g_slice_alloc () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#15 0x00007f50fd71567e in g_hash_table_new_full () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#16 0x00007f50fd73773b in ?? () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#17 0x00005555555668d3 in call_init (env=0x7ffc2a08ee50, argv=0x7ffc2a08ee38, argc=2, l=<optimized out>)
+    at dl-init.c:72
+#18 _dl_init (main_map=0x555555781170, argc=2, argv=0x7ffc2a08ee38, env=0x7ffc2a08ee50) at dl-init.c:119
+#19 0x00005555555570ca in _dl_start_user () from /lib64/ld-linux-x86-64.so.2
+#20 0x0000000000000002 in ?? ()
+#21 0x00007ffc2a090f3c in ?? ()
+#22 0x00007ffc2a090f51 in ?? ()
+#23 0x0000000000000000 in ?? ()
+
+AHA
+
+#0  calloc (nmemb=1, size=32) at /root/project/contrib/libmallochooks/malloc_hook_stubs_preload.c:415
+#1  0x00007f50fd0e77f5 in _dlerror_run (operate=operate@entry=0x7f50fd0e70d0 <dlsym_doit>, 
+    args=args@entry=0x7ffc2a08e9e0) at dlerror.c:140
+#2  0x00007f50fd0e7166 in __dlsym (handle=<optimized out>, name=0x7f50fdd81dc3 "dl_iterate_phdr")
+    at dlsym.c:70
+#3  0x00007f50fdd7ecb8 in dlsym (handle=0xffffffffffffffff, symbol=0x7f50fdd81dc3 "dl_iterate_phdr")
+    at /root/project/contrib/libsystrap/contrib/librunt/src/..//src/preload.c:241
+#4  0x00007f50fdd7f573 in dl_iterate_phdr (callback=callback@entry=0x7f50fdd7c410 <dl_for_one_phdr_cb>, 
+    data=data@entry=0x7ffc2a08ea90)
+    at /root/project/contrib/libsystrap/contrib/librunt/src/..//src/preload.c:347
+#5  0x00007f50fdd7c753 in dl_for_one_object_phdrs (handle=handle@entry=0x555555781170, 
+    callback=callback@entry=0x7f50fdb1b2b0 <vaddr_bounds_cb>, data=data@entry=0x7ffc2a08eaf0)
+    at /root/project/contrib/libsystrap/contrib/librunt/src/..//src/librunt.c:106
+
+414     void *calloc(size_t nmemb, size_t size)
+415     {
+416             _Bool is_reentrant_call = we_are_active;
+417             if (!is_reentrant_call) we_are_active = 1;
+418             void *ret;
+419             if (!is_reentrant_call
+(gdb) 
+420                              && !is_self_call(__builtin_return_address(0))
+421                              && !is_libdl_or_ldso_call(__builtin_return_address(0)))
+422             {
+423                     ret = hook_malloc(nmemb * size, __builtin_return_address(0));
+424             } else ret = __private_calloc(nmemb, size);
+425             if (ret) bzero(ret, nmemb * size);
+426             if (!is_reentrant_call) we_are_active = 0;
+427             return ret;
+
+That reentrant path in the old hooks did have a use after all.
+If we (hook entry path to malloc 2) are called while servicing a malloc (1) made earlier,
+don't call the same malloc we are servicing;
+call the private malloc
+
+Our 'new-style' approach to hooking malloc
+was to never need our own malloc.
+But if we want to initialize liballocs directly from the hook,
+we can't do that.
+The problem is that we are getting a really early malloc coming in,
+and liballocs isn't initialized yet.
+But why hasn't liballocs's initializer been called first, since it's
+preloaded?
+Answer: because it doesn't. There's no such guarantee.
+
+We can try setting DF_1_INITFIRST
+which glibc's rtld does claim to support.
+It doesn't seem to have the effect we want, though.
+HOWEVEr,
+some apparently reentrant stack traces are fine!
+Such as this one:
+
+#0  __terminal_hook_malloc (size=120, caller=0x7ffff7fdeada)
+    at /home/stephen/work/devel/libmallochooks.hg/src/terminal-indirect-dlsym.c:72
+#1  0x00007ffff69aac13 in hook_malloc (size=109, caller=0x7ffff7fdeada)
+    at /home/stephen/work/devel/libmallochooks.hg/src/hook2event.c:64
+#2  0x00007ffff69c96b7 in malloc (size=109) at /home/stephen/work/devel/libmallochooks.hg/src/user2hook.c:19
+#3  0x00007ffff7fdeada in ?? () from /lib64/ld-linux-x86-64.so.2
+#4  0x00007ffff7fcca09 in ?? () from /lib64/ld-linux-x86-64.so.2
+#5  0x00007ffff7fd6feb in ?? () from /lib64/ld-linux-x86-64.so.2
+#6  0x00007ffff66f0b3f in _dl_catch_exception () from /lib/x86_64-linux-gnu/libc.so.6
+#7  0x00007ffff7fd6bba in ?? () from /lib64/ld-linux-x86-64.so.2
+#8  0x00007ffff6397256 in ?? () from /lib/x86_64-linux-gnu/libdl.so.2
+#9  0x00007ffff66f0b3f in _dl_catch_exception () from /lib/x86_64-linux-gnu/libc.so.6
+#10 0x00007ffff66f0bcf in _dl_catch_error () from /lib/x86_64-linux-gnu/libc.so.6
+#11 0x00007ffff6397975 in ?? () from /lib/x86_64-linux-gnu/libdl.so.2
+#12 0x00007ffff63972e6 in dlopen () from /lib/x86_64-linux-gnu/libdl.so.2
+#13 0x00007ffff6c2a9d5 in dlopen (
+    filename=0x7ffff5a96768 "/usr/lib/meta/var/local/stephen/work/devel/liballocs.git/tests/simple-multi-alloc/simple-multi-alloc-meta.so", flag=262) at /var/local/stephen/work/devel/librunt.git/src/..//src/preload.c:111
+#14 0x00007ffff69a7039 in load_and_init_all_metadata_for_one_object (info=0x7fffffffc450, size=64, 
+    data=0x7fffb6296f90) at /var/local/stephen/work/devel/liballocs.git/src/..//src/liballocs.c:786
+#15 0x00007ffff66efbc7 in dl_iterate_phdr () from /lib/x86_64-linux-gnu/libc.so.6
+#16 0x00007ffff6c2b24a in dl_iterate_phdr (callback=callback@entry=0x7ffff6c28040 <dl_for_one_phdr_cb>, 
+    data=data@entry=0x7fffffffc520) at /var/local/stephen/work/devel/librunt.git/src/..//src/preload.c:368
+#17 0x00007ffff6c283a4 in dl_for_one_object_phdrs (handle=<optimized out>, callback=<optimized out>, 
+    data=<optimized out>) at /var/local/stephen/work/devel/librunt.git/src/..//src/librunt.c:106
+#18 0x00007ffff69c70b1 in load_metadata (meta=0x7fffb6296f90, handle=0x7ffff7fed190)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/allocators/static-file.c:222
+#19 0x00007ffff69c7227 in load_meta_objects_for_early_libs ()
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/allocators/static-file.c:245
+#20 0x00007ffff69be81a in __mmap_allocator_init ()
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/allocators/mmap.c:965
+#21 0x00007ffff69b0456 in find_bigalloc_recursive (start=0x0, addr=0x55555555c260, 
+    a=0x7ffff6dbce20 <__global_malloc_allocator>, match_suballocator=true)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/pageindex.c:893
+#22 0x00007ffff69b100c in __lookup_bigalloc_from_root_by_suballocator (mem=0x55555555c260, 
+    sub_a=0x7ffff6dbce20 <__global_malloc_allocator>, out_object_start=0x0)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/pageindex.c:1093
+#23 0x00007ffff69b8ada in arena_for_userptr (a=0x7ffff6dbce20 <__global_malloc_allocator>, 
+    userptr=0x55555555c260)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//include/generic_malloc_index.h:233
+#24 0x00007ffff69b9a80 in __liballocs_malloc_post_successful_alloc (allocptr=0x55555555c260, 
+    modified_size=16, modified_alignment=8, requested_size=4, requested_alignment=8, caller=0x7ffff68136b3)
+    at /var/local/stephen/work/devel/liballocs.git/src/..//src/allocators/default-lib-malloc.c:41
+#25 0x00007ffff69aac43 in hook_malloc (size=4, caller=0x7ffff68136b3)
+    at /home/stephen/work/devel/libmallochooks.hg/src/hook2event.c:66
+#26 0x00007ffff69c96b7 in malloc (size=4) at /home/stephen/work/devel/libmallochooks.hg/src/user2hook.c:19
+#27 0x00007ffff68136b3 in ?? () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#28 0x00007ffff6813c1c in g_private_get () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#29 0x00007ffff67e78dd in g_slice_alloc () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#30 0x00007ffff67b7dee in g_hash_table_new_full () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#31 0x00007ffff67d9f6b in ?? () from /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0
+#32 0x00007ffff7fd337a in ?? () from /lib64/ld-linux-x86-64.so.2
+#33 0x00007ffff7fd3476 in ?? () from /lib64/ld-linux-x86-64.so.2
+#34 0x00007ffff7fc50ca in ?? () from /lib64/ld-linux-x86-64.so.2
+
+THese must be different mallocs somehow?!
+i.e. different instances of user2hook.c
+
+one is in liballocs preload
+/var/local/stephen/work/devel/liballocs.git/build/debug/liballocs_preload.so
+
+Actually no, they're the same glibc malloc

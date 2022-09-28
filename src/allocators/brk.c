@@ -96,11 +96,14 @@ static void create_brk_bigalloc(void *curbrk)
 		);
 	}
 	assert(__brk_bigalloc);
-	/* We expect the data segment's suballocator to be malloc, so pre-ordain that.
+	/* We expect the data segment's suballocator to be malloc.
+	 * We could pre-ordain that, but for uniformity with other
+	 * malloc arenas, we no longer do. The generic_malloc_index.h code
+	 * expects to claim the arena by setting 'suballocator'.
 	 * NOTE that there will also be a nested allocation under it, that is the
 	 * static allocator's segment bigalloc. We don't consider the sbrk area
 	 * to be a child of that; it's a sibling. FIXME: is this okay? */
-	__brk_bigalloc->suballocator = &__global_malloc_allocator;
+	//__brk_bigalloc->suballocator = &__global_malloc_allocator;
 }
 
 static void update_brk(void *new_curbrk)
