@@ -430,11 +430,20 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     stubsfile.write('#include "generic_malloc_index.h"\n')
                     stubsfile.write('\nALLOC_EVENT_INDEXING_DEFS(__global_malloc, malloc_usable_size)\n')
                     stubsfile.flush()
+                    (dynamicListFd, dynamicListFilename) = tempfile.mkstemp()
+                    os.unlink(dynamicListFilename)
+                    os.write(dynamicListFd, b"{\n")
                     for sym in definedMatches:
                         # FIXME: only do this if the original sym was export-dynamic'd,
                         # and only for malloc-family syms
-                        stubsLinkArgs += [ "-Wl,--export-dynamic-symbol," + "__real_" + sym]
-
+                        # HMM. Older linkers don't support --export-dynamic-symbol,
+                        # so we may have to fall back on --dynamic-list.
+                        # stubsLinkArgs += [ "-Wl,--export-dynamic-symbol," + "__real_" + sym]
+                        os.write(dynamicListFd, bytes(sym, 'utf-8') + b";\n")
+                    # GAH. If we use NamedTemporaryFile it gets collected too soon.
+                    # HACK: use /proc/self/fd/NN
+                    stubsLinkArgs += ["-Wl,--dynamic-list," + ("/proc/%d/fd/%d" % (os.getpid(), dynamicListFd))]
+                    os.write(dynamicListFd, b"};\n")
                 # now we compile the C file ourselves, rather than cilly doing it, 
                 # because it's a special magic stub
                 stubs_pp = os.path.splitext(stubsfile.name)[0] + ".i"
