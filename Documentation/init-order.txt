@@ -4,7 +4,8 @@ try to get it initialized early.
 However, this is not foolproof, e.g. if another DSO also sets the flag.
 Ideally, allocsld.so would include some sort of intervention to force it
 to be the first initialized DSO. However, it's not clear how to achieve
-that.
+that. (XXX: check up on how the ld.so orders its initialization calls.
+This is probably somewhat standardised behaviour.)
 
 For a long time we got by with tolerating later initialization. The main
 issue is reentrancy of instrmentation, especially malloc

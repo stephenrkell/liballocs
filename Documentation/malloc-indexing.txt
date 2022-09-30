@@ -10,8 +10,8 @@ bound by:     ld +xwrap      ld.so           ld           .---------------------
                                  (entry point)                 (indexing)  (core/utility) indirect-dlsym.c malloc
 source:             stubgen.h    libmallochooks libmallochooks stubgen.h     liballocs    libmallochooks
                                  in liballocs   in liballocs  +generic.._index.h          in liballocs
-which API?                      |             |
-                            user|user     hook|hook
+which API?                      |             |              |                          |
+                            user|user     hook|hook     event|event                     |hook
 
 The in-exe case is a bit dfferent. When building an output object that
 defines 'malloc', allocstubs.i also includes a bunch of stuff generated
@@ -31,8 +31,8 @@ bound by:     ld +xwrap  #define __real_*       as        .---------------------
                    (__wrap_*) (__wrap___real_*)                stubgen.h    liballocs
                     stubgen.h   libmallochooks libmallochooks +generic..._index.h        libmallochooks
                      (* 1)         in exe         in exe       in exe                       in exe
-which API?                      |             |             |
-                            user|user     hook|hook    event|
+which API?                      |             |             |                           |
+                            user|user     hook|hook    event|                           |hook
                                          (* 1)
 
 The executable is linked with -lallocs and with xwrapping malloc (and

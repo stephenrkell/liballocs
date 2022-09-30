@@ -1,20 +1,58 @@
-There can be many malloc implementations in a process. For example,
-there may be the libc's malloc in a .so, a custom malloc in the
+There can be many malloc implementations in a process. For example, there
+may be the libc's malloc in a shared library, a custom malloc in the
 executable, and (in our case) liballocs's private malloc. Each of these
 malloc implementations has its own entry points which need to be
-interposed on separately. It should also have its own 'struct
-allocator'.
+interposed on separately. Each also has its own 'struct allocator',
+giving it its own identity at run time.
 
-The word 'wrapper' is horribly overloaded in the context of malloc.
-It can mean (leading with a better word in each case)
+To do the necessary interposition, there is more than one kind of
+'wrapper function' involved. In fact the word 'wrapper' is horribly
+overloaded in the context of malloc and we shouldn't use it. It can mean
+(leading with a better word in each case) any of the following.
 
-- 'facade': a function in user code which backs onto malloc (et al)
-or transitively, another facade
+- 'facade': a function in user code which backs onto malloc (et al) or
+transitively, another facade. These 'wrappers' are features of the client
+program, rather than something we generate. They need special treatment
+at present because we classify with a 'sizeofness' only the ultimate call
+site to any allocator or facade, i.e. the code that is actually using
+'sizeof' to compute a size and pass it down to the allocation operation.
 
-- 'stub': a generated caller-side function used to latch the call site
-address
+- 'stub' or 'caller-side wrapper': these the functions, with names such
+as __wrap_malloc, we generate in order to latch the (outermost)
+allocation call site address. This is how we infer what type is being
+allocated -- the outermost allocator-or-facade call site is the one whose
+classified sizeofness reveals the type. In some obscure cases there can
+be more than one classified allocator call on the stack at once (e.g. a
+facade that allocates a big array but also separately allocates a 'spine
+vector' of pointers into that array), hence "outermost". Subject to
+performance experiments, I would like to eliminate caller-side wrappers
+altogether, at a cost of sometimes walking the stack all the way to the
+top (looking for the outermost site).
 
-- XXX need a new word ('gate'?): a generated callee-side function used
-to invoke indexing routines
+- an 'entry point' or 'callee-side wrapper': these generated functions
+stand in for the real allocator but additionally perform indexing
+operations. We generate them at link time.
 
+Conceptually, stubs (caller-side wrappers) are inserted when we link the
+calling code using the liballocs toolchain, and entry points (callee-side
+wrappers) are likewise inserted when we link the called allocator code
+using the liballocs toolchain. However, in order to support the common
+case of malloc in libc, which we do /not/ assume was built using the
+liballocs toolchain, two exceptions are made.
 
+- liballocs preloads its own malloc which performs caller-side allocation
+site latching if no allocation site is currently latched (this is in a
+thread-local variable), albeit on the *callee* side.
+
+- the same arrangement is used to insert indexing operations around the
+libc malloc.
+
+When the 'real' global malloc is built in to the executable, preempting
+the ones in libc and liballocs, we require that the executable was built
+with the liballocs toolchain. That means it will have both kinds of
+wrappers built in to it. (To work with such executables unmodified, we
+could imagine getting into binary instrumentation techniques, but that is
+not attempted yet.)
+
+See malloc-indexing.txt for a diagram of how this works in two common
+cases.
