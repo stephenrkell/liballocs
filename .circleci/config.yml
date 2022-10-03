@@ -8,7 +8,7 @@ jobs:
           name: Install dependencies
           command: |
             apt update
-            apt install -y build-essential \
+            apt install -y build-essential libbsd-dev \
               libelf-dev libdw-dev binutils-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++ ocaml ocamlbuild ocaml-findlib \
