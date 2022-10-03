@@ -110,21 +110,22 @@ static void update_brk(void *new_curbrk)
 {
 	/* If we haven't made the bigalloc yet, sbrk needs no action. */
 	if (!executable_mapping_bigalloc) return;
-	/* Tell the mmap allocator to ensure we extend up to the new brk. */
-	__mmap_allocator_notify_brk(new_curbrk);
-	assert(executable_mapping_bigalloc);
-	assert((char*) executable_mapping_bigalloc->end >= (char*) new_curbrk);
 	assert(__brk_bigalloc);
 
 	/* We also update the metadata. */
 	if ((char*) new_curbrk < (char*) __brk_bigalloc->end)
 	{
-		/* We're contracting. */
+		/* We're contracting. Shrink ourselves first... */
 		__liballocs_truncate_bigalloc_at_end(__brk_bigalloc, new_curbrk);
+		assert(__brk_bigalloc->end == new_curbrk);
+		/* ... THEN tell the mmap allocator to ensure we extend up to the new brk. */
+		__mmap_allocator_notify_brk(new_curbrk);
 	}
 	else if ((char*) new_curbrk > (char*) __brk_bigalloc->end)
 	{
-		/* We're expanding. */
+		/* We're expanding. Grow the underlying mmap first... */
+		__mmap_allocator_notify_brk(new_curbrk);
+		/* ... THEN extend ourselves. */
 		__liballocs_extend_bigalloc(__brk_bigalloc, new_curbrk);
 	}
 }

@@ -1411,14 +1411,14 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 	{
 		void *old_end = executable_mapping_bigalloc->end;
 		void *new_end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE);
-		__adjust_bigalloc_end(executable_mapping_bigalloc,
-			new_end);
-		struct mapping_sequence *seq
-		 = executable_mapping_bigalloc->allocator_private;
-		seq->end = new_end;
 		/* If we've expanded... */
 		if ((uintptr_t) new_end > (uintptr_t) old_end)
 		{
+			__adjust_bigalloc_end(executable_mapping_bigalloc,
+				new_end);
+			struct mapping_sequence *seq
+			 = executable_mapping_bigalloc->allocator_private;
+			seq->end = new_end;
 			void *prev_mapping_end = seq->mappings[seq->nused - 1].end;
 			if (!seq->mappings[seq->nused - 1].is_anon)
 			{
@@ -1441,9 +1441,12 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 		}
 		else if ((uintptr_t) new_end < (uintptr_t) old_end)
 		{
+			/* We're shrinking... */
 			struct mapping_sequence *seq
 			 = executable_mapping_bigalloc->allocator_private;
 			delete_mapping_sequence_span(seq, new_end, (uintptr_t) old_end - (uintptr_t) new_end);
+			__adjust_bigalloc_end(executable_mapping_bigalloc,
+				new_end);
 			check_mapping_sequence_sanity(seq);
 		}
 
