@@ -90,15 +90,25 @@ extern bigalloc_num_t *__liballocs_pageindex __attribute__((alias("pageindex")))
 static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num, 
 	bigalloc_num_t old_num, size_t n)
 {
+	/* NOTE: a lot of this function is debugging checks!
+	 * It collapses to very little when NDEBUG is defined. */
 	assert(1ull<<(8*sizeof(bigalloc_num_t)) >= NBIGALLOCS - 1);
 	assert(sizeof (wchar_t) == 2 * sizeof (bigalloc_num_t));
+#ifndef NDEBUG
+	ptrdiff_t first_bad_n;
+	bigalloc_num_t bad_value;
+#define CHECK_LOC(loc, bad_n_expr) do { \
+	if (!(old_num == (bigalloc_num_t) -1 || !(loc) || (loc) == old_num)) \
+	{ first_bad_n = (bad_n_expr); bad_value = (loc); goto report_failure_and_abort; } \
+} while (0)
+#else
+#define CHECK_LOC(loc, bad_n_expr)
+#endif
 
 	/* We use wmemset with special cases at the beginning and end */
 	if (n > 0 && (uintptr_t) begin % sizeof (wchar_t) != 0)
 	{
-#ifndef NDEBUG
-		if (old_num != (bigalloc_num_t) -1 && *begin != old_num) abort();
-#endif
+		CHECK_LOC(*begin, begin-pageindex);
 		*begin++ = num;
 		--n;
 	}
@@ -109,10 +119,7 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 	wchar_t wchar_transition_val = ((wchar_t) num); // FIXME: assumes little-endianness
 	wchar_t wchar_old_val = ((wchar_t) old_num) << (8 * sizeof(bigalloc_num_t)) | old_num;
 	
-	// do the memset
-	wchar_t accept[] = { wchar_old_val, '\0' };
-	// PROBLEM: if our accept val is 0, 
-#ifndef NDEBUG
+	// check the relevant range of the pageindex is in the state we expect
 	if (old_num != (bigalloc_num_t) -1 && old_num) // FIXME: also check when old_num is zero
 	{
 		bigalloc_num_t *pageindex_end = pageindex + PAGENUM(MAXIMUM_USER_ADDRESS + 1);
@@ -125,31 +132,34 @@ static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num,
 		// when either of those is nonzero. Or in fact if there is a contiguous
 		// nonempty sequence of pages at the end of user memory, and we start
 		// within that part of the pageindex.
-		// We could also open-code a wchar_t-based solution, but this breaks
-		// strict aliasing rules. So just do the slower thing... we're debug.
+		// We could also open-code a wchar_t-based solution, but unlike wmemset (-ish!)
+		// this breaks strict aliasing rules. So just do the slower thing... we're debug.
 		bigalloc_num_t *p;
 		// search forwards from p, checking we see zero or old_num
-		for (p = begin; p < pageindex_end && p - begin < n; ++p)
+		for (p = begin; p < pageindex_end && (p - begin) < n; ++p)
 		{
 			// either *p is uninit'd or it equals the old_num we expect to see
-			assert(!*p || *p == old_num);
+			CHECK_LOC(*p, p-pageindex);
 		}
 		// assert we didn't terminate early
 		assert(p - begin == n);
 	}
-#endif
 	if (n != 0) wmemset((wchar_t *) begin, wchar_val, n / 2);
 	
 	// if we missed one off the end, do it now
 	if (n % 2 == 1)
 	{
-#ifndef NDEBUG
 		// if we have one left over, we should have done up to n-1
-		assert(old_num == (bigalloc_num_t) -1
-				|| *(begin + (n-1)) == old_num);
-#endif
+		CHECK_LOC(*(begin + (n-1)), (begin-pageindex)+n-1);
 		*(begin + (n-1)) = num;
 	}
+	return;
+#ifndef NDEBUG
+report_failure_and_abort:
+	debug_printf(0, "pageindex has bad value (%d; expected %d) at page 0x%lx\n",
+		(int) bad_value, (int) old_num, (long) first_bad_n);
+	abort();
+#endif
 }
 
 __attribute__((constructor(101),visibility("hidden")))
@@ -402,13 +412,17 @@ static void bigalloc_del(struct big_allocation *b)
 	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
 	void *begin_to_clear = b->begin;
 	void *end_to_clear = b->end;
-	clear_bigalloc_nomemset(b);
 	memset_bigalloc(
 		pageindex + PAGENUM(ROUND_UP((unsigned long) begin_to_clear, PAGE_SIZE)),
-		parent_num, (bigalloc_num_t) -1, 
+		parent_num,
+		/* If our recursive deletion worked,
+		 * then surely in all these positions the pageindex
+		 * should have our number? */
+		b - &big_allocations[0], 
 		PAGE_DIST(ROUND_UP((unsigned long) begin_to_clear, PAGE_SIZE),
 		          ROUND_DOWN((unsigned long) end_to_clear, PAGE_SIZE))
 	);
+	clear_bigalloc_nomemset(b);
 	
 	assert(!BIGALLOC_IN_USE(b));
 }

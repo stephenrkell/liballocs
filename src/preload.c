@@ -330,6 +330,22 @@ static void init(void)
 }
 
 #ifndef NDEBUG
+static void write_decint(int val)
+{
+	char a;
+	_Bool written = 0;
+	a = '0' + ((val / 1000000000) % 10); if (a != '0') { raw_write(2, &a, 1); written = 1; }
+	a = '0' + ((val / 100000000) % 10); if (a != '0' || written) { raw_write(2, &a, 1); written = 1; }
+	a = '0' + ((val / 10000000) % 10); if (a != '0' || written) { raw_write(2, &a, 1); written = 1; }
+	a = '0' + ((val / 1000000) % 10); if (a != '0' || written) { raw_write(2, &a, 1); written = 1; }
+	a = '0' + ((val / 100000) % 10); if (a != '0' || written) { raw_write(2, &a, 1); written = 1; }
+	a = '0' + ((val / 10000) % 10); if (a != '0' || written) { raw_write(2, &a, 1); written = 1; }
+	a = '0' + ((val / 1000) % 10); if (a != '0' || written) { raw_write(2, &a, 1); written = 1; }
+	a = '0' + ((val / 100) % 10); if (a != '0' || written) { raw_write(2, &a, 1); written = 1; }
+	a = '0' + ((val / 10) % 10); if (a != '0' || written) { raw_write(2, &a, 1); written = 1; }
+	a = '0' + (val % 10); raw_write(2, &a, 1);
+}
+
 void abort(void) __attribute__((visibility("protected")));
 void abort(void)
 {
@@ -338,21 +354,48 @@ void abort(void)
 	raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
 	write_string(", pid ");
 	int pid = raw_getpid();
-	char a;
-	a = '0' + ((pid / 10000) % 10); raw_write(2, &a, 1);
-	a = '0' + ((pid / 1000) % 10); raw_write(2, &a, 1);
-	a = '0' + ((pid / 100) % 10); raw_write(2, &a, 1);
-	a = '0' + ((pid / 10) % 10); raw_write(2, &a, 1);
-	a = '0' + (pid % 10); raw_write(2, &a, 1);
+	write_decint(pid);
 	write_string(", from address ");
 	write_ulong((unsigned long) __builtin_return_address(0));
 	write_string(", in 10 seconds\n");
 
 	sleep(10);
 	raw_kill(pid, 6);
-	__builtin_unreachable();
+	/* What happens now? */
+	for (;;);
 }
+/* We need our own __assert_fail that we can be sure does not mmap,
+ * to avoid reentrancy problems that hinder debugging of assertion
+ * failures. glibc's version does dcgettext which does mmap. */
+__attribute__((visibility("protected")
+#if __STDC_VERSION__ >= 201112L
+,__noreturn__
 #endif
+))
+#if __STDC_VERSION__ >= 201112L
+_Noreturn
+#endif
+/* musl's 'line' is signed, but glibc's is unsigned. It doesn't matter
+ * in practice but the compiler will throw a fit. */
+void
+__assert_fail (
+const char *assertion, const char *file,
+#if !defined(__musl__) && !defined(ASSERT_FAIL_LINE_SIGNED)
+	unsigned
+#endif
+	int line, const char *function
+)
+{
+	write_string("Assertion failed at file ");
+	raw_write(2, file, strlen(file));
+	write_string(":");
+	write_decint((int) line);
+	write_string(": ");
+	raw_write(2, assertion, strlen(assertion));
+	write_string("\n");
+	abort();
+}
+#endif /* NDEBUG */
 
 sighandler_t signal(int signum, sighandler_t handler)
 {
