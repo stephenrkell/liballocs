@@ -91,7 +91,7 @@ static void create_brk_bigalloc(void *curbrk)
 			(uintptr_t) executable_mapping_bigalloc->end - phdr_end_addr,
 			NULL, /* allocator_private */
 			NULL, /* allocator_private_free */
-			executable_mapping_bigalloc,
+			executable_mapping_bigalloc /* parent */,
 			/* allocated_by */ &__brk_allocator
 		);
 	}
