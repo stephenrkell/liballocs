@@ -1,0 +1,96 @@
+What is liballocs? How does it work at build time and load time?
+
+Conceptually, liballocs is purely a run-time extension. However, there
+are two reasons in practice why it must also extend the toolchain.
+
+First is metadata. At run time it needs to know the following two kinds
+of thing that are known /a priori/ only to the program and/or its
+compiler(s), and which standard toolchains do not propagate to the
+run-time image of the program.
+
+- The internal structure and encoding of data in the program ("type
+information").
+
+- In contexts where memory is mapped or allocated, what type of data is,
+or will be, stored there (if any, and assuming the memory is not simply
+for downstream allocation later).
+
+The toolchain is extended to gather this information and represent it in
+a convenient, efficient form.
+
+Second is instrumentation. Since liballocs needs to know when certain
+events occur, and existing code does not notify it when they do, it must
+instrument that code. Technically this is an allocator-specific need and
+many allocators can get by without co-opting the toolchain into adding
+instrumentation. For example, syscall instrumentation (to catch mmap et
+al) is done at the binary level entirely at run time. Dynamic loading
+events (to catch creation of new segments) are instrumented at dynamic
+link time, again without toolchain extension. However, malloc-like
+allocators do require link-time interventions, which update an 'index'
+structure (usually a bitmap plus an extra metadata word inserted into
+each chunk). In turn, to do the necessary link-time instrumentation
+reliably, modified compiler flags are needed (e.g. -ffunction-sections).
+
+Historically, liballocs came with a rather elaborate compiler wrapper
+(allocscc, calling code in allocscompilerwrapper.py) although this is
+being transitioned to a less invasive approach where most of the work is
+done in linker plugins and by adding a few other command-line options,
+using a helper script (cc `helper-flags` ...).
+
+Metadata is dynamically loaded by liballocs. Each loaded binary
+(executable or shared library) optionally has a 'meta-DSO' in a special
+hierarchy (by default /usr/lib/meta) mirroring the filesystem. Meta-DSOs
+can be built using For binaries built using the liballocs toolchain,
+meta-DSOs are built automatically. They can also be built post-hoc, given
+at least the binary file. The contents of the meta-DSO are somewhat
+pluggable, but include the following.
+
+dwarftypes -- type information from DWARF .debug_info, transcoded
+allocsites -- a table of allocation call sites and their allocated types
+alloctypes -- types synthesised from code like 'sizeof (int) + sizeof (float)'
+metavector -- type info for code and data segments' static/global allocations
+frametypes -- type/layout info for stack frames, postprocessed from DWARF .debug_info
+ehelfs     -- fast unwinding information (see OOPSLA '19 paper)
+
+There is also:
+
+roottypes  -- fixed, always-available type definitions like 'void'
+
+All these are built by consuming some mixture of the following.
+
+1. debugging information (the main source of type information)
+
+2. relocation records  (especially those pointing into string data)
+
+3. stack frame unwinding information  (available at run time but in slow form)
+
+4. source-level features relevant to allocation types, like use of
+'sizeof', in C and other languages with untyped allocation primitives
+
+5. allocation sites' coordinates in binary and source
+
+This is all information that would otherwise be either discarded prior to
+run time (1, 2), not encoded in a useful way (3), or never explicitly
+gathered in the first place (4, 5). Numbers 4 and 5 require access to
+source code; that does not mean they require rebuilding the binary, as
+long as a source tree can be found (using the debugging information),
+although in practice the tools currently are hard to run except from
+the compiler wrapper.
+
+For type information, 'struct uniqtype' is how types are represented by
+liballocs. It is a big discriminated union which transcodes a large-ish
+subset of what DWARF can represent (but it need not be generated from
+DWARF; see below). This struct type is defined in a submodule,
+liballocstool, which provides a lot of the utility code needed by the
+toolchain extensions (building heavily on libdwarfpp, in turn). You
+should probably look at 'include/uniqtype-defs.h'. They are called
+'uniqtypes' because a lot of effort goes into keeping them unique, e.g.
+that there is only ever one active uniqtype instance for 'int' with a
+given definition (say, 32-bit signed 2's complement), while also not
+conflating distinct types that may be called 'int' in unusual languages.
+
+Metadata does not have to be generated from DWARF, or using the provided
+tools. It does, however, have to meet the expectations of liballocs when
+it loads a meta-DSO... basically, each kind of information appears as an
+array of records of a given type, where the array has a given symbol name
+in the loaded meta-DSO.

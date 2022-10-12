@@ -1,0 +1,174 @@
+What is liballocs? How does it work at run time?
+
+One way (not the only way) to think of liballocs is as implementing an
+API over memory in a Unix process. This API involves the following
+abstractions.
+
+struct uniqtype;           -- describes a mostly-fixed-format layout of memory (nominal)
+struct allocator;          -- describes a memory allocator
+struct big_allocation      -- describes a range of memory that may have child allocations...
+  big_allocations[]        -- ... each has a #  (its index in the array)
+bigalloc_num_t pageindex[] -- for each page, the # of the deepest covering bigalloc
+
+All usable mapped memory in the process falls under the control of one or
+more allocators. It may or may not have type information.
+
+The functions in the API are primarily /queries/ taking a void*, querying
+one or more of the following properties of the pointed-to memory.
+
+base                  -- start of the allocation
+limit                 -- end (one-past) of the allocation
+site                  -- address of instruction which triggered allocation
+name                  -- allocations often have names
+allocator (leaf, ...) -- allocator that created the allocation
+type (innermost, ...) -- type at the pointed-to byte (can be interior!)
+
+So, there are functions like
+
+allocs_get_type(void*);
+allocs_get_base(void*);
+
+... and so on.
+
+(There are also other functions, like one for walking over all
+allocations. And there are other properties like 'lifetime policies',
+relevant to heap allocators. Those are not discussed here.)
+
+The implementation of all these queries looks the same: first identify
+which is the relevant allocator, then delegate to an allocator-specific
+function that knows how to retrieve the base/limit/size/type/name.
+
+Since allocations nest, there may be *many* allocators relevant to any
+given location in memory. Put differently, given a void*, there may be
+many 'views' of the memory it points to, one for each allocator. Usually
+we want the 'deepest' or 'leaf' allocator, but not always. Even within
+the 'leaf' allocation, the type information may encode further layers of
+substructure (e.g. a struct or array, perhaps nested). So, queries can
+take further arguments to disambiguate this.
+
+The bigallocs table is liballocs's primary state describing memory. It is
+a tree, because bigallocs may have a parent which must be their
+immediately enclosing bigalloc. This tree can be thought of as a
+refinement of Linux's /proc/pid/maps file, or equivalents on other OSes,
+which contains only the first level of the tree.
+
+The pageindex is a 'shortcut' structure into this tree: most queries are
+towards the leaf, so the pageindex tracks which bigalloc is the deepest
+fully covering a given page. At run time, we can think of queries coming
+into liballocs from the 'top down', consuming these structures.
+
+A number of allocators are 'built in'. These include the following.
+
+mmap           -- all top-level (parentless) bigallocs are made by mmap
+auxv           -- a region of the initial stack, only
+stack          -- any thread's stack has a bigalloc
+stackframe     -- nested within a stack are one or more frames
+static-segment -- a memory mapping overlaid (nested) with program data
+static-section -- a region of a segment
+static-symbol  -- a region of a section (roughly!)
+brk            -- the region at the end of the executable's data segment
+alloca         -- dynamically sized regions inside some stack frames
+
+It helps to have a picture of an address space in mind. (Here I have
+labelled it as only a 'bottom half', ending at 7ff...ff, which is
+vaguely realistic for x86 architectures.)
+
+ ___________________________________..._____________...________________
+|___________________________________..._____________...________________|
+00..00                                                            7f..ff
+
+... under which bigallocs form a tree. If we label them with the
+allocator that created them, a very simple process might look something
+like this (not to scale!).
+
+00..00      the executable             a library    initial stack 7f..ff
+.-----------------------------------...-------------...----------------.
+  |  mmap                  |            | mmap     |   | mmap          |
+  --------------------------            ------------   ----------------|
+  |segment |segment| brk   |            |segment|s |      |  auxv      |
+  --------------------------            ------------      |------------|
+  |..|sects|..| |  |/      \       sects|       |  |      |  stack     |
+  -----------------  malloc             -----------       --------------
+ / symbols         \ chunks            /  symbols   \    / stackframes  \
+   (non-big)         (non-big)            (non-big)         (non-big)
+
+Note that the unit of mmap allocation is not a single memory mapping but
+a 'mapping sequence' (which has a somewhat subtle definition, but really
+is just a bunch of contiguous mappings that might plausibly have a shared
+purpose). This is because e.g. one segment may span multiple mappings.
+They are all part of a single mapping sequence, allowing us to retain a
+tree structure.
+
+The 'non-big' allocations at the leaves are also managed by an allocator
+that is recorded as the 'suballocator' of the deepest bigalloc. This is
+the allocator that can answer queries about, say, heap chunks or stack
+frames. (There are no sub-sub-allocators; any region that is allocated
+from must first be promoted to a bigalloc. This means the children of a
+malloc arena, say, may be a mixture of big and non-big allocations.)
+
+To maintain the pageindex, bigalloc table, and any other structures
+required by specific allocators (e.g. see discussion of malloc below),
+liballocs relies on notifications. These might be obtained via explicit
+cooperation -- an allocator could be written as a client of liballocs --
+but in most cases this is by instrumentation of existing code. Various
+system calls are instrumented (mmap and family), as are dynamic loading
+operations (dlopen, dlclose) for the static-* allocators.
+
+malloc-like allocators are more complex. There may be more than one in
+the process. Each distinct implementation of 'malloc' has a separate
+'struct allocator' and may have different implementations of the query
+functions. At link time, the toolchain extensions of liballocs ensure
+that hooking code and the 'struct allocator' are generated. Currently,
+link-time interposition is used to hook malloc operations, using the
+'libmallochooks' codebase in rather custom fashion. See
+malloc-overview.txt.
+
+Heap allocations with no explicit type, including those made with malloc
+but potentially other allocations too ('alloca' is treated similarly),
+are given types according to their allocation site. In simple cases this
+is just the caller of 'malloc', e.g. if I do 'malloc(42*sizeof(int))'
+then that call site suffices as the allocation site and can tell us
+(given source-level analysis of 'sizeof') the type being allocated.
+Other cases get more complex, e.g. wrappers of malloc. This use of
+allocation sites is really a detail specific to the 'malloc' allocator
+family, and much of liballocs is not concerned with it. This is much more
+prominent in the toolchain side of liballocs (see
+overview-toolchain.txt), not the runtime side.
+
+More generally, each allocator is responsible for sourcing the type
+information for its allocations. Besides heap allocations, the two
+allocators doing the most work in this area are stackframe (which allows
+querying local variables, temporaries and other on-stack data) and
+static-symbol (which allows querying global variables; actually most of
+the work is pushed up to static-segment). Again, this is best viewed from
+the toolchain side.
+
+Allocators may maintain 'index' data structures of per-allocation
+information. Conceptually, this can be said to belong with the code of
+the allocator proper -- e.g. a malloc allocator will keep bookkeeping
+information on its chunks. However, since this information is often not
+sufficient to answer queries supported by the liballocs API (e.g. the
+bookkeeping info doesn't remember the allocation site, nor know its type,
+nor how to turn an arbitrary interior pointer into a base/limit pair),
+some kind of supplementary 'index' data structure is kept by code linked
+into liballocs and called from instrumentation. Again, see
+malloc-overview.txt.
+
+The runtime is built on a couple of underlying layers, for system call
+trapping and ELF introspection. In terms of artifacts it looks something
+like this. Conceptually we can think of liballocs as an extension of the
+process's dynamic linker, whose job includes keeping a map of the address
+space.
+
+     |--------------|
+     |              |    ...
+     |              |    other built-in allocators                            
+     |              |    ...
+     |  liballocs   |    pageindex, big allocation tree, mmap allocator    
+     |--------------|
+     |  libsystrap  |    syscall trapping
+     |--------------|
+     |   librunt    |    introspection over loaded objects
+     |--------------|
+     |     ld.so    |    loading
+     ----------------
