@@ -104,8 +104,16 @@ find_debug_file_for () {
             echo "Resolved debuglink to: $resolved_debuglink" 1>&2
             echo "$resolved_debuglink"
         else
-            echo "No debuglink found" 1>&2
-            echo "$file"
+            build_id_val="$( read_build_id "$file" )"
+            if [[ -n "$build_id_val" ]]; then
+                echo "Read build ID val: $build_id_val" 1>&2
+                resolved_build_id="$( resolve_build_id "$file" "$debuglink_val" )"
+                echo "Resolved build_id to: $resolved_build_id" 1>&2
+                echo "$resolved_build_id"
+            else
+                echo "No debuglink or build ID found" 1>&2
+                echo "$file"
+            fi
         fi
     else
         echo "$file"
@@ -183,6 +191,33 @@ resolve_debuglink () {
     return 1
 }
 
+# How to build the path from the build ID? GDB docs say we
+# have to try:
+# the directory of the executable file, then
+# in a subdirectory of that directory named .debug, and finally
+# under each one of the global debug directories,
+#      in a subdirectory whose name is identical to
+#      the leading directories of the executable’s absolute file name. */
+resolve_build_id () {
+    obj="$1"
+    debuglink_value="$2"
+    
+    #canon_obj_path="$( readlink -f "$obj" )"
+    canon_obj_path="$obj"
+
+    for candidate in "$( dirname "$canon_obj_path" )/.debug/$debuglink_value" \
+       /usr/lib/debug"$( dirname ${canon_obj_path} )"/$debuglink_value \
+       /usr/lib/debug/.build-id/*/$debuglink_value; do
+        if contains_debug_symbols "$candidate"; then
+            echo "detected debug info within debuglink $debuglink_value resolved at $candidate" 1>&2
+            echo "$candidate"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
 ensure_debug_symbols () {
     obj="$1"
     # do we have debug symbols already?
@@ -197,6 +232,14 @@ ensure_debug_symbols () {
         resolved_debuglink="$( resolve_debuglink "$obj" "$debuglink_value" )"
         if [[ -n "$resolved_debuglink" ]] && contains_debug_symbols "$resolved_debuglink"; then
             echo "detected debug info within debuglink $debuglink_value resolved at $candidate" 1>&2
+            echo "$candidate"
+            return 0
+        fi
+        # else we failed to resolve a good debuglink
+    elif build_id_value="$( read_build_id "$obj" )"; then
+        resolved_build_id="$( resolve_build_id "$obj" "$build_id_value" )"
+        if [[ -n "$resolved_build_id" ]] && contains_debug_symbols "$resolved_build_id"; then
+            echo "detected debug info within build ID $build_id_value resolved at $candidate" 1>&2
             echo "$candidate"
             return 0
         fi
