@@ -87,9 +87,9 @@ like this (not to scale!).
   --------------------------            ------------   ----------------|
   |segment |segment| brk   |            |segment|s |      |  auxv      |
   --------------------------            ------------      |------------|
-  |..|sects|..| |  |/      \       sects|       |  |      |  stack     |
-  -----------------  malloc             -----------       --------------
- / symbols         \ chunks            /  symbols   \    / stackframes  \
+  |..|sects|..| |  |/      \       sects|       |  |      |  stack   |
+  -----------------  malloc             -----------       ------------
+ / symbols         \ chunks            /  symbols   \    / stackframes\
    (non-big)         (non-big)            (non-big)         (non-big)
 
 Note that the unit of mmap allocation is not a single memory mapping but
