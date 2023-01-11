@@ -1,21 +1,12 @@
 #!/bin/bash
 
-objfile="$1"
-
-test -n "$objfile" || (echo "Please specify an object file"; false) || exit 1
-
-. $(dirname "$0")/../../../used-types-funcs.sh # sets LIBALLOCS
-
-usedtypes_src=$( mktemp --suffix=.c )
-usedtypes_obj=$( mktemp --suffix=.o )
+. $(dirname "${BASH_SOURCE[0]}")/../../../used-types-funcs.sh # sets LIBALLOCS
 
 objcopy_and_redefine_c_names () {
     our_objfile="$1"
     
     candidate_symnames="$( nm -fposix -u "$our_objfile" | \
 sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype__ )"
-
-    echo "sed program is $sed_program" 1>&2
 
     # we need to push candidates into the filter and see what comes out;
     # if it changes, add a --redefine-sym option to the list 
@@ -41,6 +32,16 @@ sed -r 's/[[:blank:]]*[Uw][[:blank:]]*$//' | grep __uniqtype__ )"
     fi
 }
 
+# only carry out the main logic if we're run, not sourced
+case "$0" in
+(*link-used-types)
+
+objfile="$1"
+test -n "$objfile" || (echo "Please specify an object file"; false) || exit 1
+
+usedtypes_src=$( mktemp --suffix=.c )
+usedtypes_obj=$( mktemp --suffix=.o )
+
 echo ${USEDTYPES} "$objfile" 1>&2 # for debugging
 (  objcopy_and_redefine_c_names "$objfile" && \
    echo "Successfully did objcopy_and_redefine_c_names" 1>&2 && \
@@ -55,4 +56,7 @@ echo ${USEDTYPES} "$objfile" 1>&2 # for debugging
    echo "Successfully did link_defining_aliases" 1>&2 ) || \
     (echo NOT REALLY rm -f "$objfile" 1>&2 ; exit 1)
 
+;;
+
+(*) ;; esac
 # rm -f "$usedtypes_src" "$usedtypes_obj"
