@@ -436,7 +436,7 @@ void __liballocs_free_arena_bitmap_and_info(void *info  /* really struct arena_b
 
 unsigned long __liballocs_aborted_stack __attribute__((visibility("hidden")));;
 unsigned long __liballocs_aborted_static __attribute__((visibility("hidden")));;
-unsigned long __liballocs_aborted_unknown_storage __attribute__((visibility("hidden")));;
+unsigned long __liballocs_aborted_unknown_storage __attribute__((visibility("protected")));;
 unsigned long __liballocs_hit_heap_case __attribute__((visibility("protected")));
 unsigned long __liballocs_hit_alloca_case __attribute__((visibility("hidden")));;
 unsigned long __liballocs_hit_stack_case __attribute__((visibility("hidden")));;
@@ -461,3 +461,4 @@ void __liballocs_free_arena_bitmap_and_info(void *info)
 void __liballocs_uncache_all(const void *allocptr, unsigned long size)
 {}
 
+_Bool __liballocs_notify_unindexed_address(const void *obj) { return 1; }
