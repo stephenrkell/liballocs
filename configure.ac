@@ -15,7 +15,7 @@ PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
 export CFLAGS CXXFLAGS LDFLAGS PKG_CONFIG_PATH
 
 LT_CONFIG_LTDL_DIR([libltdl])
-LT_INIT([dlopen])
+LT_INIT([dlopen disable-static])
 LTDL_INIT([nonrecursive])
 AC_LANG([C++])
 AM_INIT_AUTOMAKE([foreign subdir-objects -Wno-portability])

@@ -59,6 +59,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
     # FIXME: we shouldn't caller-wrap allocator entry points (non-wrappers),
     # though we should callee-wrap them (whic we currently do with --wrap,__real_*)
     def allWrappedSymNames(self):
+        #return self.symNamesForFns(self.allL1OrWrapperAllocFns() + self.allAllocSzFns() + self.allL1OrWrapperFreeFns())
         return self.symNamesForFns(self.allAllocFns() + self.allFreeFns())
 
     def findFirstUpperCase(self, s):
@@ -362,6 +363,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     m = re.match("(.*)\((.*)\)(.?)", allocFn)
                     fnName = m.groups()[0]
                     fnSig = m.groups()[1]
+                    def tupify(s):
+                        return '(' + ','.join([c for c in s]) + ')'
                     retSig = m.groups()[2]
                     writeArgList(fnName, fnSig)
                     sizendx = self.findFirstUpperCase(fnSig)
@@ -390,14 +393,18 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         sz = int(outp_lines[0].split("\t")[0])
                         stubsfile.write("#define size_arg_%s %d\n" % (fnName, sz))
                     if allocFn in self.allL1OrWrapperAllocFns():
-                        stubsfile.write("make_caller_wrapper(%s, %s)\n" % (fnName, retSig))
+                        stubsfile.write("make_caller_wrapper(%s, %s, %s, %s, %s, 0)\n" % \
+                        ("__wrap_" + fnName, "__real_" + fnName, fnName, tupify(fnSig), retSig))
                     elif allocFn in self.allAllocSzFns():
-                        stubsfile.write("make_size_caller_wrapper(%s, %s)\n" % (fnName, retSig))
+                        stubsfile.write("make_size_caller_wrapper(%s, %s, %s, %s, %s, 1)\n" % \
+                        ("__wrap_" + fnName, "__real_" + fnName, fnName, tupify(fnSig), retSig))
                     else:
-                        stubsfile.write("make_suballocator_alloc_caller_wrapper(%s, %s)\n" % (fnName, retSig))
+                        stubsfile.write("make_suballoc_wrapper(%s, %s, %s)\n" % \
+                        (fnName, tupify(fnSig), retSig))
                     # for genuine allocators (not wrapper fns), also make a callee wrapper
                     if allocFn in self.allSubAllocFns(): # FIXME: cover non-sub clases
-                        stubsfile.write("make_callee_wrapper(%s, %s)\n" % (fnName, retSig))
+                        pass
+                        #stubsfile.write("make_callee_wrapper(%s, %s)\n" % (fnName, retSig))
                     stubsfile.flush()
                 # also do caller-side subfree wrappers
                 for freeFn in self.allSubFreeFns():
@@ -410,10 +417,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         # it's a ptr, so flag that up
                         stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
                     writeArgList(fnName, fnSig)
-                    stubsfile.write("make_suballocator_free_caller_wrapper(%s, %s)\n" % (fnName, allocFnName))
+                    stubsfile.write("make_subfree_wrapper(%s, %s, %s)\n" % (fnName, tupify(fnSig), allocFnName))
                     stubsfile.flush()
                     if allocFn in self.allSubFreeFns(): # FIXME: cover non-sub and non-void clases
-                        stubsfile.write("make_void_callee_wrapper(%s)\n" % (fnName))
+                        pass
+                        #stubsfile.write("make_void_callee_wrapper(%s)\n" % (fnName))
                 # also do caller-side free (non-sub) -wrappers
                 for freeFn in self.allL1OrWrapperFreeFns():
                     m = re.match("(.*)\((.*)\)", freeFn)
@@ -422,9 +430,10 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     ptrndx = fnSig.find('P')
                     if ptrndx != -1:
                         # it's a ptr, so flag that up
-                        stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, fnSig[ptrndx]))
+                        stubsfile.write("#define ptr_arg_%s make_argname(%d, %c)\n" % (fnName, ptrndx, tupify(fnSig)[ptrndx]))
                     writeArgList(fnName, fnSig)
-                    stubsfile.write("make_free_caller_wrapper(%s)\n" % fnName)
+                    stubsfile.write("make_free_wrapper(%s, %s, %s, %s)\n" % \
+                        ("__wrap_" + fnName, "__real_" + fnName, fnName, tupify(fnSig)))
                     stubsfile.flush()
                 if "malloc" in definedMatches:
                     stubsfile.write('#include "generic_malloc_index.h"\n')

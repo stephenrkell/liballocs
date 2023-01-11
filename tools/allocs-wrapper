@@ -1,0 +1,170 @@
+#!/bin/bash
+
+# HACK: know where to find toolsub
+TOOLSUB="${TOOLSUB:-"$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/../contrib/toolsub}" #"
+# HACK: know where to find liballocstool
+LIBALLOCSTOOL="${LIBALLOCSTOOL:-"$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/../contrib/liballocstool}" #"
+
+case "$0" in
+    (*cflags|*cppflags|*cxxflags)
+        /bin/echo -no-integrated-cpp -wrapper "$(readlink -f "$(dirname "$0")")"/allocs-wrapper
+        exit 0
+    ;;
+    (*ldflags)
+        # for env vars like LIBALLOCS_ALLOC_FNS, we do some light rewriting
+        # and pass them as arguments to the linker plugin
+        # GAH, commas interact with "-Wl," so we have to use ';'
+        rewrite_liballocs_var () {
+            varname="$1"
+            for v in ${!varname}; do
+                IFS=$'\t' read ident args after <<<"$( echo "$v" | tr '()' '\t' )"
+                # our format is "<ident>(<argchar> [, <argchar> ]..),[retchar]"
+                # except with semicolons not commas
+                echo "${ident};($(echo "$args" | sed 's/./&;/g' | sed 's/;$//'))$(echo "$after" | sed 's/->//' | sed -E 's/.+/;&/')"
+            done
+        }
+        extra_ld_args="-Wl,-plugin=\"$(readlink -f "$(dirname "$0")")\"/gold-plugin.so"
+        for v in LIBALLOCS_ALLOC_FNS LIBALLOCS_FREE_FNS LIBALLOCS_ALLOCSZ_FNS \
+          LIBALLOCS_SUBALLOC_FNS LIBALLOCS_SUBFREE_FNS LIBALLOCS_ALLOCSITE_OVERRIDE; do
+            extra_ld_args="$extra_ld_args -Wl,-plugin-opt=\"`rewrite_liballocs_var $v`\""
+        done
+        eval echo "$extra_ld_args"
+        exit 0
+    ;;
+    (*) # silently continue, i.e. actually act as the wrapper command
+    ;;
+esac
+
+# set ourselves as the wrapper
+WRAPPER="$0"
+# source the wrapper funcs
+. "${WRAPPER_FUNCS:-${TOOLSUB}/wrapper/lib/wrapper-funcs.sh}"
+
+my_cc1 () {
+    # Run the compiler. We force debugging information to be generated.
+    # But how do we remove it?
+    "$@" -g3 -ggdb -fno-eliminate-unused-debug-types
+    status=$?
+    if ! [[ $status -eq 0 ]]; then return $status; else
+        true
+    fi
+}
+
+# we wrap 'as' so that if it's a C source file -- check from .debug_info? --
+# the resulting object gets objcopy_and_redefine_c_names'd
+
+asm_infile_is_from_c_source () {
+    local f="$1"
+    # look for a .file string ending .c or .i ...
+    grep -q "^[[:blank:]]*\.file[[:blank:]]*\"[^\"]*\.[ci]\"" "$f" || \
+        grep -q "^[[:blank:]]*\.ident[[:blank:]]*\"[^\"]*[cC][cC]\([^a-zA-Z]\|\$\)" "$f"
+    # ... or (bit of a HACK) a .ident string that has 'cc' at the end of a word
+}
+
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/lang/c/bin/link-used-types
+my_as () {
+    echo "as_infiles is ${as_infiles[@]}" 1>&2
+    # run the assembler
+    "$@"
+    status=$?
+    # FIXME: perhaps this rewrite should be done after cc1, not after the assembly,
+    # to avoid the hacky test for C-derived assembly.
+    # Is there a way we can use funky introspection, maybe _Generic, to directly
+    # generate the correct typenames? Problem is whether this can work even with
+    # old C standards that we want to support... ACTUALLY it seems to work!
+    # The more annoying problem is that we need to include stdint.h which may
+    # pollute the namespace.
+    #
+    # Even if that is not workable, maybe there is a way to do it with funky inline asm?
+    # The compiler does know the size of stuff, so if we can magic up an lvalue
+    # even just by a conditional expression (sizeof (int) == 4 ? &__uniqtype ... )
+    # then we are good. Exactly what is it that we don't know at compile time?
+    # If we can enumerate all the possible sizes of stuff, extern-declare uniqtypes
+    # for them all, then only use the ones that actually apply, we will be sorted.
+    # Need to ensure dollars-in-identifiers.
+    # ARGH. The main problem is that we need to be able to build compound type names
+    # like __uniqtype____FUN_FROM_int$$64__FUN_TO_int$$32.
+    # Still maybe we can predefine BASETYPESTR_INT "int$$32". Oh, but defines don't
+    # help us.
+    #
+    # PERHAPS a better way to do it is as follows. Do a pre-pass over the preprocessor
+    # output to infer the size of base types from stuff like __SIZEOF_LONG__.
+    # Then ... WHAT? A second run through the preprocessor is not out of the question,
+    # but 
+    # Or maybe we can run the preprocessor -dM and then scrape the #define
+    # lines that we see? Can CIL grok this, or can we make it do so?
+    #
+    # We still have to turn codeless into codeful uniqtypes. Why do we treat base
+    # types specially? Can we just scrap this entirely? If we have a function from
+    # struct S to struct T, we generate a uniqtype name that does not account for the
+    # difference.
+    #
+    # YES, try this. The only transformation we should need is codeless->codeful,
+    # which is not C-specific.
+    # HMM. Is this messing with our canonicalisation logic?
+    # We tend to treat all base type names as if they were a typedef
+    # of a 'true' unambiguous name. And then we always write compound names
+    # in terms of non-typedefs. Will things break if we no longer have
+    # this canonicalisation in place? My 'struct' argument above suggests not.
+    # But hmm. So could we have distinct-identity uniqtypes for the same
+    # base type? Not from C code, because we normalise by name. We only split
+    # if the code is different. But with another lang where 32-bit signed
+    # integers  are called something else, what would appen? AH, no problem.
+    # Hmm, but on the generation side we need to be careful. And again the
+    # compound uniqtypes are likely to be the problem... real issue is when
+    # distinct symnames imply distinct identities. Our treatment of typedefs
+    # is already not perfect (see GitHub).
+    if ! [[ $status -eq 0 ]]; then return $status; else
+        for infile in "${as_infiles[@]}"; do
+            if asm_infile_is_from_c_source "${infile}" ; then
+                echo "Rewriting uniqtype symnames in C-derived file $as_outfile" 1>&2
+                objcopy_and_redefine_c_names "$as_outfile"
+                break  # only do this once, if *any* infile is from C (bit of a HACK)
+            fi
+        done
+    fi
+}
+ASWRAP=my_as
+
+# XXX: move the -ldflags down here?
+#
+# When wrapping compilation jobs, we have to run additional tools before
+# and after the actual compiler. So, some kind of wrapper script is
+# unavoidable. Our "-cflags" tool inserts the wrapper, and the wrapper
+# shell functions actually run the extra stuff, e.g. the cilpp passes.
+#
+# With link-only jobs, it's a bit different. We can do all the work we
+# need with some extra flags to the linker, to add our plugin (and turn
+# on --emit-relocs). So we could just define our "-ldflags" tool to
+# emit those options, and forget about '-wrapper'.
+#
+# Having the flags available separately is useful for hand-crafted ld jobs
+# that don't run via a compiler driver. However, it's less uniform.
+# Also, what if a job is doing both compilation and linking?
+# We might expect the caller to insert the output of *both* `-cflags`
+# and `-ldflags`. But that feels noisy.
+#
+# We could define a collect2 wrapper, and then have our "-ldflags" emit
+# exactly the same thing as "-cflags": just the options that interpose
+# the wrapper script.
+#
+# Probably we want both: a standalone way to get the linker flags, and
+# a path that goes through this wrapper.
+
+# Problem about state: since the wrapper gets invoked separately for
+# each tool the compiler driver wants to run, there is no easy way to
+# maintain state. This matters when we mess with options to one command
+# but want to fix things up later. E.g. we have to insert --emit-relocs
+# if absent, but later strip out the relocs if the caller didn't want
+# them. Similarly with -g: we want to strpi out the debug info but
+# only later.
+#
+# This recalls the "-flags or wrapper" issue commented above: we can add
+# -g either in -cflags or in the cc1 wrapper. It's better to do it
+# in the cc1 wrapper because it can test whether -g was already present.
+# We probably have to do something like add a .note section to the .s
+# if stripping is needed later. This basically means 'these .debug_*
+# sections are not really here and won't survive the link'.
+
+# delegate to the generic wrapper -- we've set WRAPPER so it won't re-source the funcs
+. ${TOOLSUB}/wrapper/bin/wrapper

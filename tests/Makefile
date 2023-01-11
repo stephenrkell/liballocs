@@ -7,6 +7,10 @@ CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -
 CFLAGS += -fno-lto
 LDFLAGS += -fno-lto
 
+# HACK: gold-plugin needs this for liballocstool CFLAGS
+META_CFLAGS += $(CFLAGS)
+export META_CFLAGS
+
 ifneq ($(USE_FAKE_LIBUNWIND),)
 CFLAGS += -DUSE_FAKE_LIBUNWIND=1
 else
@@ -15,10 +19,12 @@ endif
 
 UNIQTYPES_BASE ?= /usr/lib/meta
 META_BASE ?= /usr/lib/meta
+LIBALLOCS ?= $(dir $(realpath $(dir $(THIS_MAKEFILE))/..
 LIBALLOCS_BUILD ?= $(dir $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_preload.so))
 
 export UNIQTYPES_BASE
 export META_BASE
+export LIBALLOCS
 export LIBALLOCS_BUILD
 # these are HACKs! Need more robust liballocs interface
 export LIBRUNT # needed by stubgen.h in allocscompilerwrapper.py
@@ -50,6 +56,7 @@ LIBALLOCS_LIB := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs_preload.so)
 else
 LIBALLOCS_LIB := $(realpath $(dir $(THIS_MAKEFILE))/../lib/liballocs.so)
 endif
+export LIBALLOCS_LIB
 ifneq ($(MAKECMDGOALS),clean)
 ifeq ($(wildcard $(LIBALLOCS_LIB)),)
         $(error You must first build liballocs{.so,_preload.so} and link them from ../lib)
@@ -127,7 +134,8 @@ uniqtype-make-precise \
 lib-test \
 forward-decls \
 metavec-layout \
-packed-seq-walk
+packed-seq-walk \
+hello-via-wrapper
 endef
 $(foreach case,$(exit-zero-case-names),$(eval $(call exit-zero-case,$(case))))
 

@@ -12,5 +12,8 @@ export TOOLSUB
 export ELFTIN
 export LIBMALLOCHOOKS
 
+XWRAP_LDPLUGIN := $(ELFTIN)/xwrap-ldplugin/xwrap-ldplugin.so
+export XWRAP_LDPLUGIN
+
 CFLAGS := -I@librunt@/include -I@libmallochooks@/include @LIBALLOCSTOOL_CFLAGS@
 export CFLAGS

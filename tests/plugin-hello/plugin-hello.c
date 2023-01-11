@@ -5,6 +5,14 @@ void *fail_alloc(size_t sz)
 {
 	return NULL;
 }
+void *fail_calloc(size_t sz, size_t nmemb)
+{
+	return NULL;
+}
+void *fail_realloc(void *p, size_t sz)
+{
+	return NULL;
+}
 
 static void *static_fail_alloc(size_t sz)
 {

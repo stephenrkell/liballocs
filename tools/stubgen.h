@@ -2,24 +2,15 @@
 #include <assert.h>
 #include <stdio.h>
 #include <sys/types.h>
+#if 0
 #include "relf.h" /* for fake_dlsym, used by callee wrappers */
-
-#ifndef NO_TLS
-extern __thread void *__current_allocsite; // __attribute__((weak)); // defined by heap_index_hooks
-extern __thread void *__current_allocfn;// __attribute__((weak)); // defined by heap_index_hooks
-extern __thread size_t __current_allocsz;// __attribute__((weak)); // defined by heap_index_hooks
-extern __thread int __currently_freeing;// __attribute__((weak)); // defined by heap_index_hooks
-extern __thread int __currently_allocating;// __attribute__((weak)); // defined by heap_index_hooks
-#else // DOUBLE HACK: make weak *definitions* here
-void *__current_allocsite __attribute__((weak)); // defined by heap_index_hooks
-void *__current_allocfn __attribute__((weak)); // defined by heap_index_hooks
-size_t __current_allocsz __attribute__((weak)); // defined by heap_index_hooks
-int __currently_freeing __attribute__((weak)); // defined by heap_index_hooks
-int __currently_allocating __attribute__((weak)); // defined by heap_index_hooks
 #endif
 
-int  __index_small_alloc(void *ptr, int level, unsigned size_bytes); // defined by heap_index_hooks
-void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
+extern __thread void *__current_allocsite; // __attribute__((weak));
+extern __thread void *__current_allocfn;// __attribute__((weak));
+extern __thread size_t __current_allocsz;// __attribute__((weak));
+extern __thread int __currently_freeing;// __attribute__((weak));
+extern __thread int __currently_allocating;// __attribute__((weak));
 
 /* these are our per-allocfn caller wrappers */
 
@@ -32,20 +23,76 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 #define type_for_argchar_i int
 #define type_for_argchar_I int
 
+#define cap_arg_z(n)
+#define cap_arg_Z(n) arg ## n
+
+#define cap_arg_p(n)
+#define cap_arg_P(n) arg ## n
+
+#define cap_arg_i(n)
+#define cap_arg_I(n) arg ## n
+
+#include <boost/preprocessor/repetition.hpp>
+#include <boost/preprocessor/tuple.hpp>
+#include <boost/preprocessor/seq.hpp>
+#include <boost/preprocessor/arithmetic/sub.hpp>
+#include <boost/preprocessor/punctuation/comma_if.hpp>
+
+/* FIXME: delete these? */
 #define make_argdecl(num, c) \
 	type_for_argchar_ ## c arg ## num
-
 #define make_argname(num, c) \
 	arg ## num
-
 #define make_argtype(num, c) \
 	type_for_argchar_ ## c
+
+/* New versions using boost-pp */
+#define make_argdecl4(r, n, i, c) \
+	BOOST_PP_CAT(type_for_argchar_, c) arg ## i \
+    BOOST_PP_COMMA_IF(BOOST_PP_LESS(BOOST_PP_ADD(i,1),n))
+#define make_argname4(r, n, i, c) \
+	arg ## i \
+    BOOST_PP_COMMA_IF(BOOST_PP_LESS(BOOST_PP_ADD(i,1),n))
+
+#define make_argdecls(tup) \
+	BOOST_PP_SEQ_FOR_EACH_I( \
+	   make_argdecl4, \
+	   /* data = n */ BOOST_PP_SEQ_SIZE(BOOST_PP_TUPLE_TO_SEQ(tup)), \
+	   BOOST_PP_TUPLE_TO_SEQ(tup) \
+	)
+
+#define make_argnames(tup) \
+	BOOST_PP_SEQ_FOR_EACH_I( \
+	   make_argname4, \
+	   /* data = n */ BOOST_PP_SEQ_SIZE(BOOST_PP_TUPLE_TO_SEQ(tup)), \
+	   BOOST_PP_TUPLE_TO_SEQ(tup) \
+	)
+
+#define map_over_argtup_nocomma(tup, f) \
+    BOOST_PP_SEQ_FOR_EACH_I(f, nothing, BOOST_PP_TUPLE_TO_SEQ(tup))
+#define map_over_argtup_nocomma_rev(tup, f) \
+    BOOST_PP_SEQ_FOR_EACH_I(f, \
+	   nothing, \
+	   BOOST_PP_TUPLE_TO_SEQ(BOOST_PP_TUPLE_REVERSE(tup)) \
+	)
+
+#define cap_test_one_arg4(r, n, i, c) \
+    BOOST_PP_CAT(cap_arg_, c)(i)
+
+#define cap_arg(tup) \
+	BOOST_PP_SEQ_FOR_EACH_I(cap_test_one_arg4, nothing, BOOST_PP_TUPLE_TO_SEQ(tup))
 
 #define pre_realarg(num, c) \
 	pre_realarg_ ## c (arg ## num)
 
 #define post_realarg(num, c) \
 	post_realarg_ ## c (arg ## num)
+
+#define pre_realarg4(r, data, i, elem) \
+	pre_realarg(i, elem)
+
+#define post_realarg4(r, data, i, elem) \
+	post_realarg(i, elem)
 
 #ifndef do_caller_wrapper_init
 #define do_caller_wrapper_init(name)
@@ -146,192 +193,138 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 #define do_arginit(num, c) do_arginit_ ## c ( arg ## num )
 #endif
 
-#define make_caller_wrapper(name, retchar) \
-	type_for_argchar_ ## retchar __real_ ## name ( arglist_ ## name (make_argdecl) ); \
-	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
-	{ \
-		do_caller_wrapper_init(name) \
-		arglist_nocomma_ ## name (do_arginit) \
-		type_for_argchar_ ## retchar real_retval; \
-		if (&__current_allocfn && !__current_allocfn) \
-		{ \
-			_Bool set_currently_allocating = 0; \
-			if (&__currently_allocating && !__currently_allocating) { \
-				__currently_allocating = 1; \
-				set_currently_allocating = 1; \
-			} \
-			/* only set the site if we don't have one already */ \
-			if (!__current_allocsite) __current_allocsite = __builtin_return_address(0); \
-			__current_allocfn = &__real_ ## name; \
-			__current_allocsz = size_arg_ ## name; \
-			rev_arglist_nocomma_ ## name (pre_realarg) \
-			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-			void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-			arglist_nocomma_ ## name (post_realarg) \
-			/* __current_alloclevel = 0; */ \
-			/* zero the site now the alloc action is completed, even if it was already set */ \
-			__current_allocsite = (void*)0; \
-			__current_allocfn = (void*)0; \
-			__current_allocsz = 0; \
-			if (set_currently_allocating) __currently_allocating = 0; \
-			real_retval = retval; \
-		} \
-		else \
-		{ \
-			/* printf("&__current_allocfn: %p    ", &__current_allocfn); */ \
-			/* if (&__current_allocfn) printf("__current_allocfn: %d", __current_allocfn); */ \
-			rev_arglist_nocomma_ ## name (pre_realarg) \
-			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-			real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-			arglist_nocomma_ ## name (post_realarg) \
-		} \
-		do_caller_wrapper_fini(name) \
-		do_ret_ ## retchar (name) \
-		return real_retval; \
-	}
+#define do_arginit4(r, data, i, elem) do_arginit(i, elem)
 
-/* For "size-only" caller wrappers, we leave the size *set* on return. 
- * "Action-only" and "normal" wrappers are the same case: 
- * */
-#define make_size_caller_wrapper(name, retchar) \
-	type_for_argchar_ ## retchar __real_ ## name( arglist_ ## name (make_argdecl) ); \
-	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
+/* FIXME: everything here really belongs in allocstubs.c. 
+ * The stuff above is customisable so that e.g. under libcrunch's shadow stack
+ * instrumentation we can generate appropriate instrumented code.
+ * (Could we instead just CIL-instrument the allocstubs.i file?
+ * Probably not, because allocation functions are assumed not to be
+ * instrumented themselves, so we wouldn't get the bounds back.
+ * In other words, the instrumentation we do at the macro level is different; it's
+ * specialized to the generated code also being a bounds-wrapper function.) */
+
+#define make_caller_wrapper(wrapname, realname, basename, argtup, retchar, leave_size_set) \
+	type_for_argchar_ ## retchar realname ( make_argdecls(argtup) ); \
+	type_for_argchar_ ## retchar wrapname( make_argdecls(argtup) ) \
 	{ \
-		do_caller_wrapper_init(name) \
-		arglist_nocomma_ ## name (do_arginit) \
+		do_caller_wrapper_init(basename) \
+		map_over_argtup_nocomma(argtup, do_arginit4) \
 		type_for_argchar_ ## retchar real_retval; \
-		if (&__current_allocsite && !__current_allocsite) \
-		{ \
-			_Bool set_currently_allocating = 0; \
-			if (&__currently_allocating && !__currently_allocating) { \
-				__currently_allocating = 1; \
-				set_currently_allocating = 1; \
-			} \
-			/* only set the site if we don't have one already */ \
-			__current_allocsite = __builtin_return_address(0); \
-			rev_arglist_nocomma_ ## name (pre_realarg) \
-			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-			void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-			arglist_nocomma_ ## name (post_realarg) \
-			/* __current_alloclevel = 0; */ \
-			if (set_currently_allocating) __currently_allocating = 0; \
-			/* *leave* the site to be picked up the the next alloc action, in case we're a helper */ \
-			real_retval = retval; \
-		} \
-		else { \
-			rev_arglist_nocomma_ ## name (pre_realarg) \
-			pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-			void *retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-			real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-			post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-			arglist_nocomma_ ## name (post_realarg) \
-		} \
-		do_caller_wrapper_fini(name) \
-		do_ret_ ## retchar (name) \
-		return real_retval; \
-	}
-	
-/* This is like the normal alloc caller wrapper but we allow for the fact that 
- * we're a nested allocator. FIXME: split off the callee stuff. */
-#define make_suballocator_alloc_caller_wrapper(name, retchar) \
-	static int name ## _alloclevel; /* FIXME: thread-safety for access to this. */\
-	type_for_argchar_ ## retchar __real_ ## name ( arglist_ ## name (make_argdecl) ); \
-	type_for_argchar_ ## retchar __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
-	{ \
-		do_caller_wrapper_init(name) \
-		arglist_nocomma_ ## name (do_arginit) \
-		_Bool have_caller_allocfn; \
 		_Bool set_currently_allocating = 0; \
-		if (&__current_allocfn && !__current_allocfn) /* This means we're not in any kind of alloc function yet */ \
+		_Bool do_setting = 0; \
+		if (&__current_allocfn && !__current_allocfn) do_setting = 1; \
+		if (do_setting) \
 		{ \
-			set_currently_allocating = 0; \
 			if (&__currently_allocating && !__currently_allocating) { \
 				__currently_allocating = 1; \
 				set_currently_allocating = 1; \
 			} \
 			/* only set the site if we don't have one already */ \
 			if (!__current_allocsite) __current_allocsite = __builtin_return_address(0); \
-			__current_allocfn = &__real_ ## name; \
-			__current_allocsz = size_arg_ ## name; \
-			have_caller_allocfn = 0; \
-		}  else have_caller_allocfn = 1; \
-		/* __current_alloclevel = 1; */ /* We're at least at level 1, i.e. below sbrk()/mmap(). pre_alloc increments this too */ \
-		rev_arglist_nocomma_ ## name (pre_realarg) \
-		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-		void *real_retval = __real_ ## name( arglist_ ## name (make_argname) ); \
-		post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-		arglist_nocomma_ ## name (post_realarg) \
-		if (/* __current_alloclevel > name ## _alloclevel*/ 0) \
-		{ \
-			/* Warn if we've already initialized our_alloclevel and saw a greater level */ \
-			if (name ## _alloclevel != 0) \
-			{ \
-				warnx("Warning: __wrap_%s operating at alloclevel %d greater than previous level %d", \
-					#name, name ## _alloclevel, /* __current_alloclevel */ 0); \
-			} \
-			name ## _alloclevel = 0/*__current_alloclevel*/; \
+			__current_allocfn = &realname; \
+			__current_allocsz = cap_arg(argtup); \
 		} \
-		if (&__index_small_alloc) \
-		{ \
-			int seen_alloclevel = __index_small_alloc(real_retval, /* name ## _alloclevel */ -1, __current_allocsz); \
-			assert(name ## _alloclevel == 0 || seen_alloclevel == name ## _alloclevel); \
-			if (name ## _alloclevel == 0) name ## _alloclevel = seen_alloclevel; \
-		} \
-		if (!have_caller_allocfn) \
+		map_over_argtup_nocomma_rev(argtup, pre_realarg4) \
+		pre_realcall( realname, make_argnames(argtup) ) \
+		type_for_argchar_ ## retchar retval = realname( make_argnames(argtup) ); \
+		post_realcall ( realname, make_argnames(argtup) ) \
+		map_over_argtup_nocomma(argtup, post_realarg4) \
+		if (do_setting) \
 		{ \
 			/* __current_alloclevel = 0; */ \
 			/* zero the site now the alloc action is completed, even if it was already set */ \
 			__current_allocsite = (void*)0; \
 			__current_allocfn = (void*)0; \
-			__current_allocsz = 0; \
+			if (!leave_size_set) __current_allocsz = 0; \
+			if (set_currently_allocating) __currently_allocating = 0; \
 		} \
-		if (set_currently_allocating) __currently_allocating = 0; \
-		do_caller_wrapper_fini(name) \
-		do_ret_ ## retchar (name) \
+		real_retval = retval; \
+		do_caller_wrapper_fini(basename) \
+		do_ret_ ## retchar (basename) \
 		return real_retval; \
 	}
 
-#define make_free_caller_wrapper(name) /* HACK: assume void-returning for now */ \
-	void __real_ ## name( arglist_ ## name (make_argdecl) ); \
-	void __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
+/* This is like the normal alloc caller wrapper but we allow for the fact that 
+ * we're a nested allocator. We want to factor out the nested case by splitting off
+ * the callee-side logic. How best to split it off?
+ * We have both caller and callee parts in one.
+ * The callee parts are the setting of *_alloclevel and the call to
+ * __index_small_alloc. (The *_alloclevel thing is just a sanity check
+ * that for a given function, we always end up indexing at the same level
+ * in the allocation tree.)
+ * The setting of __current_allocfn could be done as a caller or callee thing,
+ * i.e. it could be useful for ordinary caller-side wrappers too.
+ * If this was just a caller-side wrapper that called __real_ggc_alloc (say),
+ * how would we slip in the __index stuff?
+ * Could we do the same thing we do with 'malloc'? Before outputting the caller stub, do
+     #define __real_ggc_alloc __wrap___real_ggc_alloc
+ * so that the caller stub actually calls __wrap___real_malloc,
+ * and define that. For malloc the __wrap___real_* are defined by [user2hook.c, hook2event.c]
+ * and dispatched to [terminal-indirect-dlsym.c] which we ensure dlsyms the 'real real' function.
+ * For a custom allocator it could be simpler...
+ * maybe we could just generate the __wrap___real_* right here underneath the __wrap*?
+ * Problem: how would it call the 'real real' function?
+ * Tentative solution: we'd need to #undef __real_ggc_alloc,
+ * or use some additional parameterisation perhaps:
+ * YES, if we make the following take 'wrapname' and 'realname' args.
+ * Used this approach to eliminate the separate caller_ functions; see allocstubs.c.
+ * */
+
+#define make_free_wrapper(wrapname, realname, basename, argtup) /* HACK: assume void-returning for now */ \
+	void realname( make_argdecls(argtup) ); \
+	void wrapname( make_argdecls(argtup) ) \
 	{ \
-		do_caller_wrapper_init(name) \
-		arglist_nocomma_ ## name (do_arginit) \
+		do_caller_wrapper_init(basename) \
+		map_over_argtup_nocomma(argtup, do_arginit4) \
 		_Bool we_are_toplevel_free; \
 		if (&__currently_freeing && !__currently_freeing) we_are_toplevel_free = 1; \
 		else we_are_toplevel_free = 0; \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 1; \
-		rev_arglist_nocomma_ ## name (pre_realarg) \
-		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-		__real_ ## name( arglist_ ## name (make_argname) ); \
-		post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-		arglist_nocomma_ ## name (post_realarg) \
+		map_over_argtup_nocomma_rev(argtup, pre_realarg4) \
+		pre_realcall( realname, make_argnames(argtup) ) \
+		realname( make_argnames(argtup) ); \
+		post_realcall ( realname, make_argnames(argtup) ) \
+		map_over_argtup_nocomma(argtup, post_realarg4) \
 		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 0; \
-		do_caller_wrapper_fini(name) \
-		do_ret_void(name) \
+		do_caller_wrapper_fini(basename) \
+		do_ret_void(basename) \
 	}
 
-#define make_suballocator_free_caller_wrapper(name, alloc_name) /* HACK: assume void-returning for now */ \
-	void __real_ ## name( arglist_ ## name (make_argdecl) ); \
-	void __wrap_ ## name( arglist_ ## name (make_argdecl) ) \
+#define make_caller_alloc_wrapper(sym, argtup, retchar) \
+	make_caller_wrapper(__wrap_ ## sym, __real_ ## sym, sym, argtup, retchar, /* leave sz set? */ 0)
+
+#define make_caller_free_wrapper(sym, argtup, retchar) \
+	make_free_wrapper(__wrap_ ## sym, __real_ ## sym, sym, argtup)
+
+#define make_caller_sz_wrapper(sym, argtup, retchar) \
+	make_caller_wrapper(__wrap_ ## sym, __real_ ## sym, sym, argtup, retchar, /* leave sz set? */ 1)
+
+int  __index_small_alloc(void *ptr, int level, unsigned size_bytes);
+void __unindex_small_alloc(void *ptr, int level);
+
+#define make_suballoc_wrapper(sym, argtup, retchar) \
+	static int sym ## _alloclevel; /* FIXME: thread-safety for access to this. */ \
+	type_for_argchar_ ## retchar __real_ ## sym ( make_argdecls(argtup) ); \
+	make_caller_wrapper(__wrap_ ## sym, __wrap___real_ ## sym, sym, argtup, retchar, 0) \
+	type_for_argchar_ ## retchar __wrap___real_ ## sym( make_argdecls(argtup) ) \
 	{ \
-		assert(alloc_name ## _alloclevel); \
-		do_caller_wrapper_init(name) \
-		_Bool we_are_toplevel_free; \
-		if (&__currently_freeing && !__currently_freeing) we_are_toplevel_free = 1; \
-		else we_are_toplevel_free = 0; \
-		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 1; \
-		rev_arglist_nocomma_ ## name (pre_realarg) \
-		pre_realcall( __real_ ## name, arglist_ ## name (make_argname) ) \
-		__real_ ## name( arglist_ ## name (make_argname) ); \
-		post_realcall ( __real_ ## name,  arglist_ ## name(make_argname) ) \
-		arglist_nocomma_ ## name (post_realarg) \
-		__unindex_small_alloc(ptr_arg_ ## name, alloc_name ## _alloclevel); \
-		if (&__currently_freeing && we_are_toplevel_free) __currently_freeing = 0; \
-		do_caller_wrapper_fini(name) \
+		type_for_argchar_ ## retchar retval = __real_ ## sym( make_argnames(argtup) ); \
+		int seen_alloclevel = __index_small_alloc(retval, /* sym ## _alloclevel */ -1, \
+			__current_allocsz); \
+		assert(sym ## _alloclevel == 0 || seen_alloclevel == sym ## _alloclevel); \
+		if (sym ## _alloclevel == 0) sym ## _alloclevel = seen_alloclevel; \
+		return retval; \
+	}
+
+#define make_subfree_wrapper(sym, argtup, corresponding_alloc_name) \
+	void __real_ ## sym ( make_argdecls(argtup) ); \
+	make_free_wrapper(__wrap_ ## sym, __wrap___real_ ## sym, sym, argtup) \
+	void __wrap___real_ ## sym( make_argdecls(argtup) ) \
+	{ \
+		assert(corresponding_alloc_name ## _alloclevel); \
+		/* HACK: assume void */ __real_ ## sym( make_argnames(argtup) ); \
+		__unindex_small_alloc(cap_arg(argtup), corresponding_alloc_name ## _alloclevel); \
 	}
 
 /* We also have some macros for generating callee wrappers. These are what 
@@ -363,7 +356,20 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
  *
  * See below for the alloc event stuff which is a step towards clearing this
  * mess up.
+ *
+ * I thought these were unused. But they're not.
+       # for genuine allocators (not wrapper fns), also make a callee wrapper
+       if allocFn in self.allSubAllocFns(): # FIXME: cover non-sub clases
+           stubsfile.write("make_callee_wrapper(%s, %s)\n" % (fnName, retSig))
+ * What do __wrap___real_ functions do in the suballocator (non-malloc) case?
+ * They seem simply to dlsym the real symbol and call it. So why are they needed?
+ * Because we link with --wrap X and also --wrap __real_X
+ * so our reference to __real_x actually goes to __wrap___real_X
+ * but we can't write __real___real_X -- it doesn't work. Hence the dlsym.
+ * Isn't the answer simply not to link with --wrap __real_X for suballoc funcs?
+ * Let's try that.
  */
+#if 0
 #define make_callee_wrapper(name, retchar) \
 	type_for_argchar_ ## retchar __wrap___real_ ## name ( arglist_ ## name (make_argdecl) ) \
 	{ \
@@ -385,13 +391,14 @@ void __unindex_small_alloc(void *ptr, int level); // defined by heap_index_hooks
 		real_ ## name( arglist_ ## name (make_argname) ); \
 		return; \
 	}
+#endif
 
 /* Protos for our hook functions. The mallocapi-to-hookapi glue comes
  * from a copy of alloc_events.c. */
 #include "mallochooks/eventapi.h"
 
 /* hookapi-to-indexapi glue can be generated! */
-/* FIXME: We could e.g. also parameterise
+/* TODO: We could e.g. also parameterise
  * the generation by alignment, or some other parameter of the malloc,
  * so that the code is tailored to that malloc. */
 #define ALLOC_ALLOCATOR_NAME(frag) frag ## _allocator

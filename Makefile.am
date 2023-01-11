@@ -3,7 +3,7 @@ ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = tools/lang . allocsld src lib
 
 # HACK to disable -O2 if DEBUG is set (to anything) -- thanks for nothing, automake
-AM_CXXFLAGS = -O2 $(DEBUG:%=-O0) -fno-omit-frame-pointer -ggdb -fkeep-inline-functions \
+AM_CXXFLAGS = -std=c++17 -O2 $(DEBUG:%=-O0) -fno-omit-frame-pointer -ggdb -fkeep-inline-functions \
   -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) \
   $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) \
   $(DWARFIDL_CFLAGS) -I$(LIBRUNT)/include $(LIBALLOCSTOOL_CFLAGS)
@@ -43,7 +43,7 @@ TOOLS_LDADD = $(LIBALLOCSTOOL_LIBS) \
  $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(LIBANTLR3CXX_LIBS) $(DWARFIDL_LIBS) \
 -lantlr3c $(LIBELF) -lz
 
-TOOLS_CXXFLAGS := $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)/include
+TOOLS_CXXFLAGS := $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)/include -I$(elftin)/include
 
 tools_dwarftypes_SOURCES = tools/dwarftypes.cpp
 tools_dwarftypes_LDADD = $(TOOLS_LDADD)
@@ -90,14 +90,15 @@ tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HE
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
 tools_find_allocated_type_size_CXXFLAGS = $(TOOLS_CXXFLAGS)
 
-pkglib_LTLIBRARIES = tools/gold-plugin.la tools/libroottypes.la
+pkglib_LTLIBRARIES = tools/gold-plugin.la
 tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp
 tools_gold_plugin_la_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_gold_plugin_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
-tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD)
+tools_gold_plugin_la_LIBADD = $(TOOLS_LDADD) $(elftin)/base-ldplugin/base-ldplugin.a -lffi
 
-tools_libroottypes_la_SOURCES = tools/roottypes.c
-tools_libroottypes_la_CFLAGS = $(LIBALLOCSTOOL_CFLAGS)
+pkglib_LIBRARIES = tools/libroottypes.a
+tools_libroottypes_a_SOURCES = tools/roottypes.c
+tools_libroottypes_a_CFLAGS = $(LIBALLOCSTOOL_CFLAGS)
 
 # pkg-config doesn't understand PKG_CXXFLAGS, but I'm buggered
 # if I'm going to have my Makefiles use _CFLAGS to mean _CXXFLAGS.
@@ -171,22 +172,32 @@ endif
 
 include libltdl/ltdl.mk
 
-#tools/gold-plugin.so: $(lib_LTLIBRARIES)
-#	echo "gold-plugin.so: creating convenience link from $(abs_builddir)/.libs to $(top_builddir)"; \
-#            rm -f $(top_builddir)/tools/gold-plugin.so ; \
-#            test -e $(abs_builddir)/tools/.libs/gold-plugin.so && \
-#            cd $(top_builddir) && \
-#            $(LN_S) $(abs_builddir)/tools/.libs/gold-plugin.so tools/gold-plugin.so || true
+tools/gold-plugin.so: $(lib_LTLIBRARIES)
+	echo "gold-plugin.so: creating convenience link from $(abs_builddir)/.libs to $(top_builddir)"; \
+            rm -f $(top_builddir)/tools/gold-plugin.so ; \
+            test -e $(abs_builddir)/tools/.libs/gold-plugin.so && \
+            cd $(top_builddir) && \
+            $(LN_S) $(abs_builddir)/tools/.libs/gold-plugin.so tools/gold-plugin.so || true
+# HACK: we need to put a symlink to 'xwrap-ldplugin.so' in the same
+# directory as our main linker plugin, so the latter can find the
+# former. Under in-place use of a libtool build, this will be
+# in the .libs directory.
+tools/.libs/xwrap-ldplugin.so: $(lib_LTLIBRARIES)
+	echo "xwrap-ldplugin.so: creating convenience link from $(elftin)/xwrap-ldplugin to $(top_builddir)"; \
+            rm -f $(top_builddir)/tools/xwrap-ldplugin.so ; \
+            test -e $(elftin)/xwrap-ldplugin/xwrap-ldplugin.so && \
+            cd $(top_builddir) && \
+            $(LN_S) $(elftin)/xwrap-ldplugin/xwrap-ldplugin.so tools/.libs/xwrap-ldplugin.so
 
-tools/libroottypes.a: tools/libroottypes.la
-	cd $(top_builddir) && \
-            $(LN_S) -f $(abs_builddir)/tools/.libs/libroottypes.a tools/libroottypes.a
+#tools/libroottypes.a: tools/libroottypes.la
+#	cd $(top_builddir) && \
+#            $(LN_S) -f $(abs_builddir)/tools/.libs/libroottypes.a tools/libroottypes.a
 
 tools/roottypes.c: tools/pervasive-types
 	$< > $@ || (rm -f $@; false)
 
-#all-am: tools/gold-plugin.so
-all-am: tools/libroottypes.la tools/libroottypes.a
+all-am: tools/gold-plugin.so
+all-am: tools/libroottypes.a
 
 clean:
 	$(MAKE) clean-recursive
