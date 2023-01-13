@@ -121,11 +121,14 @@ varlist += TOOLSUB
 
 # any librunt will do because we just need relf.h
 LIBRUNT ?= $(CONTRIB)/libsystrap/contrib/librunt
+# any libsrk31c++ will do because we just need closure.hpp
+LIBSRK31CXX_CXXFLAGS ?= -I$(CONTRIB)/liballocstool/contrib/dwarfidl/contrib/libdwarfpp/contrib/libsrk31c++
 .PHONY: build-elftin
 build-elftin:
 	$(MAKE) -C elftin/normrelocs normrelocs
 	$(MAKE) -C elftin/abs2und abs2und sym2und
-	LIBRUNT=$(LIBRUNT) $(MAKE) -C elftin/xwrap-ldplugin xwrap-ldplugin.so
+	LIBRUNT="$(LIBRUNT)" CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }${LIBSRK31CXX_CXXFLAGS}" $(MAKE) -C elftin/base-ldplugin
+	LIBRUNT="$(LIBRUNT)" CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }${LIBSRK31CXX_CXXFLAGS}" $(MAKE) -C elftin/xwrap-ldplugin xwrap-ldplugin.so
 CONFIG_MK += \nELFTIN ?= $(CONTRIB)/elftin\n
 varlist += ELFTIN
 
