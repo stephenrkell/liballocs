@@ -16,7 +16,7 @@ jobs:
               make git gawk gdb wget \
               libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
               libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev
+              libboost-serialization-dev libboost-filesystem-dev libffi7 libffi-dev
       - run:
           name: Report OCaml version for debugging
           command: |
@@ -59,7 +59,7 @@ jobs:
               ocaml ocamlbuild ocaml-findlib \
               libdw-dev binutils-dev \
               libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev
+              libboost-serialization-dev libboost-filesystem-dev libffi7
       - attach_workspace:
           at: /root
       - run:
