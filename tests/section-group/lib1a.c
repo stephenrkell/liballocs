@@ -5,7 +5,7 @@
 struct s1a
 {
 	int x;
-} s;
+} s1a;
 
 void *l1a(void)
 {

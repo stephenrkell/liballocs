@@ -8,7 +8,7 @@ extern struct uniqtype *l2a(void);
 struct s2
 {
 	int x;
-} s;
+} s2;
 
 void *l2(int arg)
 {

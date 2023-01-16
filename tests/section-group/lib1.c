@@ -6,7 +6,7 @@
 struct s1
 {
 	int x;
-} s;
+} s1;
 
 extern struct uniqtype *l1a(void);
 
