@@ -3,7 +3,11 @@ ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = tools/lang . allocsld src lib
 
 # HACK to disable -O2 if DEBUG is set (to anything) -- thanks for nothing, automake
-AM_CXXFLAGS = -std=c++17 -O2 $(DEBUG:%=-O0) -fno-omit-frame-pointer -ggdb -fkeep-inline-functions \
+# HACK: -fpermissive is needed while we have c++17 and might use boost <1.66
+# because then boost/icl/type_traits/type_to_string.hpp is borked
+# (w.r.t. template specializations on std::string), but
+# g++ only complains in C++17 mode and up.
+AM_CXXFLAGS = -std=c++17 -fpermissive -O2 $(DEBUG:%=-O0) -fno-omit-frame-pointer -ggdb -fkeep-inline-functions \
   -Wall -Wno-deprecated-declarations -fPIC -Wp,-w -Iinclude $(LIBSRK31CXX_CFLAGS) \
   $(LIBCXXFILENO_CFLAGS) $(LIBDWARFPP_CFLAGS) $(LIBCXXGEN_CFLAGS) $(LIBANTLR3CXX_CFLAGS) \
   $(DWARFIDL_CFLAGS) -I$(LIBRUNT)/include $(LIBALLOCSTOOL_CFLAGS)
