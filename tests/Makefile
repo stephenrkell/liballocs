@@ -30,8 +30,12 @@ export LIBALLOCS_BUILD
 export LIBRUNT # needed by stubgen.h in allocscompilerwrapper.py
 export ELFTIN # needed by allocscompilerwrapper.py
 
-CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
+#CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
+CC := cc
+META_CC := cc
+CFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-cflags)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
+LDFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-ldflags)
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../lib
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../src
 
@@ -115,9 +119,11 @@ checkrun-plugin-hello:
 checkrun-allocsld-as-cmd:
 	$(MAKE) cleanbuild-allocsld-as-cmd >/dev/null 2>&1
 # Some cases are special and require only an exit status of zero
+# NOTE: this define is going to be eval'd, so we need two layers of escaping
+dollar := $$
 define exit-zero-case
 checkrun-$(1):
-	$(MAKE) cleanrun-$(1) >/dev/null 2>&1
+	$(MAKE) cleanrun-$(1) >/dev/null 2>&1; status=$$(dollar)?; if ! [ $$(dollar)status -eq 0 ]; then echo "Status was $$(dollar)status"; fi; exit $$(dollar)status
 
 endef
 define exit-zero-case-names
