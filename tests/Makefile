@@ -30,12 +30,8 @@ export LIBALLOCS_BUILD
 export LIBRUNT # needed by stubgen.h in allocscompilerwrapper.py
 export ELFTIN # needed by allocscompilerwrapper.py
 
-#CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
-CC := cc
-META_CC := cc
-CFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-cflags)
+CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
-LDFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-ldflags)
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../lib
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../src
 
