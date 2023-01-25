@@ -119,7 +119,10 @@ checkrun-allocsld-as-cmd:
 dollar := $$
 define exit-zero-case
 checkrun-$(1):
-	$(MAKE) cleanrun-$(1) >/dev/null 2>&1; status=$$(dollar)?; if ! [ $$(dollar)status -eq 0 ]; then echo "Status was $$(dollar)status"; fi; exit $$(dollar)status
+	@echo "exit-zero case is $(1)" && \
+	out=$$(dollar)( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
+	err=$$(dollar)( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
+	$(MAKE) cleanrun-$(1) >$$(dollar)out 2>$$(dollar)err; status=$$(dollar)?; if ! [ $$(dollar)status -eq 0 ]; then echo "Status of checkrun-$(1) was $$(dollar)status"; fi; exit $$(dollar)status
 
 endef
 define exit-zero-case-names
