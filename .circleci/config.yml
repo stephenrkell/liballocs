@@ -57,7 +57,7 @@ jobs:
             apt install -y ca-certificates make build-essential g++ autoconf automake libtool \
               libelf-dev python3 python git gawk python3-distutils libunwind-dev \
               ocaml ocamlbuild ocaml-findlib \
-              libdw-dev binutils-dev \
+              libdw-dev binutils-dev libffi6 libffi-dev \
               libboost-iostreams-dev libboost-regex-dev \
               libboost-serialization-dev libboost-filesystem-dev libffi6
       - attach_workspace:
