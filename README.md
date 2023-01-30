@@ -6,7 +6,8 @@ If you want to try it, here's how to run a simple demo in a container:
 
     $ git clone https://github.com/stephenrkell/liballocs.git
     $ docker build -t liballocs_built liballocs/buildtest/debian-stretch
-    $ docker run --rm -i -t --name liballocs_test liballocs_built bash
+    $ DOCKER_RUN_ARGS="--security-opt apparmor=unconfined --security-opt seccomp=unconfined"
+    $ docker run ${DOCKER_RUN_ARGS} --rm -i -t --name liballocs_test liballocs_built bash
     $ export PATH=/usr/local/src/liballocs/tools/lang/c/bin:$PATH
     $ cat >test.c <<EOF
       #include <allocs.h>
