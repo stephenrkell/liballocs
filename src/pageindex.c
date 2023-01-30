@@ -5,9 +5,11 @@
 #include <link.h>
 #include <string.h>
 #include <wchar.h>
+#include <sysconf.h>
 #include "relf.h"
 #include "liballocs_private.h"
 #include "raw-syscalls-defs.h"
+#include "memtable.h"
 
 #ifndef NO_PTHREADS
 #include <pthread.h>
