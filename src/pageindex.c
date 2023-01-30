@@ -5,7 +5,7 @@
 #include <link.h>
 #include <string.h>
 #include <wchar.h>
-#include <sysconf.h>
+#include <unistd.h>
 #include "relf.h"
 #include "liballocs_private.h"
 #include "raw-syscalls-defs.h"
