@@ -7,8 +7,7 @@ include $(SRCROOT)/config.mk
 CFLAGS += -DIN_LIBRUNT_DSO
 CFLAGS += -DIN_LIBALLOCS_DSO
 CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS)/include \
-   -I$(LIBSYSTRAP)/include -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused \
-   $(LIBALLOCSTOOL_CFLAGS)
+   -I$(LIBSYSTRAP)/include -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused
 ifeq ($(DEBUG),)
 CFLAGS += -flto -ffat-lto-objects
 endif
@@ -204,7 +203,7 @@ DEPS := $(C_OBJ_DEPS)
 # defined. So we have to use eval.
 define rule-for-depfile =
 $(patsubst %.o,%.d,$(1)): $(patsubst %.o,%.c,$(1))
-	mkdir -p $$(dir $$@) && $$(CC) -MM -MT $(1) $$(CFLAGS) "$$<" > "$$@" || (rm -f "$$@"; false)
+	mkdir -p $$(dir $$@) && $$(CC) -MM -MT $(1) $$(CPPFLAGS) $$(CFLAGS) "$$<" > "$$@" || (rm -f "$$@"; false)
 endef
 $(foreach f,$(DEP_OBJS),$(eval $(call rule-for-depfile,$(f))))
 ifneq ($(MAKECMDGOALS),clean)
