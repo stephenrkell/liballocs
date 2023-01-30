@@ -13,6 +13,7 @@
 #include <dlfcn.h>
 #include <limits.h>
 #include <link.h>
+#include <sys/mman.h>
 #include "raw-syscalls-defs.h" /* for raw_open */
 #include "relf.h"
 #include "librunt.h"
