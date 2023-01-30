@@ -102,8 +102,8 @@ int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data);
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data);
 int link_stackaddr_and_static_allocs_for_one_object(struct dl_phdr_info *, size_t, void *data);
 void load_meta_objects_for_early_libs(void);
-void *(*orig_dlopen)(const char *, int);
-void *(*orig_memmove)(void *, const void *, unsigned long);
+extern void *(*orig_dlopen)(const char *, int);
+extern void *(*orig_memmove)(void *, const void *, unsigned long);
 const char *format_symbolic_address(const void *addr);
 /* We contain our own private malloc, and we wrap it using the linker 
  * to keep track of whether it's active on the current thread. */
