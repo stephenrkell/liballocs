@@ -10,13 +10,15 @@ RUN mkdir -p /usr/local/src && chown root:user /usr/local/src && \
 USER ${user:-user}
 RUN sudo mkdir -p /usr/lib/meta && sudo chown root:staff /usr/lib/meta && \
    sudo chmod g+w /usr/lib/meta
-RUN sudo apt-get install -y git build-essential libelf-dev libdw-dev binutils-dev \
-       autoconf automake libtool pkg-config autoconf-archive \
-       g++ ocaml ocamlbuild ocaml-findlib \
-       default-jre-headless default-jdk-headless python3 python \
-       make git gawk gdb wget \
-       libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
-       libboost-iostreams-dev libboost-regex-dev libboost-serialization-dev libboost-filesystem-dev
+RUN sudo apt-get install -y build-essential libbsd-dev \
+              libelf-dev libdw-dev binutils-dev \
+              autoconf automake libtool pkg-config autoconf-archive \
+              g++ ocaml ocamlbuild ocaml-findlib \
+              default-jdk-headless python3 python \
+              make git gawk gdb wget \
+              libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
+              libboost-iostreams-dev libboost-regex-dev \
+              libboost-serialization-dev libboost-filesystem-dev libffi6 libffi-dev
 RUN cd /usr/local/src && git clone https://github.com/stephenrkell/liballocs.git
 RUN cd /usr/local/src/liballocs && \
    git submodule update --init --recursive && \
@@ -28,4 +30,4 @@ RUN cd /usr/local/src/liballocs && \
 RUN sudo mkdir -p /usr/lib/meta && sudo chown root:user /usr/lib/meta && \
    sudo chmod g+w /usr/lib/meta
 RUN cd /usr/local/src/liballocs && \
-   make -f tools/Makefile.meta /usr/lib/meta/lib/x86_64-linux-gnu/libc-2.27.so-meta.so
+   make -f tools/Makefile.meta /usr/lib/meta`ldd /bin/true | grep 'libc.so.6' | sed -r 's/.*=> (.*) \(.*/\1/' | xargs readlink -f`-meta.so

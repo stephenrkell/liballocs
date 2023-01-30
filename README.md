@@ -35,10 +35,10 @@ of how liballocs knows what is in memory, having precise dynamic
 information and an awareness of allocators (there are four different
 allocators visible in this example).
 
-    At 0x55c36036c6c0 is a static-allocated object of size 0, type __FUN_FROM___ARG0_int$32__ARG1___PTR___PTR_signed_char$8__FUN_TO_int$32
-    At 0x55c36036c6c0 is a generic malloc-allocated object of size 176, type __ARR0_int$32
-    At 0x55c36036c6c0 is a stackframe-allocated object of size 128, type _test_cil_c_main_vaddrs_0x1910_0x1a01
-    At 0x55c36036c6c0 is a auxv-allocated object of size 16, type __ARR2___PTR_signed_char$8
+    At 0x55d223c01436 is a static-allocated object of size 0, type __FUN_FROM___ARG0_int$32__ARG1___PTR___PTR_signed_char$8__FUN_TO_int$32
+    At 0x55d2259235c0 is a __default_lib_malloc-allocated object of size 176, type __ARR0_int$32
+    At 0x7ffe4e3692c8 is a stackframe-allocated object of size 128, type $2e$2ftest$2ecil$2ecmain_vaddrs_0x1436_0x154d
+    At 0x7ffe4e369418 is a auxv-allocated object of size 16, type __ARR2___PTR_signed_char$8
 
 More generally, liballocs provides the following.
 

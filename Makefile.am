@@ -35,7 +35,16 @@ my_libdir = $(libdir)
 my_lib_DATA = lib/interp-pad.o
 
 liballocs_includedir = $(includedir)/liballocs
-liballocs_include_HEADERS = include/generic_malloc_index.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/memtable.h include/fake-libunwind.h include/allocsites.h
+liballocs_include_HEADERS = include/uniqtype.h include/uniqtype-defs.h include/generic_malloc_index.h include/liballocs.h include/uniqtype-bfs.h include/liballocs_cil_inlines.h include/memtable.h include/fake-libunwind.h include/allocsites.h
+
+include/uniqtype.h include/uniqtype-defs.h:
+	for arg in $(LIBALLOCSTOOL_CFLAGS); do \
+        case "$$arg" in \
+            (-I*/include) d="$$( echo "$$arg" | sed 's/^-I *//' )"; if [ -e "$$d"/`basename $@` ]; then ln -sf "$$d"/`basename $@` $@ && exit 0; fi \
+            ;; \
+            (*) continue ;; \
+        esac; \
+    done; exit 1
 
 bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types
 #tools/objdumpallocs-llvm

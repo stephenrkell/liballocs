@@ -29,8 +29,10 @@ extern void warnx(const char *fmt, ...); // avoid repeating proto
 #include <assert.h>
 #endif
 
+/* How do we locate these now that they're in librunt and liballocstool?
+ */
 #include "liballocs_config.h"
-#include "memtable.h"
+//#include "memtable.h"
 #include "uniqtype.h"
 struct insert; // instead of generic_malloc_index.h
 struct allocator; // instead of allocmeta.h
