@@ -22,7 +22,7 @@ else:
     cilly_cmd = existing_cil_install + "/../bin/cilly"
 existing_elftin = os.environ.get("ELFTIN")
 if existing_elftin == None:
-    os.putenv("ELFTIN", liballocs_base + "/contrib/elftil")
+    os.putenv("ELFTIN", liballocs_base + "/contrib/elftin")
 existing_ocamlpath = os.environ.get("OCAMLPATH")
 if existing_ocamlpath == None:
     existing_ocamlpath = ""
