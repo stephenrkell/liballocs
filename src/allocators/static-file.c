@@ -319,7 +319,13 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 		void *ret = /*mmap*/raw_mmap(lowest_containing_mapping_bigalloc->end,
 			(uintptr_t) highest_containing_mapping_bigalloc->begin -
 			(uintptr_t) lowest_containing_mapping_bigalloc->end,
-				PROT_NONE, MAP_FIXED_NOREPLACE|MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+				PROT_NONE,
+#ifdef MAP_FIXED_NOREPLACE
+                           MAP_FIXED_NOREPLACE
+#else
+                           MAP_FIXED
+#endif
+                                              |MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 		if (MMAP_RETURN_IS_ERROR(ret))
 		{
 			debug_printf(0, "Aborting after failing to plug hole in ld.so mappings\n");
