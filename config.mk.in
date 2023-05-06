@@ -6,14 +6,17 @@ DONALD := @donald@
 TOOLSUB := @toolsub@
 ELFTIN := @elftin@
 CIL_INSTALL := @cil_install@
+LIBALLOCSTOOL_CFLAGS := @liballocstool_cflags@
 # export anything needed during build of liballocs-enabled executables
 export CIL_INSTALL
 export TOOLSUB
 export ELFTIN
 export LIBMALLOCHOOKS
+export LIBALLOCSTOOL_CFLAGS
 
 XWRAP_LDPLUGIN := $(ELFTIN)/xwrap-ldplugin/xwrap-ldplugin.so
 export XWRAP_LDPLUGIN
 
-CFLAGS := -I@librunt@/include -I@libmallochooks@/include @LIBALLOCSTOOL_CFLAGS@
-export CFLAGS
+# tests/Makefile and src/Makefile include us
+CPPFLAGS := -I@librunt@/include -I@libmallochooks@/include @LIBALLOCSTOOL_CFLAGS@
+export CPPFLAGS
