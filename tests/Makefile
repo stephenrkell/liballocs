@@ -1,14 +1,22 @@
+$(info Initially CFLAGS is $(CFLAGS) and CPPFLAGS is $(CPPFLAGS))
+# How can we stop our CFLAGS multiplying up as we recursively make?
+# If we use CPPFLAGS at least it's maybe not exported. Possibly we
+# should avoid recursive make (and try to merge this file with
+# libcrunch's)?
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 -include $(dir $(THIS_MAKEFILE))/../config.mk
 
-CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types -Wl,-q -O2 -save-temps
+CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types
+CFLAGS += -Wl,-q
+CFLAGS += -O2
+CFLAGS += -save-temps
 
 # HACK while LTO is broken
 CFLAGS += -fno-lto
 LDFLAGS += -fno-lto
 
-# HACK: gold-plugin needs this for liballocstool CFLAGS
-META_CFLAGS += $(CFLAGS)
+# HACK: gold-plugin needs this for liballocstool flags
+META_CFLAGS += $(CPPFLAGS)
 export META_CFLAGS
 
 ifneq ($(USE_FAKE_LIBUNWIND),)
@@ -30,8 +38,12 @@ export LIBALLOCS_BUILD
 export LIBRUNT # needed by stubgen.h in allocscompilerwrapper.py
 export ELFTIN # needed by allocscompilerwrapper.py
 
-CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
+#CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
+CC := cc
+META_CC := cc
+CFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-cflags)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
+LDFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-ldflags)
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../lib
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../src
 
