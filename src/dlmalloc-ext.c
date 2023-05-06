@@ -52,7 +52,8 @@ void __private_malloc_set_metadata(void *ptr, size_t size, const void *allocsite
 static void clear_metadata(void *ptr)
 {
 	// we shouldn't be dlfreeing stuff so early
-	assert(__liballocs_systrap_is_initialized);
+	// ... WHY NOT? we do this when plugging the ld.so hole, in static-file init
+	//assert(__liballocs_systrap_is_initialized);
 	struct big_allocation *b = __lookup_bigalloc_top_level(ptr);
 	assert(b && b->allocated_by == &__mmap_allocator);
 	bitmap_clear_b(
