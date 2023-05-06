@@ -11,6 +11,7 @@ vpath %.c $(DONALD)/src
 CFLAGS += -std=gnu99 -g -fPIC -save-temps
 CFLAGS += -fno-stack-protector
 CFLAGS += -I$(DONALD)/src # for donald.h, for non-vpath'd .c files
+CFLAGS += -I$(LIBRUNT)/include
 CFLAGS += -DDONALD_NAME=\"allocsld\"
 
 # Thanks to Dan Williams for the recipes that my link commands were based on.

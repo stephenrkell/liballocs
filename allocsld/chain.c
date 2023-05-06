@@ -112,15 +112,17 @@ SECTIONS
 		// the program should already have been mapped by the kernel. fix up its .interp
 		// first we need the program's base addr, inferred from its PHDR phdr
 		ElfW(Addr) program_base_addr = 0;
+		_Bool saw_pt_phdr = 0;
 		for (int i = 0; i < program_phnum; ++i)
 		{
 			if (program_phdrs[i].p_type == PT_PHDR)
 			{
+				saw_pt_phdr = 1;
 				program_base_addr = (uintptr_t) program_phdrs
 					- program_phdrs[i].p_vaddr;
 			}
 		}
-		if (!program_base_addr) die("could not infer program base address (no PT_PHDR?)\n");
+		if (!saw_pt_phdr) die("could not infer program base address (no PT_PHDR?)\n");
 		for (int i = 0; i < program_phnum; ++i)
 		{
 			if (program_phdrs[i].p_type == PT_INTERP)
@@ -129,7 +131,7 @@ SECTIONS
 				if (!we_are_the_program && !(program_phdrs[i].p_flags & PF_W))
 				{
 					die("PT_INTERP is not writable, so can't transparently chain-load ld.so\n"
-						"special args are required when setting allocsld.so as the dynamic linker\n");
+						"special link args are required when setting allocsld.so as the dynamic linker\n");
 				}
 				interp_addr = (char*) (program_base_addr + program_phdrs[i].p_vaddr);
 				interp_sz = program_phdrs[i].p_filesz;
