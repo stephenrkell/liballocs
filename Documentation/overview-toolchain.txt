@@ -51,10 +51,7 @@ alloctypes -- types synthesised from code like 'sizeof (int) + sizeof (float)'
 metavector -- type info for code and data segments' static/global allocations
 frametypes -- type/layout info for stack frames, postprocessed from DWARF .debug_info
 ehelfs     -- fast unwinding information (see OOPSLA '19 paper)
-
-There is also:
-
-roottypes  -- fixed, always-available type definitions like 'void'
+roottypes  -- creates fixed, always-present type definitions like 'void'
 
 All these are built by consuming some mixture of the following.
 

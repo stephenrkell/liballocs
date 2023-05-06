@@ -274,7 +274,7 @@ struct interpreter
  * only if it is not already available in memory (fsvo 'available'). FIXME:
  * how do such allocations get freed? One possible answer is that they don't;
  * another is that they are either GC'd or are reclaimed only when their
- * wole container is reclaimed, i.e. region-style.
+ * whole container is reclaimed, i.e. region-style.
  */
 
 struct allocated_chunk;   /* the start of an allocation, opaquely (gen this per-allocator?) */
