@@ -1281,8 +1281,9 @@ out:
 		if (filename && cur->filename && 0 == strcmp(filename, cur->filename))
 		{
 			debug_printf(0,
-				"mapping of same file could not extend preceding sequence (reason: %s); BUG?",
-				reason
+				"mapping of same file (`%s'; addr %p, offset 0x%lx) could not extend preceding sequence (reason: %s; begin %p, end %p); BUG?\n",
+				filename, begin, (long) offset,
+				reason, cur->begin, cur->end
 			);
 		}
 	}
