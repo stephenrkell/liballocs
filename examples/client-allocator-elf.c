@@ -961,7 +961,7 @@ enum elf_offset_or_pointer_interp
 	EOP_POINTER = 1,
 	EOP_OFFSET = 2,
 	EOP_VADDR = 3,
-	EOP_BITS_MASK = 0x7
+	EOP_BITS_MASK = 0x7 /* all bits that we might use to encode the 'how' */
 };
 static intptr_t can_interp_elf_offset_or_pointer(void *exp, struct uniqtype *exp_t,
 	struct alloc_tree_link *link)
@@ -1575,6 +1575,7 @@ do { int snret = snprintf((arr), sizeof (arr), (fmt) , __VA_ARGS__ ); \
 
 	 * Do those help us emit the reference? Yes I think.
 	 * Currently on our walk, we find only three references:
+	 * (in seen_elf_reference_or_pointer_cb)
 
 Saw a reference within our mapping, at offset 0x18, type uint$$64, target offset ffffffff
 ffffffff (absolute: 0x7f28d7963000, symname (null))
@@ -1587,12 +1588,20 @@ Saw a reference within our mapping, at offset 0x28, type uint$$64, target offset
 solute: 0x7f28d7565298, symname (null))
 			 -- this is e_shoff
 
-	 * ... but our symname is always null. The easiest way to
-	 * compute a symname is using an encl_ chain. So we may need to
+	 * ... but our symname is always null. (The symname has now been removed.)
+	 * We don't currently know how to emit a symbolic name for the target.
+	 *
+	 * The easiest way to compute a symname is using an encl_ chain. So we may need to
 	 * (1) gather reference target offsets in one DF walk (when we hit the reference)
+	 *       -- we do this currently I think
 	 * (2) gather reference target names in another DF walk (when we hit the referent)
+	 *       -- we don't do this yet -- OR maybe we do? __liballocs_name_ref_targets_cb
+	 *       -- by 'gather', what do we do about storing this information?
+	 *       -- since we will have the encl_ chain at the point of reaching the referent,
+	 *          we could compute a name as we go, but where would we put it?
 	 * (3) what about references that need to be emitted as a vaddr or some other
 	 *     calculation?
+	 *     i.e. "something about how the reference is [to be] encoded".
 	 *     The issue is the dual of interpretation. We need to calculate the representation
 	 *     for the reference -- or rather, emit the asm that calculates it. This knowledge is
 	 *     in the interpreter. The can_interp() function tells us 'how' the reference has
