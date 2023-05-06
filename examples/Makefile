@@ -27,9 +27,10 @@ CFLAGS += -I$(srcroot)/include -g $(LIBALLOCSTOOL_CFLAGS)
 LDFLAGS += -L$(srcroot)/lib -L$(LIBDLBIND)/lib -Wl,--dynamic-linker,$(srcroot)/lib/allocsld.so $(srcroot)/lib/interp-pad.o
 LDLIBS += -lallocs -ldlbind -ldl -lbsd
 
-client-allocator-elf+meta: client-allocator-elf+meta.o
+client-allocator-elf+meta: client-allocator-elf.o elf-allocators+meta.o elf-refs.o emit-asm.o
+	$(CC) -o $@ $+ $(LDFLAGS) $(LDLIBS)
 
-client-allocator-elf+meta.o: client-allocator-elf.o
+%+meta.o: %.o
 	cp "$<" "$@" && ../tools/lang/c/bin/link-used-types "$@" || (rm -f "$@"; false)
 
 .PHONY: clean
