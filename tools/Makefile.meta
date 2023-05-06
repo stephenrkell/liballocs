@@ -29,7 +29,12 @@ OBJDUMPMEMACC ?= $(dir $(THIS_MAKEFILE))/objdumpmemacc
 MERGE_MEMACC ?= $(dir $(THIS_MAKEFILE))/merge-allocs.sh # FIXME: change name
 GATHER_SRCMEMACC ?= $(dir $(THIS_MAKEFILE))/gather-srcmemacc.sh
 
-CFLAGS += -I$(LIBALLOCSTOOL)/include -I$(LIBALLOCS)/include -I$(LIBRUNT)/include
+ifneq ($(LIBALLOCSTOOL),)
+CFLAGS += -I$(LIBALLOCSTOOL)/include
+else
+CFLAGS += $(LIBALLOCSTOOL_CFLAGS)
+endif
+CFLAGS += -I$(LIBALLOCS)/include -I$(LIBRUNT)/include
 
 META_CC ?= $(CC)
 $(info META_CC is $(META_CC))
