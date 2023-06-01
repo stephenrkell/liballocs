@@ -10,6 +10,10 @@
 #include "pageindex.h"
 #include "vas.h"
 
+#ifdef TRACE_PRIVATE_MALLOC
+#include "raw-syscalls-defs.h"
+#endif
+
 /* Here we lightly extend dlmalloc so that we can probe whether a chunk
  * belongs to it or not. We use liballocs's bigallocs to do this. */
 void *__real_dlmalloc(size_t size);
@@ -66,29 +70,65 @@ static void clear_metadata(void *ptr)
 void *__wrap_dlmalloc(size_t size)
 {
 	void *ret = __real_dlmalloc(size);
+#ifdef TRACE_PRIVATE_MALLOC
+	write_string("private dlmalloc(");
+	write_ulong((unsigned long) size);
+	write_string(") returned ");
+	write_ulong((unsigned long) ret);
+	write_string("\n");
+#endif
 	if (ret) set_metadata(ret, size, __builtin_return_address(0));
 	return ret;
 }
 void *__wrap_dlcalloc(size_t nmemb, size_t size)
 {
 	void *ret = __real_dlcalloc(nmemb, size);
+#ifdef TRACE_PRIVATE_MALLOC
+	write_string("private dlcalloc(nmemb=");
+	write_ulong((unsigned long) nmemb);
+	write_string(",size=");
+	write_ulong((unsigned long) size);
+	write_string(") returned ");
+	write_ulong((unsigned long) ret);
+	write_string("\n");
+#endif
 	if (ret) set_metadata(ret, size, __builtin_return_address(0));
 	return ret;
 }
 void __wrap_dlfree(void *ptr)
 {
 	clear_metadata(ptr);
+#ifdef TRACE_PRIVATE_MALLOC
+	write_string("private dlfree(");
+	write_ulong((unsigned long) ptr);
+	write_string(") called\n");
+#endif
 	__real_dlfree(ptr);
 }
 void *__wrap_dlrealloc(void *ptr, size_t size)
 {
 	if (ptr) clear_metadata(ptr);
+#ifdef TRACE_PRIVATE_MALLOC
+	write_string("private dlcalloc(ptr=");
+	write_ulong((unsigned long) ptr);
+	write_string(",size=");
+	write_ulong((unsigned long) size);
+	write_string(") called...\n");
+#endif
 	// don't mess with the size-zero case, because it means free()
-	if (!size) { __wrap_dlfree(ptr); return NULL; }
+	if (!size) { __real_dlfree(ptr); return NULL; }
 	void *ret = __real_dlrealloc(ptr, size + sizeof (struct insert)); // FIXME: aligned
 	// FIXME: better to copy the old metadata, not set new?
 	// FIXME: all this should be common to generic-malloc.c, extracted/macroised somehow
 	if (ret && size > 0) set_metadata(ret, size, __builtin_return_address(0));
+#ifdef TRACE_PRIVATE_MALLOC
+	write_string("private dlcalloc(ptr=");
+	write_ulong((unsigned long) ptr);
+	write_string(",size=");
+	write_ulong((unsigned long) size);
+	write_string(") ... returning new allocation ");
+	write_ulong((unsigned long) ret);
+#endif
 	return ret;
 }
 void *__wrap_dlmemalign(size_t boundary, size_t size)
