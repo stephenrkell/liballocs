@@ -109,7 +109,7 @@ void *__wrap_dlrealloc(void *ptr, size_t size)
 {
 	if (ptr) clear_metadata(ptr);
 #ifdef TRACE_PRIVATE_MALLOC
-	write_string("private dlcalloc(ptr=");
+	write_string("private dlrealloc(ptr=");
 	write_ulong((unsigned long) ptr);
 	write_string(",size=");
 	write_ulong((unsigned long) size);
