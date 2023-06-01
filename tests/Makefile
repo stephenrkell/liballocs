@@ -19,7 +19,9 @@ CFLAGS += -save-temps        # helps debugging
 CFLAGS += -fno-lto
 LDFLAGS += -fno-lto
 
-# HACK: gold-plugin needs this for liballocstool flags
+# HACK: config.mk generates our CPPFLAGS (not CFLAGS)
+# for mallochooks, liballocstool and librunt; and
+# gold-plugin needs them to get the liballocstool headers
 META_CFLAGS += $(CPPFLAGS)
 export META_CFLAGS
 
@@ -47,6 +49,9 @@ CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
 META_CC := cc
 #CFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-cflags)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
+# HACK: liballocs headers now also depend on librunt headers
+$(info appending $(filter %,$(CPPFLAGS)))
+CFLAGS += $(filter %,$(CPPFLAGS))
 #LDFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-ldflags)
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../lib
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../src
