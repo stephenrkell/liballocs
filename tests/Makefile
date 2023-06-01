@@ -7,9 +7,13 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 -include $(dir $(THIS_MAKEFILE))/../config.mk
 
 CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types
-CFLAGS += -Wl,-q
-CFLAGS += -O2
-CFLAGS += -save-temps
+CFLAGS += -Wl,-q             # FIXME: I think this is no longer needed
+ifeq ($(TEST_OPT_LEVEL),)
+CFLAGS += -O2                # 'normal'...
+else
+CFLAGS += -O$(TEST_OPT_LEVEL) # ... but sometimes we want to override
+endif
+CFLAGS += -save-temps        # helps debugging
 
 # HACK while LTO is broken
 CFLAGS += -fno-lto
@@ -38,12 +42,12 @@ export LIBALLOCS_BUILD
 export LIBRUNT # needed by stubgen.h in allocscompilerwrapper.py
 export ELFTIN # needed by allocscompilerwrapper.py
 
-#CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
-CC := cc
+CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
+#CC := cc
 META_CC := cc
-CFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-cflags)
+#CFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-cflags)
 CFLAGS += -I$(realpath $(dir $(THIS_MAKEFILE)))/../include
-LDFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-ldflags)
+#LDFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-ldflags)
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../lib
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../src
 
