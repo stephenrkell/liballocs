@@ -122,12 +122,13 @@ void *__wrap_dlrealloc(void *ptr, size_t size)
 	// FIXME: all this should be common to generic-malloc.c, extracted/macroised somehow
 	if (ret && size > 0) set_metadata(ret, size, __builtin_return_address(0));
 #ifdef TRACE_PRIVATE_MALLOC
-	write_string("private dlcalloc(ptr=");
+	write_string("private dlrealloc(ptr=");
 	write_ulong((unsigned long) ptr);
 	write_string(",size=");
 	write_ulong((unsigned long) size);
 	write_string(") ... returning new allocation ");
 	write_ulong((unsigned long) ret);
+	write_string("\n");
 #endif
 	return ret;
 }
