@@ -1,1 +1,1 @@
-LDLIBS += -lallocs
+LDLIBS += -lallocs -ldl
