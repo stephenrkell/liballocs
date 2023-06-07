@@ -177,6 +177,9 @@ _onlyrun-%:
 _onlygdbrun-%:
 	gdb --symbols=./$* --args env LD_PRELOAD="$(PRELOAD)" ./$* ./$*
 
+_onlyrrrun-%:
+	rr record env LD_PRELOAD="$(PRELOAD)" ./$* ./$*
+
 build-%:
 	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" 
 
@@ -194,8 +197,14 @@ cleanrun-%:
 gdbrun-%: # run the test case with itself as input
 	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( cd "$*" && $(MAKE) $(INCLUDE_MK_INC) -f ../Makefile _onlygdbrun-$* )
 
+rrrun-%: # run the test case with itself as input
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( cd "$*" && $(MAKE) $(INCLUDE_MK_INC) -f ../Makefile _onlyrrrun-$* )
+
 gdbcleanrun-%:
 	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && $(MAKE) gdbrun-$*
+
+rrcleanrun-%:
+	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && $(MAKE) rrrun-$*
 
 clean-%:
 	$(MAKE) -C "$*" $(INCLUDE_MK_INC) -f $(realpath $(THIS_MAKEFILE)) clean
