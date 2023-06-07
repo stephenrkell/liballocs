@@ -21,8 +21,8 @@ int main(void)
 	assert(UNIQTYPE_IS_ARRAY_TYPE(got_type));
 	assert(UNIQTYPE_ARRAY_ELEMENT_TYPE(got_type) == int_type);
 	
-	void *b = alloca(69105);
-	printf("alloca'd chunk at %p\n", b);
+	void *c = alloca(69105);
+	printf("alloca'd chunk at %p\n", c);
 	// can we still get the type of o (not b)?
 	struct uniqtype *got_type_again = __liballocs_get_alloc_type(o);
 	assert(got_type_again);
