@@ -168,26 +168,23 @@ static void *emulated_curbrk;
 void *emulated_sbrk(intptr_t increment)
 {
 	if (!emulated_curbrk) emulated_curbrk = __private_malloc_heap_base;
-	if (increment > 0)
+	void *old_curbrk = emulated_curbrk;
+	/* We always return an error if we can't satisfy the request,
+	 * which includes overflow/underflow. */
+	uintptr_t req_brk = (uintptr_t) emulated_curbrk + increment;
+	_Bool flowed_over_or_under = (increment > 0 && req_brk < (uintptr_t) old_curbrk)
+			|| (increment < 0 && req_brk > (uintptr_t) old_curbrk);
+	if (flowed_over_or_under) goto err;
+	/* Clip to our heap area. We only go ahead if it fits. */
+	void *new_brk = (increment > 0)
+		? (MINPTR(__private_malloc_heap_limit, (void*)req_brk))
+		: (MAXPTR(__private_malloc_heap_base, (void*)req_brk));
+	if (new_brk == (void*) req_brk)
 	{
-		// we only return an error if we can't allocate any more at all
-		// FIXME: is this correct? matches my memory of glibc's logic...
-		if (emulated_curbrk == __private_malloc_heap_limit)
-		{
-			errno = ENOMEM;
-			return (void*) -1;
-		}
-		emulated_curbrk = MINPTR(
-			__private_malloc_heap_limit,
-			(void*)((uintptr_t) emulated_curbrk + increment)
-		);
+		emulated_curbrk = (void*) req_brk;
+		return old_curbrk;
 	}
-	else if (increment < 0)
-	{
-		emulated_curbrk = MAXPTR(
-			__private_malloc_heap_base,
-			(void*)((uintptr_t) emulated_curbrk + increment)
-		);
-	}
-	return emulated_curbrk;
+err:
+	errno = ENOMEM;
+	return (void*) -1;
 }
