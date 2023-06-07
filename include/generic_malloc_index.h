@@ -303,6 +303,12 @@ static inline void ensure_has_info(struct big_allocation *arena)
 		bzero(info->recently_freed, sizeof info->recently_freed);
 #endif
 		info->bitmap_base_addr = ROUND_DOWN_PTR(arena->begin, MALLOC_ALIGN*BITMAP_WORD_NBITS);
+		/* The base addr is rounded down to MALLOC_ALIGN * BITMAP_WORD_NBITS.
+		 * E.g. if a bitmap word if 64 bits / 8 bytes, and malloc align is 16,
+		 * the bitmap base is at the 512-byte boundary that precedes the arena base.
+		 * Why? It's because there is one bit in the bitmap for every MALLOC_ALIGN bytes
+		 * in the arena. So the number of bytes covered by one bitmap word is the product
+		 * of the two and is the unit of alignment for our region of coverage. */
 	}
 }
 
@@ -315,12 +321,14 @@ static inline void ensure_has_bitmap_to_current_end(struct big_allocation *arena
 	 * only some bigallocs, like mapping sequences maybe, can do this. */
 	struct arena_bitmap_info *info = arena->suballocator_private;
 	assert(bitmap_base_addr == (uintptr_t) info->bitmap_base_addr);
-	unsigned long total_words = ((uintptr_t)(ROUND_UP_PTR(arena->end, MALLOC_ALIGN*BITMAP_WORD_NBITS))
-			- bitmap_base_addr)
-			/ (MALLOC_ALIGN * BITMAP_WORD_NBITS);
+	unsigned long total_words =
+		((uintptr_t)(ROUND_UP_PTR(arena->end, MALLOC_ALIGN*BITMAP_WORD_NBITS))
+			 - bitmap_base_addr)
+		/ (MALLOC_ALIGN * BITMAP_WORD_NBITS);
 	if (__builtin_expect(info->nwords < total_words, 0))
 	{
-		info->bitmap = __liballocs_private_realloc(info->bitmap, total_words * sizeof (bitmap_word_t));
+		info->bitmap = __liballocs_private_realloc(info->bitmap,
+			total_words * sizeof (bitmap_word_t));
 		if (!info->bitmap) abort();
 		bzero(info->bitmap + info->nwords, (total_words - info->nwords) * sizeof (bitmap_word_t));
 		info->nwords = total_words;
