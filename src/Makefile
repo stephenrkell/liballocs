@@ -13,6 +13,11 @@ CFLAGS += -flto -ffat-lto-objects
 endif
 LDFLAGS += -L$(LIBDLBIND)/lib
 
+# for debugging private malloc, try these
+# ... remember that dlmalloc needs -DDEBUG for assertions to be enabled
+# CFLAGS += -DTRACE_PRIVATE_MALLOC
+# dlmalloc.o: CFLAGS += -DDEBUG
+
 # run-from-srcdir case:
 # if the current dir is the source dir, change to the output directory
 # and re-invoke this makefile from there.
