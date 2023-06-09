@@ -885,8 +885,8 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 			if (phdr->p_type == PT_LOAD)
 			{
 				/* Kernel's treatment of extra-memsz is not reliable -- i.e. the 
-				 * memsz bit needn't show up in /proc/<pid>/maps -- so use the
-				 * beginning. */
+				 * memsz extra part needn't show up in /proc/<pid>/maps -- so use the
+				 * beginning of the segment as our comparison. */
 				uintptr_t end = ROUND_UP(executable_load_addr + 
 					(uintptr_t) phdr->p_vaddr + phdr->p_memsz, PAGE_SIZE);
 				if (end > biggest_end_seen)
