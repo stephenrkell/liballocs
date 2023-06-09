@@ -20,6 +20,7 @@
 #include "liballocs_private.h"
 #include "pageindex.h"
 #include "allocsites.h"
+#include "maps.h"
 
 /* We now split static metadata into static-file, static-segment,
    static-section and static-symbol. This file implements only static-file,
@@ -259,6 +260,151 @@ void load_meta_objects_for_early_libs(void)
 		}
 	}
 }
+static int noop_maps_cb(struct maps_entry *ent, char *linebuf, void *arg)
+{
+	debug_printf(0, "%lx-%lx %s\n", (unsigned long) ent->first, (unsigned long) ent->second,
+		ent->rest);
+	return 0;
+}
+static void dump_maps(void)
+{
+	debug_printf(0, "Check the maps file below\n");
+	intptr_t hnd = get_maps_handle();
+	char linebuf[4096];
+	struct maps_entry entry_buf;
+	for_each_maps_entry(hnd,
+		get_a_line_from_maps_fd,
+		linebuf, sizeof linebuf, &entry_buf,
+		noop_maps_cb, NULL);
+	free_maps_handle(hnd);
+}
+static
+struct big_allocation *plug_hole_or_abort(
+	struct big_allocation *lowest_containing_mapping_bigalloc,
+	struct big_allocation *highest_containing_mapping_bigalloc,
+	struct link_map *l)
+{
+	/* If we get here it means the file "has holes" between its mappings.
+	 * I've only seen this with ld.so, because it is mapped
+	 * by the kernel. With GNU (glibc) ld.so we never create holes
+	 * for DSOs mapped by the ld.so itself. */
+	debug_printf(0, "Attempting to plug hole between bigalloc %lx-%lx (%d) "
+		"and %lx-%lx (%d) in DSO `%s'\n",
+		(unsigned long) lowest_containing_mapping_bigalloc->begin,
+		(unsigned long) lowest_containing_mapping_bigalloc->end,
+		(int)(lowest_containing_mapping_bigalloc - &big_allocations[0]),
+		(unsigned long) highest_containing_mapping_bigalloc->begin,
+		(unsigned long) highest_containing_mapping_bigalloc->end,
+		(int)(highest_containing_mapping_bigalloc - &big_allocations[0]),
+		l->l_name);
+	assert((intptr_t) highest_containing_mapping_bigalloc->begin >
+		(intptr_t) lowest_containing_mapping_bigalloc->end);
+	size_t hole_size = (uintptr_t) highest_containing_mapping_bigalloc->begin
+		- (uintptr_t) lowest_containing_mapping_bigalloc->end;
+	char *failure_kind = NULL;
+	if (hole_size > BIGGEST_SANE_USER_ALLOC) { failure_kind = "huge hole"; goto hole_err; }
+	debug_printf(0, "Hole is a workable size (0x%lx), so checking the hole remains free...\n",
+		(unsigned long) hole_size);
+	_Bool hole_free = 1;
+	for (unsigned long i = PAGENUM(lowest_containing_mapping_bigalloc->end);
+			i != PAGENUM(highest_containing_mapping_bigalloc->begin);
+			++i)
+	{
+		hole_free &= (pageindex[i] == 0);
+	}
+	if (!hole_free) { failure_kind = "hole not free"; goto hole_err; }
+	debug_printf(0, "Hole seems to be free according to pageindex...\n");
+	void *ret = /*mmap*/raw_mmap(lowest_containing_mapping_bigalloc->end,
+	(uintptr_t) highest_containing_mapping_bigalloc->begin -
+	(uintptr_t) lowest_containing_mapping_bigalloc->end,
+		PROT_NONE,
+#ifdef MAP_FIXED_NOREPLACE
+		MAP_FIXED_NOREPLACE
+#else
+		MAP_FIXED
+#endif
+		|MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+	if (MMAP_RETURN_IS_ERROR(ret)) { failure_kind = "mmap failure"; dump_maps(); goto hole_err; }
+	debug_printf(0, "Successfully plugged hole in non-contiguous DSO %s\n", l->l_name);
+
+	/* Now we've plugged the hole, we need to coalesce the mappings.
+	 * First let's check that the plug mapping has successfully been
+	 * coalesced into the first bigalloc. PROBLEM: this won't have
+	 * happened if we are not yet systrapping. That's why we changed
+	 * from mmap to raw_mmap above. We have to extend the sequence
+	 * manually. */
+#if 0
+	struct big_allocation *plug_mapping_bigalloc = NULL;
+	__liballocs_get_memory_mapping(
+		(void*)((intptr_t) highest_containing_mapping_bigalloc->begin - 1),
+		&plug_mapping_bigalloc);
+	assert(plug_mapping_bigalloc);
+	assert(plug_mapping_bigalloc == lowest_containing_mapping_bigalloc);
+#endif
+	struct mapping_sequence *lower_seq = (struct mapping_sequence *)
+		lowest_containing_mapping_bigalloc->allocator_private;
+	_Bool did_augment = __augment_mapping_sequence(lower_seq,
+		lowest_containing_mapping_bigalloc->end,
+		highest_containing_mapping_bigalloc->begin,
+		PROT_NONE, MAP_FIXED|MAP_PRIVATE|MAP_ANONYMOUS, 0,
+		/* PRETEND this is a mapping of the dynamic linker too, even though
+		 * it is PROT_NONE... keep our is_anon invariant alive */
+		(char*) lower_seq->filename,
+		plug_hole_or_abort);
+	if (!did_augment) { failure_kind = "augmenting mapping sequence"; goto hole_err; }
+	/* Now we want to coalesce the two now-abutting bigallocs and fix up the mapping
+	 * sequence metadata. We
+	 * - grab the mapping_sequence pointer from the higher-addressed bgialloc
+	 * - delete that bigalloc
+	 * - HACK the 'plug' mapping sequence element so it's not seen as anonymous
+	 * - re-augment the mapping sequence with the mappings from the higher
+	 * - free the mapping sequence we grabbed */
+	struct mapping_sequence *upper_seq = (struct mapping_sequence *)
+		 highest_containing_mapping_bigalloc->allocator_private;
+	assert(upper_seq);
+	assert(upper_seq->nused > 0);
+	void *upper_end = highest_containing_mapping_bigalloc->end;
+	/* Since the plug should have been added to the pre-existing sequence,
+	 * we expect at least two mappings. We DON'T expect it to be anonymous
+	 * because we are going to blat the upper sequence mappings straight
+	 * on afterwards,. */
+	assert(lower_seq->nused >= 2);
+	/* If we got the filename from the maps file, it might not
+	 * match the ldso name -- it might be its realpath. */
+	assert(0 == strcmp(lower_seq->filename, __ldso_name)
+		|| 0 == strcmp(lower_seq->filename, realpath_quick(__ldso_name)));
+	assert(lower_seq->mappings[lower_seq->nused - 1].is_anon == 0);
+	struct mapping_sequence upper_seq_copy = *upper_seq;
+	/* Now we can delete the upper bigalloc. */
+	_Bool success = __liballocs_delete_bigalloc_at(highest_containing_mapping_bigalloc->begin,
+		&__mmap_allocator);
+	assert(success);
+	upper_seq = NULL; // it's dead
+	__adjust_bigalloc_end(lowest_containing_mapping_bigalloc, upper_end);
+	for (int i = 0; i < upper_seq_copy.nused; ++i)
+	{
+		_Bool did_augment = __augment_mapping_sequence(
+			lower_seq,
+			upper_seq_copy.mappings[i].begin,
+			upper_seq_copy.mappings[i].end,
+			upper_seq_copy.mappings[i].prot,
+			upper_seq_copy.mappings[i].flags,
+			upper_seq_copy.mappings[i].offset,
+			lower_seq->filename,
+			upper_seq_copy.mappings[i].caller);
+		assert(did_augment);
+	}
+	assert(lower_seq->end == upper_end);
+	return lowest_containing_mapping_bigalloc;
+hole_err: ;
+	_Bool is_ldso = (0 == strcmp(l->l_name, __ldso_name));
+	debug_printf(0, "Aborting after seeing %s DSO (`%s') with an unpluggable hole. Failed at: %s\n",
+		is_ldso ? "ld.so" : "non-ld.so",
+		l->l_name, failure_kind);
+	if (is_ldso) debug_printf(0, "Try re-running with allocsld\n");
+
+	abort();
+}
 
 struct file_metadata *__real___runt_files_notify_load(void *handle, const void *load_site);
 struct file_metadata *__static_file_allocator_notify_load(void *handle, const void *load_site)
@@ -295,121 +441,25 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 	 * a logic error in liballocs; we should have done that by now. */
 	if (!lowest_containing_mapping_bigalloc) abort();
 	if (!highest_containing_mapping_bigalloc) abort();
-	if (highest_containing_mapping_bigalloc != lowest_containing_mapping_bigalloc)
-	{
-		/* This means the file "has holes" between its mappings.
-		 * I've only seen this with ld.so, because it is mapped
-		 * by the kernel. With GNU ld.so we never create holes
-		 * for DSOs mapped by the ld.so itself. */
-		assert((intptr_t) highest_containing_mapping_bigalloc->begin >
-			(intptr_t) lowest_containing_mapping_bigalloc->end);
-		if (0 != strcmp(l->l_name, __ldso_name))
-		{
-			debug_printf(0, "Aborting after seeing non-ld.so DSO with a hole. This is fixable....\n");
-			abort();
-		}
-		debug_printf(0, "Saw ld.so with a hole in... checking the middle chunk is free\n");
-		for (unsigned long i = PAGENUM(lowest_containing_mapping_bigalloc->end);
-				i != PAGENUM(highest_containing_mapping_bigalloc->begin);
-				++i)
-		{
-			assert(pageindex[i] == 0);
-		}
-		debug_printf(0, "Saw ld.so with a hole in... mapping the middle chunk\n");
-		void *ret = /*mmap*/raw_mmap(lowest_containing_mapping_bigalloc->end,
-			(uintptr_t) highest_containing_mapping_bigalloc->begin -
-			(uintptr_t) lowest_containing_mapping_bigalloc->end,
-				PROT_NONE,
-#ifdef MAP_FIXED_NOREPLACE
-                           MAP_FIXED_NOREPLACE
-#else
-                           MAP_FIXED
-#endif
-                                              |MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-		if (MMAP_RETURN_IS_ERROR(ret))
-		{
-			debug_printf(0, "Aborting after failing to plug hole in ld.so mappings\n");
-			abort();
-		}
-		/* Now we've plugged the hole, we need to coalesce the mappings.
-		 * First let's check that the plug mapping has successfully been
-		 * coalesced into the first bigalloc. PROBLEM: this won't have
-		 * happened if we are not yet systrapping. That's why we changed
-		 * from mmap to raw_mmap above. We have to extend the sequence
-		 * manually. */
-#if 0
-		struct big_allocation *plug_mapping_bigalloc = NULL;
-		__liballocs_get_memory_mapping(
-			(void*)((intptr_t) highest_containing_mapping_bigalloc->begin - 1),
-			&plug_mapping_bigalloc);
-		assert(plug_mapping_bigalloc);
-		assert(plug_mapping_bigalloc == lowest_containing_mapping_bigalloc);
-#endif
-		struct mapping_sequence *lower_seq = (struct mapping_sequence *)
-		    lowest_containing_mapping_bigalloc->allocator_private;
-		_Bool did_augment = __augment_mapping_sequence(lower_seq,
-			lowest_containing_mapping_bigalloc->end,
-			highest_containing_mapping_bigalloc->begin,
-			PROT_NONE, MAP_FIXED|MAP_PRIVATE|MAP_ANONYMOUS, 0,
-			/* PRETEND this is a mapping of the dynamic linker too, even though
-			 * it is PROT_NONE... keep our is_anon invariant alive */
-			(char*) lower_seq->filename,
-			&&next);
-		assert(did_augment);
-	next: ;
-		/* Now we want to coalesce the two now-abutting bigallocs and fix up the mapping
-		 * sequence metadata. We
-		 * - grab the mapping_sequence pointer from the higher-addressed bgialloc
-		 * - delete that bigalloc
-		 * - HACK the 'plug' mapping sequence element so it's not seen as anonymous
-		 * - re-augment the mapping sequence with the mappings from the higher
-		 * - free the mapping sequence we grabbed */
-		struct mapping_sequence *upper_seq = (struct mapping_sequence *)
-		     highest_containing_mapping_bigalloc->allocator_private;
-		assert(upper_seq);
-		assert(upper_seq->nused > 0);
-		void *upper_end = highest_containing_mapping_bigalloc->end;
-		/* Since the plug should have been added to the pre-existing sequence,
-		 * we expect at least two mappings. We DON'T expect it to be anonymous
-		 * because we are going to blat the upper sequence mappings straight
-		 * on afterwards,. */
-		assert(lower_seq->nused >= 2);
-		/* If we got the filename from the maps file, it might not
-		 * match the ldso name -- it might be its realpath. */
-		assert(0 == strcmp(lower_seq->filename, __ldso_name)
-			|| 0 == strcmp(lower_seq->filename, realpath_quick(__ldso_name)));
-		assert(lower_seq->mappings[lower_seq->nused - 1].is_anon == 0);
-		struct mapping_sequence upper_seq_copy = *upper_seq;
-		/* Now we can delete the upper bigalloc. */
-		_Bool success = __liballocs_delete_bigalloc_at(highest_containing_mapping_bigalloc->begin,
-			&__mmap_allocator);
-		assert(success);
-		upper_seq = NULL; // it's dead
-		__adjust_bigalloc_end(lowest_containing_mapping_bigalloc, upper_end);
-		for (int i = 0; i < upper_seq_copy.nused; ++i)
-		{
-			_Bool did_augment = __augment_mapping_sequence(
-				lower_seq,
-				upper_seq_copy.mappings[i].begin,
-				upper_seq_copy.mappings[i].end,
-				upper_seq_copy.mappings[i].prot,
-				upper_seq_copy.mappings[i].flags,
-				upper_seq_copy.mappings[i].offset,
-				lower_seq->filename,
-				upper_seq_copy.mappings[i].caller);
-			assert(did_augment);
-		}
-		assert(lower_seq->end == upper_end);
-	}
-	struct big_allocation *containing_mapping_bigalloc = lowest_containing_mapping_bigalloc;
+	/* We want to create a single "big allocation" for the whole file,
+	 * to keep our invariant that bigallocs are properly nested in a tree.
+	 * However, that's a problem ta least in the case of executables
+	 * mapped by the kernel: it doesn't guarantee contiguous mappings.
+	 * Since glibc's ld.so does ensure contiguity (any gap emerges
+	 * plugged with PROT_NONE mapping), it's only the kernel that we
+	 * normally have to worry about, which in turn means it's only
+	 * holes in the ld.so that usually give us bother. It's a problem
+	 * if the kernel has mapped something in the hole before we reach
+	 * here... that will cause an abort with a message to re-run with
+	 * allocsld.so, which is specially linked s.t. it never has a hole. */
+	struct big_allocation *containing_mapping_bigalloc =
+		(highest_containing_mapping_bigalloc == lowest_containing_mapping_bigalloc)
+			? lowest_containing_mapping_bigalloc
+			: plug_hole_or_abort(lowest_containing_mapping_bigalloc,
+				highest_containing_mapping_bigalloc, l);
 	size_t file_bigalloc_size = (uintptr_t)((char*) l->l_addr + bounds.limit_vaddr)
 		- (uintptr_t) lowest_containing_mapping_bigalloc->begin;
-	/* We want to create a single "big allocation" for the whole file. 
-	 * However, that's a problem ta least in the case of executables
-	 * mapped by the kernel: there isn't a single mapping sequence. We
-	 * fixed that in allocators/mmap.c: if we detect a hole, we map
-	 * it PROT_NONE, and ensure the rules on extending mapping_sequences
-	 * will swallow this into the same sequence. */
+
 	struct big_allocation *b = __liballocs_new_bigalloc(
 		(void*) lowest_containing_mapping_bigalloc->begin, // the file begins at a page boundary
 		file_bigalloc_size,

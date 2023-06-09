@@ -430,13 +430,47 @@ void __liballocs_systrap_init(void)
 	__liballocs_systrap_is_initialized = 1;
 }
 
+/* We do a self-call check by comparing addresses against this
+ * function's address, so be defensive about overrides. */
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
+                  int *p_fd, off_t *p_offset, const void *caller)
+__attribute__((alias("local_liballocs_nudge_mmap")));
+
+extern struct allocator __static_file_allocator;
+extern void *__private_malloc_heap_base;
+__attribute__((visibility("hidden")))
+void local_liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller)
 {
 	if (&dlbind_dummy && dlbind_open_active_on)
 	{
 		*p_flags &= ~(0x3 /*MAP_SHARED|MAP_PRIVATE*/);
 		*p_flags |= 0x1 /* MAP_SHARED */;
+	}
+#define IS_SELF_CALL(caller) ( \
+	(__private_malloc_heap_base) && \
+	__lookup_bigalloc_from_root(caller, &__static_file_allocator, NULL) == \
+	__lookup_bigalloc_from_root(local_liballocs_nudge_mmap, &__static_file_allocator, NULL) \
+	)
+	else if (*p_addr == NULL && IS_SELF_CALL(caller)
+		&& !((*p_flags & /*MAP_FIXED*/0x10) || (*p_flags & /*MAP_FIXED_NOREPLACE*/0x100000)))
+	{
+		/* If we're making a self-call with a NULL addr argument, it's dangerous
+		 * because the kernel might plonk it inside an intra-DSO hole that we're yet to plug,
+		 * breaking our invariant and causing an abort later during startup. This has been
+		 * seen with librunt get_or_map_file_range calls. QUICK HACK: pick an unlikely
+		 * address range and use this for internal unhinted calls. FIXME: does this
+		 * work if we simply always give the same hint? We just update it assuming our
+		 * mmap will succeed.
+		 *
+		 * Note that we use such an 'mmap' when creating the private mmap area, during
+		 * init of the pageindex. That's too soon to do our test for a self call, so
+		 * we let that case proceed normally. This is relying on the private malloc heap
+		 * being too large an area to fit inside any hole. That is likely true but is
+		 * definitely not guaranteed (FIXME). */
+		static uintptr_t unhinted_self_call_mmap_area = 0x5000000000; /* FIXME: sysdep */
+		*p_addr = (void*) unhinted_self_call_mmap_area;
+		unhinted_self_call_mmap_area += *p_length;
 	}
 }
 
