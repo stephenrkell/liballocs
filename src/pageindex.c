@@ -6,9 +6,10 @@
 #include <string.h>
 #include <wchar.h>
 #include <unistd.h>
+#include "raw-syscalls-defs.h"
+#include "librunt.h"
 #include "relf.h"
 #include "liballocs_private.h"
-#include "raw-syscalls-defs.h"
 #include "memtable.h"
 
 #ifndef NO_PTHREADS
