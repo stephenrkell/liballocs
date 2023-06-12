@@ -127,6 +127,7 @@ LIBSRK31CXX_CXXFLAGS ?= -I$(CONTRIB)/liballocstool/contrib/dwarfidl/contrib/libd
 build-elftin:
 	$(MAKE) -C elftin/normrelocs normrelocs
 	$(MAKE) -C elftin/abs2und abs2und sym2und
+	$(MAKE) -C elftin/dynappend dynappend
 	LIBRUNT="$(LIBRUNT)" CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }${LIBSRK31CXX_CXXFLAGS}" $(MAKE) -C elftin/base-ldplugin
 	LIBRUNT="$(LIBRUNT)" CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }${LIBSRK31CXX_CXXFLAGS}" $(MAKE) -C elftin/xwrap-ldplugin xwrap-ldplugin.so
 CONFIG_MK += \nELFTIN ?= $(CONTRIB)/elftin\n

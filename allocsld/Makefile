@@ -13,6 +13,7 @@ CFLAGS += -fno-stack-protector
 CFLAGS += -I$(DONALD)/src # for donald.h, for non-vpath'd .c files
 CFLAGS += -I$(LIBRUNT)/include
 CFLAGS += -DDONALD_NAME=\"allocsld\"
+CFLAGS += -DCHAIN_LOADER
 
 # Thanks to Dan Williams for the recipes that my link commands were based on.
 # http://www.cs.virginia.edu/~dww4s/articles/ld_linux.html
@@ -23,7 +24,7 @@ CFLAGS += -DDONALD_NAME=\"allocsld\"
 LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/lib/libc.a
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-OBJS := premain.o main.o entry.o load.o chain.o
+OBJS := premain.o main.o entry.o load.o chain.o debug.o
 C_DEPS := $(patsubst %.o,.%.d,$(OBJS))
 DEPS := $(C_DEPS)
 
@@ -32,13 +33,17 @@ $(C_DEPS): .%.d: %.c
 	
 -include $(DEPS)
 
+DYNAPPEND ?= $(ELFTIN)/dynappend/dynappend
+
 # FIXME: localize all global symbols except maybe _start?
 allocsld.so: allocsld.lds $(OBJS)
 	$(CC) $(CFLAGS) -fuse-ld=bfd \
             -Bsymbolic -nostdlib -nostartfiles -shared -o "$@" \
+            -Wl,--spare-dynamic-tags,2 \
             $(filter-out %.lds,$+) \
             -Wl,-Bstatic $(LIBC_ARCHIVE) -Wl,-Bsymbolic \
-            -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2 
+            -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2
+	$(DYNAPPEND) $@ 21 # add DT_DEBUG
 
 main.o: CFLAGS += -DCHAIN_LOADER \
   -DCHAIN_LOADER_COVER_TRACKS_DECLS='void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned program_phnum, const char *ldso_path, uintptr_t inferior_dynamic_vaddr, uintptr_t base_addr);' \

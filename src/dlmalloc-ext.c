@@ -11,7 +11,7 @@
 #include "vas.h"
 
 #ifdef TRACE_PRIVATE_MALLOC
-#include "raw-syscalls-defs.h"
+#include "librunt.h"
 #endif
 
 /* Here we lightly extend dlmalloc so that we can probe whether a chunk

@@ -19,8 +19,8 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include "librunt.h"
-#include "maps.h"
 #include "relf.h"
+#include "maps.h"
 #include "systrap.h"
 #include "raw-syscalls-defs.h"
 #include "liballocs.h"
@@ -457,8 +457,6 @@ int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *o
 }
 #endif
 
-FILE *stream_err __attribute__((visibility("hidden")));
-
 struct addrlist __liballocs_unrecognised_heap_alloc_sites = { 0, 0, NULL };
 
 const char *meta_base __attribute__((visibility("hidden")));
@@ -466,9 +464,6 @@ unsigned meta_base_len __attribute__((visibility("hidden")));
 
 int __liballocs_debug_level;
 _Bool __liballocs_is_initialized;
-
-// these two are defined in addrmap.h as weak
-unsigned long __addrmap_max_stack_size;
 
 // helper
 static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typestr);

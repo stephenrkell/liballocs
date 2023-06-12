@@ -20,9 +20,9 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include "raw-syscalls-defs.h" /* declares raw_write, no? */
 #include "librunt.h"
 #include "relf.h"
-#include "raw-syscalls-defs.h"
 #include "liballocs_private.h"
 #include "allocmeta.h"
 
