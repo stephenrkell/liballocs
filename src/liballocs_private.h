@@ -89,6 +89,13 @@ _Bool __augment_mapping_sequence(struct mapping_sequence *cur,
 struct big_allocation *__add_mapping_sequence_bigalloc_nocopy(struct mapping_sequence *seq);
 
 extern struct big_allocation *executable_mapping_bigalloc;
+/* Normally, the mapping that contiguously precedes the program break
+ * is the executable's mapping. However, in some cases where allocsld
+ * is 'the program' from the kernel's p.o.v., the program break is above
+ * the dynamic linker but 'the executable' (from our p.o.v.) is the binary
+ * loaded by the dynamic linker. So this may or may not alias
+ * executable_mapping_bigalloc. */
+extern struct big_allocation *pre_brk_mapping_bigalloc;
 extern struct big_allocation *executable_file_bigalloc;
 extern struct big_allocation *executable_data_segment_bigalloc;
 extern uintptr_t executable_data_segment_start_addr;

@@ -93,6 +93,14 @@ extern bigalloc_num_t *__liballocs_pageindex __attribute__((alias("pageindex")))
 static void memset_bigalloc(bigalloc_num_t *begin, bigalloc_num_t num, 
 	bigalloc_num_t old_num, size_t n)
 {
+	if (unlikely(n > (BIGGEST_SANE_USER_ALLOC >> LOG_PAGE_SIZE)))
+	{
+		debug_printf(0,
+			"asked to memset pageindex for an insanely large bigalloc (%ld pages, at %p)\n",
+			(unsigned long) n, begin
+		);
+		abort();
+	}
 	/* NOTE: a lot of this function is debugging checks!
 	 * It collapses to very little when NDEBUG is defined. */
 	assert(1ull<<(8*sizeof(bigalloc_num_t)) >= NBIGALLOCS - 1);
