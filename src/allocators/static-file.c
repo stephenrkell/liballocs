@@ -488,6 +488,14 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 		if (early_lib_handles[i] == handle) { we_are_early = 1; break; }
 	}
 	if (!we_are_early) load_metadata(meta, handle);
+	if (containing_mapping_bigalloc == brk_mapping_bigalloc)
+	{
+		/* snap the brk bigalloc's beginning into its rightful place */
+		assert((uintptr_t) brk_mapping_bigalloc->begin + file_bigalloc_size
+			< (uintptr_t) __brk_bigalloc->begin);
+		_Bool ret = __liballocs_pre_extend_bigalloc(__brk_bigalloc,
+			(void*)((uintptr_t) brk_mapping_bigalloc->begin + file_bigalloc_size));
+	}
 	return &meta->m;
 }
 struct file_metadata *__wrap___runt_files_notify_load(void *handle, const void *load_site) __attribute__((alias("__static_file_allocator_notify_load")));

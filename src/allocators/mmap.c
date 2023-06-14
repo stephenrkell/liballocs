@@ -414,8 +414,9 @@ report_problem:
 				&& (char*) executable_data_segment_start_addr
 					< (char*) existing_seq->end)
 		{
-			executable_mapping_bigalloc = NULL; // FIXME: when will it get reinstated?
-			__brk_bigalloc = NULL;
+			//executable_mapping_bigalloc = NULL; // FIXME: when will it get reinstated?
+			//__brk_bigalloc = NULL;
+			abort();
 		}
 		__liballocs_delete_all_bigallocs_overlapping_range(existing_seq->begin,
 			existing_seq->end);
@@ -789,13 +790,11 @@ _Bool __mmap_allocator_is_initialized(void)
 	return initialized;
 }
 
-static void *executable_end_addr;
 static void *data_segment_start_addr;
-
-struct big_allocation *executable_mapping_bigalloc __attribute__((visibility("hidden")));
+void *executable_end_addr __attribute__((visibility("hidden")));
 struct big_allocation *executable_file_bigalloc __attribute__((visibility("hidden")));
 struct big_allocation *executable_data_segment_bigalloc __attribute__((visibility("hidden")));
-struct big_allocation *pre_brk_mapping_bigalloc __attribute__((visibility("hidden")));
+struct big_allocation *brk_mapping_bigalloc __attribute__((visibility("hidden")));
 
 void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk);
 
@@ -803,95 +802,6 @@ _Bool __mmap_allocator_notify_unindexed_address(const void *mem)
 {
 	if (!initialized) return 0;
 	return __brk_allocator_notify_unindexed_address(mem);
-}
-
-static void set_executable_mapping_bigalloc(void *real_end)
-{
-	/* We can be called more than once. */
-	if (executable_mapping_bigalloc || pre_brk_mapping_bigalloc) return;
-	
-	/* Can't do anything if we haven't seen the data segment yet. */
-	if (!executable_data_segment_start_addr) return;
-	
-	/* Which bigalloc is top-level and spans the executable's data segment
-	 * *start*? */
-	for (int i = 1; BIGALLOC_IN_USE(&big_allocations[i]); ++i)
-	{
-		if (!BIDX(big_allocations[i].parent))
-		{
-			// write_string("Top-level bigalloc end ");
-			// write_ulong((unsigned long) big_allocations[i].end);
-			// write_string("\n");
-			/* Does this include the data segment? */
-			if ((uintptr_t) big_allocations[i].end >= executable_data_segment_start_addr
-					&& (uintptr_t) big_allocations[i].begin <= executable_data_segment_start_addr)
-			{
-				executable_mapping_bigalloc = &big_allocations[i];
-				if ((uintptr_t) executable_mapping_bigalloc->end < (uintptr_t) real_end)
-				{
-					__liballocs_extend_bigalloc(executable_mapping_bigalloc, real_end);
-				}
-				break;
-			}
-		}
-	}
-	if (!executable_mapping_bigalloc) abort();
-	/* Now, is this contiguous with the program break? If not, we have another
-	 * puzzle on our hands.
-	 * I had hoped we could simply check for an equality, that
-	 * curbrk == executable_mapping_bigalloc->end
-	 *
-	 * i.e. that we are running early enough that brk has not yet moved
-	 * from its initial value, which I expect to be the end of the data segment.
-	 * PROBLEM: the brk can be set to a wacky address.
-
-	 55616a1a9000-55616a1aa000 rw-p 00000000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
-	 55616a1aa000-55616a1ab000 r-xp 00001000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
-	 55616a1ab000-55616a1ac000 r--p 00002000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
-	 55616a1ac000-55616a1ad000 r--p 00002000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
-	 55616a1ad000-55616a1ae000 rw-p 00003000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
-	 7f62bcb3d000-7f62fcb3d000 rw-p 00000000 00:00 0
-	 (gdb) print curbrk
-	 $10 = (void *) 0x55616a6ff000
-
-	 * ... i.e. it's far from the end of the data segment (according to maps!) but
-	 * hasn't been used yet. What does the ELF file say about the end of the segment?
-	 * In my example, test case 'alloca''s entry point is 0x55616a1aa340 which is vaddr 0x1340
-	 * and its load address is      0x55616a1a9000
-	 * and data segment filesz + memsz is 03d60 + 03e8  so vaddr 0x4148 so addr 0x55616a1ad148
-	 * which is hundreds of kB distant from the curbrk value.
-	 * However, if I run in gdb, the equality does hold!
-	 555555558000-555555559000 rw-p 00003000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
-	                 ^- end of executable_mapping_bigalloc: curbrk points here!
-	 * This suggests it may be an ASLR thing and the kernel has inserted
-	 * a random amount of unmapped space at the end of the data segment. So let's
-	 * tolerate a reasonable amount of space here.
-	 */
-	void *curbrk = sbrk(0);
-	ssize_t gap = (intptr_t) curbrk - (intptr_t) executable_mapping_bigalloc->end;
-	if (gap >= 0 && gap < (BIGGEST_SANE_USER_ALLOC>>1)) /* allow up to 2GB! too generous? */
-	{
-		// FIXME: also check nothing is mapped in the gap?
-		// If we scan a 2GB window of pageindex, we might allocate
-		// 2bytes * 2^19  i.e. 1MB of memory. That is too much.
-		// Maybe we need to thread a linked list through the bigallocs,
-		// to allow walking them in tree order.
-		// I think memset_bigalloc will do the check, although only in debug mode.
-		/* We can work with this. We don't know where the 'real' brk region
-		 * begins, vs what is randomisation padding, but let's just pretend
-		 * it's all one region. */
-		pre_brk_mapping_bigalloc = executable_mapping_bigalloc;
-	}
-	else
-	{
-		/* What should we do here? Why are we doing all this?
-		 * create_brk_bigalloc is affected... we need to create the bigalloc under
-		 * the right parent.
-		 */
-		write_string("liballocs panic: program break is not where we expect\n");
-		abort();
-	}
-	if (!pre_brk_mapping_bigalloc) abort();
 }
 
 void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
@@ -1004,8 +914,6 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 		 * (in the indexing logic, or in pageindex) to have a second-attempt
 		 * at getting the bigalloc after re-checking the sbrk(). */
 		add_missing_mappings_from_proc(executable_end_addr);
-		/* Also extend the data segment to account for the current brk. */
-		set_executable_mapping_bigalloc(executable_end_addr);
 		/* brk allocator init can initialize even before systrap -- we
 		 * need to worry about out-of-date __curbrk manually, though. */
 		__brk_allocator_init();
@@ -1466,17 +1374,17 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 
 	/* If we haven't made the bigalloc yet, sbrk needs no action.
 	 * Otherwise we must update the end. */
-	if (executable_mapping_bigalloc)
+	if (brk_mapping_bigalloc)
 	{
-		void *old_end = executable_mapping_bigalloc->end;
+		void *old_end = brk_mapping_bigalloc->end;
 		void *new_end = ROUND_UP_PTR(new_curbrk, PAGE_SIZE);
 		/* If we've expanded... */
 		if ((uintptr_t) new_end > (uintptr_t) old_end)
 		{
-			__adjust_bigalloc_end(executable_mapping_bigalloc,
+			__adjust_bigalloc_end(brk_mapping_bigalloc,
 				new_end);
 			struct mapping_sequence *seq
-			 = executable_mapping_bigalloc->allocator_private;
+			 = brk_mapping_bigalloc->allocator_private;
 			seq->end = new_end;
 			void *prev_mapping_end = seq->mappings[seq->nused - 1].end;
 			if (!seq->mappings[seq->nused - 1].is_anon)
@@ -1502,9 +1410,9 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 		{
 			/* We're shrinking... */
 			struct mapping_sequence *seq
-			 = executable_mapping_bigalloc->allocator_private;
+			 = brk_mapping_bigalloc->allocator_private;
 			delete_mapping_sequence_span(seq, new_end, (uintptr_t) old_end - (uintptr_t) new_end);
-			__adjust_bigalloc_end(executable_mapping_bigalloc,
+			__adjust_bigalloc_end(brk_mapping_bigalloc,
 				new_end);
 			check_mapping_sequence_sanity(seq);
 		}

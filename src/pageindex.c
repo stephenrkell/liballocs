@@ -723,7 +723,37 @@ static void unlink_toplevel(struct big_allocation *b)
 	if (b->prev_sib) BIDX(b->prev_sib)->next_sib = b->next_sib;
 	if (b->next_sib) BIDX(b->next_sib)->prev_sib = b->prev_sib;
 }
-
+__attribute__((visibility("protected")))
+struct big_allocation *__liballocs_find_mapping_at_or_above(void *addr)
+{
+	if (!pageindex) __pageindex_init();
+	int lock_ret;
+	BIG_LOCK
+	uint16_t found = find_toplevel_highest_lt(addr);
+	// does the found bigalloc span the address?
+	struct big_allocation *ret = NULL;
+	if (!found) ret = NULL;
+	else if ((uintptr_t) BIDX(found)->end <= (uintptr_t) addr) ret = BIDX(find_toplevel_lowest_ge(addr));
+	else ret = BIDX(found);
+	BIG_UNLOCK
+	return ret;
+}
+__attribute__((visibility("protected")))
+struct big_allocation *__liballocs_find_mapping_below(void *addr)
+{
+	if (!pageindex) __pageindex_init();
+	int lock_ret;
+	BIG_LOCK
+	uint16_t found = find_toplevel_highest_lt(addr);
+	struct big_allocation *ret = NULL;
+	// does the found bigalloc end below the query address?
+	// if not, look for the highest lt its start address
+	if (!found) ret = NULL;
+	else if ((uintptr_t) BIDX(found)->end > (uintptr_t) addr) ret = BIDX(find_toplevel_highest_lt(BIDX(found)->begin));
+	else ret = BIDX(found);
+	BIG_UNLOCK
+	return ret;
+}
 __attribute__((visibility("protected")))
 _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end)
 {

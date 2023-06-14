@@ -10,6 +10,7 @@ int open(const char *, int, ...);
 #include <string.h>
 #include <dlfcn.h>
 #include <link.h>
+#include "librunt.h"
 #include "relf.h"
 #include "maps.h"
 #include "liballocs_private.h"
@@ -48,53 +49,107 @@ struct allocator __brk_allocator = {
 
 static void create_brk_bigalloc(void *curbrk)
 {
-	assert(executable_mapping_bigalloc);
-	// now create the brk bigalloc
-	// what is the actual end of the data segment PHDR?
-	struct link_map *exe_lment = get_highest_loaded_object_below(executable_mapping_bigalloc->begin);
-	assert(exe_lment);
-	ElfW(auxv_t) *at_phdr = auxv_xlookup(get_auxv((char **) environ, &at_phdr), AT_PHDR);
-	ElfW(auxv_t) *at_phnum = auxv_xlookup(get_auxv((char **) environ, &at_phdr), AT_PHNUM);
-	ElfW(Phdr) *phdrs = (ElfW(Phdr) *) at_phdr->a_un.a_val;
-	/* Our "data segment mapping" bigalloc is really a *mapping sequence*.
-	 * It includes all segments of the executable. What is the "data segment"?
-	 * It's really the thing that precedes the "program break"; in other words
-	 * it's the LOAD phdr with the highest virtual address. */
-	// FIXME: I probably mean "... that is contiguous with the program base address"
-	// look for a writable phdr that begins at the data segment base
-	ElfW(Phdr) *highest_vaddr_load_phdr = NULL;
-	for (ElfW(Phdr) *p = phdrs; p < phdrs + at_phnum->a_un.a_val; ++p)
+	assert(executable_end_addr);
+	/* Is the executable contiguous with the program break? If not, we have another
+	 * puzzle on our hands.
+	 * I had hoped we could simply check for an equality, that
+	 * curbrk == executable_mapping_bigalloc->end
+	 *
+	 * i.e. that we are running early enough that brk has not yet moved
+	 * from its initial value, which I expect to be the end of the data segment.
+	 * PROBLEM: the brk can be set to a wacky address.
+
+	 55616a1a9000-55616a1aa000 rw-p 00000000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
+	 55616a1aa000-55616a1ab000 r-xp 00001000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
+	 55616a1ab000-55616a1ac000 r--p 00002000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
+	 55616a1ac000-55616a1ad000 r--p 00002000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
+	 55616a1ad000-55616a1ae000 rw-p 00003000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
+	 7f62bcb3d000-7f62fcb3d000 rw-p 00000000 00:00 0
+	 (gdb) print curbrk
+	 $10 = (void *) 0x55616a6ff000
+
+	 * ... i.e. it's far from the end of the data segment (according to maps!) but
+	 * hasn't been used yet. What does the ELF file say about the end of the segment?
+	 * In my example, test case 'alloca''s entry point is 0x55616a1aa340 which is vaddr 0x1340
+	 * and its load address is      0x55616a1a9000
+	 * and data segment filesz + memsz is 03d60 + 03e8  so vaddr 0x4148 so addr 0x55616a1ad148
+	 * which is hundreds of kB distant from the curbrk value.
+	 * However, if I run in gdb, the equality does hold!
+	 555555558000-555555559000 rw-p 00003000 08:07 3639623                    /var/local/stephen/work/devel/liballocs.git/tests/alloca/alloca
+	                 ^- end of executable_mapping_bigalloc: curbrk points here!
+	 * This suggests it may be an ASLR thing and the kernel has inserted
+	 * a random amount of unmapped space at the end of the data segment. So let's
+	 * tolerate a reasonable amount of space here.
+	 */
+	struct big_allocation *mapping_b = __lookup_bigalloc_top_level(curbrk);
+	if (!mapping_b)
 	{
-		if (p->p_type == PT_LOAD
-				&& p->p_memsz > 0
-				&& (!highest_vaddr_load_phdr || p->p_vaddr > highest_vaddr_load_phdr->p_vaddr))
+		mapping_b = __liballocs_find_mapping_below(curbrk);
+		if (!mapping_b)
 		{
-			highest_vaddr_load_phdr = p;
+			write_string("liballocs panic: nothing mapped below curbrk\n");
+			abort();
+		}
+		// we want to extend it to cover curbrk; is this sensible?
+		ssize_t gap = (intptr_t) curbrk - (intptr_t) mapping_b->end;
+		if (gap >= 0 && gap < (BIGGEST_SANE_USER_ALLOC>>1)) /* allow up to 2GB! too generous? */
+		{
+			// also check nothing is mapped in the gap?
+			// If we scan a 2GB window of pageindex, we might allocate
+			// 2bytes * 2^19  i.e. 1MB of memory. That is too much.
+			// This is why we thread a linked list through the top-level bigallocs,
+			// to allow walking them in address order.
+			// (Already memset_bigalloc will do the check, but only in debug mode.)
+			struct big_allocation *next = BIDX(mapping_b->next_sib);
+			if (!(
+				!next || (uintptr_t) next->begin >= (uintptr_t) curbrk)
+			)
+			{
+				write_string("liballocs panic: something occupying the (<2GB) gap between "
+					"curbrk and executable data segment\n");
+				abort();
+			}
 		}
 	}
-	if (highest_vaddr_load_phdr)
+	assert(!brk_mapping_bigalloc);
+	brk_mapping_bigalloc = mapping_b;
+	/* We want the brk area to begin where the attached program binary leaves
+	 * off. Is there a file under the mapping? FIXME: what if file bigallocs
+	 * have not been created yet? */
+	assert(brk_mapping_bigalloc);
+	/* Look for a file underneath this bigalloc. Will we have created the files yet?
+	 * Probably not. For now we simply create the brk bigalloc from the current
+	 * brk value to the end of the mapping. When we create a file bigalloc we will
+	 * notice the brk and snap its beginning back to the end of the data segment. */
+	void *brk_base_upper_bound = curbrk;
+	ssize_t size = (uintptr_t) brk_mapping_bigalloc->end - (uintptr_t) brk_base_upper_bound;
+	if (!(size > 0))
 	{
-		uintptr_t phdr_loaded_addr = exe_lment->l_addr + highest_vaddr_load_phdr->p_vaddr;
-		uintptr_t phdr_end_addr = phdr_loaded_addr + highest_vaddr_load_phdr->p_memsz;
-		debug_printf(1, "think we have a data segment phdr %lx-%lx (vs %p-%p)\n",
-			(unsigned long) phdr_loaded_addr,
-			phdr_end_addr,
-			executable_mapping_bigalloc->begin,
-			executable_mapping_bigalloc->end);
-		// assert that it's contained within the mapping sequence we know about
-		assert(phdr_loaded_addr >= (uintptr_t) executable_mapping_bigalloc->begin);
-		assert(phdr_end_addr <= (uintptr_t) executable_mapping_bigalloc->end);
-		// found it.
-		// so now we know where it ends. create the brk bigalloc where it leaves off
-		__brk_bigalloc = __liballocs_new_bigalloc(
-			(void*) phdr_end_addr,
-			(uintptr_t) executable_mapping_bigalloc->end - phdr_end_addr,
-			NULL, /* allocator_private */
-			NULL, /* allocator_private_free */
-			executable_mapping_bigalloc /* parent */,
-			/* allocated_by */ &__brk_allocator
-		);
+		if (size < 0) 
+		{
+			// ensure the brk mapping bigalloc is at least as big as we need it to be
+			_Bool ret = __liballocs_extend_bigalloc(brk_mapping_bigalloc,
+				brk_base_upper_bound);
+			size = (uintptr_t) brk_mapping_bigalloc->end - (uintptr_t) brk_base_upper_bound;
+		}
+		if (size == 0)
+		{
+			void *ret = sbrk(1);
+			if (ret == NULL) abort();
+			curbrk += 1;
+			__mmap_allocator_notify_brk(curbrk);
+			size = (uintptr_t) brk_mapping_bigalloc->end - (uintptr_t) brk_base_upper_bound;
+		}
 	}
+	assert(size > 0);
+	__brk_bigalloc = __liballocs_new_bigalloc(
+		brk_base_upper_bound,
+		size,
+		NULL, /* allocator_private */
+		NULL, /* allocator_private_free */
+		brk_mapping_bigalloc /* parent */,
+		/* allocated_by */ &__brk_allocator
+	);
 	assert(__brk_bigalloc);
 	/* We expect the data segment's suballocator to be malloc.
 	 * We could pre-ordain that, but for uniformity with other
@@ -109,7 +164,7 @@ static void create_brk_bigalloc(void *curbrk)
 static void update_brk(void *new_curbrk)
 {
 	/* If we haven't made the bigalloc yet, sbrk needs no action. */
-	if (!executable_mapping_bigalloc) return;
+	if (!brk_mapping_bigalloc) return;
 	assert(__brk_bigalloc);
 
 	/* We also update the metadata. */
