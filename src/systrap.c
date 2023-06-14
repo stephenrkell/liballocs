@@ -293,11 +293,21 @@ void __liballocs_systrap_init(void)
 	ElfW(auxv_t) *auxv_at_base = auxv_lookup(auxv, AT_BASE);
 	if (!auxv_at_base) abort();
 	const void *interpreter_base = (const void *) auxv_at_base->a_un.a_val;
-	for (struct link_map *l = find_r_debug()->r_map; l; l = l->l_next)
+	if (interpreter_base == 0)
 	{
-		if ((const void *) l->l_addr == interpreter_base)
+		/* This means the dynamic linker was run as the program. In that case
+		 * AT_EXECFN has the interpreter name. */
+		interpreter_fname = realpath((char*) auxv_xlookup(auxv, AT_EXECFN)->a_un.a_val,
+				&realpath_buf[0]);
+	}
+	else
+	{
+		for (struct link_map *l = find_r_debug()->r_map; l; l = l->l_next)
 		{
-			interpreter_fname = realpath(l->l_name, &realpath_buf[0]);
+			if ((const void *) l->l_addr == interpreter_base)
+			{
+				interpreter_fname = realpath(l->l_name, &realpath_buf[0]);
+			}
 		}
 	}
 	if (!interpreter_fname) abort();
