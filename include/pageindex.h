@@ -26,7 +26,7 @@ struct big_allocation
 	void *end;              // XXX: store 'size' instead? 32 bits max, would help hot/cold packing
 	uint16_t first_child;   // idx of parent, etc. We keep these as 16-bit integers
 	uint16_t next_sib;      // to stop the structure getting too large. Also we try to
-	uint16_t next_sib;      // keep a hot/cold split: first_child and next_sib are hottest.
+	uint16_t parent;        // keep a hot/cold split: first_child and next_sib are hottest.
 	uint16_t prev_sib;      // (Could take this split further if it affects perf.)
 	struct allocator *allocated_by; // should always be parent->suballocator *if* parent has a suballocator -- but it needn't, because suballocation is about small stuff
 	struct allocator *suballocator; // ... suballocated bigallocs may have BOTH small and big children
