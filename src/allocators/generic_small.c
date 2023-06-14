@@ -429,7 +429,7 @@ int __index_small_alloc(void *ptr, int level, unsigned size_bytes)
 	if (!a) abort();
 	// if one of our allocations somehow got promoted to bigalloc, look at *its* container
 	struct big_allocation *container = (b->allocated_by == &__generic_small_allocator) ?
-		b->parent : b;
+		BIDX(b->parent) : b;
 	if (!container) abort();
 	if (a == &__generic_small_allocator)
 	{
@@ -757,7 +757,7 @@ void __unindex_small_alloc(void *ptr)
 	
 	struct big_allocation *b = __lookup_deepest_bigalloc(ptr);
 	while (b && b->suballocator != &__generic_small_allocator)
-		b = b->parent;
+		b = BIDX(b->parent);
 	if (!b) abort();
 	
 	unindex_small_alloc_internal(ptr, (struct chunk_rec *) b->suballocator_private, b);
@@ -771,7 +771,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 {
 	struct big_allocation *container =
 		(b->allocated_by == &__generic_small_allocator)
-		? b->parent
+		? BIDX(b->parent)
 		 : __lookup_deepest_bigalloc(obj);
 	
 	struct insert *heap_info = lookup_small_alloc(obj, container->suballocator_private,

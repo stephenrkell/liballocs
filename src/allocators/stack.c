@@ -71,7 +71,7 @@ void __stack_allocator_notify_init_stack_region(void *begin, void *end)
 		&__stack_allocator
 	);
 	if (!initial_stack_bigalloc) abort();
-	if (!initial_stack_bigalloc->parent || initial_stack_bigalloc->parent->allocated_by
+	if (!BIDX(initial_stack_bigalloc->parent) || BIDX(initial_stack_bigalloc->parent)->allocated_by
 				!= &__auxv_allocator) abort();
 	
 	/* FIXME: is this necessarily right? a GROWSDOWN mapping might actually 

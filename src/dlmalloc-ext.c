@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <sys/mman.h>
 #include "liballocs_private.h"
 #include "malloc-meta.h"
 #include "pageindex.h"
@@ -28,6 +29,84 @@ __attribute__((visibility("hidden")))
 struct allocator __private_malloc_allocator = (struct allocator) {
 	.name = "liballocs private malloc"
 };
+
+__attribute__((visibility("protected")))
+struct big_allocation *__liballocs_private_malloc_bigalloc;
+__attribute__((visibility("hidden")))
+struct big_allocation *create_private_malloc_heap(void)
+{
+	/* For now, make our heap region quite large, but not so large that
+	 * we wouldn't want it in our pageindex. FIXME: We want to downscale
+	 * this by defining *two* private mallocs: one for stuff that is
+	 * O(nbigallocs) and one for stuff that is O(usedmem). The theory
+	 * is that only the nbigallocs one needs to have a 'no-mmap' property
+	 * in order to avoid reentrancy. */
+	size_t heapsz = 1*1024*1024*1024ul;
+	/* 1GB is 256K pages, or 512kB of shorts in the pageindex. It's still too
+	 * much, but fine for now. */
+	int prot = PROT_READ|PROT_WRITE;
+	int flags = MAP_ANONYMOUS|MAP_NORESERVE|MAP_PRIVATE;
+	__private_malloc_heap_base = mmap(NULL, heapsz, prot, flags, -1, 0);
+mmap_return_site:
+	if (MMAP_RETURN_IS_ERROR(__private_malloc_heap_base)) abort();
+	__private_malloc_heap_limit = (void*)((uintptr_t) __private_malloc_heap_base
+		+ heapsz);
+	/* It's just a mapping sequence, init. */
+	static struct mapping_sequence seq;
+	seq = (struct mapping_sequence) {
+		.begin = __private_malloc_heap_base,
+		.end =  __private_malloc_heap_limit,
+		.filename = NULL,
+		.nused = 1,
+		.mappings = { [0] = (struct mapping_entry) {
+			.begin = __private_malloc_heap_base,
+			.end = __private_malloc_heap_limit,
+			.prot = prot,
+			.flags = flags & ~MAP_NORESERVE,
+			.offset = 0,
+			.is_anon = 1,
+			.caller = /* &&mmap_return_site */ 0
+		} }
+	};
+	struct big_allocation *b = __liballocs_private_malloc_bigalloc =
+		__add_mapping_sequence_bigalloc_nocopy(&seq);
+	/* What about the bitmap? 1GB in 16B units needs 64M bits or 8Mbytes.
+	 * We don't want to spend that much up-front. But we don't have to!
+	 * We allocate the bitmap in our own heap, which is MAP_NORESERVE. */
+	b->suballocator = &__private_malloc_allocator;
+	size_t range_size_bytes = (uintptr_t) b->end - (uintptr_t) b->begin;
+	size_t bitmap_alloc_size_bytes = DIVIDE_ROUNDING_UP(
+		DIVIDE_ROUNDING_UP(range_size_bytes, PRIVATE_MALLOC_ALIGN),
+		8) + sizeof (struct insert);
+	/* FIXME: also want to create one of these?
+	struct arena_bitmap_info
+	{
+		unsigned long nwords;
+		bitmap_word_t *bitmap;
+		void *bitmap_base_addr;
+	};
+	*/
+	/* we use the real dlmalloc just this once, because we can't set the bit
+	 * before the bitmap is created */
+	// FIXME: this is an interesting case of an unclassifiable allocation site,
+	// by our current 'dumpallocs.ml' classifier. It is sized (syntactically)
+	// in bytes but allocated (semantically) in bitmap_word_t units, and rests
+	// on the assumption that when we scale down a whole number of pages,
+	// we get some whole number of bitmap_word_ts, but we don't care about
+	// the actual number... we care only that we have one bit per
+	// PRIVATE_MALLOC_ALIGN bytes.
+	void *__real_dlmalloc(size_t size);
+	b->suballocator_private = __real_dlmalloc(bitmap_alloc_size_bytes);
+dlmalloc_return_site:
+	assert((uintptr_t) b->suballocator_private >= (uintptr_t) __private_malloc_heap_base);
+	assert((uintptr_t) b->suballocator_private + bitmap_alloc_size_bytes
+		< (uintptr_t) __private_malloc_heap_limit);
+	__private_malloc_set_metadata(b->suballocator_private, bitmap_alloc_size_bytes,
+		&&dlmalloc_return_site);
+
+	return b;
+}
+
 static void set_metadata(void *ptr, size_t size, const void *allocsite)
 {
 	struct big_allocation *b = __lookup_bigalloc_top_level(ptr);

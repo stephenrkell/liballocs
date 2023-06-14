@@ -136,12 +136,12 @@ void __static_segment_allocator_notify_define_segment(
 		 * segment is suballocated by the symbols (?). */
 		executable_data_segment_bigalloc = b;
 		// the data segment always extends as far as the file+mapping do (should be the same)
-		assert(b->parent); // the segment's parent is the file
-		assert(b->parent->parent); // the parent's parent is the mapping, which includes brk area
+		assert(BIDX(b->parent)); // the segment's parent is the file
+		assert(BIDX(BIDX(b->parent)->parent)); // the parent's parent is the mapping, which includes brk area
 		// with the brk area included, we may extend further than the segment
-		assert((uintptr_t) b->parent->parent->end >= (uintptr_t) b->parent->end);
+		assert((uintptr_t) BIDX(BIDX(b->parent)->parent)->end >= (uintptr_t) BIDX(b->parent)->end);
 		// the end of the segment is the end of the file
-		__adjust_bigalloc_end(b, b->parent->end);
+		__adjust_bigalloc_end(b, BIDX(b->parent)->end);
 		b->suballocator = &__static_symbol_allocator;
 	}
 	/* Fill in the per-segment info that is stored in the file metadata. */
@@ -168,7 +168,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	if (out_type) *out_type = pointer_to___uniqtype____uninterpreted_byte;
 	if (out_base) *out_base = b->begin;
 	if (out_site) *out_site =
-			((struct file_metadata *) (b->parent->allocator_private))
+			((struct file_metadata *) (BIDX(b->parent)->allocator_private))
 				->load_site;
 	if (out_size) *out_size = (char*) b->end - (char*) b->begin;
 	return NULL;

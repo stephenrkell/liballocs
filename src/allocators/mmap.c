@@ -165,10 +165,10 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 	 * and end addresses. It should be the same, perhaps zero.
 	 */
 	struct big_allocation *parent_begin = &big_allocations[pageindex[PAGENUM(seq->begin)]];
-	while (parent_begin->parent) parent_begin = parent_begin->parent;
+	while (BIDX(parent_begin->parent)) parent_begin = BIDX(parent_begin->parent);
 	if (parent_begin == &big_allocations[0]) parent_begin = NULL;
 	struct big_allocation *parent_end = &big_allocations[pageindex[PAGENUM(((char*)seq->end)-1)]];
-	while (parent_end->parent) parent_end = parent_end->parent;
+	while (BIDX(parent_end->parent)) parent_end = BIDX(parent_end->parent);
 	if (parent_end == &big_allocations[0]) parent_end = NULL;
 	
 	/* Special case: if we've strayed into the auxv, our work is done. */
@@ -817,7 +817,7 @@ static void set_executable_mapping_bigalloc(void *real_end)
 	 * *start*? */
 	for (int i = 1; BIGALLOC_IN_USE(&big_allocations[i]); ++i)
 	{
-		if (!big_allocations[i].parent)
+		if (!BIDX(big_allocations[i].parent))
 		{
 			// write_string("Top-level bigalloc end ");
 			// write_ulong((unsigned long) big_allocations[i].end);
@@ -872,7 +872,11 @@ static void set_executable_mapping_bigalloc(void *real_end)
 	if (gap >= 0 && gap < (BIGGEST_SANE_USER_ALLOC>>1)) /* allow up to 2GB! too generous? */
 	{
 		// FIXME: also check nothing is mapped in the gap?
-		// I think memset_bigalloc will do this, although only in debug mode.
+		// If we scan a 2GB window of pageindex, we might allocate
+		// 2bytes * 2^19  i.e. 1MB of memory. That is too much.
+		// Maybe we need to thread a linked list through the bigallocs,
+		// to allow walking them in tree order.
+		// I think memset_bigalloc will do the check, although only in debug mode.
 		/* We can work with this. We don't know where the 'real' brk region
 		 * begins, vs what is randomisation padding, but let's just pretend
 		 * it's all one region. */
@@ -880,6 +884,10 @@ static void set_executable_mapping_bigalloc(void *real_end)
 	}
 	else
 	{
+		/* What should we do here? Why are we doing all this?
+		 * create_brk_bigalloc is affected... we need to create the bigalloc under
+		 * the right parent.
+		 */
 		write_string("liballocs panic: program break is not where we expect\n");
 		abort();
 	}
@@ -1512,7 +1520,7 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 	// Why do we support the b == NULL case? None of the other allocators do.
 	// The caller should grab the bigalloc number from the pageindex if they want.
 	//if (!b) b = &big_allocations[pageindex[PAGENUM(obj)]];
-	//while (b && b->parent) b = b->parent;
+	//while (b && BIDX(b->parent)) b = BIDX(b->parent);
 	//if (!b) return &__liballocs_err_object_of_unknown_storage;
 	assert(b);
 

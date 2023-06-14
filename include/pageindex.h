@@ -23,11 +23,11 @@ struct allocator;
 struct big_allocation
 {
 	void *begin;
-	void *end;
-	struct big_allocation *parent;
-	struct big_allocation *next_sib;
-	struct big_allocation *prev_sib;
-	struct big_allocation *first_child;
+	void *end;              // XXX: store 'size' instead? 32 bits max, would help hot/cold packing
+	uint16_t first_child;   // idx of parent, etc. We keep these as 16-bit integers
+	uint16_t next_sib;      // to stop the structure getting too large. Also we try to
+	uint16_t next_sib;      // keep a hot/cold split: first_child and next_sib are hottest.
+	uint16_t prev_sib;      // (Could take this split further if it affects perf.)
 	struct allocator *allocated_by; // should always be parent->suballocator *if* parent has a suballocator -- but it needn't, because suballocation is about small stuff
 	struct allocator *suballocator; // ... suballocated bigallocs may have BOTH small and big children
 	void *allocator_private;        // metadata for use by the `allocated_by' allocator
@@ -56,6 +56,13 @@ struct big_allocation
 };
 #define BIGALLOC_IN_USE(b) ((b)->begin && (b)->end)
 #define NBIGALLOCS 1024
+#ifdef IN_LIBALLOCS_DSO
+#define BIDX(idx) ((struct big_allocation *)((idx) ? &big_allocations[(idx)] : NULL))
+#define IDXB(b)   ((b) ? (b) - &big_allocations[0] : 0)
+#else
+#define BIDX(idx) ((struct big_allocation *)((idx) ? &__liballocs_big_allocations[(idx)] : NULL))
+#define IDXB(b)   ((b) ? (b) - &__liballocs_big_allocations[0] : 0)
+#endif
 extern struct big_allocation big_allocations[] __attribute__((weak));
 extern struct big_allocation __liballocs_big_allocations[] __attribute__((weak));
 
@@ -154,9 +161,9 @@ struct allocator *__liballocs_leaf_allocator_for(const void *obj,
 		deepest = cur;
 
 		/* Increment: does one of the children overlap? */
-		for (struct big_allocation *child = cur->first_child;
+		for (struct big_allocation *child = BIDX(cur->first_child);
 				__builtin_expect(child != NULL, 0);
-				child = child->next_sib)
+				child = BIDX(child->next_sib))
 		{
 			if ((char*) child->begin <= (char*) obj && 
 					(char*) child->end > (char*) obj)

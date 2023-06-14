@@ -1739,9 +1739,9 @@ int __liballocs_walk_allocations(
 			/* To walk the imposed children, we need to divide the range up into
 			 * chunks for each imposed child. FIXME: this is racy, but imposed
 			 * children are rare and come/go/move even more rarely. */
-			for (struct big_allocation *child = b->first_child; child;
+			for (struct big_allocation *child = BIDX(b->first_child); child;
 				walked_up_to = child->end,
-				child = child->next_sib,
+				child = BIDX(child->next_sib),
 				++new_cont.to_here.containee_coord)
 			{
 				// skip any that don't fall within our range
@@ -1839,9 +1839,9 @@ static int walk_one_df_cb(struct big_allocation *maybe_the_allocation,
 	// with uniqtype, once with the bigalloc child structure).
 	if (t && BOU_IS_BIGALLOC(link->container.bigalloc_or_uniqtype))
 	{
-		for (struct big_allocation *child = BOU_BIGALLOC(link->container.bigalloc_or_uniqtype)->first_child;
+		for (struct big_allocation *child = BIDX(BOU_BIGALLOC(link->container.bigalloc_or_uniqtype)->first_child);
 			child;
-			child = child->next_sib)
+			child = BIDX(child->next_sib))
 		{
 			// does this child alloc actually describe the alloc
 			// in question? e.g. if it was just hung on there.

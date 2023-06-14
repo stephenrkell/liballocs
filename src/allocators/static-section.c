@@ -86,14 +86,14 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *b,
 		if (out_type) *out_type = pointer_to___uniqtype____uninterpreted_byte;;
 		if (out_base) *out_base = object_start;
 		if (out_site) *out_site =
-			((struct file_metadata *) (b->parent->parent->allocator_private))
+			((struct file_metadata *) (BIDX(BIDX(b->parent)->parent)->allocator_private))
 					->load_site;
 		if (out_size) *out_size = /*shdr->sh_size*/
 			(char*) b->end - (char*) b->begin;
 		return NULL;
 	}
 	// else we have the containing bigalloc... might be a segment, but we want the file
-	while (b->allocated_by != &__static_file_allocator) b = b->parent;
+	while (b->allocated_by != &__static_file_allocator) b = BIDX(b->parent);
 	struct file_metadata *fm = (struct file_metadata *) b->allocator_private;
 	/* Querying by section is pretty rare. And there are not that many
 	 * sections. It doesn't seem worth maintaining a separate sorted

@@ -41,8 +41,84 @@ extern struct big_allocation __liballocs_big_allocations[NBIGALLOCS] __attribute
 static unsigned bigalloc_depth(struct big_allocation *b)
 {
 	unsigned depth = 0;
-	for (struct big_allocation *tmp = b; tmp; tmp = tmp->parent) ++depth;
+	for (struct big_allocation *tmp = b; tmp; tmp = BIDX(tmp->parent)) ++depth;
 	return depth;
+}
+#if 0 /* not used currently */
+static int bigalloc_compare_df(struct big_allocation *b1, struct big_allocation *b2)
+{
+	/* b1 precedes b2 if its begin address precedes b2's, OR
+	 * if its begin address is equal and its depth is greater. */
+	if ((uintptr_t) b1->begin < (uintptr_t) b2->begin) return -1;
+	if ((uintptr_t) b1->begin > (uintptr_t) b2->begin) return 1;
+	unsigned d1 = bigalloc_depth(b1);
+	unsigned d2 = bigalloc_depth(b2);
+	if (d1 < d2) return -1;
+	if (d2 > d1) return 1;
+	return 0;
+}
+#endif
+static int bigalloc_compare_toplevel(struct big_allocation *b1, struct big_allocation *b2)
+{
+	/* b1 precedes b2 if its begin address precedes b2's. */
+	if ((uintptr_t) b1->begin < (uintptr_t) b2->begin) return -1;
+	if ((uintptr_t) b1->begin > (uintptr_t) b2->begin) return 1;
+	return 0;
+}
+static void sanity_check_bigallocs_toplevel(void)
+{
+	struct big_allocation *b = __liballocs_private_malloc_bigalloc;
+	if (!b) return;
+	bitmap_word_t bitmap[NBIGALLOCS / 8*sizeof(bitmap_word_t)];
+	memset(bitmap, 0, sizeof bitmap);
+	/* OK, found an in-use top-level bigalloc. Let's walk backwards to the start of the list,
+	 * setting bits as we go and checking the order. */
+	struct big_allocation *cur;
+	struct big_allocation *prev = NULL;
+	for (cur = b; cur; prev = cur, cur = BIDX(cur->prev_sib))
+	{
+		bitmap_set_b(bitmap, IDXB(cur));
+		/* If we have a earlier, it's better be df-earlier. */
+		if (BIDX(cur->prev_sib)) assert(-1 == bigalloc_compare_toplevel(BIDX(cur->prev_sib), cur));
+	}
+	struct big_allocation *first_top = prev;
+	/* Same but walking forwards from b. */
+	for (cur = b; cur; prev = cur, cur = BIDX(cur->next_sib))
+	{
+		bitmap_set_b(bitmap, IDXB(cur));
+		/* If we have a later, it's better be df-later. */
+		if (BIDX(cur->next_sib)) assert(-1 == bigalloc_compare_toplevel(cur, BIDX(cur->next_sib)));
+	}
+	struct big_allocation *last_top = prev;
+	/* For each big allocation, check its state agrees with the bitmap.
+	 * Since the bitmap only contains toplevel bigallocs, we simply check
+	 * that they are in use. */
+	unsigned n_toplevel_in_use = 0;
+	for (unsigned idx = 1; idx < NBIGALLOCS; ++idx)
+	{
+		struct big_allocation *c = &big_allocations[idx];
+		if (BIGALLOC_IN_USE(c) && !c->parent)
+		{
+			n_toplevel_in_use++;
+			_Bool bit = bitmap_get_b(bitmap, idx);
+			assert(bit);
+		}
+	}
+	prev = NULL;
+	unsigned n_seen = 0;
+	/* We haven't walked the whole list both ways yet. So do that. */
+	for (struct big_allocation *d = first_top; d; ++n_seen, prev = d, d = BIDX(d->next_sib))
+	{
+		if (prev) assert(-1 == bigalloc_compare_toplevel(prev, d));
+	}
+	assert(n_seen == n_toplevel_in_use);
+	prev = NULL;
+	n_seen = 0;
+	for (struct big_allocation *d = last_top; d; ++n_seen, prev = d, d = BIDX(d->prev_sib))
+	{
+		if (prev) assert(1 == bigalloc_compare_toplevel(prev, d));
+	}
+	assert(n_seen == n_toplevel_in_use);
 }
 
 __attribute__((visibility("hidden")))
@@ -55,26 +131,26 @@ void sanity_check_bigalloc(struct big_allocation *b)
 		assert(b->end != b->begin);
 		/* The pageindex immediately before the beginning should not say
 		 * that it's this bigalloc there. */
-		assert(pageindex[PAGENUM(((char*)(b)->begin)-1)] != ((b) - &big_allocations[0]));
-		assert(pageindex[PAGENUM((b)->end)] != ((b) - &big_allocations[0]));
+		assert(pageindex[PAGENUM(((char*)(b)->begin)-1)] != IDXB(b));
+		assert(pageindex[PAGENUM((b)->end)] != IDXB(b));
 
 		assert(!b->allocated_by
 				|| !b->allocated_by->min_alignment
 				|| 0 == (unsigned long) b->begin % b->allocated_by->min_alignment);
 
 		/* Check that our depth is 1 + our parent's depth */
-		if (b->parent)
+		if (BIDX(b->parent))
 		{
-			assert(bigalloc_depth(b) == 1 + bigalloc_depth(b->parent));
+			assert(bigalloc_depth(b) == 1 + bigalloc_depth(BIDX(b->parent)));
 			/* Also check bounds w.r.t. parent. */
-			assert(b->begin >= b->parent->begin);
-			assert(b->end <= b->parent->end);
+			assert(b->begin >= BIDX(b->parent)->begin);
+			assert(b->end <= BIDX(b->parent)->end);
 		}
 		/* Check that old children all have the same depth as each other. */
-		if (b->first_child)
+		if (BIDX(b->first_child))
 		{
-			unsigned first_child_depth = bigalloc_depth(b->first_child);
-			for (struct big_allocation *child = b->first_child->next_sib; child; child = child->next_sib)
+			unsigned first_child_depth = bigalloc_depth(BIDX(b->first_child));
+			for (struct big_allocation *child = BIDX(BIDX(b->first_child)->next_sib); child; child = BIDX(child->next_sib))
 			{
 				assert(bigalloc_depth(child) == first_child_depth);
 				/* Also recursively sanity-check children. */
@@ -221,73 +297,7 @@ void __pageindex_init(void)
 		if (pageindex == MAP_FAILED) abort();
 		debug_printf(3, "pageindex at %p\n", pageindex);
 
-		/* For now, make our heap region quite large, but not so large that
-		 * we wouldn't want it in our pageindex. FIXME: We want to downscale
-		 * this by defining *two* private mallocs: one for stuff that is
-		 * O(nbigallocs) and one for stuff that is O(usedmem). The theory
-		 * is that only the nbigallocs one needs to have a 'no-mmap' property. */
-		size_t heapsz = 1*1024*1024*1024ul;
-		/* 1GB is 256K pages, or 512kB of shorts in the pageindex. It's still too
-		 * much, but fine for now. */
-		int prot = PROT_READ|PROT_WRITE;
-		int flags = MAP_ANONYMOUS|MAP_NORESERVE|MAP_PRIVATE;
-		__private_malloc_heap_base = mmap(NULL, heapsz, prot, flags, -1, 0);
-	mmap_return_site:
-		if (MMAP_RETURN_IS_ERROR(__private_malloc_heap_base)) abort();
-		__private_malloc_heap_limit = (void*)((uintptr_t) __private_malloc_heap_base
-			+ heapsz);
-		/* It's just a mapping sequence, init. */
-		static struct mapping_sequence seq;
-		seq = (struct mapping_sequence) {
-			.begin = __private_malloc_heap_base,
-			.end =  __private_malloc_heap_limit,
-			.filename = NULL,
-			.nused = 1,
-			.mappings = { [0] = (struct mapping_entry) {
-				.begin = __private_malloc_heap_base,
-				.end = __private_malloc_heap_limit,
-				.prot = prot,
-				.flags = flags & ~MAP_NORESERVE,
-				.offset = 0,
-				.is_anon = 1,
-				.caller = /* &&mmap_return_site */ 0
-			} }
-		};
-		struct big_allocation *b = __add_mapping_sequence_bigalloc_nocopy(&seq);
-		/* What about the bitmap? 1GB of 16B regions is 64Mbits or 8Mbytes.
-		 * We don't want to spend that much up-front. But we don't have to!
-		 * We allocate the bitmap in our own heap, which is MAP_NORESERVE. */
-		b->suballocator = &__private_malloc_allocator;
-		size_t range_size_bytes = (uintptr_t) b->end - (uintptr_t) b->begin;
-		size_t bitmap_alloc_size_bytes = DIVIDE_ROUNDING_UP(
-			DIVIDE_ROUNDING_UP(range_size_bytes, PRIVATE_MALLOC_ALIGN),
-			8) + sizeof (struct insert);
-		/* FIXME: also want to create one of these?
-		struct arena_bitmap_info
-		{
-			unsigned long nwords;
-			bitmap_word_t *bitmap;
-			void *bitmap_base_addr;
-		};
-		*/
-		/* we use the real dlmalloc just this once, because we can't set the bit
-		 * before the bitmap is created */
-		void *__real_dlmalloc(size_t size);
-		b->suballocator_private = __real_dlmalloc(bitmap_alloc_size_bytes);
-	dlmalloc_return_site:
-		assert((uintptr_t) b->suballocator_private >= (uintptr_t) __private_malloc_heap_base);
-		assert((uintptr_t) b->suballocator_private + bitmap_alloc_size_bytes
-			< (uintptr_t) __private_malloc_heap_limit);
-		__private_malloc_set_metadata(b->suballocator_private, bitmap_alloc_size_bytes,
-			&&dlmalloc_return_site);
-		// FIXME: this is an interesting case of an unclassifiable allocation site,
-		// by our current 'dumpallocs.ml' classifier. It is sized (syntactically)
-		// in bytes but allocated (semantically) in bitmap_word_t units, and rests
-		// on the assumption that when we scale down a whole number of pages,
-		// we get some whole number of bitmap_word_ts, but we don't care about
-		// the actual number... we care only that we have one bit per
-		// PRIVATE_MALLOC_ALIGN bytes.
-
+		create_private_malloc_heap();
 	}
 }
 
@@ -351,41 +361,41 @@ static void clear_bigalloc(struct big_allocation *b)
 static void add_child(struct big_allocation *child, struct big_allocation *parent)
 {
 	SANITY_CHECK_BIGALLOC(parent);
-	assert(!child->parent);
-	child->parent = parent;
+	assert(!BIDX(child->parent));
+	child->parent = IDXB(parent);
 	/* Hook it into the new list, at the head. FIXME: keep sorted? */
-	struct big_allocation *previous_first_child = parent->first_child;
-	parent->first_child = child;
-	assert(!child->next_sib);
-	child->next_sib = previous_first_child;
-	assert(!previous_first_child || !previous_first_child->prev_sib);
-	if (previous_first_child) previous_first_child->prev_sib = child;
-	assert(!child->prev_sib);
+	struct big_allocation *previous_first_child = BIDX(parent->first_child);
+	parent->first_child = IDXB(child);
+	assert(!BIDX(child->next_sib));
+	child->next_sib = IDXB(previous_first_child);
+	assert(!previous_first_child || !BIDX(previous_first_child->prev_sib));
+	if (previous_first_child) previous_first_child->prev_sib = IDXB(child);
+	assert(!BIDX(child->prev_sib));
 	SANITY_CHECK_BIGALLOC(child);
 	SANITY_CHECK_BIGALLOC(parent);
 }
 
 static void unlink_child(struct big_allocation *child)
 {
-	struct big_allocation *parent = child->parent;
+	struct big_allocation *parent = BIDX(child->parent);
 	if (!parent) abort();
 	SANITY_CHECK_BIGALLOC(child);
 	SANITY_CHECK_BIGALLOC(parent);
 	/* Unhook it from its current list. */
-	if (child == parent->first_child)
+	if (child == BIDX(parent->first_child))
 	{
 		parent->first_child = child->next_sib;
-		assert(!child->prev_sib);
+		assert(!BIDX(child->prev_sib));
 	}
 	else
 	{
-		assert(child->prev_sib);
+		assert(BIDX(child->prev_sib));
 	}
-	if (child->prev_sib) child->prev_sib->next_sib = child->next_sib;
-	if (child->next_sib) child->next_sib->prev_sib = child->prev_sib;
-	child->prev_sib = NULL;
-	child->next_sib = NULL;
-	child->parent = NULL;
+	if (BIDX(child->prev_sib)) BIDX(child->prev_sib)->next_sib = child->next_sib;
+	if (BIDX(child->next_sib)) BIDX(child->next_sib)->prev_sib = child->prev_sib;
+	child->prev_sib = 0;
+	child->next_sib = 0;
+	child->parent = 0;
 	SANITY_CHECK_BIGALLOC(parent);
 }
 #define PAGE_DIST(first, second) \
@@ -395,16 +405,18 @@ static void unlink_child(struct big_allocation *child)
 	: 0 )
 
 static struct big_allocation *find_deepest_bigalloc(const void *addr);
+static void add_toplevel(struct big_allocation *b);
+static void unlink_toplevel(struct big_allocation *b);
 
 static void bigalloc_del(struct big_allocation *b)
 {
 	SANITY_CHECK_BIGALLOC(b);
 	
 	/* Recursively delete all children. */
-	struct big_allocation *child = b->first_child;
+	struct big_allocation *child = BIDX(b->first_child);
 	while (child)
 	{
-		struct big_allocation *next_child = child->next_sib;
+		struct big_allocation *next_child = BIDX(child->next_sib);
 		bigalloc_del(child);
 		child = next_child;
 	}
@@ -415,12 +427,13 @@ static void bigalloc_del(struct big_allocation *b)
 		b->allocator_private_free(b->allocator_private);
 	}
 	if (b->suballocator_private_free) b->suballocator_private_free(b->suballocator_private);
-	struct big_allocation *parent = b->parent;
+	struct big_allocation *parent = BIDX(b->parent);
 	if (parent) unlink_child(b);
+	else unlink_toplevel(b);
 	
 	SANITY_CHECK_BIGALLOC(b);
 	
-	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
+	bigalloc_num_t parent_num = IDXB(parent);
 	void *begin_to_clear = b->begin;
 	void *end_to_clear = b->end;
 	memset_bigalloc(
@@ -429,7 +442,7 @@ static void bigalloc_del(struct big_allocation *b)
 		/* If our recursive deletion worked,
 		 * then surely in all these positions the pageindex
 		 * should have our number? */
-		b - &big_allocations[0], 
+		IDXB(b),
 		PAGE_DIST(ROUND_UP((unsigned long) begin_to_clear, PAGE_SIZE),
 		          ROUND_DOWN((unsigned long) end_to_clear, PAGE_SIZE))
 	);
@@ -461,7 +474,7 @@ void __liballocs_print_l0_to_stream_err(void)
 	if (!pageindex) __pageindex_init();
 	for (struct big_allocation *b = &big_allocations[1]; b < &big_allocations[NBIGALLOCS]; ++b)
 	{
-		if (BIGALLOC_IN_USE(b) && !b->parent) fprintf(get_stream_err(), "%p-%p %s %p\n",
+		if (BIGALLOC_IN_USE(b) && !BIDX(b->parent)) fprintf(get_stream_err(), "%p-%p %s %p\n",
 				b->begin, b->end, b->allocated_by->name, 
 				b->allocator_private
 		);
@@ -610,11 +623,18 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 	b->suballocator = suballocator;
 	b->suballocator_private = suballocator_private;
 	b->suballocator_private_free = suballocator_private_free;
-	b->first_child = b->next_sib = b->prev_sib = NULL;
+	b->first_child = b->next_sib = b->prev_sib = 0;
+	/* How to populate the df fields?
+	 * Maybe we don't need them after all. Instead we 'simply' use the
+	 * next_sib and prev_sib fields in a different manner. There should
+	 * be a position in the list where next_sib has 'begin' >= our end or null, and
+	 *                                 prev_sib has 'end' <= our begin or null.
+	 */
 	/* Add it to the child list of the parent, if we have one. */
-	if (parent) 
+	if (parent)
 	{
 		add_child(b, parent);
+		assert(b->parent);
 		/* Check that the parent thinks that this allocator is its suballocator. 
 		 * EXCEPTION: the executable's data segment also contains the sbrk area.
 		 * EXCEPTION: the auxv allocator also "contains" (logically) the stack.
@@ -626,9 +646,10 @@ static void bigalloc_init_nomemset(struct big_allocation *b, const void *ptr, si
 		// 		 && parent->suballocator == &__default_lib_malloc_allocator)
 		// 	// && parent != auxv_bigalloc
 		// ) abort();
-	}
+	} else add_toplevel(b);
 	
 	SANITY_CHECK_BIGALLOC(b);
+	if (!b->parent) sanity_check_bigallocs_toplevel();
 }
 
 static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size, struct big_allocation *parent, 
@@ -639,15 +660,68 @@ static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size
 		allocated_by, suballocator,
 		suballocator_private, suballocator_private_free);
 
-	bigalloc_num_t parent_num = parent ? parent - &big_allocations[0] : 0;
+	bigalloc_num_t parent_num = IDXB(parent);
 	/* For each page that this alloc newly spans, memset it in the page index. */
 	memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) b->begin, PAGE_SIZE)),
-		b - &big_allocations[0], parent_num, 
+		IDXB(b), parent_num,
 			PAGE_DIST(ROUND_UP((unsigned long) b->begin, PAGE_SIZE),
 				      ROUND_DOWN((unsigned long) b->end, PAGE_SIZE))
 	);
-	
 	SANITY_CHECK_BIGALLOC(b);
+}
+
+#define START __liballocs_private_malloc_bigalloc
+#define search_xwards_until_p(dir, p) \
+    prev = NULL; \
+	for (cur = START; \
+			cur && !(p); \
+			prev = cur, cur = BIDX(cur->dir ## _sib));
+static uint16_t find_toplevel_lowest_ge(void *addr)
+{
+	/* To do this search, we start by searching forwards from our arbitrary start point,
+	 * looking for something spanning an address >= addr       i.e. its 'end-1' >= addr
+	 * If the result is not our start point, then we have our answer.
+	 * If the result is our start point, we have found *something*
+	 * but it might not be the lowest.
+	 * So search backwards for the highest spanning any address < addr   i.e. its 'begin' is < addr
+	 * and return its successor (possibly null). */
+#define cond (((uintptr_t) cur->end-1) >= (uintptr_t) addr)
+	struct big_allocation *cur, *prev = NULL;
+	search_xwards_until_p(next, cond);
+	if (cur && cur != START) return IDXB(cur);
+	if (!cur) return 0; // nothing from START onwards is ge addr, so nothing is
+	search_xwards_until_p(prev, !cond);
+	assert(cur != START);
+	assert(prev);
+	return IDXB(prev); // might equal START
+#undef cond
+}
+static uint16_t find_toplevel_highest_lt(void *addr)
+{
+#define cond (((uintptr_t) cur->begin) < (uintptr_t) addr)
+	struct big_allocation *cur, *prev = NULL;
+	search_xwards_until_p(prev, cond);
+	if (cur && cur != START) return IDXB(cur);
+	if (!cur) return 0; // nothing from START backwards is lt addr, so nothing is
+	search_xwards_until_p(next, !cond);
+	struct big_allocation *b;
+	assert(cur != START);
+	assert(prev);
+	return IDXB(prev); // might equal START
+#undef cond
+}
+static void add_toplevel(struct big_allocation *b)
+{
+	b->next_sib = find_toplevel_lowest_ge(b->end);
+	/* Don't repeat the search if we don't need to. */
+	b->prev_sib = b->next_sib ? BIDX(b->next_sib)->prev_sib : find_toplevel_highest_lt(b->begin);
+	if (b->prev_sib) BIDX(b->prev_sib)->next_sib = IDXB(b);
+	if (b->next_sib) BIDX(b->next_sib)->prev_sib = IDXB(b);
+}
+static void unlink_toplevel(struct big_allocation *b)
+{
+	if (b->prev_sib) BIDX(b->prev_sib)->next_sib = b->next_sib;
+	if (b->next_sib) BIDX(b->next_sib)->prev_sib = b->prev_sib;
 }
 
 __attribute__((visibility("protected")))
@@ -658,11 +732,11 @@ _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end)
 	BIG_LOCK
 	const void *old_end = b->end;
 	b->end = (void*) new_end;
-	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+	bigalloc_num_t parent_num = BIDX(b->parent) ? b->parent : 0;
 	
 	/* For each page that this alloc spans, memset it in the page index. */
 	memset_bigalloc(pageindex + PAGENUM(ROUND_DOWN((unsigned long) old_end, PAGE_SIZE)),
-		b - &big_allocations[0], parent_num,
+		IDXB(b), parent_num,
 			PAGE_DIST(ROUND_DOWN((unsigned long) old_end, PAGE_SIZE),
 			          ROUND_DOWN((unsigned long) new_end, PAGE_SIZE))
 	);
@@ -676,14 +750,14 @@ _Bool __liballocs_extend_bigalloc(struct big_allocation *b, const void *new_end)
 static _Bool is_one_or_more_levels_under(bigalloc_num_t maybe_lower_n, struct big_allocation *b)
 {
 	/* Equality means the answer is false. */
-	if (maybe_lower_n == b - &big_allocations[0]) return 0;
+	if (maybe_lower_n == IDXB(b)) return 0;
 	
 	/* Search b's children for bigalloc number maybe_lower_n. Be breadth-first. */
-	for (struct big_allocation *child = b->first_child; child; child = child->next_sib)
+	for (struct big_allocation *child = BIDX(b->first_child); child; child = BIDX(child->next_sib))
 	{
-		if (child - &big_allocations[0] == maybe_lower_n) return 1;
+		if (IDXB(child) == maybe_lower_n) return 1;
 	}
-	for (struct big_allocation *child = b->first_child; child; child = child->next_sib)
+	for (struct big_allocation *child = BIDX(b->first_child); child; child = BIDX(child->next_sib))
 	{
 		_Bool rec = is_one_or_more_levels_under(maybe_lower_n, child);
 		if (rec) return 1;
@@ -695,9 +769,9 @@ __attribute__((visibility("protected")))
 _Bool __liballocs_pre_extend_bigalloc_recursive(struct big_allocation *b, const void *new_begin)
 {
 	_Bool ret;
-	if (b->parent) ret = __liballocs_pre_extend_bigalloc_recursive(b->parent,
-		b->parent->allocated_by->min_alignment ?
-			(ROUND_DOWN_PTR(new_begin, b->parent->allocated_by->min_alignment))
+	if (BIDX(b->parent)) ret = __liballocs_pre_extend_bigalloc_recursive(BIDX(b->parent),
+		BIDX(b->parent)->allocated_by->min_alignment ?
+			(ROUND_DOWN_PTR(new_begin, BIDX(b->parent)->allocated_by->min_alignment))
 		: new_begin);
 	else ret = 1;
 	if (ret) ret = __liballocs_pre_extend_bigalloc(b, new_begin);
@@ -715,11 +789,11 @@ _Bool __liballocs_pre_extend_bigalloc(struct big_allocation *b, const void *new_
 	if ((char*) new_begin < (char*) old_begin)
 	{
 		b->begin = (void*) new_begin;
-		bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+		bigalloc_num_t parent_num = b->parent;
 
 		/* For each page that this alloc spans, memset it in the page index. */
 		memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) new_begin, PAGE_SIZE)),
-			b - &big_allocations[0], parent_num,
+			IDXB(b), parent_num,
 				PAGE_DIST(ROUND_UP((unsigned long) new_begin, PAGE_SIZE),
 			              /* GAH. Two cases: either we now cover the whole page that contains
 			               * old_begin (e.g. if b->end is on the *next* page or later), or
@@ -763,11 +837,11 @@ static _Bool bigalloc_truncate_at_end(struct big_allocation *b, const void *new_
 {
 	const void *old_end = b->end;
 	b->end = (void*) new_end;
-	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+	bigalloc_num_t parent_num = b->parent;
 	
 	/* For each page that this alloc no longer spans, memset it back to the parent num. */
 	memset_bigalloc(pageindex + PAGENUM(ROUND_DOWN((unsigned long) new_end, PAGE_SIZE)),
-		parent_num, b - &big_allocations[0], 
+		parent_num, IDXB(b),
 			PAGE_DIST(ROUND_DOWN((unsigned long) new_end, PAGE_SIZE),
 			          ROUND_DOWN((unsigned long) old_end, PAGE_SIZE))
 	);
@@ -797,11 +871,11 @@ _Bool __liballocs_truncate_bigalloc_at_beginning(struct big_allocation *b, const
 	BIG_LOCK
 	const void *old_begin = b->begin;
 	b->begin = (void*) new_begin;
-	bigalloc_num_t parent_num = b->parent ? b->parent - &big_allocations[0] : 0;
+	bigalloc_num_t parent_num = b->parent;
 	
 	/* For each page that this alloc no longer spans, memset it in the page index. */
 	memset_bigalloc(pageindex + PAGENUM(ROUND_UP((unsigned long) old_begin, PAGE_SIZE)),
-		parent_num, b - &big_allocations[0], 
+		parent_num, IDXB(b),
 			PAGE_DIST(ROUND_UP((unsigned long) old_begin, PAGE_SIZE),
 			          ROUND_UP((unsigned long) new_begin, PAGE_SIZE))
 	);
@@ -823,7 +897,7 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 	struct big_allocation *new_bigalloc = find_free_bigalloc();
 	if (!new_bigalloc) abort();
 	bigalloc_init_nomemset(new_bigalloc, 
-		split_addr, (char*) tmp.end - (char*) split_addr, tmp.parent,
+		split_addr, (char*) tmp.end - (char*) split_addr, BIDX(tmp.parent),
 		tmp.allocator_private, tmp.allocator_private_free, tmp.allocated_by,
 		tmp.suballocator, tmp.suballocator_private, tmp.suballocator_private_free);
 	/* Danger: the new bigalloc now have the *same* metadata as the old one. 
@@ -831,7 +905,7 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 	
 	/* We avoid memset because the old (before-the-split) allocation's children 
 	 * might have taken over this elements in the index. Deal with children now. */
-	struct big_allocation *child = b->first_child;
+	struct big_allocation *child = BIDX(b->first_child);
 	while (child)
 	{
 		_Bool within_first_half = 
@@ -842,7 +916,7 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 				&& (char*) child->end <= (char*) b->end;
 		assert(!(within_first_half && within_second_half));
 		
-		struct big_allocation *next_in_original_list = child->next_sib;
+		struct big_allocation *next_in_original_list = BIDX(child->next_sib);
 		
 		if (within_first_half && within_second_half) abort();
 		if (within_second_half)
@@ -854,7 +928,7 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 		
 		child = next_in_original_list;
 	}
-	
+
 	/* Now we've reassigned children, just update the end. Don't memset... we'll do that
 	 * manually. */
 	b->end = (void*) split_addr;
@@ -867,7 +941,7 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 			pos < pageindex + PAGENUM(ROUND_UP((unsigned long) new_bigalloc->end, PAGE_SIZE));
 			++pos)
 	{
-		if (*pos == (b - &big_allocations[0])) *pos = (new_bigalloc - &big_allocations[0]);
+		if (*pos == IDXB(b)) *pos = IDXB(new_bigalloc);
 	}
 	SANITY_CHECK_BIGALLOC(b);
 	SANITY_CHECK_BIGALLOC(new_bigalloc);
@@ -923,16 +997,16 @@ static struct big_allocation *find_bigalloc_recursive(struct big_allocation *sta
 			}
 		}
 		start = &big_allocations[startnum];
-		while (start->parent) start = start->parent;
+		while (BIDX(start->parent)) start = BIDX(start->parent);
 	}
 
 	/* Is it this one? */
 	if ((match_suballocator ? start->suballocator : start->allocated_by) == a) return start;
 	
 	/* Okay, it's not this one. Is it one of the children? */
-	for (struct big_allocation *child = start->first_child;
+	for (struct big_allocation *child = BIDX(start->first_child);
 			child;
-			child = child->next_sib)
+			child = BIDX(child->next_sib))
 	{
 		if ((char*) child->begin <= (char*) addr && 
 				child->end > addr)
@@ -967,9 +1041,9 @@ static struct big_allocation *find_deepest_bigalloc_recursive(struct big_allocat
 	const void *addr)
 {
 	/* Is it one of the children? */
-	for (struct big_allocation *child = start->first_child;
+	for (struct big_allocation *child = BIDX(start->first_child);
 			child;
-			child = child->next_sib)
+			child = BIDX(child->next_sib))
 	{
 		if ((char*) child->begin <= (char*) addr && 
 				child->end > addr)
@@ -1045,7 +1119,7 @@ _Bool __liballocs_delete_all_bigallocs_overlapping_range(const void *begin, cons
 		{
 			struct big_allocation *b = &big_allocations[n];
 			assert(b->begin); if (!b->begin) abort(); if (!b->end) abort();
-			while (b->parent) b = b->parent;
+			while (BIDX(b->parent)) b = BIDX(b->parent);
 			assert((char*) b->end > (char*) deleted_up_to); if (!((char*) b->end > (char*) deleted_up_to)) abort();
 			const void *old_deleted_up_to = deleted_up_to;
 			deleted_up_to = b->end;
@@ -1132,7 +1206,7 @@ struct big_allocation *__lookup_bigalloc_top_level(const void *mem)
 		b = &big_allocations[n];
 	}
 	BIG_UNLOCK
-	while (b && b->parent) b = b->parent;
+	while (b && BIDX(b->parent)) b = BIDX(b->parent);
 	return b;
 }
 
@@ -1158,9 +1232,9 @@ static struct big_allocation *get_common_parent_bigalloc_recursive(struct big_al
 		return NULL;
 	}
 	if (depth1 > depth2) return get_common_parent_bigalloc_recursive(
-		b1->parent, depth1 - 1, b2, depth2 - 1);
+		BIDX(b1->parent), depth1 - 1, b2, depth2 - 1);
 	else return get_common_parent_bigalloc_recursive(
-		b1, depth1, b2->parent, depth2 - 1);
+		b1, depth1, BIDX(b2->parent), depth2 - 1);
 }
 
 static struct big_allocation *get_common_parent_bigalloc(const void *ptr, const void *end)

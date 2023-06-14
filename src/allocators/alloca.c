@@ -38,7 +38,7 @@ struct big_allocation *alloca_arena_for_userptr(void *userptr, struct big_alloca
 	if (b)
 	{
 		return (b->allocated_by == &__stackframe_allocator) ? b :
-				(b->allocated_by == &__alloca_allocator) ? b->parent :
+				(b->allocated_by == &__alloca_allocator) ? BIDX(b->parent) :
 				(abort(), NULL); // it's a problem
 	}
 	b = __lookup_bigalloc_from_root_by_suballocator(userptr, &__alloca_allocator, NULL);

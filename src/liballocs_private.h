@@ -127,10 +127,12 @@ void __private_free(void *);
 void __private_malloc_init(void) __attribute__((constructor(101)));
 extern void *__private_malloc_heap_base;
 extern void *__private_malloc_heap_limit;
+extern struct big_allocation *__liballocs_private_malloc_bigalloc;
 extern struct allocator __private_malloc_allocator;
 #define PRIVATE_MALLOC_ALIGN 16
 #define LOG_PRIVATE_MALLOC_ALIGN 4
 void __private_malloc_set_metadata(void *ptr, size_t size, const void *allocsite);
+struct big_allocation *create_private_malloc_heap(void);
 
 extern FILE *stream_err;
 FILE *get_stream_err(void);
