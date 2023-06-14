@@ -192,9 +192,10 @@ SYSTRAP_OBJS := systrap.o
 else
 SYSTRAP_OBJS := systrap.o
 endif
+DLMALLOC_A_OBJS := dlmalloc.o dlmalloc-ext.o
 
 # Generate deps.
-ALL_OBJS := $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(SYSTRAP_OBJS)
+ALL_OBJS := $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(SYSTRAP_OBJS) $(DLMALLOC_A_OBJS)
 # enumerate src files backwards from our .o files
 DEP_OBJS := $(ALL_OBJS)
 C_SRC := $(sort $(patsubst %.o,%.c,$(DEP_OBJS)))
