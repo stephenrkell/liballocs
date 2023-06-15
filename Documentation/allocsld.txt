@@ -1,0 +1,97 @@
+Why does liballocs have its own dynamic linker, allocsld?
+
+The short answer is "to handle a corner case of memory layout".
+
+The long answer is "conceptually, that's where all of liballocs
+belongs".
+
+To explain the corner case: it is about 'holes'. The allocation tree in
+liballocs is a tree, i.e. it assumes proper nesting. So, for example,
+the image of a shared library (a 'file') is assumed to nest properly
+within a contiguous sequence* of memory mappings, while within it, there
+are segments, and within segments there are sections and symbols, all
+properly nested.
+
+(* since these mappings are made piecemeal, constructing the
+right 'sequence' of mappings is already a matter of some delicacy!)
+
+However, conceptually a file's image in memory might not be properly
+nested, because a file's address space may be sparse i.e. contain holes.
+One could end up with something like this in memory.
+
+     higher addresses
+          ^   ...
+          |
+          
+              +-------------------------+
+              + data segment of libB.so +
+              +-------------------------+
+          
+              +-------------------------+
+              + data segment of libA.so +
+              +-------------------------+
+
+              +-------------------------+
+              | text segment of libB.so +
+              +-------------------------+
+
+              +-------------------------+
+              | text segment of libA.so +
+              +-------------------------+
+          |
+          v   ...
+     lower addresses
+     
+... because each segment is placed at its own virtual address by the ELF
+headers; the internal address space of a library (or executable) can be
+sparse.
+
+This already makes it more difficult to implement a call such as
+dladdr(), which maps an address to an object. So very sensibly, glibc
+and any other sensible dynamic linker will not create mappings like the
+above. It reserves a large contiguous area PROT_NONE, covering the whole
+extent of address space of the library, then uses mprotect() to add
+permissions appropriate for the segments. Since any internal 'hole' is
+still mapped, albeit PROT_NONE, nothing will get mapped there and proper
+nesting is maintained; files it loads will never overlap.
+
+So is there a loader that we care about that doesn't do this? Yes! It's
+the Linux kernel's ELF loader. It happily leaves a gap in the middle of
+a DSO, and subsequent mmaps can put something in there, destroying our
+proper nesting property. However, in a dynamically linked process the
+only file that the kernel is responsible for loading is the dynamic
+linker itself. (Wart: it's also responsible for loading the executable,
+although we can prevent that by running the dynamic linker as a program.)
+
+So everything is fine unless the following property holds: the dynamic
+linker has a hole in its internal virtual address space, and the Linux
+kernel mmaps something in the hole.
+
+It was a long time before I witnessed this situation but it did
+eventually happen (GitHub issue #47). The solution of allocsld is the
+following.
+
+- Ensure allocsld does not have an internal hole (we control how it is
+linked).
+
+- Binaries that are to use liballocs are only sure to work if loaded by
+allocsld. If built using our toolchain extension, we set allocsld.so as
+the requested interpreter.
+
+Of course, allocsld is implemented as a 'chain loader' which just loads
+the 'real' dynamic linker and calls it to do the work. However, it is
+responsible for mapping the real dynamic linker into memory, so it can
+do the PROT_NONE trick and ensure no hole is left.
+
+That covers the short answer. The long answer was "conceptually, that's
+where all of liballocs belongs"... there are many places where liballocs
+could be a lot simpler if it had access to the private state of the
+dynamic linker, not just its public interfaces. Implementing liballocs
+as an extended dynamic linker is probably the Right Thing, but dynamic
+linkers are complicated enough that the maintenance burden of that is
+not yet viable to take on. As a hint about why this is the conceptual
+right thing, consider that dladdr() mentioned above is essentially a
+special case of the query functionality that is the main added value of
+liballocs. dladdr() lets you query by address, but it only understands
+'static' ('file') addresses, not (say) heap or stack addresses, or those
+of any other allocator....
