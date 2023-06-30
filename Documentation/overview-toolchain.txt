@@ -40,10 +40,11 @@ using a helper script (cc `helper-flags` ...).
 Metadata is dynamically loaded by liballocs. Each loaded binary
 (executable or shared library) optionally has a 'meta-DSO' in a special
 hierarchy (by default /usr/lib/meta) mirroring the filesystem. Meta-DSOs
-can be built using For binaries built using the liballocs toolchain,
-meta-DSOs are built automatically. They can also be built post-hoc, given
-at least the binary file. The contents of the meta-DSO are somewhat
-pluggable, but include the following.
+are built using rules in liballocs/tools/Makefile.meta. For binaries
+built using the liballocs toolchain, meta-DSOs are built automatically.
+They can also be built post-hoc, given at least the binary file. The
+contents of the meta-DSO are somewhat pluggable, but include the
+following.
 
 dwarftypes -- type information from DWARF .debug_info, transcoded
 allocsites -- a table of allocation call sites and their allocated types

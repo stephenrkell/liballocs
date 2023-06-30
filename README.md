@@ -206,7 +206,12 @@ Dockerfile once you've done this. Thanks to Manuel Rigger for
 contributing the initial Ubuntu 18.04 one.
 
 Note also there are submodules at many levels in this git repo,
-including nested submodules. Please make sure you pull them all.
+including nested  submodules. Please make sure you pull them all. This
+will happen automatically if you follow one of the buildtest recipes or
+the instructions below. The following diagram 
+
+![Diagram of liballocs's depended-on subrepositories](https://raw.githubusercontent.com/stephenrkell/liballocs/b41fdc0c99411d959876594d66f6e6fc6a9b7efa/Documentation/subrepo-structure.svg)
+
 Generic download-and-build instructions for Debian platforms
 look something like the following.
 
@@ -226,9 +231,10 @@ look something like the following.
     ./configure && \
     make -j4
 
-... where you should tune "-j4" according to your needs. After
-building, you will also want to set up space to hold metadata
-files, and build the metadata for your C library binary.
+... where you should tune "-j4" according to your needs. After building,
+you will also want to set up space to hold metadata files, and build the
+metadata for your C library binary. (This is slow because libdwarf calls
+`malloc()` far, far too often.)
 
     $ cd ..
     $ export LIBALLOCS=`pwd`/liballocs
