@@ -46,7 +46,7 @@ include/uniqtype.h include/uniqtype-defs.h:
         esac; \
     done; exit 1
 
-bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types
+bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types tools/noopgen
 #tools/objdumpallocs-llvm
 
 LIBELF ?= -lelf
@@ -88,6 +88,9 @@ tools_usedtypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_pervasive_types_SOURCES = tools/pervasive-types.cpp $(HELPERS)
 tools_pervasive_types_LDADD = $(TOOLS_LDADD)
 tools_pervasive_types_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_noopgen_SOURCES = tools/noopgen.cpp $(HELPERS)
+tools_noopgen_LDADD = $(TOOLS_LDADD)
+tools_noopgen_CXXFLAGS = $(TOOLS_CXXFLAGS)
 # massive HACKs for ifacetypes
 tools_ifacetypes_CXXFLAGS = $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
