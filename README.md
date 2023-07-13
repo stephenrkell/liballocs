@@ -66,13 +66,13 @@ It does this extension mostly transparently. In particular,
 * most of the time, you don't have to change your code
     - ... or even recompile it!
     - so long as you have debugging information
-    - exception: custom allocators (alloca() and obstacks are fine)
-        + for these: annotate and relink, but usually no code changes (see Documentation/custom-allocators.md)
+    - exception: custom allocators (`alloca()` is supported via compile-time instrumentation; obstacks are WIP)
+        + for your own allocators: annotate and relink, but usually no code changes (see Documentation/custom-allocators.md)
 
 * most of the time, the slowdown is not noticeable
-    - slowdowns I've seen are mostly under 5% 
-    - ongoing work is reducing these further (see Documentation/projects.md)
-    - some code patterns do fare worse 
+    - slowdowns I've seen are mostly under 5%...
+    - ... and these could be reduced further, to near zero (see Documentation/projects.md)
+    - some code patterns do suffer worse slowdowns
         + main one: non-malloc-like custom allocators
 
 * most of the time, the memory overheads are low
@@ -86,7 +86,7 @@ they invite building higher-level abstractions in mutually opaque and
 incompatible ways (think language VMs, file formats, middlewares...). To
 avoid these, liballocs is a minimal extension of Unix-like abstractions
 broadly in the spirit of Smalltalk-style dynamism, designed to counter
-both of these problems. These provide a foundation for features such as:
+both of these problems. It provides a foundation for features such as:
 
 * run-time type checking in C, C++ and other unsafe languages
 * type-checked linking, including dynamic linking
@@ -109,7 +109,7 @@ both of these problems. These provide a foundation for features such as:
 * robust object-level copy-on-write (+ tools based on it)
 * robust shadow memory (+ tools based on it)
 * orthogonal persistence
-* image-based development
+* image-based development (Smalltalk-style or otherwise)
 * your idea here!
 
 What's novel? Although the run-time facilities of liballocs are (I
@@ -146,40 +146,40 @@ Unix's free-form byte-oriented facilities allow many higher-level
 semantic constructs to coexist (programming languages, structured data,
 network protocols and so on). Unlike Unix, liballocs also tries fairly
 hard to recognise and reconcile these duplicates after the fact. That
-requires a metasystem that is *descriptive* rather than prescriptive. By
-reconciling abstract commonality across the many concretely different
-ways in which memory can be managed, structured and interpreted, it can
-offer a platform for higher-level services which can operate correctly
-across many different such schemes -- as defined by various ABIs,
-language runtimes, libraries, coding styles or conventions.
+requires a metasystem that is *descriptive* rather than prescriptive. A
+few abstractions (allocators, 'types' as data layout descriptions, and
+interpreters) allow reconciling commonalities across many distinct
+pre-existing concretions: ways in which can be managed, data be
+organised, and meanings interpreted. These core abstractions form a
+platform for higher-level services that can be made to operate across
+multiple ABIs, language runtimes, libraries, coding styles and so on.
 
 There is both a toolchain component and a run-time component. The
-run-time is what actually offers the services, and is in this
-repository. To do so reliably, commodity toolchains must be lightly
-subverted, mostly below the level of user code -- at link time, by
-instrumentation, or by influencing compiler options); the basics of this
-are found in the [toolsub
+run-time is what actually offers the services, and is in this repository.
+For this to work reliably, compilation toolchains must be lightly
+subverted, but this mostly occurs below the level of user code -- at link
+time, by influencing compiler options, and sometimes by light
+instrumentation; the basics of this are found in the [toolsub
 repository](https://github.com/stephenrkell/toolsub/ "toolsub
-repository"), which is usable independently of liballocs. A minimal
-core, which reflects roughly at the ELF level, but does not know about
-allocators or types, is in the [librunt
+repository"), which is usable independently of liballocs. Similarly, a
+minimal core runtime, which reflects roughly at the ELF level, but does
+not know about allocators or types, is in the [librunt
 repository](https://github.com/stephenrkell/librunt/ "librunt
-repository").
+repository"), and liballocs directly extends it.
 
 You can read more about the system in a research paper
 <http://www.cl.cam.ac.uk/~srk31/#onward15> from Onward! 2015 which
-explains how liballocs generalises existing debugging infrastructure,
-the contrast with VM-style debug servers, and the Unix-style descriptive
+explains how liballocs generalises existing debugging infrastructure, the
+contrast with VM-style debug servers, and the Unix-style descriptive
 debugging which liballocs adopts and extends. The polyglot aspects of
 liballocs were discussed in my talk at Strange Loop 2014
-<http://www.youtube.com/watch?v=LwicN2u6Dro>.
+<http://www.youtube.com/watch?v=LwicN2u6Dro>. Another paper is rather
+overdue, to describe the more mature architecture that now exists.
 
 For full disclosure, here are some additional current limitations that
 will eventually go away.
 
 * works on GNU/Linux only (some FreeBSD code exists...)
-* must recompile code that calls alloca(), uses or
-   provides custom allocators, and a few other cases
 * when code does need to be recompiled, the toolchain is a bit slow
 * it is a little fragile to churn (e.g. glibc or
    Linux kernel changes can break it)
@@ -192,25 +192,25 @@ will eventually go away.
    builds usually omit.
 
 To build this software on a Debian-based GNU/Linux distribution,
-please see the buildtest/ directory. This has a number of
-Dockerfiles which do testable and (mostly) reproducible builds,
-from a bare-bones start. If you're running one of the given
-distributions, you should be able to adapt the RUN commands
-fairly easily to do your build. If you find any problems doing these
-builds ("docker build buildtest/xxx") please report them.
-
-If there is no buildtest Dockerfile for your distribution, it
-means you'll have to pick the "closest" one and then figure out
-any necessary changes for yourself. Ideally, please contribute a
+please see the .circleci/ and buildtest/ directories. The former
+shows the actively tested build recipe, and the latter has a number
+of Dockerfiles for doing testable, (mostly) reproducible builds from
+a bare-bones start on the given distributions. You should be able to
+adapt the RUN commands fairly easily to do your build. If you find
+any problems doing these builds ("docker build buildtest/xxx") please
+report them. If there is no buildtest Dockerfile for your
+distribution, pick the "closest" one but then you'll need to figure
+out any necessary changes for yourself. Ideally, please contribute a
 Dockerfile once you've done this. Thanks to Manuel Rigger for
 contributing the initial Ubuntu 18.04 one.
 
 Note also there are submodules at many levels in this git repo,
-including nested  submodules. Please make sure you pull them all. This
-will happen automatically if you follow one of the buildtest recipes or
-the instructions below. The following diagram shows the structure
-([generated by this script](https://www.humprog.org/~stephen/software/git2dot "git2dot script");
-view the SVG proper for useful mouseover labels).
+including nested  submodules. You pull naturally end up pulling them
+all if you follow one of the buildtest recipes or the instructions
+below. The following diagram shows the structure ([generated by this
+script](https://www.humprog.org/~stephen/software/git2dot "git2dot
+script"); view the SVG proper for useful mouseover labels explaining
+what each subrepo contains).
 
 ![Diagram of liballocs's depended-on subrepositories](https://raw.githubusercontent.com/stephenrkell/liballocs/b41fdc0c99411d959876594d66f6e6fc6a9b7efa/Documentation/subrepo-structure.svg)
 
