@@ -37,7 +37,7 @@ jobs:
             make -j 2
       - run:
           name: Create liballocs metadata
-          no_output_timeout: 15m
+          no_output_timeout: 25m
           command: |
             mkdir -p /usr/lib/meta
             make -f tools/Makefile.meta /usr/lib/meta`ldd /bin/true | grep 'libc.so.6' | sed -r 's/.*=> (.*) \(.*/\1/' | xargs readlink -f`-meta.so
