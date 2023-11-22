@@ -50,8 +50,8 @@ allocators/%.d allocators/%.o:: allocators
 allocators:
 	mkdir -p allocators
 
-#liballocs.so: $(srcdir)/liballocs.so
-#	cp $< $@
+liballocs.so: $(srcdir)/liballocs.so
+	cp $< $@
 
 # if we're building from a dir called "debug" or "test"...
 ifeq ($(notdir $(realpath .)),test)
@@ -67,17 +67,18 @@ endif
 default: all # autotools likes an 'all' target (I think)
 
 # What binaries do we build?
-TARGETS += liballocs_preload.a     # the library in archive form, for extending libraries to link in (libcrunch)
-TARGETS += liballocs_preload.a.pubsyms # we use this to build the noop/ifunc stuff
-TARGETS += liballocs_preload.so    # the current main binary (FIXME: eliminate)
-TARGETS += liballocs.so            # the IFUNC-enabled multi-purpose binary that will replace liballocs_preload.so
-TARGETS += liballocs.a             # the main binary usable for statically-linked client exes -- no uniqueness problem (FIXME: eliminate in favour of loader? how do we allow undefs? make the .a file a linker script that turns on allowing undefs? or defines as zero but emits relocs, so our loader can rebind later? static ifuncs are supported by glibc, so just including noops is an option)
-TARGETS += liballocs_dummyweaks.so # FIXME: eliminate: non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
-TARGETS += liballocs_dummyweaks.o  # FIXME: eliminate: non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
+TARGETS += liballocs_preload.so    # the main binary
+TARGETS += liballocs_preload.a     # in archive form, for extending libraries to link in (libcrunch)
+TARGETS += liballocs.so            # nasty linker script for clients, working around uniqueness problem
+                                   # FIXME: this has little reason to exist, although could perhaps
+                                   # be repurposed as futzing with ld.so->allocsld.so (etc) if sane
+TARGETS += liballocs.a             # the main binary usable for statically-linked client exes -- no uniqueness problem
+TARGETS += liballocs_dummyweaks.so # non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
+TARGETS += liballocs_dummyweaks.o  # non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
                                    # (what do client solibs get? easiest is just to treat them like exes, modulo non-overrideyness)
 
 # Keep a list of all the linked binaries we produce
-SOLIB_TARGETS := $(filter %.so,$(TARGETS))
+SOLIB_TARGETS := $(filter-out liballocs.so,$(filter %.so,$(TARGETS)))
 #$(info SOLIB_TARGETS is $(SOLIB_TARGETS))
 
 .PHONY: all
@@ -122,7 +123,7 @@ LDFLAGS += -fuse-ld=gold
 # undefineds that were bound to it. That bug has been reported (#24286) and
 # I've removed the protected undefineds (which came from libmallochooks
 # template code). So we are still committed to using gold to link liballocs
-# owing to binutils issue 13600.
+# owing to binutils issue 13600 is fixed.
 
 # FIXME: if/when LTO is fixed, we can revert to using ld -r
 # to create __next_hook_* aliases when composing malloc wrappers. For now we
@@ -175,8 +176,7 @@ NOPRELOAD_OBJS := #uniqtypes.o # never link this into a preload lib! nor include
  # recall that liballocs.a is only for static-linked client binaries (exe or solib).
  # What should liballocs.a include? E.g. does a client static-linked exe need this
  # if it defines its own malloc?
-PRELOAD_OBJS := preload.o user2hook.o ifunc.o
-ifunc.o: CFLAGS += -DLIBALLOCS_SONAME='"liballocs_preload.so"'
+PRELOAD_OBJS := preload.o user2hook.o
 ifneq ($(TEST),)
 # We have a noop version of the systrap object, which
 # used to be linked into liballocs_test.so because
@@ -253,7 +253,7 @@ liballocs_preload.so: LDFLAGS += $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
 liballocs_preload.so: private-malloc-wrapped.lds
 liballocs_preload.so: LDFLAGS += -Wl,-Map,liballocs_preload.so.map
 liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a
-liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a
+liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 # also set the dependencies, for make purposes
 liballocs_preload.so: $(LIBDLBIND)/lib/libdlbind.a $(LIBSYSTRAP)/lib/libsystrap.a # anything that goes in ldlibs should be a dependency
 
@@ -284,50 +284,21 @@ RUNT_LDFLAGS := -Wl,--wrap,__runt_files_notify_load \
 # ... though with a behaviour that makes no sense: librunt still calls itself rather
 # than its wrapper __static_file_allocator notify_load.
 RUNT_LDLIBS := -Wl,--whole-archive $(LIBRUNT)/lib/librunt_preload.a -Wl,--no-whole-archive
-liballocs_preload.so liballocs.so: LDFLAGS += $(RUNT_LDFLAGS) -Wl,-O0
-liballocs_preload.so liballocs.so: LDLIBS += $(RUNT_LDLIBS)
+liballocs_preload.so: LDFLAGS += $(RUNT_LDFLAGS) -Wl,-O0
+liballocs_preload.so: LDLIBS += $(RUNT_LDLIBS)
 # dependency for make
-liballocs_preload.so liballocs.so: $(LIBRUNT)/lib/librunt_preload.a
+liballocs_preload.so: $(LIBRUNT)/lib/librunt_preload.a
 
 # liballocs_preload.so build rule is funky because dlmalloc.a is in LDFLAGS.
 # It needs to be there because it goes inside --whole-archive (and these options
-# are not files, so can't be prerequisites expanded by $+).
-comma := ,
+# are not files, so can't be prerequisites expanded by $+)
 liballocs_preload.so: $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
-	$(CC) $(CFLAGS) -shared \
-	 -o "$@" $(filter-out $(LDLIBS) dlmalloc.a,$+) \
-	 $(LDFLAGS) $(LDLIBS) \
-	 -Wl,--exclude-libs="$(EXCLUDE_LIBS)"
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out $(LDLIBS) dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS) -Wl,--exclude-libs="$(EXCLUDE_LIBS)"
 
 %.a:
 	$(AR) r "$@" $+
 liballocs_preload.a: $(LIBALLOCS_PRELOAD_A_OBJS)
 liballocs.a: $(LIBALLOCS_A_OBJS)
-
-%.pubsyms: %
-	$(SRCROOT)/tools/pubsyms.sh $< > $@ || (rm -f $@; false)
-# Now to build liballocs.so we need to objcopy-prefix liballocs_preload.a
-# and then combine with the noopgen output (also prefixed)
-SHELL := /bin/bash
-liballocs_preload_prefixed.a: liballocs_preload.a liballocs_preload.so.pubsyms
-	objcopy --redefine-syms=<( cut -f6 $(filter %.pubsyms,$+) | while read line; do echo "$$line" __yesop_"$$line" ; done ) $< $@
-NOOPGEN ?= $(SRCROOT)/tools/noopgen
-IFUNCGEN ?= $(SRCROOT)/tools/ifuncgen
-# noopgen and ifuncgen don't want a single file
-liballocs_preload_noop.cc: liballocs_preload.so liballocs_preload.so.pubsyms
-	$(NOOPGEN) $< < $<.pubsyms > $@ || (rm -f $@; false)
-liballocs_preload_noop_prefixed.o: liballocs_preload_noop.o liballocs_preload.so.pubsyms
-	objcopy --redefine-syms=<( cut -f6 $(filter %.pubsyms,$+) | while read line; do echo "$$line" __noop_"$$line" ; done ) $< $@
-liballocs_preload_ifunc.cc: liballocs_preload.so liballocs_preload.so.pubsyms
-	$(IFUNCGEN) $< < $<.pubsyms > $@ || (rm -f $@; false)
-%.o: %.cc
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ -include <(/bin/echo -e 'bool check_head_preload_position(void);') $<
-# BEWARE link order: We need the prefixed archive to go after the ifuncs, to ensure pull-in from the archive
-liballocs.so: liballocs_preload_prefixed.a liballocs_preload_noop_prefixed.o liballocs_preload_ifunc.o dlmalloc.a
-	$(CC) -shared \
-	 -o "$@" $(filter-out $(LDLIBS) dlmalloc.a,$+) \
-	 $(LDFLAGS) $(LDLIBS) \
-	 -Wl,--exclude-libs="$(EXCLUDE_LIBS)"
 
 ifeq ($(USE_FAKE_LIBUNWIND),)
 FAKE_LIBUNWIND_OBJ :=
@@ -351,7 +322,7 @@ endif
 # HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option
 # or if we could statically link-in our stubs without making them non-overridable.
 # Perhaps the custom ld.so will make this feasible.
-liballocs_dummyweaks.o: dummyweaks.o ifunc.o
+liballocs_dummyweaks.o: dummyweaks.o
 	$(LD) -r -o "$@" $+
 # Because our dummyweaks also includes private_strdup, it brings in a whole private malloc.
 # FIXME: it shouldn't. But unclear how else to satisfy the dependency on __private_strdup
@@ -359,7 +330,7 @@ liballocs_dummyweaks.o: dummyweaks.o ifunc.o
 vpath %.o $(LIBRUNT)/lib
 liballocs_dummyweaks.so: private-malloc-plain.lds
 liballocs_dummyweaks.so: LDLIBS += $(PRIVATE_MALLOC_LDLIBS)
-liballocs_dummyweaks.so: dummyweaks.o ifunc.o librunt_dummyweaks.o
+liballocs_dummyweaks.so: dummyweaks.o librunt_dummyweaks.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)  -Wl,--exclude-libs="$(EXCLUDE_LIBS)"
 
 # Instead of a nomemtable build (for Valgrinding)
@@ -368,9 +339,10 @@ liballocs_dummyweaks.so: dummyweaks.o ifunc.o librunt_dummyweaks.o
 # and we handle the fault in our fault handler (Valgrind
 # does honour user-supplied segfault handlers, apparently)
 
+# liballocs.so is a linker script, so don't remove it
 .PHONY: clean
 clean: 
-	rm -f *.o */*.o *.so *.d */*.d *.a *_fast.c
+	rm -f *.o */*.o $(filter-out liballocs.so,$(wildcard *.so)) *.d */*.d *.a *_fast.c
 	rm -r allocators
 
 .PHONY: install
