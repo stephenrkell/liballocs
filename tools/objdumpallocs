@@ -135,5 +135,5 @@ escaped_meta_instr_regexp="$( echo "$meta_instr_regexp" | sed 's/\\/\\\\/g' )"
 #echo rm -f "$oldstyle_tmpfile" "$gawk_tmpfile"
 
 get_objdump | "$(dirname "$0")"/objdumpmeta.awk \
-   -vdebug=1 -vmeta_instr_regexp_cmdline="$escaped_meta_instr_regexp" | \
+   -vdebug=0 -vmeta_instr_regexp_cmdline="$escaped_meta_instr_regexp" | \
    LANG=C sort -s -t$'\t' -k5 -k6 | format_output
