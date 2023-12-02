@@ -902,7 +902,7 @@ int main(int argc, char **argv)
 			for (auto i_by_off = by_off.begin(); i_by_off != by_off.end(); ++i_by_off)
 			{
 				auto el_type = i_by_off->second->find_type();
-				auto name_pair = initial_key_for_type(el_type);
+				auto name_pair = codeful_name(el_type);
 				string mangled_name = mangle_typename(name_pair);
 				if (names_emitted.find(mangled_name) == names_emitted.end())
 				{
@@ -1003,7 +1003,7 @@ int main(int argc, char **argv)
 				}
 				// FIXME: also want to report holes at the start or end of the frame
 
-				string mangled_name = mangle_typename(initial_key_for_type(el_type));
+				string mangled_name = mangle_typename(codeful_name(el_type));
 				write_uniqtype_related_contained_member_type(cout,
 					/* is_first */ i_by_off == i_frame_int->second.begin(),
 					offset_after_fixup,

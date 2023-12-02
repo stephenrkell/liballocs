@@ -72,10 +72,10 @@ using dwarf::lib::Dwarf_Unsigned;
 
 using namespace allocs::tool;
 
-static set<uniqued_name>
+static set<codeful_name>
 get_names_depended_on(vector<allocsite>::const_iterator begin, vector<allocsite>::const_iterator end)
 {
-	set<uniqued_name> retval;
+	set<codeful_name> retval;
 	for (auto i_a = begin; i_a != end; ++i_a)
 	{
 		auto& initial_t = i_a->found_type;
@@ -102,7 +102,7 @@ get_names_depended_on(vector<allocsite>::const_iterator begin, vector<allocsite>
 			}
 			if (t && t != t->get_concrete_type()) return true; // don't add anything, but keep going
 			// we need this one
-			auto p = retval.insert(initial_key_for_type(t));
+			auto p = retval.insert(codeful_name(t));
 			if (!p.second) return false; // we've already added it; stop now
 			return true; // keep going
 		});
@@ -153,7 +153,7 @@ int main(int argc, char **argv)
 	 * anything that an emitted type might reference.
 	 * This can include things we created, and things we didn't.
 	 *  */
-	set<uniqued_name> dependencies = get_names_depended_on(allocsites->begin(), allocsites->end());
+	set<codeful_name> dependencies = get_names_depended_on(allocsites->begin(), allocsites->end());
 	for (auto i_n = dependencies.begin(); i_n != dependencies.end(); ++i_n)
 	{
 		emit_extern_declaration(cout, *i_n, false);

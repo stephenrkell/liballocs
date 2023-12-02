@@ -72,7 +72,7 @@ struct sym_or_reloc_rec_to_generate
 	sym_or_reloc_kind k;
 	sticky_root_die::static_descr::kind priority_k;
 	unsigned idx_in_per_kind_table;
-	opt<uniqued_name> maybe_uniqtype;
+	opt<codeful_name> maybe_uniqtype;
 	std::string extra_comment;
 };
 std::map< Dwarf_Addr, sym_or_reloc_rec_to_generate > generate_recs(sticky_root_die& root);
@@ -106,7 +106,7 @@ int main(int argc, char **argv)
 	= root.get_statics();
 	
 	/* For each uniqtype, extern-declare it as weak. */
-	set< pair<string, string> > seen_codeful_type_names;
+	set< codeful_name > seen_codeful_type_names;
 	for (auto i_int = statics.begin(); i_int != statics.end(); ++i_int)
 	{
 		for (auto i_descr = i_int->second.begin(); i_descr != i_int->second.end(); ++i_descr)
@@ -114,7 +114,7 @@ int main(int argc, char **argv)
 			if (i_descr->k == sticky_root_die::static_descr::DWARF)
 			{
 				seen_codeful_type_names.insert(
-					initial_key_for_type(i_descr->get_d().is_a<type_die>() ?
+					codeful_name(i_descr->get_d().is_a<type_die>() ?
 						i_descr->get_d().as_a<type_die>() :
 						i_descr->get_d().as_a<variable_die>()->find_type()
 					)
@@ -359,7 +359,7 @@ add_sane_reloc_intervals(
 				/* kind */ REC_RELOC,
 				/* static_descr kind */ sticky_root_die::static_descr::REL,
 				/* idx_in_per_kind_table */ i_tuple->first.first /* the index in the linearised collection of reloc-record-containing sections */,
-				/* maybe_uniqtype */ opt<uniqued_name>(),
+				/* maybe_uniqtype */ opt<codeful_name>(),
 				/* extra comment */ i_tuple->first.second
 			};
 			recs.insert(make_pair(i_tuple->second.first, /* the addr/end pair is the itself second thing in a pair */
@@ -391,8 +391,8 @@ generate_recs(sticky_root_die& root)
 				/* priority kind */ summary.descr_priority_k,
 				/* idx_in_per_kind_table */ extrasym_idx,
 				/* maybe_uniqtype */ i_static->second.get_type() ?
-					opt<uniqued_name>(initial_key_for_type(summary.t))
-					: opt<uniqued_name>(),
+					opt<codeful_name>(codeful_name(summary.t))
+					: opt<codeful_name>(),
 				/* extra_comment */ string("")
 			};
 			recs.insert(make_pair(/* vaddr */ i_static->first.lower(), rec));
@@ -411,8 +411,8 @@ generate_recs(sticky_root_die& root)
 				/* priority kind */ summary.descr_priority_k,
 				/* idx_in_per_kind_table */ *summary.maybe_idx,
 				/* maybe_uniqtype */  i_static->second.get_type() ?
-					opt<uniqued_name>(initial_key_for_type(i_static->second.get_type()))
-					: opt<uniqued_name>(),
+					opt<codeful_name>(codeful_name(i_static->second.get_type()))
+					: opt<codeful_name>(),
 				/* extra_comment */ string("")
 			};
 			recs.insert(make_pair(/* vaddr */ i_static->first.lower(), rec));

@@ -77,7 +77,7 @@ int main(int argc, char **argv)
 	// extern-declare the uniqtypes as weak! we might still want typeless alloc site info
 	for (auto i_a = allocsites.begin(); i_a != allocsites.end(); ++i_a)
 	{
-		emit_extern_declaration(cout, initial_key_for_type(i_a->found_type), true);
+		emit_extern_declaration(cout, codeful_name(i_a->found_type), true);
 	}
 	cout << "struct allocsite_entry allocsites[] = {" << endl;
 	for (auto i_a = allocsites.begin(); i_a != allocsites.end(); ++i_a)
@@ -87,7 +87,7 @@ int main(int argc, char **argv)
 		cout << "\n\t/* allocsite info for " << i_a->objname << "+"
 			<< std::hex << "0x" << i_a->file_addr << std::dec << " */";
 		cout << "\n\t{ 0x" << std::hex << i_a->file_addr << std::dec << "UL, "
-			<< "&" << mangle_typename(initial_key_for_type(i_a->found_type));
+			<< "&" << mangle_typename(codeful_name(i_a->found_type));
 		cout << " }";
 	}
 	// close the list

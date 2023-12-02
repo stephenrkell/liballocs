@@ -102,7 +102,7 @@ int main(int argc, char **argv)
 	// be better. Our old hand-written version also had only one related[] entry,
 	// and used __liballocs_make_precise_identity as the make_precise, but
 	// I'm not sure why
-	uniqued_name n = initial_key_for_type(generic_pointer_t);
+	codeful_name n(generic_pointer_t);
 	n.second = "__EXISTS1___PTR__1";
 	pervasives_master_relation[n] = generic_pointer_t;
 
