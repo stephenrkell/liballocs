@@ -1,0 +1,90 @@
+Liballocs conceptually divides the allocation tree into "big"
+allocations nearer the top, and "non-big" allocations at the
+leaves. A special data structure -- the bigallocs table, combined
+with the pageindex -- records details of all existing big
+allocations.
+
+The idea here is to (1) optimise handling of queries that want to
+hit the leaves, e.g. type information for program variables, (2)
+represent allocation nesting in a uniform but flexible way, and (3)
+keep liballocs mostly out of the allocation path in the case of
+"small" allocations, which are inherently more frquent than big
+allocations.
+
+Liballocs assumes that allocations are properly nested. This is
+typically true, but requires a bit of manoeuvring in the case of
+memory mappings: the unit of allocation by the mmap allocator is a
+"mapping sequence" not a single mapping, so that multiple
+contiguous mappings make up a bigger allocation that can then be
+nested within without regard for the internal boundary between
+originally mmap'd pieces.
+
+Since allocations form a tree, allocations generally higher up the
+tree are "big". This means they appear in the "big allocations"
+table.
+
+Traditionally, there has been an invariant that bigallocness ends
+roughly where type information begins. More precisely: if an
+allocation has a uniqtype, then it may or may not be a big
+allocation, but there will be no nested allocations under it.
+"Type information is at the leaves."
+
+It's likely that the design will have to be relaxed so that
+allocations can also nest underneath the uniqtype level. See GitHub
+issues #53, #82. The necesary design change seems to be to
+recognise that uniqtypes are themselves a kind of allocator.
+
+Despite their name, there is no minimum size for a bigalloc.
+
+One example of a bigalloc is a memory mapping sequence.  Another is
+a data segment, or maybe a section within that segment. In these
+cases, the allocation itself has no type information, but type
+information begins at the next level down.
+
+Another is a big malloc chunk that is being used for a nested
+allocator. A custom allocator might get hold of memory by doing a
+big malloc, then nesting its allocations within that. The big chunk
+could conceivably have type info, although that would be unusual.
+
+To record the fact that other allocations are nested within a
+bigalloc, it has a nominated "suballocator", i.e. a pointer to the
+"struct allocator" describing the allocator that is parcelling out
+the allocation's space.
+
+It follows that any allocation arena is a bigalloc (but not all
+bigalloc are allocation arenas).
+
+Bigallocs may or may not be suballocated, but they are never
+sub-sub-allocated. Rather, if we have a malloc within a malloc, we
+promote the nested chunk to be its own bigalloc.
+
+bigalloc at level n (nested allocations shown with 'x')
+  +---------------------------------------------------+
+  |xxxx| |xx| |xx|   |xxxxxxxxxxxxxxxxxxxxxxxxxxxx|...|
+  +---------------------------------------------------+
+                     ^ ----bigalloc at level n+1  ^ (nested allocations shown with 'y')
+                     +----------------------------+
+                     |   |yy|  |yy|    |yy|       |
+                     +----------------------------+
+
+This kind of structure could be made recursively, reaching
+arbitrarily many layers down.
+
+This means that we can have one bigalloc that is "mostly"
+suballocated into non-big allocations, but a specific chunk within
+it, allocated by that suballocator and subsequently used for
+parcelling out by a nested allocator, is itself a bigalloc. In
+other words, a bigalloc may have both a suballocator (general) and
+child bigallocs (promoted).
+
+How to support queries in such a world is tricky. If we query the
+free space at level n+1, do we get the metadata (e.g. type info)
+from the malloc chunk at level n? Most likely, each query should be
+viewed as "cut off" at some level on the tree, possibly bounded
+both above and below. Cut-offs below can account for e.g. run-time
+type checking within an allocator's code, where its own bookkeeping
+should be subject to run-time checks but it should not know or care
+what structure lies below. Cut-offs above would handle the converse
+case where querying free space at level n+1 might be best not to
+return the containing allocation.
+

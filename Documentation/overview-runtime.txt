@@ -36,42 +36,13 @@ relevant to heap allocators. Those are not discussed here.)
 
 The implementation of all these queries looks the same: first identify
 which is the relevant allocator, then delegate to an allocator-specific
-function that knows how to retrieve the base/limit/size/type/name.
+function that knows how to retrieve the base/limit/size/type/name/....
 
-Since allocations nest, there may be *many* allocators relevant to any
-given location in memory. Put differently, given a void*, there may be
-many 'views' of the memory it points to, one for each allocator. Usually
-we want the 'deepest' or 'leaf' allocator, but not always. Even within
-the 'leaf' allocation, the type information may encode further layers of
-substructure (e.g. a struct or array, perhaps nested). So, queries can
-take further arguments to disambiguate this.
-
-The bigallocs table is liballocs's primary state describing memory. It is
-a tree, because bigallocs may have a parent which must be their
-immediately enclosing bigalloc. This tree can be thought of as a
-refinement of Linux's /proc/pid/maps file, or equivalents on other OSes,
-which contains only the first level of the tree.
-
-The pageindex is a 'shortcut' structure into this tree: most queries are
-towards the leaf, so the pageindex tracks which bigalloc is the deepest
-fully covering a given page. At run time, we can think of queries coming
-into liballocs from the 'top down', consuming these structures.
-
-A number of allocators are 'built in'. These include the following.
-
-mmap           -- all top-level (parentless) bigallocs are made by mmap
-auxv           -- a region of the initial stack, only
-stack          -- any thread's stack has a bigalloc
-stackframe     -- nested within a stack are one or more frames
-static-segment -- a memory mapping overlaid (nested) with program data
-static-section -- a region of a segment
-static-symbol  -- a region of a section (roughly!)
-brk            -- the region at the end of the executable's data segment
-alloca         -- dynamically sized regions inside some stack frames
-
-It helps to have a picture of an address space in mind. (Here I have
-labelled it as only a 'bottom half', ending at 7ff...ff, which is
-vaguely realistic for x86 architectures.)
+Allocations nest. It follows that for any given location in memory, 
+there may be *many* allocators relevant to it. Each allocator provides 
+one "view" of the memory. It helps to have a picture of an address space 
+in mind. (Here I have labelled it as only a 'bottom half', ending at 
+7ff...ff, which is vaguely realistic for x86 architectures.)
 
  ___________________________________..._____________...________________
 |___________________________________..._____________...________________|
@@ -87,23 +58,81 @@ like this (not to scale!).
   --------------------------            ------------   ----------------|
   |segment |segment| brk   |            |segment|s |      |  auxv      |
   --------------------------            ------------      |------------|
-  |..|sects|..| |  |/      \       sects|       |  |      |  stack   |
+  |..|sects|..| |  |\      \       sects|       |  |      |  stack   |
   -----------------  malloc             -----------       ------------
  / symbols         \ chunks            /  symbols   \    / stackframes\
    (non-big)         (non-big)            (non-big)         (non-big)
 
-Note that the unit of mmap allocation is not a single memory mapping but
-a 'mapping sequence' (which has a somewhat subtle definition, but really
-is just a bunch of contiguous mappings that might plausibly have a shared
-purpose). This is because e.g. one segment may span multiple mappings.
-They are all part of a single mapping sequence, allowing us to retain a
-tree structure.
 
-The 'non-big' allocations at the leaves are also managed by an allocator
-that is recorded as the 'suballocator' of the deepest bigalloc. This is
-the allocator that can answer queries about, say, heap chunks or stack
-frames. (There are no sub-sub-allocators; any region that is allocated
-from must first be promoted to a bigalloc. This means the children of a
+For any address that is mapped, then the memory mapping allocator 
+provides a view of the memory as raw bytes but with information about 
+mapping permissions, backing file if any, etc. If that memory mapping is 
+being used as a thread stack, then the stack allocator is also relevant 
+and provides a view of the memory as a list of frames. Under that, the 
+stackframe allocator provides a view of each frame as typed fields 
+(local variables or actual parameters) along with untyped register save 
+slots. There are similar nests of allocators for static structure 
+(symbols, sections, segments, loaded binaries) and for heaps (which also 
+nest sometimes, e.g. a big malloc chunk used by a downstream allocator), 
+as well as for memory-mapped files.
+
+When querying the type of a piece of memory, usually we want the 
+'deepest' or 'leaf' allocator's view, since higher-up allocators just 
+deal in "raw memory" without knowing the meaning of what it stores.
+
+The bigallocs table is liballocs's primary state describing memory. It 
+is a tree. Each bigalloc's parent is its immediately enclosing bigalloc; 
+only memory mappings have no parent. This tree can be thought of as a 
+refinement of Linux's /proc/pid/maps file, or equivalents on other OSes, 
+which contains only the first level of the tree.
+
+The boundary between "big" and "small" allocations occurs at most one 
+level up from the bottom of the allocation tree. Specifically, most leaf 
+allocations are small. For example: stack frames, static symbol 
+definitions or malloc chunks are usually not bigallocs. However, the "at 
+most one level is small" invariant means that if, say, a malloc chunk is 
+"suballocated", i.e. is used by another allocator as the arena from 
+which smaller allocations are parcelled out, then it must be promoted to 
+a bigalloc, since the "suballocates" relation is stored in the bigallocs 
+table.
+
+Even within the 'leaf' allocation, the type information may encode 
+further layers of substructure (e.g. a struct or array, perhaps nested). 
+So, "get type" queries can take further arguments to disambiguate this 
+by specifying a relevant enclosing type.
+
+The pageindex is a 'shortcut' structure into the bigalloc tree. Most 
+queries are towards the leaf, so the pageindex tracks which bigalloc is 
+the deepest fully covering a given page. At run time, we can think of 
+queries coming into liballocs from the 'top down', consuming these 
+structures.
+
+A number of allocators are 'built in'. These include the following.
+
+mmap           -- all top-level (parentless) bigallocs are made by mmap
+auxv           -- a region of the initial stack, only
+stack          -- any thread's stack has a bigalloc
+stackframe     -- nested within a stack are one or more frames
+static-segment -- a memory mapping overlaid (nested) with program data
+static-section -- a region of a segment
+static-symbol  -- a region of a section (roughly!)
+brk            -- the region at the end of the executable's data segment
+alloca         -- dynamically sized regions inside some stack frames
+
+
+Note that the unit of mmap allocation is not a single memory mapping but 
+a 'mapping sequence' (which has a somewhat subtle definition, but really 
+is just a bunch of contiguous mappings that might plausibly have a 
+shared purpose). This is because e.g. one segment may span multiple 
+memory mappings, i.e. areas mapped by multiple calls to mmap(). Grouping 
+these into contiguous sequences allows us to retain a tree structure 
+when a segment spans multiple of these individual mappings.
+
+The 'non-big' allocations at the leaves are managed by an allocator that 
+is recorded as the 'suballocator' of the deepest bigalloc. This is the 
+allocator that can answer queries about, say, heap chunks or stack 
+frames. (There are no sub-sub-allocators; any region that is allocated 
+from must first be promoted to a bigalloc. This means the children of a 
 malloc arena, say, may be a mixture of big and non-big allocations.)
 
 To maintain the pageindex, bigalloc table, and any other structures

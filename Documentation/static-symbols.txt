@@ -1,0 +1,85 @@
+"Segments" are contiguous regions of virtual address space defined
+by a loaded DSO (executable or shared object)... on ELF platforms
+they correspond to a LOAD program header. Meanwhile "symbols" are
+subdivisions of segments, with (usually) associated type
+information since they correspond to a program function or
+variable.
+
+The main data structure used to index a segment is a "metavector".
+This is an array of short records sorted by address. Lookup
+proceeds by binary search.
+
+Metavector records are intentionally small, for time- and
+space-efficiency. They do not duplicate information held in the
+ELF symbol, for example. This is covered below.
+
+There may or may not be a "sections" layer in between segments and
+symbols (or, perhaps, in between *some* symbols and the segment,
+but not all). I have also contemplated creating a further
+"subsection" layer, recording the original section boundaries prior
+to linking; if a link map is available, this could be used to infer
+which parts of a section are padding and therefore available to be
+allocated e.g. for hot-patching purposes.
+
+"Symbols" is interpreted widely, in order to ensure that type
+information can be attached to all allocations that have a
+meaningful type. An ELF symbol is of course a symbol -- provided it
+is of non-zero st_size and has ELF symbol type SHT_FUNC or
+SHT_OBJECT. But other chunks of data can be treated as "symbols"
+too. There are two notable kinds: string literals, and static
+locals.
+
+String literals are treated as quasi-symbols whose boundaries and
+types are inferred from relocation records (this is assuming -q was
+passed at link time). Any region of memory not covered by a symbol
+but referenced by a relocation record is assumed to form an
+allocation, spanning from the referenced point to the next distinct
+point that is referenced by some other relocation record.
+
+Note that this is a heuristic and currently may be defeated by
+string suffix merging: if a relocation record points into the
+middle of a longer string, this will create an allocation boundary
+and could give rise to reports of bounds errors, say by libcrunch.
+A better heuristic could perhaps be devised, or additional metadata
+propagated. (Since string literals' sizes are statically known at
+the relocation site, this could be propagated somehow and then the
+overlap detected after linking, once string merging has happened.)
+
+Static locals typically don't have an ELF symbol but can be
+recovered from debugging information. This yields a second kind of
+quasi-symbols: "debug-only".
+
+As mentioned above, the metavector does not contain most metadata,
+e.g. for a 64-bit ELF symbol, it does not repeat the Elf64_Sym's
+contents. Rather, it's assumed the symbol table is mapped and
+available. For dynamic symbols (ELF .dynsym) this is always the
+case. For "static" symbols (ELF .symtab), the table is mapped by
+liballocs if it does not fall within a segment of the file already.
+For quasi-symbols, a "fake" symbol table called "extrasyms" is
+created by the liballocs tools, and stored in the meta-DSO.
+
+This assumption that a symbol record is always available enables a
+uniform yet compact representation in the metavector. To describe
+the object's address, size and (where present) name, it only needs
+to record which of these three symbol tables to consult, and the
+index into that table. The rest of the record encodes a pointer to
+the uniqtype, which of course is not present in a symbol record. On
+current 64-bit x86 platforms with only 47 bits of user address
+space, a uniqtype pointer requires only 44 bits (accounting for
+8-byte alignment), meaning that in one word there remain 20 bits to
+identify the symbol table and index within it. These are assumed to
+be sufficient, i.e. there can be no more than about a million
+symbols of each kind per DSO.
+
+A minor exception to the above is that relocation quasi-symbols are
+currently not promoted to extrasyms. Instead the base address and
+size of the target memory are encoded directly into the metavector,
+and this is memory is assumed to have array-of-character type. This
+may need to be revisited if non-character data is delineated only
+by relocs. (Perhaps on certain architectures that have limited
+immediate modes, constants of various types are stored at non-fixed
+offsets from the referencing instruction? Even if they are
+intermingled with the instructions, it would be good to have
+information about these. This has minor consequences for the
+packed_sequence that is the instruction stream... it consists not
+only of instructions but also of primitive constants.)
