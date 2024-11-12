@@ -14,13 +14,14 @@ typedef bool _Bool;
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
-#if !defined(_GNU_SOURCE) && !defined(HAVE_DL_INFO)
+#if !defined(_GNU_SOURCE) && !defined(HAVE_DL_INFO) && !defined(LIBALLOCS_DEFINED_DL_INFO)
 typedef struct {
 	const char *dli_fname;
 	void       *dli_fbase;
 	const char *dli_sname;
 	void       *dli_saddr;
 } Dl_info;
+#define LIBALLOCS_DEFINED_DL_INFO
 #endif
 #include <link.h>
 

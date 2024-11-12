@@ -72,7 +72,7 @@ extern int __currently_allocating;
  *
  *   FIXME: this means inserts may be misaligned.
  *   In practice this seems not to happen, because
- *   malloc pads to a #words and inserts at word-sized.
+ *   malloc pads to a #words and inserts are word-sized.
  *   We can easily fix this by rounding down to _Alignof (struct insert).
  *   (A perverse malloc might pad even more, s.t. this rounding-down
  *   doesn't hit the boundary we rounded up to, but a later one. That's fine.)
