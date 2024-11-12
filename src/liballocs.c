@@ -1003,6 +1003,7 @@ int ( __attribute__((constructor(103))) __liballocs_global_init)(void)
 	__liballocs_is_initialized = 1;
 
 	debug_printf(1, "liballocs successfully initialized\n");
+	workaround_glibc_bugs();
 	
 	return 0;
 }

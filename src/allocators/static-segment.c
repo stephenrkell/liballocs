@@ -72,6 +72,10 @@ void __static_segment_setup_metavector(
 			metavector_size = found_sym->st_size;
 		}
 	}
+	else
+	{
+		debug_printf(5, "no meta object loaded for %s\n", afile->m.l->l_name);
+	}
 	assert(afile->m.segments[loadndx].phdr_idx == phndx); // librunt has already done it
 	afile->m.segments[loadndx].metavector = metavector;
 	afile->m.segments[loadndx].metavector_size = metavector_size;
@@ -114,7 +118,7 @@ void __static_segment_allocator_notify_define_segment(
 		&afile->m.segments[loadndx], /* allocator_private */
 					/* HMM. This will often "overflow" the 1-element array. So we
 					 * are really trusting the compiler not to know that. */
-		NULL /* allocatoe_private_free */,
+		NULL /* allocator_private_free */,
 		containing_file,
 		&__static_segment_allocator /* allocated_by */
 	);

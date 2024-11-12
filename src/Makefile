@@ -171,7 +171,7 @@ CFLAGS += -fno-omit-frame-pointer
 endif
 ALLOCATOR_OBJS := $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
 #$(info ALLOCATORS_OBJS is $(ALLOCATOR_OBJS))
-MAIN_OBJS := liballocs.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) $(UTIL_OBJS) $(ALLOCATOR_OBJS)
+MAIN_OBJS := liballocs.o workarounds.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 NOPRELOAD_OBJS := #uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
  # recall that liballocs.a is only for static-linked client binaries (exe or solib).
  # What should liballocs.a include? E.g. does a client static-linked exe need this

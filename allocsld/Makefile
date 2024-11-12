@@ -18,13 +18,10 @@ CFLAGS += -DCHAIN_LOADER
 # Thanks to Dan Williams for the recipes that my link commands were based on.
 # http://www.cs.virginia.edu/~dww4s/articles/ld_linux.html
 
-# We must use the BFD-based linker (ld.bfd) -- gold doesn't work
-# (it won't generate the donald.lds linker script, though I'm not yet sure why).
-
 LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/lib/libc.a
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-OBJS := premain.o main.o entry.o load.o chain.o debug.o
+OBJS := premain.o main.o entry.o load.o chain.o debug.o allocinstr.o
 C_DEPS := $(patsubst %.o,.%.d,$(OBJS))
 DEPS := $(C_DEPS)
 
@@ -33,21 +30,39 @@ $(C_DEPS): .%.d: %.c
 	
 -include $(DEPS)
 
+# We use the 'dynappend' tool to add a DT_DEBUG entry to our .dynamic section.
+# Normally only an executable gets these. But we are an executable, in the
+# 'invoked' case, so a debugger will sometimes want to look at our DT_DEBUG.
+# We use an outrageous hack to make this point to the 'real' _r_debug structure.
+# FIXME: is this hack really necessary? Does debugging work when the ld.so is
+# 'invoked'? I think it does, but the ld.so lacks a DT_DEBUG, so would be good
+# to understand how it does so.
 DYNAPPEND ?= $(ELFTIN)/dynappend/dynappend
+
+# We must use the BFD-based linker (ld.bfd) -- gold doesn't work
+# (it won't generate the donald.lds linker script, though I'm not yet sure why).
+# FIXME: what happened to our flags for ensuring this?
+allocsld.so: LDFLAGS += -fuse-ld=bfd \
+            -nostdlib -nostartfiles \
+            -Wl,--spare-dynamic-tags,2 \
+            -Wl,-soname=ld-linux.so.2 -Wl,-Bsymbolic
 
 # FIXME: localize all global symbols except maybe _start?
 allocsld.so: allocsld.lds $(OBJS)
-	$(CC) $(CFLAGS) -fuse-ld=bfd \
-            -Bsymbolic -nostdlib -nostartfiles -shared -o "$@" \
-            -Wl,--spare-dynamic-tags,2 \
+	$(CC) $(CFLAGS) $(LDFLAGS) -shared -o "$@" \
             $(filter-out %.lds,$+) \
             -Wl,-Bstatic $(LIBC_ARCHIVE) -Wl,-Bsymbolic \
-            -T $(filter %.lds,$+) -Wl,-soname=ld-linux.so.2
+            -T $(filter %.lds,$+)
 	$(DYNAPPEND) $@ 21 # add DT_DEBUG
 
+# FIXME: including code here is not nice. Why not just call a function?
+# I think it's because we can't anticipate what locals our function will
+# want to receive from the calling context. Maybe instead do an #include?
+# Then we would put the code quoted below into its own .h or .inc file for
+# inclusion.
 main.o: CFLAGS += -DCHAIN_LOADER \
-  -DCHAIN_LOADER_COVER_TRACKS_DECLS='void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned program_phnum, const char *ldso_path, uintptr_t inferior_dynamic_vaddr, uintptr_t base_addr);' \
-  -DCHAIN_LOADER_COVER_TRACKS='cover_tracks(we_are_the_program, program_phdrs, program_phnum, SYSTEM_LDSO_PATH, inferior_dynamic_vaddr, base_addr);'
+  -DCHAIN_LOADER_COVER_TRACKS_H='"$(shell pwd)/cover-tracks.h"' \
+  -DCHAIN_LOADER_COVER_TRACKS_INC='"$(shell pwd)/cover-tracks.inc.c"'
 
 # We need to ensure we don't have any pages of 'hole'
 # in between the two segments. But how? How does the
@@ -102,4 +117,17 @@ allocsld.lds: $(shell which ld) $(THIS_MAKEFILE)
 
 clean:
 	rm -f allocsld.lds allocsld.so $(OBJS) $(DEPS)
+
+malloc-patcher-self-test: return-hook.o malloc-patcher-with-main.o
+	$(CC) -o $@ $+ $(LDFLAGS) $(LDLIBS)
+
+malloc-patcher-with-main.o: malloc-patcher.c
+	$(CC) -o $@ -c $< -DSELF_TEST $(CFLAGS) $(CPPFLAGS)
+
+malloc-patcher-self-test: LDFLAGS += -fno-lto -L$(LIBSYSTRAP)/lib -L$(LIBRUNT)/lib
+
+#   -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
+#   -Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr
+
+malloc-patcher-self-test: LDLIBS += -Wl,-Bstatic -lsystrap -lrunt_preload -Wl,-Bdynamic
 

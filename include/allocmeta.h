@@ -24,13 +24,15 @@ struct liballocs_err;
 typedef struct liballocs_err *liballocs_err_t;
 
 struct big_allocation;
-#if !defined(_GNU_SOURCE) && !defined(HAVE_DLADDR) /* FIXME: proper autoconf'able test */
+#if !defined(_GNU_SOURCE) && !defined(HAVE_DLADDR) && !defined(LIBALLOCS_DEFINED_DL_INFO)
+/* FIXME: proper autoconf'able test */
 typedef struct {
 	const char *dli_fname;
 	void       *dli_fbase;
 	const char *dli_sname;
 	void       *dli_saddr;
 } Dl_info;
+#define LIBALLOCS_DEFINED_DL_INFO
 #endif
 
 /* A tentative meta-protocol for allocators. 

@@ -100,6 +100,7 @@ extern struct big_allocation *executable_file_bigalloc;
 extern struct big_allocation *executable_data_segment_bigalloc;
 extern uintptr_t executable_data_segment_start_addr;
 
+struct dl_phdr_info; /* for include contexts that lack this */
 void mmap_replacement(struct generic_syscall *s, post_handler *post);
 void munmap_replacement(struct generic_syscall *s, post_handler *post);
 void mremap_replacement(struct generic_syscall *s, post_handler *post);
@@ -232,6 +233,9 @@ extern struct uniqtype *pointer_to___uniqtype__long_int;
 extern struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t;
 extern struct uniqtype *pointer_to___uniqtype____ARR0_signed_char;
 extern struct uniqtype *pointer_to___uniqtype__intptr_t;
+
+void workaround_glibc_bugs(void) __attribute__((visibility("hidden")));
+
 #ifdef __cplusplus
 } /* end extern "C" */
 #endif

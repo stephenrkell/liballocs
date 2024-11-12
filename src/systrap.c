@@ -288,7 +288,7 @@ void __liballocs_systrap_init(void)
 	/* Get a hold of the ld.so's link map entry. How? We get it from the auxiliary
 	 * vector. */
 	const char *interpreter_fname = NULL;
-	ElfW(auxv_t) *auxv = get_auxv(environ, &interpreter_fname);
+	ElfW(auxv_t) *auxv = get_auxv_via_libc_stack_end(); // get_auxv(environ, &interpreter_fname);
 	if (!auxv) abort();
 	ElfW(auxv_t) *auxv_at_base = auxv_lookup(auxv, AT_BASE);
 	if (!auxv_at_base) abort();
