@@ -19,6 +19,7 @@ ALLOCSITES ?= $(dir $(THIS_MAKEFILE))/allocsites
 ALLOCSITES_BLOOM ?= $(dir $(THIS_MAKEFILE))/allocsites-bloom
 ALLOCTYPES ?= $(dir $(THIS_MAKEFILE))/alloctypes
 METAVECTOR ?= $(dir $(THIS_MAKEFILE))/metavector
+EXTRASYMS ?= $(dir $(THIS_MAKEFILE))/extrasyms
 
 LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
 OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
@@ -104,6 +105,10 @@ endif
 ifneq ($(filter allocsites,$(METADATA_KINDS)),)
 $(info Generating allocsites)
 meta_sources += $(META_BASE)/$(1)-allocsites.c
+endif
+ifneq ($(filter extrasyms,$(METADATA_KINDS)),)
+$(info Generating extrasyms)
+meta_sources += $(META_BASE)/$(1)-extrasyms.c
 endif
 ifneq ($(filter metavector,$(METADATA_KINDS)),)
 $(info Generating metavector)

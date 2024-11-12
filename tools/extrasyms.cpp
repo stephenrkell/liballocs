@@ -102,8 +102,8 @@ int main(int argc, char **argv)
 
 	auto statics = root.get_sanely_described_statics();
 	cout << "#include <elf.h>\n"
-	     << "static const char (__attribute__((section(\".extrastrtab\"))) extrastr)[] = \"\";\n";
-	cout << "static const " ElfWstr(Elf, _Sym) " extrasyms[] __attribute__((section(\".extrasymtab\"))) = {\n\t(" ElfWstr(Elf, _Sym) ") { .st_name = 0 }\n};" << endl;
+	     << "const char (__attribute__((section(\".extrastrtab\"))) extrastr)[] = \"\";\n";
+	cout << "const " ElfWstr(Elf, _Sym) " extrasyms[] __attribute__((section(\".extrasymtab\"))) = {\n\t(" ElfWstr(Elf, _Sym) ") { .st_name = 0 }\n};" << endl;
 	cout << "#define APPEND_STRING(s) \\\n\
 		__asm__(\".pushsection .extrastrtab\\n\\\n\
 			.asciz \\\"\"s \"\\\"\" )" << std::endl;
