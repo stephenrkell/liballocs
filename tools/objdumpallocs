@@ -71,14 +71,14 @@ suballoc_descriptors="${LIBALLOCS_SUBALLOC_FNS:-}"
 allocsz_descriptors="${LIBALLOCS_ALLOCSZ_FNS:-}"
 all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}${allocsz_descriptors:+ ${allocsz_descriptors}}"
 echo "all_alloc_descriptors is: $all_alloc_descriptors" 1>&2
-# Treat callq of monalloca labels as a possible alloc site, as that's what 
+# Treat call of monalloca labels as a possible alloc site, as that's what 
 # our alloca instrumentation inserts.
 meta_instr_regexp="${line_regexp}.*((call|jmp).*(<($( 
     echo -ne 'malloc\ncalloc\nrealloc\nmemalign\nposix_memalign\nvalloc\n__monalloca_' | \
     make_match_any_line_floating_eregexp )|$( 
     echo -n "${all_alloc_descriptors}" | \
         sed -r 's/([a-zA-Z0-9_]+)\([^\)]*\)[a-zA-Z]?( +|$)/\1\n__wrap_\1\n/g' | \
-    make_match_any_line_floating_eregexp ))|.*\*)|.* 00 00 00 00.*callq)"
+    make_match_any_line_floating_eregexp ))|.*\*)|.* 00 00 00 00.*call)"
 # HACK: if liballocs_alloc_fns is unset, use "malloc" a second time
 # (leaving this out will make the regexp end "|)" so match all calls)
 
