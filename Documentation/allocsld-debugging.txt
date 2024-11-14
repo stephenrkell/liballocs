@@ -22,22 +22,24 @@ linker calls it whenever it loads or unloads something, so the debugger
 can stay aware. In our case, the 'real' dynamic linker is doing all the
 work and will happily call its own _dl_debug_state function, but the
 debugger will not know to set a breakpoint on it because it might look
-only in the DT_DEBUG-defining library. We have no choice but to define
-our own _dl_debug_state function, overriding the dynamic linker's. (It
-appears gdb is wrong to behave this way. A comment in glibc's dl-debug.c
-attests: "The debugger is supposed to find this function's address by
-examining the r_brk member of struct r_debug, but GDB 4.15 in fact looks
-for this particular symbol name in the PT_INTERP file.")
+only at the 'apparent' dynamic linker, allocsld. We have no choice but to
+define our own _dl_debug_state function. We can set the r_brk field
+in the _r_debug, defined by the real dynamic linker, to point to our
+own function. (It appears gdb is wrong to behave this way. A comment in
+glibc's dl-debug.c attests: "The debugger is supposed to find this
+function's address by examining the r_brk member of struct r_debug, but
+GDB 4.15 in fact looks for this particular symbol name in the PT_INTERP
+file.")
 
-And there is yet one more complication. Does this overriding work?
-Unfortunately: no! Although _dl_debug_state has default (global)
-visibility so appears subject to overriding, glibc's dynamic linker
-seems to make internal calls to it which are not overridden. Even if we
-could override it, there is still the risk that a debugger somehow does
-find the 'real' dynamic linker and set a breakpoint instead on *its*
-_dl_debug_state. (This can happen if the debugger is attached late,
-given sufficiently good 'track-covering' by the chain loader.) So we
-have to make sure that calling glibc's calls ours. We do this by
-exploiting that functions have 16-byte alignment on x86-64, so we have
-16 bytes to play with. We make the glibc's _dl_debug_state tail-call
-(jump) into ours. Our function is empty and just returns to the caller.
+Note that simply symbol-overriding _dl_debug_state does not work. Even
+though it has default (global) visibility so appears subject to overriding,
+allocsld doesn't actually exist as far as the link map is concerned, so
+defining our own there is no good. In any case, glibc's dynamic linker
+seems to make internal calls to its own function, which are not overriddable.
+And once we've "covered our tracks", the debugger will only find the "real"
+dynamic linker anyway. Our solution is to overwrite the 'real' ld.so's
+_dl_debug_state so that it calls ours. Since functions have 16-byte alignment
+on x86-64, so we have 16 bytes to play with. We make the real ld.so
+_dl_debug_state tail-call (jump) into ours in allocsld. Our function is empty
+and just returns to the caller. Calling the ld.so's _dl_debug_state will
+activate *both* functions, so we've covered both debugger-bases.

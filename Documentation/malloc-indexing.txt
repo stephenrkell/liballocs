@@ -13,6 +13,7 @@ source:             stubgen.h    libmallochooks libmallochooks stubgen.h     lib
 which API?                      |             |              |                          |
                             user|user     hook|hook     event|event                     |hook
 
+
 The in-exe case is a bit dfferent. When building an output object that
 defines 'malloc', allocstubs.i also includes a bunch of stuff generated
 from libmallochooks. In-executable malloc calls can get directed to our
@@ -21,7 +22,7 @@ all gets linked in non-sharedly and calls out cross-DSO to liballocs.
 
                                                                        liballocs_preload.so
       /-------------------------exe----------------------------------------\/--------\/------------exe-----------\
-bound by:     ld +xwrap  #define __real_*       as        .---------------------------.as          dlsym(* 2)
+bound by:     ld +xwrap  #define __real_*       as (* 4)  .---------------------------.as          dlsym(* 2)
       +--------+    +--------+    +--------+    +--------+  as+--------+ld.so--------+ `->+--------+    +--------+
       |malloc()|--->| caller |--->|        |--->|        |--->| index  |--->|bitmap/ |    |        |--->| malloc |
       |...     |<---| stubs  |<---|        |<---|        |<---| events |<---|arena/..|    |        |<---|        |
@@ -74,6 +75,10 @@ instrument calloc or not. Can use the presence of macro
 __next_hook_calloc to test for this? Ideally just the absence of a
 hook_calloc would be enough to tell us to emulate calloc. 'Us' is the
 user2hook wrappers, *not* the user instrumentation.
+
+(* 4) "bound by as" means this is all going on in a single compilation
+unit, so the inter-section references are not subject to link-time
+wrapping -- unlike the ld +xwrap cases.
 
 FIXME: there was a nasty non-orthogonality in the 'deep' indexing
 instrumentation. IIRC, too much happens in the stubgen.h-generated stubs,

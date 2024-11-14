@@ -979,6 +979,9 @@ struct big_allocation *__liballocs_split_bigalloc_at_page_boundary(struct big_al
 	return new_bigalloc;
 }
 
+/* We recursively search through the bigallocs overlapping 'addr'. 
+ * If 'match_suballocator', we return the first one whose suballocator equals 'a'.
+ * Otherwise we return the first one whose *allocator* equals 'a'. */
 static struct big_allocation *find_bigalloc_recursive(struct big_allocation *start,
 	const void *addr, struct allocator *a, _Bool match_suballocator)
 {

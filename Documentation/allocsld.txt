@@ -1,11 +1,34 @@
 Why does liballocs have its own dynamic linker, allocsld?
 
+- to work around uncooperative behaviours of the kernel or ld.so
+that cause corner-case problems for liballocs
+
+- to allow "early introspection" even with an uncooperative
+ld.so and libc
+
+- to make using liballocs less error-prone (e.g. warning if
+liballocs is not preloaded in head position)
+
+- to create a smooth pathway for liballocs eventually merging
+with the system dynamic linker.
+
+Conceptually, the dynamic linker is where all of liballocs belongs.
+At some point, my goal is that at least in some distributions,
+the system ld.so will embed liballocs functionality.
 The short answer is "to handle a corner case of memory layout".
 
-The long answer is "conceptually, that's where all of liballocs
-belongs".
+To explain "early introspection": this is rather misnamed. Although
+liballocs queries cannot be issued before liballocs is initialized,
+which is some way into process start-up (but we aim for as early
+as possible), we would like the ability to introspect *later* on
+allocations *made* during early phases, e.g. by the ld.so itself. In
+general that requires allocsld to interfere with the ld.so,
+e.g. to instrument its memory alloctaion functions. And of course we
+must craft allocsld itself so that introspection on it, and anything
+it allocates, will later work correctly... there are some
+meta-completeness gaps at the moment.
 
-To explain the corner case: it is about 'holes'. The allocation tree in
+To explain one corner case: it is about 'holes'. The allocation tree in
 liballocs is a tree, i.e. it assumes proper nesting. So, for example,
 the image of a shared library (a 'file') is assumed to nest properly
 within a contiguous sequence* of memory mappings, while within it, there
@@ -15,9 +38,12 @@ properly nested.
 (* since these mappings are made piecemeal, constructing the
 right 'sequence' of mappings is already a matter of some delicacy!)
 
-However, conceptually a file's image in memory might not be properly
-nested, because a file's address space may be sparse i.e. contain holes.
-One could end up with something like this in memory.
+Reality is *almost always* faithful to this tree-based model. The goal
+of allocsld is to make it always faithful.
+
+The "almost" arises when a file's image in memory overlaps other things.
+This can happen because a file's address space may be sparse i.e. contain
+holes. One could end up with something like this in memory.
 
      higher addresses
           ^   ...
