@@ -409,7 +409,8 @@ void  \
 ALLOC_EVENT(post_successful_alloc)(void *allocptr, size_t modified_size, size_t modified_alignment, \
 		size_t requested_size, size_t requested_alignment, const void *caller) \
 { \
-	__generic_malloc_index_insert(arena_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), allocptr), \
+	__generic_malloc_index_insert(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
+		ensure_arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), allocptr), \
 		allocptr /* == userptr */, requested_size, \
 		__current_allocsite ? __current_allocsite : caller, sizefn); \
 } \
@@ -433,7 +434,9 @@ int ALLOC_EVENT(pre_nonnull_free)(void *userptr, size_t freed_usable_size) \
 		if (*lti) return 1; /* Cancel free if we are still alive */ \
 		__notify_free(userptr); \
 	} \
-	__generic_malloc_index_delete(arena_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), userptr), userptr/*, freed_usable_size*/, sizefn); \
+	__generic_malloc_index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
+		ensure_arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), userptr), \
+		userptr/*, freed_usable_size*/, sizefn); \
 	return 0; \
 } \
  \
@@ -460,7 +463,9 @@ void ALLOC_EVENT(pre_nonnull_nonzero_realloc)(void *userptr, size_t size, const 
 	/* BUT some bigallocs are just big; they needn't have children.  */ \
 	/* For those, does it matter if we delete and then re-create the bigalloc record? */ \
 	/* I don't see why it should. */ \
-	__generic_malloc_index_delete(arena_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), userptr), userptr/*, malloc_usable_size(ptr)*/, sizefn); \
+	__generic_malloc_index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
+		arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), userptr), \
+		userptr/*, malloc_usable_size(ptr)*/, sizefn); \
 } \
 ALLOC_EVENT_ATTRIBUTES \
 void ALLOC_EVENT(post_nonnull_nonzero_realloc)(void *userptr, \
@@ -473,6 +478,7 @@ void ALLOC_EVENT(post_nonnull_nonzero_realloc)(void *userptr, \
 	size_t requested_size = __current_allocsz ? __current_allocsz : \
 		modified_size - sizeof(struct extended_insert); \
 	__generic_malloc_index_reinsert_after_resize(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
+		arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), userptr), \
 		userptr, \
 		modified_size, \
 		old_usable_size, \

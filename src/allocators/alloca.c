@@ -126,7 +126,9 @@ void __liballocs_unindex_stack_objects_counted_by(unsigned long *bytes_counter, 
 
 		unsigned long bytes_to_unindex = usable_size(cur_userchunk);
 		assert(ALLOCA_ALIGN == MALLOC_ALIGN);
-		__generic_malloc_index_delete(b, cur_userchunk, usable_size);
+		__generic_malloc_index_delete(&__alloca_allocator,
+			arena_info_for_userptr(&__alloca_allocator, cur_userchunk),
+			cur_userchunk, usable_size);
 		assert(bytes_to_unindex < BIGGEST_SANE_ALLOCA);
 		total_unindexed += bytes_to_unindex;
 		if (total_unindexed >= total_to_unindex)
@@ -278,7 +280,9 @@ void __alloca_allocator_notify(void *new_userchunkaddr,
 
 	ensure_arena_covers_addr(b, new_userchunkaddr);
 	/* index it */
-	__generic_malloc_index_insert(b, new_userchunkaddr, requested_size, caller, usable_size);
+	__generic_malloc_index_insert(&__alloca_allocator, 
+		arena_info_for_userptr(&__alloca_allocator, new_userchunkaddr),
+		new_userchunkaddr, requested_size, caller, usable_size);
 	
 #undef __liballocs_get_alloc_base /* inlcache HACKaround */
 	assert(__liballocs_get_alloc_base(new_userchunkaddr));
