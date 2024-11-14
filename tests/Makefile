@@ -56,6 +56,9 @@ CFLAGS += $(filter %,$(CPPFLAGS))
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../lib
 LDFLAGS += -L$(realpath $(dir $(THIS_MAKEFILE)))/../src
 
+GDB ?= gdb
+RR ?= rr
+
 # HMM -- this is causing us to re-add the +='d stuff in each recursive make.
 # can we get away without this?
 export CC
@@ -169,16 +172,16 @@ _onlyrun-nopreload-%:
 	./nopreload-$*
 
 _onlygdbrun-nopreload-%:
-	gdb --args ./nopreload-$* ./nopreload-$*
+	$(GDB) --args ./nopreload-$* ./nopreload-$*
 
 _onlyrun-%:
 	LD_PRELOAD=$(PRELOAD) ./$*
 
 _onlygdbrun-%:
-	gdb --symbols=./$* --args env LD_PRELOAD="$(PRELOAD)" ./$* ./$*
+	$(GDB) --symbols=./$* --args env LD_PRELOAD="$(PRELOAD)" ./$* ./$*
 
 _onlyrrrun-%:
-	rr record env LD_PRELOAD="$(PRELOAD)" ./$* ./$*
+	$(RR) record env LD_PRELOAD="$(PRELOAD)" ./$* ./$*
 
 build-%:
 	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" 
