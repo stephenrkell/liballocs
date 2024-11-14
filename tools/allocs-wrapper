@@ -35,12 +35,10 @@ case "$0" in
     ;;
 esac
 
-# set ourselves as the wrapper
-WRAPPER="$0"
 # source the wrapper funcs
 . "${WRAPPER_FUNCS:-${TOOLSUB}/wrapper/lib/wrapper-funcs.sh}"
 
-my_cc1 () {
+my_cc () {
     # Run the compiler. We force debugging information to be generated.
     # But how do we remove it?
     # FIXME: we should not force the generation if we will later run the
@@ -55,12 +53,15 @@ my_cc1 () {
         ;;
         (*) true ;;
     esac; done
-    "$@" -g3 -ggdb -fno-eliminate-unused-debug-types
+    echo "CC_DRIVER is $CC_DRIVER" 1>&2
+    echo $CC_DRIVER "$@" -g3 -ggdb -fno-eliminate-unused-debug-types 1>&2
+    $CC_DRIVER "$@" -g3 -ggdb -fno-eliminate-unused-debug-types 1>&2
     status=$?
     # FIXME: if we forced the generation of debug info, append a .note section
     # to the output file (or if it's '-', write to stdout)
     if ! [[ $status -eq 0 ]]; then return $status; else true; fi
 }
+export CC=my_cc
 
 # we wrap 'as' so that if it's a C source file -- check from .debug_info? --
 # the resulting object gets objcopy_and_redefine_c_names'd
@@ -89,9 +90,7 @@ my_as () {
     # So in total we could generate up to three .debug_line sections!
     # One for .c, one for .i and one for .s. To get the .i one we just strip out
     # the #-directives and use what comes out of the compiler (run an additional time).
-    real_as="$1"
-    shift
-    "$real_as" -g "$@"
+    as -g "$@"
     status=$?
     # FIXME: perhaps this rewrite should be done after cc1, not after the assembly,
     # to avoid the hacky test for C-derived assembly.
@@ -302,7 +301,7 @@ my_as () {
         done
     fi
 }
-ASWRAP=my_as
+export AS=my_as
 
 # XXX: move the -ldflags down here?
 #
@@ -344,5 +343,10 @@ ASWRAP=my_as
 # if stripping is needed later. This basically means 'these .debug_*
 # sections are not really here and won't survive the link'.
 
+# set ourselves as the wrapper... remind me how we do this?
+WRAPPER="$0"
+
+# HACK that really needs to go away...
+export CC_WRAPPER_SOURCE_TO_RUN=1
 # delegate to the generic wrapper -- we've set WRAPPER so it won't re-source the funcs
 . ${TOOLSUB}/wrapper/bin/wrapper
