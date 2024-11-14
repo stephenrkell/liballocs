@@ -187,6 +187,9 @@ SECTIONS
 	}
 }
 
+#include "asmutil.h"
+// now we have bytes now available as a char[] and bytes_relocs now available as an ElfW(Rela)[]
+
 /* Make the ld.so's _dl_debug_state function call ours, so that
  * the ld.so logic always connects with the debugger even if it's
  * only seen our function. */
@@ -209,7 +212,7 @@ chain_dl_debug_state_function(ElfW(Phdr) *program_phdrs, unsigned program_phnum,
 	  "r_debug_state",
 	  "rtld_db_dlactivity",
 	 */
-	// FIXME: the following assertion is not true (size is 1, i.e. 'retq')...
+	// FIXME: the following assertion is not true (st_size is 1, i.e. 'retq')...
 	// assert(fs->st_size >= 16);
 	// ... but want to check that nothing interesting lives in the following 15 bytes.
 	// In theory liballocs or even librunt could easily tell us this, and it might make
@@ -220,29 +223,21 @@ chain_dl_debug_state_function(ElfW(Phdr) *program_phdrs, unsigned program_phnum,
 	void *page_addr = (void*) RELF_ROUND_DOWN_((uintptr_t)f, page_size);
 	int ret = mprotect(page_addr, page_size, PROT_READ|PROT_WRITE);
 	/* %rax is caller-save so we are free to clobber it */
-#if 0
-	// We want to be able to write something like this:
-	static char bytes[];
 	INSTRS_FROM_ASM (bytes, /* FIXME: sysdep */ " \
-			1: movabs 0x12345678,%rax             # 48 b8 f0 de bc 9a 78 56 34 12 \n\
-			         RELOC(1u + 2, R_X86_64_32) \n\
-			   jmpq *%rax \n\
-			");
-	// and have bytes_relocs now available as an ElfW(Rela)
-#endif
-	char bytes[] = { // FIXME: sysdep
-		0x48, 0xb8, 0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12, /* movabs $PLACEHOLDER,%rax */
-		0xff, 0xe0 /* jmpq   *%rax */
-	};
-	uintptr_t address_8bytes = (uintptr_t) &_dl_debug_state;
-	memcpy(bytes + 2, &address_8bytes, sizeof address_8bytes);
-	memcpy(f, bytes, sizeof bytes);
+1: movabs $0x123456789abcdef0,%rax             # 48 b8 f0 de bc 9a 78 56 34 12 \n\
+		RELOC (1b + 2), "R_(X86_64_64)", "/* reloc using symidx 0 */" 0, 0 \n\
+   jmpq *%rax \n\
+");
+	memcpy_and_relocate(f, bytes, /* value for symidx 0 */ (uintptr_t) &_dl_debug_state);
 	mprotect(page_addr, page_size, PROT_READ|PROT_EXEC);
 
 	// Call it, so that an attached debugger does its update!
 	// Is this correct timing-wise? It will only work if the attached
 	// debugger has seen our DT_DEBUG and set a breakpoint on our _dl_debug_state().
 	// We could even just call our own _dl_debug_state.
+	// Right now, we're running very early... no chance that the inferior dynamic
+	// linker has made a call that was "missed", because it hasn't run yet.
+	// That also means there's no link map, unless we install a fake.
 	((void(*)(void)) f)();
 
 }
@@ -256,7 +251,8 @@ void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned 
 	// debugger *will* breakpoint our _dl_debug_state.
 
 	// ensure the right ld.so filename shows up in the link map
-	// -- this may need to rewrite the executable's .interp section
+	// -- this may need to rewrite the executable's .interp section,
+	// in the case of allocsld-requesting executables.
 	fix_link_map_paths(we_are_the_program, program_phdrs, program_phnum,
 		ldso_path);
 

@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include "asmutil.h"
 
 /* Simple binary patcher for allocation function prologues.
  * We do roughly the following:
@@ -15,116 +16,14 @@
  * they run correctly even if sited at a different address. If they are not,
  * we fail because such cases are currently too hard for us.
  *
- * 3. In our trampoline, we
- *
- *    - tweak the argument register
- *
- *    - hook the return path by overwriting the return address, having
- *      stored the real return address in a thread-local buffer. HMM. But
- *      do we have working thread-locals yet? No, I don't think so. Is there
- *      some clever way we can communicate save the return address? Maybe in the red zone?
- *      No because we cede ownership of the red zone to the real malloc code, and
- *      it will return directly into our hook code.
- *      Maybe working thread-locals are not too much to ask. Let's try it.
- *
- *    - execute the displaced instructions
- *
- *    - jump to the first non-displaced instruction. 
+ * 3. Set up a trampoline and clobber the entry point to jump to it. The approach
+ * is rather like 'Detours' by Hunt & Brubacher (Proc. 3rd USENIX Windows NT
+ * Symposium, 1999).
  */
-
-// TODO: rather like generic_syscall in libsystrap,
-// we want something like a "generic_abicall"... our "add    $0x8,%rdi" is
-// specific to instrumenting malloc, but really we should call out
-// to some general-purpose C code that lets us interfere with the
-// call however we like and then segue back into its code. We can
-// still use a per-entry-point trampoline to do this, and indeed
-// I think we have to. But probably we want templates that are
-// per function signature at the ABI level. Each template can
-// push/pop only the relevant registers from the stack, e.g.
-// only %rdi for a one-pointer-argument call, and so on. The trampoline
-// then pops them back into place. It's a lot like a signal frame but
-// doing it in user space and tailored to the argument signature being
-// instrumented.
-//
-// We could use a lot of the machinery that is used to define mcontext_t,
-// but we'd want to change the order of registers s.t. we have
-#if 0
-struct generic_abi_call_entry
-{
-	const void *real_callee;          // we always push this
-	const void **active_return_address_slot;
-	                                  // we always push the *address* of the return address...
-	                                  // Do we always hook the return address when creating
-	                                  // the trampoline? Note that we CAN't skip the thread-
-	                                  // -local thing, because this struct only exists at the
-	                                  // entry end of the function. I think it is probably
-	                                  // optional to do the return-address hooking, i.e. only when
-	                                  // requested should the trampoline do the hooking.
-	const void **maybe_saved_return_address_slot;
-	                                  // ^ this is non-null only if the trampoline did the
-	                                  // hooking and stored the return address.
-	                                  // What if we want multiple hooked functions active
-	                                  // on the stack at once? We should be able to get away
-	                                  // with just a single TLS variable, I think, but not sure why.
-	
-	unsigned char ngregs;             // the number that we pushed
-	unsigned char nfpregs;
-	__greg_t reg1; // rdi
-	__greg_t reg2; // rsi
-	__greg_t reg3; // rdx
-	__greg_t reg4; // rcx
-	__greg_t reg5; // r8
-	__greg_t reg6; // r9
-	// fp regs may follow....
-
-	// on-stack args live in a contiguous block that should be easy to reach
-	// starting from the return address slot, I guess?
-}
-#endif
-// But how do we build this on the stack? We have to push in reverse order!
-// i.e. if we want to materialise r9, we push r9 first, then r8, then...
-// Then we lea the on-stack address of the overall structure and pass that
-// as the argument to handle_generic_abi_call.
-//
-// How does this compare to what DynInst does?
-
-static char trampoline_template_pre[] = {
-/*   0:  */  0x48, 0x83, 0xc7, 0x08,                         // add    $0x8,%rdi  # munge args
-/*   4:  */  0x57,                                           // push   %rdi       # 
-/*   5:  */  0x50,                                           // push   %rax
-/*   6:  */  0x64, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00,   // mov    %fs:0x0,%rax
-/*   f:  */  0x48, 0x8d, 0x80, 0x00, 0x00, 0x00, 0x00,               // lea    0x0(%rax),%rax
-//                        12: R_X86_64_TPOFF32     real_return_address
-/*  16:  */  0x48, 0x8b, 0x7c, 0x24, 0x10,                   // mov    0x10(%rsp),%rdi
-/*  1b:  */  0x48, 0x89, 0x38,                               // mov    %rdi,(%rax)
-/*  1e:  */  0x58,                                           // pop    %rax
-/*  1f:  */  0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00, // lea    0x0(%rip),%rdi
-//                        22: R_X86_64_32S        generic_return_hook
-/*  26:  */  0x48, 0x89, 0x7c, 0x24, 0x10,                   // mov    %rdi,0x10(%rsp)
-/*  2b:  */  0x5f                                            // pop    %rdi
-/*  2c:  */  // displaced instructions go here, then the jump back into the original function
-};
-
-static char trampoline_template_post[] = {
-/*  2c+NDISPLACED:  */  0xe9, 0x00, 0x00, 0x00, 0x00                    // jmp    2e <mytramp+0x2e>
-//                        2c+NDISPLACED: R_X86_64_PLT32      first_non_displaced-0x4
-}; // total: 0x30+NDISPLACED bytes
-
-void generic_return_hook(void) __attribute__((visibility("hidden"))); // same-object binding
-
 // from libsystrap
 unsigned long instr_len(unsigned const char *ins, unsigned const char *end);
 
-__asm__ (
-	".pushsection .data\n"
-	".globl real_return_address_tpoff\n"
-	"real_return_address_tpoff:\n"
-	".long real_return_address@tpoff\n"
-	".popsection"
-);
-extern signed real_return_address_tpoff;
-void instrument_malloc_entry(const void *func, const void *func_limit,
-	void *trampoline_buf, void *trampoline_buf_limit)
+static void *prologue_get_first_non_displaced(const void *func, const void *func_limit)
 {
 #define NBYTES_TO_CLOBBER  5 /* FIXME: sysdep */
 #define CHECK_DISPLACEABLE(ptr) 1 /* FIXME: actually do this */
@@ -136,83 +35,88 @@ void instrument_malloc_entry(const void *func, const void *func_limit,
 	{
 		// decode one, check we can 
 		unsigned inslen = instr_len(insbyte, func_limit);
-		if (inslen == 0) /* error */ abort();
-		if (!CHECK_DISPLACEABLE(insbyte)) abort();
+		if (inslen == 0) /* error */ return NULL;
+		if (!CHECK_DISPLACEABLE(insbyte)) return NULL;
 
 		nbytes_decoded += inslen;
 		insbyte += inslen;
 	}
-	void *first_non_displaced = insbyte;
-	
-	memcpy(trampoline_buf, trampoline_template_pre, sizeof trampoline_template_pre);
-#define APPLY_32BIT_FIXUP_NATIVE_ENDIANNESS(buf, offset, value) \
-    do { \
-        int32_t val = (value); \
-        memcpy((char*) (buf) + (offset), &val, 4); \
-    } while (0)
-#define APPLY_32BIT_FIXUP_PCREL(buf, offset, addr) \
-    APPLY_32BIT_FIXUP_NATIVE_ENDIANNESS(buf, offset, (addr) - ((uintptr_t) (buf) + offset));
+	return insbyte; // first non-displaced
+}
+/* Next for the Detours-style stuff. The trampoline is a "monopoline" because
+ * it's specialised to a single detoured entry point. We therefore don't need to
+ * save the entry point address anywhere in code... our generated trampoline code
+ * embodies it in the displaced-instructinos-then-jump sequence.
+ *
+ * It's impossible to generate the monopoline as a compiled chunk of code, because
+ * we only know where it needs to jump back to when we are doing the patching,
+ * i.e. at run time. Likewise it needs to know the displaced instructions and
+ * those are also only known at run time.
+ *
+ * Still, this ends suspiciously similar to a link-time-interposed function.
+ * Our orig_post_displaced is similar to the dlsym() result.
+ * But we are regrettably more malware-like... we are defeating the normal
+ * dynamic-linking-induced points-to and called-from relation.
+ */
 
-	APPLY_32BIT_FIXUP_NATIVE_ENDIANNESS(trampoline_buf, 0x12, real_return_address_tpoff);
-	APPLY_32BIT_FIXUP_PCREL(trampoline_buf, 0x22, (int64_t) &generic_return_hook - 0x4);
-	// copy displaced instructions
-	unsigned ndisplaced_bytes = insbyte - (unsigned char*) func;
-	memcpy(trampoline_buf + 0x2c, func, ndisplaced_bytes);
-	// copy post instructions
-	memcpy(trampoline_buf + 0x2c + ndisplaced_bytes, trampoline_template_post, sizeof trampoline_template_post);
-	// fix up post instructions
-	APPLY_32BIT_FIXUP_PCREL(trampoline_buf, 0x2c + ndisplaced_bytes + 1, (uintptr_t) first_non_displaced - 0x4);
-	// now we have a trampoline... do the clobber
-	char jump_insn[] = { 0xe9, 0x00, 0x00, 0x00, 0x00 };
-	memcpy((void*) func, jump_insn, 4);
-	// relocate in place
-	APPLY_32BIT_FIXUP_PCREL((void*) func, 1, (uintptr_t) trampoline_buf - 0x4); 
+void *write_monopoline_and_detour(void *func, void *func_limit,
+	void *detour_func,
+	void *detour_func_orig_callee_slot,
+	void *trampoline_buf,
+	void *trampoline_buf_limit)
+{
+	/* We jump straight from the target function entry instruction
+	 * to the detour function, not via the trampoline.
+	 * The trampoline is used only for return: it is specialised to
+	 * a particular callee, and its entry point is what we set the
+	 * orig callee slot to point to -- it performs the displaced
+	 * instructions and then jumps back. It could be used either
+	 * for a call or a jump, but a call is easier when coming from
+	 * compiler-generated code. */
+	void *first_non_displaced = prologue_get_first_non_displaced(func, func_limit);
+	unsigned ndisplaced_bytes = (unsigned char *) first_non_displaced - (unsigned char*) func;
+
+	// create the trampoline, beginning with the displaced instructions
+	memcpy((char*) trampoline_buf, func, ndisplaced_bytes);
+	INSTRS_FROM_ASM(trampoline_exit,
+"1:jmp 0 \n\
+        RELOC 1b + 1, "R_(X86_64_PC32)", "/* symidx 0: original entry point */" 0, -0x4\n"
+	);
+	memcpy_and_relocate((char*) trampoline_buf + ndisplaced_bytes,
+		trampoline_exit,
+		(uintptr_t) func + ndisplaced_bytes);
+	*(void**) detour_func_orig_callee_slot = trampoline_buf;
+
+	// finally, plumb in the detour function
+	INSTRS_FROM_ASM(jump_to_detour,
+"1:jmp 0 \n\
+        RELOC 1b + 1, "R_(X86_64_PC32)", "/* symidx 0: detour func addr */" 0, -0x4\n"
+	);
+	memcpy_and_relocate((void*) func,
+		jump_to_detour,
+		(uintptr_t) detour_func);
+	extern size_t trampoline_exit_size;
+	return (char*) trampoline_buf + ndisplaced_bytes + trampoline_exit_size;
 }
 
-#ifdef SELF_TEST
+/* Now we want to use mallochooks to generate our detour functions.
+ * From libmallochooks we can get user2hook (narrowing to a minimal
+ * malloc API) and hook2event (turning malloc/realloc/free into events).
+ * The implementation of event hooks comes from stubgen.h. And
+ * in turn those call indexing functions in generic_malloc.h. */
 
-#include <stdio.h>
-#include <sys/mman.h>
-#include <err.h>
-#include <errno.h>
-extern int _end;
-
-void *__libc_malloc(size_t);
-
-void *malloc(size_t sz)
+/* This is the malloc that the above malloc entry point gets detoured to,
+ * if we are doing a detour. */
+void *(*detour_malloc_orig_callee)(size_t);
+void *detour_malloc(size_t sz)
 {
+	/* Don't try to print anything here without adding reentrancy guards.
+	 * Or just use write(). */
 	static __thread _Bool active = 0;
 	_Bool we_set_active = 0;
+	sz += 8;
 	if (!active) { active = 1; printf("Asked to malloc %ld bytes!\n", (long) sz); we_set_active = 1; }
-	void *ret = __libc_malloc(sz);
+	void *ret = detour_malloc_orig_callee(sz);
 	if (we_set_active) active = 0;
 	return ret;
 }
-
-extern __thread size_t real_return_address;
-
-int main(void)
-{
-	printf("in this thread, real_return_address is stored at %p\n", &real_return_address);
-	void *dummy = malloc(42);
-
-	int ret = mprotect((void*) (((uintptr_t) malloc) & ~0xfff), 4096, PROT_READ|PROT_WRITE|PROT_EXEC);
-	if (ret != 0) err(errno, "doing mprotect");
-	
-	// get some RWX memory that is not too far from our own memory
-	// FIXME: use libdlbind? doesn't exactly work in our use case but
-	// maybe there's a subset of its functionality that makes sense, or
-	// maybe its interface / utility logic helps here.
-	void *rwx_buf = mmap( (void*) (((uintptr_t) &_end + 1048576) & ~0xfff), 4096,
-			PROT_READ|PROT_WRITE|PROT_EXEC,
-			MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0); 
-	if (rwx_buf == MAP_FAILED) err(errno, "doing mmap");
-	
-	// do the instrumentation
-	instrument_malloc_entry(malloc, (char*) malloc + 4096,
-		rwx_buf, rwx_buf + 4096);
-
-	dummy = malloc(42);
-	return 0;
-}
-#endif
