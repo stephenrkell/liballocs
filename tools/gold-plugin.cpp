@@ -76,7 +76,7 @@ private:
 	map< pair<string, off_t> , set<string> > file_and_local_symname_pairs_to_globalize; // those we found
 	map< pair<string, off_t> , set<string> > global_symnames_to_xwrap_by_input_file;
 	set<string> global_symnames_to_xwrap;
-	bool saw_malloc; // do we define 'malloc'?
+	std::optional<string> saw_malloc; // do we define 'malloc'?
 public:
 	/* The plugin library's "claim file" handler. */
 	enum ld_plugin_status
@@ -243,8 +243,8 @@ public:
 		for (auto& pair : job->input_files)
 		{
 			auto& bytes = pair.second.second;
-			debug_println(0, "%s %u %d %d %02x", pair.first.first.c_str(), pair.first.second,
-				pair.second.first, bytes.size(),
+			debug_println(0, "%s %u %d %d %02x", pair.first.first.c_str(), (unsigned) pair.first.second,
+				(int) pair.second.first, (int) bytes.size(),
 				(unsigned) (bytes.size() > 0) ? bytes[0] : 0xff );
 			// we only want the REL files, i.e. stuff that is going in to our link
 			if (bytes.size() == 64 &&
@@ -278,6 +278,11 @@ public:
 		 * pruning removes any entry if the corresponding symbol is
 		 * not defined in the link. If we don't do this, we risk
 		 * undefined reference link errors from our allocstubs.o. */
+		 /* We unconditionally build and link the allocstubs file. We are
+		  * relying on the preprocessor environment controlling the expansion of
+		  * macros therein such that only the needed stubs are generated.
+		  * */
+		debug_println(0, "for malloc stubs, saw malloc? %s", (!saw_malloc) ? "no" : saw_malloc->c_str());
 		ret = compile_c_source_and_add_as_input(string("\"${LIBALLOCS:+${LIBALLOCS}/tools/}allocstubs.c\""),
 			string("allocstubs"),
 			(string(/* for debugging */ string("-save-temps "/*"-Wp,-dD"*/) +
@@ -292,6 +297,19 @@ public:
 			(saw_malloc ? " -DLIBALLOCS_MALLOC_CALLEE_WRAPPERS " : "")
 			).c_str()), /* quote src filename? */ false);
 		if (ret != LDPS_OK) abort(); /* compile_c_source_and_add_as_input() has printed error */
+
+		 
+		/* HACK: if we've added stuff that depends on TLS, we may need to bump
+		 * the dynamic linker -- does this work?!?! Yes, seems to.
+		 * FIXME: this makes me think that a linker plugin is a bad idea and we 
+		 * should instead have stuck with wrapper scripts. Big problem with my
+		 * self-rebuilding C approach is: how do we extend it allowing use of
+		 * existing functions, like we currently do
+		 * using 'source' ? I guess we can #include ? but omit the main()? or #define main to
+		 * orig_main or something? */
+		linker->add_input_file("/lib64/ld-linux-x86-64.so.2");
+
+
 
 		// now just do the super call for good measure
 		return this->linker_plugin::all_symbols_read();
@@ -556,17 +574,19 @@ public:
 		/* auto files_defining_malloc = */ classify_input_objects< set<pair< ElfW(Sym)*, string > > >(
 			input_files,
 			[this](fmap const& f, off_t offset, string const& fname) {
-				return enumerate_symbols_matching(f, offset,
+				if (dynamic_cast<elfmap const *>(&f) && dynamic_cast<elfmap const &>(f).hdr->e_type == ET_REL)
+					return enumerate_symbols_matching(f, offset,
 					[this, &f, fname](ElfW(Sym)* sym, string const& name) -> bool {
 						bool saw_it = (ELFW_ST_TYPE(sym->st_info) == STT_OBJECT
 							  ||  ELFW_ST_TYPE(sym->st_info) == STT_FUNC)
 							  && (sym->st_shndx != SHN_UNDEF && sym->st_shndx != SHN_ABS)
 							  && (ELFW_ST_BIND(sym->st_info) != STB_LOCAL)
 							  && (name == "malloc");
-						saw_malloc |= saw_it;
+						if (saw_it) saw_malloc = std::optional<string>(string(fname));
 						return saw_it;
 					}
 				);
+				else return set< pair<ElfW(Sym)*, string> >();
 			}
 		);
 
