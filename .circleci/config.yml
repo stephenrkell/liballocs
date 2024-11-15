@@ -62,7 +62,7 @@ jobs:
               libboost-iostreams-dev libboost-regex-dev \
               libboost-serialization-dev libboost-filesystem-dev libffi6
       - attach_workspace:
-          at: /root
+          at: /
       - run:
           name: Run tests
           command: make -C /root/project/tests -j 2 -k
