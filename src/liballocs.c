@@ -1399,6 +1399,7 @@ __liballocs_get_base(void *obj)
 	return (void*) out;
 }
 void *__liballocs_get_alloc_base(void *obj) __attribute__((alias("__liballocs_get_base")));
+void *alloc_get_base(void *obj) __attribute__((alias("__liballocs_get_base")));
 
 void *
 __liballocs_get_alloc_base_with_fill(void *obj, struct allocator **out_a, /*bigalloc_num_t*/ unsigned short *out_num)
