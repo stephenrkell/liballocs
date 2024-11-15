@@ -39,8 +39,9 @@ jobs:
           name: Create liballocs metadata
           no_output_timeout: 25m
           command: |
-            mkdir -p /usr/lib/meta
-            make -f tools/Makefile.meta /usr/lib/meta`ldd /bin/true | grep 'libc.so.6' | sed -r 's/.*=> (.*) \(.*/\1/' | xargs readlink -f`-meta.so
+            mkdir -p /usr/lib/meta && \
+            make -f tools/Makefile.meta \
+                $(for libname in `ldd /bin/true | sed -En '/[[:blank:]]*([^[:blank:]]* => )?(.*) \(0x[0-9a-f]+\)/ {s//\2/;p}' | egrep 'libc\.so\.6|ld-linux.*\.so'`; do echo "/usr/lib/meta${libname}-meta.so"; done)
       - persist_to_workspace:
           root: /root
           paths: project binutils-gdb
