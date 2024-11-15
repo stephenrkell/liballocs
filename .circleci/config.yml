@@ -41,7 +41,7 @@ jobs:
           command: |
             mkdir -p /usr/lib/meta && \
             make -f tools/Makefile.meta \
-                $(for libname in `ldd /bin/true | sed -En '/[[:blank:]]*([^[:blank:]]* => )?(.*) \(0x[0-9a-f]+\)/ {s//\2/;p}' | egrep 'libc\.so\.6|ld-linux.*\.so'`; do echo "/usr/lib/meta${libname}-meta.so"; done)
+                $(for libname in `ldd /bin/true | sed -En '/[[:blank:]]*([^[:blank:]]* => )?(.*) \(0x[0-9a-f]+\)/ {s//\2/;p}' | egrep 'libc\.so\.6|ld-linux.*\.so' | xargs readlink -f`; do echo "/usr/lib/meta${libname}-meta.so"; done)
       - persist_to_workspace:
           root: /root
           paths: project binutils-gdb

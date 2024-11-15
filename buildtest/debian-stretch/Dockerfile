@@ -29,4 +29,4 @@ RUN sudo mkdir -p /usr/lib/meta && sudo chown root:user /usr/lib/meta && \
    sudo chmod g+w /usr/lib/meta
 RUN cd /usr/local/src/liballocs && \
    make -f tools/Makefile.meta \
-      $(for libname in `ldd /bin/true | sed -En '/[[:blank:]]*([^[:blank:]]* => )?(.*) \(0x[0-9a-f]+\)/ {s//\2/;p}' | egrep 'libc\.so\.6|ld-linux.*\.so'`; do echo "/usr/lib/meta${libname}-meta.so"; done)
+      $(for libname in `ldd /bin/true | sed -En '/[[:blank:]]*([^[:blank:]]* => )?(.*) \(0x[0-9a-f]+\)/ {s//\2/;p}' | egrep 'libc\.so\.6|ld-linux.*\.so' | xargs readlink -f`; do echo "/usr/lib/meta${libname}-meta.so"; done)
