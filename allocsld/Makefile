@@ -7,13 +7,21 @@ all: default
 include ../config.mk
 
 vpath %.c $(DONALD)/src
+vpath %.S $(DONALD)/src
 
 CFLAGS += -std=gnu99 -g -fPIC -save-temps
 CFLAGS += -fno-stack-protector
 CFLAGS += -I$(DONALD)/src # for donald.h, for non-vpath'd .c files
 CFLAGS += -I$(LIBRUNT)/include
+CFLAGS += -I$(LIBSYSTRAP)/include
+CFLAGS += -I$(LIBMALLOCHOOKS)/include
+CFLAGS += -I../tools  # for stubgen.h
+CFLAGS += -I../include  # for generic_malloc_index.h
+CFLAGS += $(LIBALLOCSTOOL_CFLAGS)  # for allocmeta-defs.h
 CFLAGS += -DDONALD_NAME=\"allocsld\"
 CFLAGS += -DCHAIN_LOADER
+
+CFLAGS += -save-temps # TEMP for debugging alloc stub generation etc
 
 # Thanks to Dan Williams for the recipes that my link commands were based on.
 # http://www.cs.virginia.edu/~dww4s/articles/ld_linux.html
@@ -21,8 +29,8 @@ CFLAGS += -DCHAIN_LOADER
 LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/lib/libc.a
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-OBJS := premain.o main.o entry.o load.o chain.o debug.o allocinstr.o
-C_DEPS := $(patsubst %.o,.%.d,$(OBJS))
+OBJS := start.o premain.o main.o entry.o load.o chain.o debug.o allocinstr.o
+C_DEPS := $(filter-out start.o,$(patsubst %.o,.%.d,$(OBJS)))
 DEPS := $(C_DEPS)
 
 $(C_DEPS): .%.d: %.c
@@ -45,13 +53,15 @@ DYNAPPEND ?= $(ELFTIN)/dynappend/dynappend
 allocsld.so: LDFLAGS += -fuse-ld=bfd \
             -nostdlib -nostartfiles \
             -Wl,--spare-dynamic-tags,2 \
-            -Wl,-soname=ld-linux.so.2 -Wl,-Bsymbolic
+            -Wl,-soname=ld-linux.so.2 -Wl,-Bsymbolic \
+            -L$(LIBSYSTRAP)/lib -L$(LIBRUNT)/lib
+allocsld.so: LDLIBS += -lsystrap -lrunt
 
 # FIXME: localize all global symbols except maybe _start?
 allocsld.so: allocsld.lds $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -shared -o "$@" \
             $(filter-out %.lds,$+) \
-            -Wl,-Bstatic $(LIBC_ARCHIVE) -Wl,-Bsymbolic \
+            -Wl,-Bstatic $(LIBC_ARCHIVE) -Wl,-Bsymbolic $(LDLIBS) \
             -T $(filter %.lds,$+)
 	$(DYNAPPEND) $@ 21 # add DT_DEBUG
 
@@ -64,6 +74,8 @@ main.o: CFLAGS += -DCHAIN_LOADER \
   -DCHAIN_LOADER_COVER_TRACKS_H='"$(shell pwd)/cover-tracks.h"' \
   -DCHAIN_LOADER_COVER_TRACKS_INC='"$(shell pwd)/cover-tracks.inc.c"'
 
+start.o: start.S
+	$(CC) -c -o $@ $<
 # We need to ensure we don't have any pages of 'hole'
 # in between the two segments. But how? How does the
 # break in segments even get made? The data segment
