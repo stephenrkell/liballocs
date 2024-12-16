@@ -103,7 +103,7 @@ checkrun-fail-%:
 	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
 	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
 	$(MAKE) cleanrun-fail-$* 1>$$out 2>$$err && \
-		tail -n6 "$$err" | tr '\n' '\f' | \
+		sed -n '/liballocs summary/,/^========/ p' "$$err" | tr '\n' '\f' | \
 		grep ' 0.* 0.* 0.* 0\+.* [1-9][0-9]*.* 0\+$$' >/dev/null || \
 		(tail -n20 $$err; false)
 # special: this failing case aborts, for now
@@ -120,14 +120,14 @@ checkrun-abort-%:
 	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
 	if $(MAKE) cleanrun-abort-$* 1>$$out 2>$$err; then false; else true; fi
 
-# Most test cases should output a liballocs summary in which 
-# -- zero queries aborted
+# Most test cases should output a liballocs summary in which
+# -- zero queries aborted (the last four counts in the summary, followed by '===='...)
 checkrun-%:
 	@echo "case is $*" && \
 	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
 	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
 	$(MAKE) cleanrun-$* 1>$$out 2>$$err && \
-		tail -n6 "$$err" | tr '\n' '\f' | \
+		sed -n '/liballocs summary/,/^========/ p' "$$err" | tr '\n' '\f' | \
 		grep ' 0.* 0.* 0.* 0=\+$$' >/dev/null || \
 		(tail -n20 $$err; false)
 
@@ -138,6 +138,7 @@ checkrun-plugin-hello:
 # Some cases are special and require only to build OK
 checkrun-allocsld-as-cmd:
 	$(MAKE) cleanbuild-allocsld-as-cmd >/dev/null 2>&1
+
 # Some cases are special and require only an exit status of zero
 # NOTE: this define is going to be eval'd, so we need two layers of escaping
 dollar := $$
@@ -164,7 +165,10 @@ lib-test \
 forward-decls \
 metavec-layout \
 packed-seq-walk \
-hello-via-wrapper
+hello-via-wrapper \
+ld-so-malloc \
+hello-environ \
+ifunc
 endef
 $(foreach case,$(exit-zero-case-names),$(eval $(call exit-zero-case,$(case))))
 
