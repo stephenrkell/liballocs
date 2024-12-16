@@ -238,7 +238,10 @@ class AllocsCompilerWrapper(CompilerWrapper):
         stubsfile_name = self.getOutputFilename(Phase.LINK) + ".allocstubs.c"
         self.debugMsg("Doing allocator mods given linked output object: %s\n" % \
             linkedRelocFilename)
-        stubsLinkArgs = ["-Wl,-plugin=" + os.environ.get("ELFTIN") + "/xwrap-ldplugin/xwrap-ldplugin.so"]
+        elftin = os.environ.get("ELFTIN")
+        if elftin == None:
+            elftin = os.path.realpath(os.path.dirname(__file__)+ "/../") + "/contrib/elftin"
+        stubsLinkArgs = ["-Wl,-plugin=" + elftin + "/xwrap-ldplugin/xwrap-ldplugin.so"]
         for sym in self.allWrappedSymNames():
              stubsLinkArgs += ["-Wl,-plugin-opt=" + sym]
         definedMatches = self.listDefinedSymbolsMatching(linkedRelocFilename, self.allWrappedSymNames())
