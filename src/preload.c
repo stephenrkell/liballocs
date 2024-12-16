@@ -351,7 +351,7 @@ void abort(void)
 {
 	/* Give ourselves time to attach a debugger. */
 	write_string("Aborting program ");
-	raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
+	raw_write(2, get_exe_command_basename(), strlen(get_exe_command_basename()));
 	write_string(", pid ");
 	int pid = raw_getpid();
 	write_decint(pid);

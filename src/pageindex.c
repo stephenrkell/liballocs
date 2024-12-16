@@ -34,7 +34,8 @@ extern struct big_allocation *__liballocs_get_bigalloc_containing(const void *ob
 
 /* How many big allocs? 256 is a bit stingy. 
  * Each bigalloc record is 48--64 bytes, so 4096 of them would take 256KB.
- * Maybe stick to 1024? */
+ * Maybe stick to 1024?
+ * That is no longer enough! Let's go large. */
 struct big_allocation big_allocations[NBIGALLOCS] __attribute__((visibility("protected"))); // NOTE: we *don't* use big_allocations[0]; the 0 byte means "empty"
 extern struct big_allocation __liballocs_big_allocations[NBIGALLOCS] __attribute__((alias("big_allocations"))); // NOTE: we *don't* use big_allocations[0]; the 0 byte means "empty"
 
@@ -270,7 +271,7 @@ void __pageindex_init(void)
 		if (print_debug_message)
 		{
 			write_string("liballocs: process name ");
-			raw_write(2, get_exe_basename(), strlen(get_exe_basename()));
+			raw_write(2, get_exe_command_basename(), strlen(get_exe_command_basename()));
 			write_string(", pid ");
 			int pid = raw_getpid();
 			char a;
@@ -1284,6 +1285,39 @@ struct big_allocation * __liballocs_find_common_parent_bigalloc(const void *ptr,
 {
 	if (!pageindex) __pageindex_init();
 	return get_common_parent_bigalloc(ptr, end);
+}
+
+void print_bigalloc_slice_for(void *addr)
+{
+#if 0
+	/* We want to print something like this... */
+	fprintf(stderr, "       0x7fffe1234567                   \n");
+	fprintf(stderr, "0___________:_______________________UMAX\n");
+	fprintf(stderr, "    |_______:_______| mmap   [NN]       \n");
+	fprintf(stderr, "         |__:___|     malloc [MM]       \n");
+	fprintf(stderr, "           |:_|                         \n");
+	fprintf(stderr, "       0x7fffe1234567                   \n");
+	/* We want to print something like this...
+	 *   - size each intermediate rectangle by the log2 of its size
+	 *   - pick the : position linearly along that
+	 *       ... in effect this is sliding the rectangle around
+	 *       since we have picked the top ':' position also linearly?
+	 */
+	struct big_allocation *b = BIDX(pageindex[PAGENUM(addr)]);
+	while (b && b->parent) b = b->parent;
+	for (struct big_allocation *child = BIDX(start->first_child);
+			child;
+			child = BIDX(child->next_sib))
+	{
+		if ((char*) child->begin <= (char*) addr && 
+				child->end > addr)
+		{
+			/* Recurse down here */
+			struct big_allocation *maybe_deeper = find_deepest_bigalloc_recursive(child, addr);
+			if (maybe_deeper) return maybe_deeper;
+		}
+	}
+#endif
 }
 
 _Bool __liballocs_notify_unindexed_address(const void *ptr)

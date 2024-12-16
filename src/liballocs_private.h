@@ -19,6 +19,7 @@ typedef bool _Bool;
 #include <stdint.h>
 #include <link.h>
 #include "systrap.h"
+#include "librunt.h"
 #include "liballocs.h"
 
 #ifndef likely
@@ -139,7 +140,7 @@ extern FILE *stream_err;
 FILE *get_stream_err(void);
 #define debug_printf(lvl, fmt, ...) do { \
     if ((lvl) <= __liballocs_debug_level) { \
-      fprintf(get_stream_err(), "%s: " fmt, get_exe_basename(), ## __VA_ARGS__ );  \
+      fprintf(get_stream_err(), "%s: " fmt, get_exe_command_basename(), ## __VA_ARGS__ );  \
     } \
   } while (0)
 

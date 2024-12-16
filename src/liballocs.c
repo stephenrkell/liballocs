@@ -748,7 +748,7 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
-	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_fullname()));
+	_Bool is_exe = (info->dlpi_addr == 0) || (0 == strcmp(canon_objname, get_exe_dynobj_fullname()));
 	const char *canon_basename = basename(canon_objname);
 	_Bool is_libc = ((0 == strncmp(canon_basename, "libc", 4))
 				&& (canon_basename[4] == '-' || canon_basename[4] == '.'));
