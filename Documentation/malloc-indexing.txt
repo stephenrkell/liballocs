@@ -1,6 +1,7 @@
 Currently the preload case looks like this
 
       /-- client exe or .so--\/-------------------liballocs_preload.so--------------------------------\/----libc.so---
+
 bound by:     ld +xwrap      ld.so           ld           .----------------------------ld           dlsym
       +--------+    +--------+    +--------+    +--------+  ld+--------+  ld+--------+ `-->+--------+    +--------+
       |malloc()|--->| caller |--->|        |--->|        |--->| index  |--->|bitmap/ |     |        |--->| malloc |
@@ -22,6 +23,7 @@ all gets linked in non-sharedly and calls out cross-DSO to liballocs.
 
                                                                        liballocs_preload.so
       /-------------------------exe----------------------------------------\/--------\/------------exe-----------\
+
 bound by:     ld +xwrap  #define __real_*       as (* 4)  .---------------------------.as          dlsym(* 2)
       +--------+    +--------+    +--------+    +--------+  as+--------+ld.so--------+ `->+--------+    +--------+
       |malloc()|--->| caller |--->|        |--->|        |--->| index  |--->|bitmap/ |    |        |--->| malloc |
