@@ -279,12 +279,27 @@ void instrument_ld_so_allocators(uintptr_t ld_so_load_addr)
 	 */
 
 #define hard_assert(cond) do { assert(cond); if (!(cond)) abort(); } while(0)
+
+/* If we don't have MAP_FIXED_NOREPLACE, and have to use MAP_FIXED,
+ * what's the damage? In theory there's a chance that we will
+ * clobber something important like the stack or vdso... or perhaps
+ * something we don't know about, if the execution environment is
+ * especially wacky. It's vanishingly in practice. We could possibly
+ * use the auxv to check for some of these, or /proc/self/maps to
+ * check definitively. FIXME: do something about this. Or fail to
+ * run on kernels < 4.14 where we don't have MAP_FIXED_NOREPLACE?
+ * There's also the host glibc version... we could supply the flag
+ * numerically ourselves.... Is it sane to probe the kernel version? */
+#ifdef MAP_FIXED_NOREPLACE
+#define FLAGS (MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED_NOREPLACE)
+#else
+#define FLAGS (MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED)
+#endif
 	/* We have to place our linear malloc info precisely on the page
 	 * preceding the ld.so, so that liballocs can find it. This is
 	 * a total HACK and we should instead pass something in the auxv. */
 	linear_malloc = mmap((void*) (ld_so_load_addr - 4096), 4096,
-		PROT_READ|PROT_WRITE,
-		MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED_NOREPLACE, -1, 0);
+		PROT_READ|PROT_WRITE, FLAGS, -1, 0);
 	hard_assert((uintptr_t) linear_malloc < (uintptr_t) -4095);
 	*linear_malloc = (struct linear_malloc_index_instance) {
 		.recs = RELF_ROUND_UP_PTR_((char*) linear_malloc + sizeof (*linear_malloc),
@@ -300,8 +315,7 @@ void instrument_ld_so_allocators(uintptr_t ld_so_load_addr)
 	 * it needs to be within a 32-bit PC-relative branch range of
 	 * the original ld.so. So ask for the next earlier frame */
 	void *rwx_buf = mmap((void*) (ld_so_load_addr - 8192), 4096,
-		PROT_READ|PROT_WRITE|PROT_EXEC,
-		MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED_NOREPLACE, -1, 0);
+		PROT_READ|PROT_WRITE|PROT_EXEC, FLAGS, -1, 0);
 	hard_assert((uintptr_t) rwx_buf < (uintptr_t) -4095);
 	struct trampoline_buf_info trampoline_info = {
 		.nextfree = rwx_buf,
