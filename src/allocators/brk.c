@@ -47,7 +47,7 @@ struct allocator __brk_allocator = {
 	/* FIXME: meta-protocol implementation */
 };
 
-static void create_brk_bigalloc(void *curbrk)
+static struct big_allocation *find_existing_brk_mapping(void *curbrk)
 {
 	assert(executable_end_addr);
 	/* Is the executable contiguous with the program break? If not, we have another
@@ -111,12 +111,19 @@ static void create_brk_bigalloc(void *curbrk)
 			}
 		}
 	}
+	return mapping_b;
+}
+static void create_brk_bigalloc(void *curbrk)
+{
+	struct big_allocation *mapping_b = find_existing_brk_mapping(curbrk);
 	assert(!brk_mapping_bigalloc);
 	brk_mapping_bigalloc = mapping_b;
+
 	/* We want the brk area to begin where the attached program binary leaves
 	 * off. Is there a file under the mapping? FIXME: what if file bigallocs
 	 * have not been created yet? */
 	assert(brk_mapping_bigalloc);
+
 	/* Look for a file underneath this bigalloc. Will we have created the files yet?
 	 * Probably not. For now we simply create the brk bigalloc from the current
 	 * brk value to the end of the mapping. When we create a file bigalloc we will

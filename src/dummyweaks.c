@@ -177,7 +177,10 @@ struct allocator __stack_allocator;
 struct allocator __stackframe_allocator;
 struct allocator __mmap_allocator; /* mmaps */
 struct allocator __sbrk_allocator; /* sbrk() */
-struct allocator __static_allocator; /* ldso; nests under file? */
+struct allocator __static_file_allocator; /* ldso; nests under file? */
+struct allocator __static_symbol_allocator; /* ldso; nests under file? */
+struct allocator __static_section_allocator; /* ldso; nests under file? */
+struct allocator __static_segment_allocator; /* ldso; nests under file? */
 struct allocator __auxv_allocator; /* nests under stack? */
 struct allocator __alloca_allocator; /* nests under stack? */
 struct allocator __default_lib_malloc_allocator = (struct allocator) {}; /* covers all chunks */

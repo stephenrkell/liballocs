@@ -253,9 +253,12 @@ DEFINE_META_VEC_FUNCS(sym, SYM, sym_or_reloc_rec, /* raw record -- ignored */ sy
 	/* metaval_from_raw -- ignored */ NOOP1,
 	/* addr_from_metaptr */ addr_from_rec, /* addr_from_metaptr_arg */ NULL)
 #endif
-static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc,
-	struct uniqtype **out_type, void **out_base,
-	unsigned long *out_size, const void **out_site)
+struct lookup_result {
+	struct big_allocation *segment;
+	union sym_or_reloc_rec *found;
+};
+static
+struct lookup_result do_lookup(void *obj, struct big_allocation *maybe_bigalloc)
 {
 	++__liballocs_hit_static_case;
 	/* Search backwards in the bitmap for the first bit set
@@ -342,14 +345,36 @@ static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc
 		}
 		if (target_vaddr > found_limit_vaddr) goto fail;
 		// else we can go ahead
-		if (out_base) *out_base = (void*)(file_load_addr + found_base_vaddr);
-		if (out_site) *out_site = file->m.load_site;
-		if (out_size) *out_size = found_limit_vaddr - found_base_vaddr;
-		if (out_type) *out_type = found_type;
-		return NULL;
+		return (struct lookup_result) { segment_bigalloc, found };
 	}
 fail:
 	++__liballocs_aborted_static;
+	return (struct lookup_result) { NULL, NULL };
+
+}
+static liballocs_err_t get_info(void *obj, struct big_allocation *maybe_bigalloc,
+	struct uniqtype **out_type, void **out_base,
+	unsigned long *out_size, const void **out_site)
+{
+	struct lookup_result result = do_lookup(obj, maybe_bigalloc);
+	if (result.found)
+	{
+		struct allocs_file_metadata *file = BIDX(result.segment->parent)->allocator_private;
+		uintptr_t found_base_vaddr = vaddr_from_rec(result.found, file);
+		#define SIZE_FROM_SYMTAB(tab) (tab)[result.found->sym.idx].st_size
+		uintptr_t size = 
+			(result.found->is_reloc ? found_base_vaddr + result.found->reloc.size :
+				(result.found->sym.kind == REC_DYNSYM) ? SIZE_FROM_SYMTAB(file->m.dynsym) :
+				(result.found->sym.kind == REC_SYMTAB) ? SIZE_FROM_SYMTAB(file->m.symtab) :
+				(result.found->sym.kind == REC_EXTRASYM) ? SIZE_FROM_SYMTAB(file->extrasym) :
+				(abort(), 0));
+		if (out_base) *out_base = (void*)(file->m.l->l_addr + found_base_vaddr);
+		if (out_site) *out_site = file->m.load_site;
+		if (out_size) *out_size = size;
+		if (out_type) *out_type = result.found->is_reloc ? pointer_to___uniqtype____uninterpreted_byte
+				: (struct uniqtype *)(((uintptr_t) result.found->sym.uniqtype_ptr_bits_no_lowbits) << 3);
+		return NULL; // no error
+	}
 	return &__liballocs_err_unrecognised_static_object;
 }
 
@@ -362,9 +387,44 @@ liballocs_err_t __static_symbol_allocator_get_info(void *obj, struct big_allocat
 
 DEFAULT_GET_TYPE
 
+/* QUESTION: are we naming a memory location or an allocation?
+ * If the former, we want to reflect the offset.
+ * If the latter, we are throwing away offset information. */
+static const char *get_name(void *obj, char *namebuf, size_t buflen)
+{
+	struct lookup_result result = do_lookup(obj, NULL);
+	if (!result.found) return NULL; // print nothing
+	struct allocs_file_metadata *file = BIDX(result.segment->parent)->allocator_private;
+	int ret = 0;
+	if (result.found->is_reloc) 
+	{
+		ret = snprintf(namebuf, buflen, "reloc target data at vaddr %lx",
+			(long) vaddr_from_rec(result.found, file ));
+	}
+	else
+	{
+		unsigned char *strtab = 
+				(result.found->sym.kind == REC_DYNSYM) ? file->m.dynstr :
+				(result.found->sym.kind == REC_SYMTAB) ? file->m.strtab :
+				(result.found->sym.kind == REC_EXTRASYM) ? file->extrastr : NULL;
+		ElfW(Sym) *symtab = 
+				(result.found->sym.kind == REC_DYNSYM) ? file->m.dynsym :
+				(result.found->sym.kind == REC_SYMTAB) ? file->m.symtab :
+				(result.found->sym.kind == REC_EXTRASYM) ? file->extrasym : NULL;
+		unsigned long st_name = symtab[result.found->sym.idx].st_name;
+
+		ret = snprintf(namebuf, buflen, "%s symbol `%s'",
+			(result.found->sym.kind == REC_DYNSYM) ? "dynamic" :
+			(result.found->sym.kind == REC_SYMTAB) ? "static" :
+			(result.found->sym.kind == REC_EXTRASYM) ? "extra" : "unknown",
+			(strtab && st_name) ? (char*) &strtab[st_name] : (strtab ? "(no name)" : "(no strtab)"));
+	}
+	return (ret > 0) ? namebuf : NULL;
+}
 struct allocator __static_symbol_allocator = {
 	.name = "static-symbol",
 	.is_cacheable = 1,
 	.get_info = __static_symbol_allocator_get_info,
-	.get_type = get_type
+	.get_type = get_type,
+	.get_name = get_name
 };

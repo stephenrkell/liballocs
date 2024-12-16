@@ -1538,9 +1538,15 @@ __liballocs_get_leaf_allocator(void *obj)
 	struct allocator *a = NULL;
 	struct liballocs_err *err = __liballocs_get_alloc_info(obj, &a, NULL, 
 		NULL, NULL, NULL);
-	
-	if (err && err != &__liballocs_err_unrecognised_alloc_site) return 0;
-	
+	// HACK: we can still return an allocator even if we didn't find the
+	// object... this will be a hack until we refactor our error reporting
+	// to be more allocator-agnostic
+	if (err && err != &__liballocs_err_unrecognised_alloc_site
+			&& err != &__liballocs_err_unrecognised_static_object) return NULL;
+	// FIXME: I think these single-return functions should set errno,
+	// for an errno value recorded in the error structure. But is there
+	// an appropriate errno value for, say, 'unrecognised static object'?
+	// ENOENT?
 	return a;
 }
 struct allocator *

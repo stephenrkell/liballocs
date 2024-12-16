@@ -3,14 +3,18 @@
 #include <stdio.h>
 #include <sys/types.h>
 #if 0
-#include "relf.h" /* for fake_dlsym, used by callee wrappers */
+#include "relf.h" /* for fake_dlsym, used by callee wrappers, but they are also ifdef'd out just now */
 #endif
 
-extern __thread void *__current_allocsite; // __attribute__((weak));
-extern __thread void *__current_allocfn;// __attribute__((weak));
-extern __thread size_t __current_allocsz;// __attribute__((weak));
-extern __thread int __currently_freeing;// __attribute__((weak));
-extern __thread int __currently_allocating;// __attribute__((weak));
+#ifndef CURRENT_ALLOC_VARS_QUALIFIERS
+#define CURRENT_ALLOC_VARS_QUALIFIERS extern __thread
+#define CURRENT_ALLOC_VARS_QUALIFIERS_POST  /* __attribute__((weak)) */
+#endif
+CURRENT_ALLOC_VARS_QUALIFIERS void *__current_allocsite CURRENT_ALLOC_VARS_QUALIFIERS_POST;
+CURRENT_ALLOC_VARS_QUALIFIERS void *__current_allocfn CURRENT_ALLOC_VARS_QUALIFIERS_POST;
+CURRENT_ALLOC_VARS_QUALIFIERS size_t __current_allocsz CURRENT_ALLOC_VARS_QUALIFIERS_POST;
+CURRENT_ALLOC_VARS_QUALIFIERS int __currently_freeing CURRENT_ALLOC_VARS_QUALIFIERS_POST;
+CURRENT_ALLOC_VARS_QUALIFIERS int __currently_allocating CURRENT_ALLOC_VARS_QUALIFIERS_POST;
 
 /* these are our per-allocfn caller wrappers */
 
@@ -402,14 +406,14 @@ void __unindex_small_alloc(void *ptr, int level);
  * the generation by alignment, or some other parameter of the malloc,
  * so that the code is tailored to that malloc. */
 #define ALLOC_ALLOCATOR_NAME(frag) frag ## _allocator
-#define ALLOC_EVENT_INDEXING_DEFS3(allocator_namefrag, sizefn, do_lifetime_policies) \
+#define ALLOC_EVENT_INDEXING_DEFS4(allocator_namefrag, index_namefrag, sizefn, do_lifetime_policies) \
 ALLOC_EVENT_ATTRIBUTES void ALLOC_EVENT(post_init)(void) {} \
 ALLOC_EVENT_ATTRIBUTES \
 void  \
 ALLOC_EVENT(post_successful_alloc)(void *allocptr, size_t modified_size, size_t modified_alignment, \
 		size_t requested_size, size_t requested_alignment, const void *caller) \
 { \
-	__generic_malloc_index_insert(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
+	index_namefrag ## _index_insert(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
 		ensure_arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), allocptr), \
 		allocptr /* == userptr */, requested_size, \
 		__current_allocsite ? __current_allocsite : caller, sizefn); \
@@ -420,7 +424,7 @@ void ALLOC_EVENT(pre_alloc)(size_t *p_size, size_t *p_alignment, const void *cal
 	/* We increase the size by the amount of extra data we store,  \
 	 * and possibly a bit more to allow for alignment.  */ \
 	size_t orig_size = *p_size; \
-	size_t size_to_allocate = CHUNK_SIZE_WITH_TRAILER(orig_size, struct extended_insert, void*); \
+	size_t size_to_allocate = CHUNK_SIZE_WITH_TRAILER(orig_size, INSERT_TYPE, void*); \
 	assert(0 == size_to_allocate % ALIGNOF(void *)); \
 	*p_size = size_to_allocate; \
 } \
@@ -434,7 +438,7 @@ int ALLOC_EVENT(pre_nonnull_free)(void *userptr, size_t freed_usable_size) \
 		if (*lti) return 1; /* Cancel free if we are still alive */ \
 		__notify_free(userptr); \
 	} \
-	__generic_malloc_index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
+	index_namefrag ## _index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
 		ensure_arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), userptr), \
 		userptr/*, freed_usable_size*/, sizefn); \
 	return 0; \
@@ -463,7 +467,7 @@ void ALLOC_EVENT(pre_nonnull_nonzero_realloc)(void *userptr, size_t size, const 
 	/* BUT some bigallocs are just big; they needn't have children.  */ \
 	/* For those, does it matter if we delete and then re-create the bigalloc record? */ \
 	/* I don't see why it should. */ \
-	__generic_malloc_index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
+	index_namefrag ## _index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
 		arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), userptr), \
 		userptr/*, malloc_usable_size(ptr)*/, sizefn); \
 } \
@@ -476,8 +480,8 @@ void ALLOC_EVENT(post_nonnull_nonzero_realloc)(void *userptr, \
 	/* FIXME: This requested size could be wrong. */ \
 	/* The caller should give us the real requested size instead. */ \
 	size_t requested_size = __current_allocsz ? __current_allocsz : \
-		modified_size - sizeof(struct extended_insert); \
-	__generic_malloc_index_reinsert_after_resize(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
+		modified_size - sizeof(INSERT_TYPE); \
+	index_namefrag ## _index_reinsert_after_resize(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
 		arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), userptr), \
 		userptr, \
 		modified_size, \
@@ -487,24 +491,25 @@ void ALLOC_EVENT(post_nonnull_nonzero_realloc)(void *userptr, \
 		new_allocptr, \
 		sizefn\
 	); \
-} \
-/* Now the allocator itself. */ \
+}
+/* Now the allocator itself. */
+#define ALLOC_EVENT_ALLOCATOR_DEFS4(allocator_namefrag, index_namefrag, sizefn, do_lifetime_policies) \
 extern struct allocator ALLOC_ALLOCATOR_NAME(allocator_namefrag); \
 static struct big_allocation *ensure_big(void *addr, size_t size) \
 { \
-	return __generic_malloc_ensure_big(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), addr, size); \
+	return index_namefrag ## _ensure_big(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), addr, size); \
 } \
-static liballocs_err_t set_type(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type) \
+static struct liballocs_err *set_type(struct big_allocation *maybe_the_allocation, void *obj, struct uniqtype *new_type) \
 { \
-	return __generic_malloc_set_type(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), maybe_the_allocation, \
+	return index_namefrag ## _set_type(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), maybe_the_allocation, \
 			obj, new_type, sizefn); \
 } \
-static liballocs_err_t get_info( \
+static struct liballocs_err *get_info( \
 	void *obj, struct big_allocation *maybe_the_allocation, \
 	struct uniqtype **out_type, void **out_base,  \
 	unsigned long *out_size, const void **out_site) \
 { \
-	return __generic_malloc_get_info(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), sizefn, obj, maybe_the_allocation, \
+	return index_namefrag ## _get_info(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), sizefn, obj, maybe_the_allocation, \
 		out_type, out_base, out_size, out_site); \
 } \
  \
@@ -523,5 +528,11 @@ struct allocator ALLOC_ALLOCATOR_NAME(allocator_namefrag) = { \
 #else
 #define __do_lp 0
 #endif
+
+#ifndef index_namefrag
+#define index_namefrag __generic_malloc
+#endif
+
 #define ALLOC_EVENT_INDEXING_DEFS(allocator_namefrag, sizefn) \
-  ALLOC_EVENT_INDEXING_DEFS3(allocator_namefrag, sizefn, __do_lp)
+  ALLOC_EVENT_INDEXING_DEFS4(allocator_namefrag, __generic_malloc, sizefn, __do_lp) \
+  ALLOC_EVENT_ALLOCATOR_DEFS4(allocator_namefrag, __generic_malloc, sizefn, __do_lp)

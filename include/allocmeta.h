@@ -436,10 +436,10 @@ extern struct allocator __alloca_allocator; /* nests under stack? */
 extern struct allocator __packed_seq_allocator;
 extern struct allocator __default_lib_malloc_allocator;
 extern struct allocator __global_malloc_allocator;
+extern struct allocator __ld_so_malloc_allocator;
 // FIXME: These are indexes, not allocators
 extern struct allocator __generic_small_allocator; /* usual suballoc impl */
 extern struct allocator __generic_uniform_allocator; /* usual suballoc impl */
-// extern struct allocator __global_malloc_allocator;
 // extern struct allocator __libc_malloc_allocator; // good idea? probably not
 // extern struct allocator __global_obstack_allocator;
 
@@ -486,6 +486,7 @@ struct allocs_file_metadata
 {
 	void *meta_obj_handle; /* loaded by us */
 	ElfW(Sym) *extrasym;
+	unsigned char *extrastr;
 	struct allocsites_vectors_by_base_id_entry *allocsites_info;
 	struct frame_allocsite_entry *frames_info;
 	unsigned nframes;
@@ -580,6 +581,8 @@ struct packed_sequence
 };
 extern struct packed_sequence_family __string8_nulterm_packed_sequence;
 void __packed_seq_free(void *arg);
+
+void __ld_so_malloc_allocator_init(void) __attribute__((constructor(103)));
 
 /* Assorted notes:
  * - core liballocs implements the reflective protocol 

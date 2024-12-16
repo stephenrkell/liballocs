@@ -88,22 +88,25 @@ void __static_segment_allocator_notify_define_segment(
 	unsigned loadndx
 )
 {
-	/* To avoid confusion, don't use "file" in this function
-	 * (that's why I called it "file_"). */
+	/* To avoid confusion, don't use "file" in this function --
+	 * that's why I called it "file_". "file_" points to the librunt
+	 * metadata structure, and "afile" points to our own bigger structure. */
 	struct allocs_file_metadata *afile = CONTAINER_OF(file_, struct allocs_file_metadata, m);
 	/* DON'T check for liballocs's global initializedness here.
-	 * Because the only thing we need to initialize is the data segment
-	 * bigalloc end, we can only become fully initialized once our
-	 * depended-on allocators (static file, mmap) are fully initialized.
-	 * But the file allocator calls *us* during *its* initialization.
-	 * So this function has to work even if we're not fully initialized yet. */
+	 * Also don't check for our own initializedness.
+	 * The file allocator calls *us* during *its* initialization,
+	 * So this function has to work even if we're not fully initialized yet.
+	 * The only thing we need to initialize, in our init function, is the
+	 * executable's data segment bigalloc end. We can set this, and become
+	 * fully initialized, only once our depended-on allocators (static file,
+	 * mmap) are fully initialized. */
 	ElfW(Phdr) *phdr = &afile->m.phdrs[phndx];
 	const void *segment_start_addr = (char*) afile->m.l->l_addr + phdr->p_vaddr;
 	size_t segment_size = phdr->p_memsz;
 
 	/* librunt does the outcalls to set up segments, so for us to run,
-	 * we  need to be a wrapper of the librunt call. We call its __real_
-	 * one to do the basics. */
+	 * we need to be a wrapper of the librunt call. And we are! SEe the
+	 * __wrap_ alias below. We call librunt's __real_ one to do the basics. */
 	__real___runt_segments_notify_define_segment(&afile->m, phndx, loadndx);
 	/* Now librunt has set up a dummy segment_metadata for us; we mostly
 	 * just have to do the bigalloc stuff and fill it in the metavector. */

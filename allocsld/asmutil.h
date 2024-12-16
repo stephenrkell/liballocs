@@ -92,7 +92,23 @@ static inline void apply_one_reloc(void *buf, ElfW(Rela) rel, uintptr_t *symaddr
 		default: abort();
 	}
 }
-
+static inline unsigned long read_one_relocated_field(void *buf, ElfW(Rela) rel)
+{
+	char *tgt = buf + rel.r_offset;
+	unsigned long long utmp = 0;
+	unsigned utmp32 = 0;
+	long long stmp = 0;
+	unsigned stmp32 = 0;
+	switch (ELFW_R_TYPE(rel.r_info))
+	{
+		case R_X86_64_PC32:   memcpy(&stmp, tgt, 4); return (uintptr_t) tgt + stmp;
+		case R_X86_64_64:     memcpy(&utmp, tgt, 8); return utmp;
+		case R_X86_64_32:     memcpy(&utmp32, tgt, 4); return utmp32;
+		case R_X86_64_32S:    memcpy(&stmp32, tgt, 4); return stmp32;
+		case R_X86_64_TPOFF32:memcpy(&utmp32, tgt, 4); return utmp32;
+		default: abort();
+	}
+}
 #define memcpy_and_relocate(dest, srcident, ...) do { \
 	uintptr_t addrlist[] = { __VA_ARGS__ }; \
 	extern size_t srcident ## _size; \

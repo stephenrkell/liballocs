@@ -278,16 +278,7 @@ void cover_tracks(_Bool we_are_the_program, ElfW(Phdr) *program_phdrs, unsigned 
 	chain_dl_debug_state_function(program_phdrs, program_phnum,
 		ldso_path, inferior_dynamic_vaddr, base_addr);
 
-	struct link_map lm = {
-		.l_addr = base_addr,
-		.l_name = (char*) ldso_path,
-		.l_ld = (ElfW(Dyn) *) (base_addr + inferior_dynamic_vaddr),
-		.l_next = NULL,
-		.l_prev = NULL
-	};
-	_Bool walk_all_ld_so_symbols(struct link_map *);
-	walk_all_ld_so_symbols(&lm);
-	
+	instrument_ld_so_allocators(base_addr);
 
 	// FIXME: now munmap and/or mprotect some stuff:
 	// munmap ourselves, to the extent we can

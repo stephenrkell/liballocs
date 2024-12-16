@@ -64,11 +64,20 @@ struct uniqtype; /* forward decl */
 #define ALLOCA_HEADER_SIZE (sizeof (unsigned long))
 #endif
 
+#ifndef CURRENT_ALLOC_VARS_QUALIFIERS
+/* TLS can be disabled */
 #ifndef NO_TLS
-extern __thread void *__current_allocsite __attribute__((weak));
+#define CURRENT_ALLOC_VARS_QUALIFIERS extern __thread
+#define CURRENT_ALLOC_VARS_QUALIFIERS_POST  __attribute__((weak))
 #else
-extern void *__current_allocsite __attribute__((weak));
+#define CURRENT_ALLOC_VARS_QUALIFIERS extern
+#define CURRENT_ALLOC_VARS_QUALIFIERS_POST  __attribute__((weak))
 #endif
+/* */
+#else
+/* the include context needs to have defined CURRENT_ALLOC_VARS_QUALIFIERS{,_POST} */
+#endif
+CURRENT_ALLOC_VARS_QUALIFIERS void *__current_allocsite CURRENT_ALLOC_VARS_QUALIFIERS_POST;
 
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *, void *frame_addr);
 

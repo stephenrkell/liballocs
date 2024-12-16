@@ -21,6 +21,7 @@
 #include "pageindex.h"
 #include "allocsites.h"
 #include "maps.h"
+#include "donald.h" // for SYSTEM_LDSO_PATH
 
 /* We now split static metadata into static-file, static-segment,
    static-section and static-symbol. This file implements only static-file,
@@ -225,6 +226,7 @@ static void load_metadata(struct allocs_file_metadata *meta, void *handle)
 		load_and_init_all_metadata_for_one_object, &meta->meta_obj_handle);
 	// meta_obj_handle may be null -- we continue either way
 	meta->extrasym = (meta->meta_obj_handle ? dlsym(meta->meta_obj_handle, "extrasym") : NULL);
+	meta->extrastr = (meta->meta_obj_handle ? dlsym(meta->meta_obj_handle, "extrastr") : NULL);
 	/* We still haven't filled in everything... */
 	init_allocsites_info(meta);
 	init_frames_info(meta);
@@ -496,6 +498,26 @@ struct file_metadata *__static_file_allocator_notify_load(void *handle, const vo
 		_Bool ret = __liballocs_pre_extend_bigalloc(__brk_bigalloc,
 			(void*)((uintptr_t) brk_mapping_bigalloc->begin + file_bigalloc_size));
 	}
+	/* If this file is the ld.so, then look for the special
+	 * malloc instrumentation that we do for it. */
+	if (0 == strcmp(fm->l->l_name, SYSTEM_LDSO_PATH))
+	{
+		// FIXME: put this in a header
+		extern struct linear_malloc_instance_info *ld_so_malloc_index_info;
+		void *candidate_addr = (void*)(l->l_addr - 4096); // FIXME: less nasty please
+		/* If we're running without allocsld, the page before the ld.so might contain
+		 * anything. We check that the memory mapping currently doesn't exist or
+		 * has no children. We could also check that it's anonymous, but note e.g.
+		 * that the vdso appears to us to be anonymous currently (FIXME). */
+		struct big_allocation *candidate_b = __lookup_bigalloc_from_root(candidate_addr, &__mmap_allocator,
+			NULL);
+		if (!candidate_b || !candidate_b->first_child)
+		{
+			ld_so_malloc_index_info = candidate_addr;
+		} else ld_so_malloc_index_info = NULL;
+	}
+
+
 	return &meta->m;
 }
 struct file_metadata *__wrap___runt_files_notify_load(void *handle, const void *load_site) __attribute__((alias("__static_file_allocator_notify_load")));

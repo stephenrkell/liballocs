@@ -7,7 +7,7 @@ include $(SRCROOT)/config.mk
 CFLAGS += -DIN_LIBRUNT_DSO
 CFLAGS += -DIN_LIBALLOCS_DSO
 CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS)/include \
-   -I$(LIBSYSTRAP)/include -I$(LIBRUNT)/include -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused
+   -I$(LIBSYSTRAP)/include -I$(LIBRUNT)/include -I$(DONALD)/src -I$(LIBDLBIND)/include -I$(srcdir) -Wno-unused
 ifeq ($(DEBUG),)
 CFLAGS += -flto -ffat-lto-objects
 endif
@@ -176,7 +176,7 @@ NOPRELOAD_OBJS := #uniqtypes.o # never link this into a preload lib! nor include
  # recall that liballocs.a is only for static-linked client binaries (exe or solib).
  # What should liballocs.a include? E.g. does a client static-linked exe need this
  # if it defines its own malloc?
-PRELOAD_OBJS := preload.o user2hook.o
+PRELOAD_OBJS := preload.o user2hook.o ifunc.o # <-- ifunc.o is just for testing / proof-of-concept
 ifneq ($(TEST),)
 # We have a noop version of the systrap object, which
 # used to be linked into liballocs_test.so because
@@ -244,7 +244,7 @@ $(SOLIB_TARGETS): dlmalloc.a
 # HACKETY HACK: ld.gold seems to require we use the colon separator, and just give the filename
 # not its fully qualified pathname
 $(SOLIB_TARGETS): EXCLUDE_LIBS += dlmalloc.a:libsystrap.a
-$(SOLIB_TARGETS): LDFLAGS += -Wl,-z,initfirst
+#$(SOLIB_TARGETS): LDFLAGS += -Wl,-z,initfirst
 
 LIBALLOCS_PRELOAD_A_OBJS := dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS)
 LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS)
