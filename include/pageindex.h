@@ -55,7 +55,7 @@ struct big_allocation
 	 */
 };
 #define BIGALLOC_IN_USE(b) ((b)->begin && (b)->end)
-#define NBIGALLOCS 1024
+#define NBIGALLOCS 32768
 #ifdef IN_LIBALLOCS_DSO
 #define BIDX(idx) ((struct big_allocation *)((idx) ? &big_allocations[(idx)] : NULL))
 #define IDXB(b)   ((b) ? (b) - &big_allocations[0] : 0)
