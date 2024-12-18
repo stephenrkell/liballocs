@@ -46,7 +46,7 @@ include/uniqtype.h include/uniqtype-defs.h:
         esac; \
     done; exit 1
 
-bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types tools/noopgen
+bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/frametypes2 tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types tools/noopgen
 #tools/objdumpallocs-llvm
 
 LIBELF ?= -lelf
@@ -64,6 +64,9 @@ tools_dwarftypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_frametypes_SOURCES = tools/frametypes.cpp
 tools_frametypes_LDADD = $(TOOLS_LDADD)
 tools_frametypes_CXXFLAGS = $(TOOLS_CXXFLAGS)
+tools_frametypes2_SOURCES = tools/frametypes2.cpp
+tools_frametypes2_LDADD = $(TOOLS_LDADD)
+tools_frametypes2_CXXFLAGS = $(TOOLS_CXXFLAGS)
 tools_extrasyms_SOURCES = tools/extrasyms.cpp
 tools_extrasyms_LDADD = $(TOOLS_LDADD)
 tools_extrasyms_CXXFLAGS = $(TOOLS_CXXFLAGS)
