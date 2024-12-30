@@ -46,7 +46,10 @@ include/uniqtype.h include/uniqtype-defs.h:
         esac; \
     done; exit 1
 
-bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes tools/frametypes2 tools/extrasyms tools/metavector tools/dumpptrs tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size tools/cufiles tools/pervasive-types tools/noopgen
+bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes \
+  tools/frametypes2 tools/extrasyms tools/metavector tools/dumpptrs \
+  tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size \
+  tools/cufiles tools/pervasive-types tools/noopgen
 #tools/objdumpallocs-llvm
 
 LIBELF ?= -lelf
@@ -191,6 +194,11 @@ endif
 
 include libltdl/ltdl.mk
 
+# To sanity-check our DWARF expression compiler,
+# we build the self-test and run it
+tools/dwarf-machine-self-test: tools/dwarf-machine.hpp
+	$(CXX) -o $@ -O3 -Wl,--export-dynamic -g -x c++ -DSELF_TEST $< && `pwd`/$@ 11 12 || { mv $@ $@.failed; false; }
+
 tools/gold-plugin.so: $(lib_LTLIBRARIES)
 	echo "gold-plugin.so: creating convenience link from $(abs_builddir)/.libs to $(top_builddir)"; \
             rm -f $(top_builddir)/tools/gold-plugin.so ; \
@@ -216,6 +224,7 @@ tools/roottypes.c: tools/pervasive-types
 	$< > $@ || (rm -f $@; false)
 
 all-am: tools/gold-plugin.so
+all-am: tools/dwarf-machine-self-test
 all-am: tools/libroottypes.a
 
 clean:
