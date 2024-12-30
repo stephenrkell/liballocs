@@ -197,7 +197,7 @@ include libltdl/ltdl.mk
 # To sanity-check our DWARF expression compiler,
 # we build the self-test and run it
 tools/dwarf-machine-self-test: tools/dwarf-machine.hpp
-	$(CXX) -o $@ -O3 -Wl,--export-dynamic -g -x c++ -DSELF_TEST $< && `pwd`/$@ 11 12 || { mv $@ $@.failed; false; }
+	$(CXX) -o $@ -O3 -Wl,--export-dynamic -g -x c++ -DSELF_TEST $< -ldl && `pwd`/$@ 11 12 || { mv $@ $@.failed; false; }
 
 tools/gold-plugin.so: $(lib_LTLIBRARIES)
 	echo "gold-plugin.so: creating convenience link from $(abs_builddir)/.libs to $(top_builddir)"; \
