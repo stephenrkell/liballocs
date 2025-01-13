@@ -769,11 +769,8 @@ void write_traditional_output(
 	} // end for subprogram
 	
 	unsigned total_emitted = 0;
-	// FIXME: these records need to be exactly one-for-one with the
-	// records we emitted earlier, because each one includes a pointer back,
-	// and we calculate the name of the address-taken record by its address
-	// range.
-	boost::icl::interval_map<Dwarf_Addr, iterator_df<subprogram_die> > sorted_intervals;
+	set< pair< boost::icl::discrete_interval<Dwarf_Addr>, iterator_df<subprogram_die> > >
+	 sorted_intervals;
 	for (map< iterator_df<subprogram_die>, frame_intervals_t >::iterator i_subp_intervals 
 	  = frame_intervals_by_subprogram.begin(); i_subp_intervals != frame_intervals_by_subprogram.end();
 	  ++ i_subp_intervals)
@@ -793,14 +790,16 @@ void write_traditional_output(
 			sorted_intervals.insert(make_pair(i_int->first, i_subp_intervals->first));
 		}
 	}
+	/* Frame alloc records need to be exactly one-for-one with the
+	 * records we emitted earlier, even if that results in multiple
+	 * contiguous entries with the same offset value. This is because
+	 * each record includes a pointer back to a frame type structure,
+	 * and these are named according to the address range they cover.
+	 * We need to refer to that range. */
 	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
 	for (auto i_pair = sorted_intervals.begin(); i_pair != sorted_intervals.end(); ++i_pair)
 	{
-		auto i_last_equal = find_equal_range_last< iterator_df<subprogram_die> >(
-			i_pair, sorted_intervals.end());
-		auto interval = boost::icl::discrete_interval<Dwarf_Addr>::right_open(
-			i_pair->first.lower(), i_last_equal->first.upper());
-
+		auto interval = i_pair->first;
 		unsigned offset_from_frame_base = frame_offsets_by_subprogram[i_pair->second];
 	
 		if (i_pair != sorted_intervals.begin()) cout << ",";
@@ -813,10 +812,6 @@ void write_traditional_output(
 			<< " }"
 			<< "\n\t}";
 		++total_emitted;
-
-	//continue_allocsite_loop:
-		// fast-forward
-		i_pair = i_last_equal;
 	}
 	// close the list
 	cout << "\n};\n";
