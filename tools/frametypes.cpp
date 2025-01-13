@@ -25,6 +25,7 @@
 
 #include "stickyroot.hpp"
 #include "uniqtypes.hpp"
+#include "frame-element.hpp" /* we mostly don't use this, except find_equal_range_last */
 #include "relf.h"
 
 using std::cin;
@@ -582,6 +583,7 @@ int main(int argc, char **argv)
 			}
 			
 			/* We can get unreasonably big. */
+#if 0
 			static const unsigned MAX_INTERVALS = 10000;
 			if (subp_vaddr_intervals.size() > MAX_INTERVALS)
 			{
@@ -591,7 +593,7 @@ int main(int argc, char **argv)
 				subp_vaddr_intervals.clear();
 				break;
 			}
-			
+#endif
 			/* We note that the map is supposed to map file-relative addrs
 			 * (FIXME: vaddr is CU- or file-relative? or "applicable base address" blah?) 
 			 * to the set of variable/fp DIEs that are 
@@ -712,15 +714,11 @@ int main(int argc, char **argv)
 				}
 				else try
 				{
-					std::stack<Dwarf_Unsigned> initial_stack; 
-					// call the evaluator directly
-					// -- push zero (a.k.a. the frame base) onto the initial stack
-					initial_stack.push(0); 
-					// FIXME: really want to push the offset of the stack pointer from the frame base
 					dwarf::expr::evaluator e(i_el_pair->second,
 						i_el_pair->first.spec_here(),
 						/* fb */ 0, 
-						initial_stack);
+						{ 0 } /* push zero (a.k.a. the frame base) onto the initial stack */);
+					// FIXME: really want to push the offset of the stack pointer from the frame base
 					switch (e.tos_state())
 					{
 						case dwarf::expr::evaluator::ADDRESS: // the good one
@@ -745,7 +743,7 @@ int main(int argc, char **argv)
 							<< "in the vaddr range " 
 							<< std::hex << i_int->first << std::dec
 							<< ": "
-					 		<< *i_el;
+					 		<< *i_el << endl;
 					}
 					//discarded.push_back(make_pair(*i_el, "register-located"));
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
@@ -759,7 +757,7 @@ int main(int argc, char **argv)
 				catch (dwarf::expr::Not_supported)
 				{
 					cerr << "Warning: unsupported DWARF opcode when computing location for fp: "
-						<< *i_el;
+						<< *i_el << endl;
 					//discarded.push_back(make_pair(*i_el, "register-located"));
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
 						compare_first_iter_offset<string> */ singleton_set;
@@ -772,7 +770,7 @@ int main(int argc, char **argv)
 				catch (...)
 				{
 					cerr << "Warning: something strange happened when computing location for fp: " 
-					 	<< *i_el;
+					 	<< *i_el << endl;
 					//discarded.push_back(make_pair(*i_el, "register-located"));
 					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
 						compare_first_iter_offset<string> */ singleton_set;
@@ -782,6 +780,9 @@ int main(int argc, char **argv)
 #endif
 					continue;
 				}
+				if (debug_out > 1) cerr << "Over interval " << std::hex << i_int->first
+					<< " succeeded at getting on-stack frame location for fp: "
+					<< *i_el << " (expr was " << i_el_pair->second << ")" << endl;
 				Dwarf_Signed frame_offset = static_cast<Dwarf_Signed>(addr_from_zero);
 				// cerr << "Found on-stack location (fb + " << frame_offset << ") for fp/var " << *i_el 
 				// 		<< "in the vaddr range " 
@@ -875,7 +876,34 @@ int main(int argc, char **argv)
 		if (overall_frame_minoff < 0)
 		{
 			/* The offset we want to apply to everything is the negation of 
-			 * overall_frame_minoff, rounded *up* to a word. */
+			 * overall_frame_minoff (likely a negative number), rounded *up* to a word
+			 * (i.e. decreasing its magnitude, if negative;
+			 * shifting upwards the range of offsets being used in the struct).
+			 * What this looks like is:
+			 *
+			 *  higher        .............
+			 *  addrs       |_______________| stack-passed parameters   (positive CFA offset)
+			 *           ^  |               | <-- CFA
+			 *           |  |               |
+			 *       size|  |               |   |  stack growth
+			 *           |  |               |   v
+			 *  lower    |  |               | locals                    (negative CFA offset)
+			 *  addrs    v  |_______________| <-- top of frame (TOF)
+			 * THEN:         ..............
+			 *
+			 * -- each offset in the struct will get offset_to_all added to the CFA offset
+			 *      (always turning a negative offset to a nonnegative one)
+			 *      (turning CFA-relative offsets into TOF-relative)
+			 * -- the size of the struct will be emitted as interval_maxoff + offset_to_all
+			 *      (recalling that interval_maxoff already reflects the size of the element there)
+			 *        ** IS THIS CORRECT? Seems wrong. But interval_maxoff is not a size,
+			 *        because it might be small or negative
+			 * -- offset_to_all will be remembered as
+			 *      frame_offsets_by_subprogram[i_subp] = offset_to_all;
+			 *
+			 * -- the frame alloc record will include offset_to_all
+			 * -- offsets will be interpreted relative to XXX FIXME fill in.
+			 */
 			// FIXME: don't assume host word size
 			unsigned remainder = (-overall_frame_minoff) % (sizeof (void*));
 			unsigned quotient  = (-overall_frame_minoff) / (sizeof (void*));
@@ -937,8 +965,11 @@ int main(int argc, char **argv)
 					string mangled_earlier_name = mangle_typename(
 						make_pair("", cu_name + unmangled_earlier_typename));
 					cout << "\n/* an alias will do */\n";
+					/* This might emit nothing, if */
 					emit_weak_alias_idem(cout, mangled_name, mangled_earlier_name); // FIXME: not weak
 					emitted_as_alias = true;
+					break; // just one alias is enough, even if other duplicates exist
+						// (they themselves having been emitted as aliases)
 				}
 			}
 			if (emitted_as_alias) continue;

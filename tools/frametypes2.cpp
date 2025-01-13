@@ -43,6 +43,7 @@
 #include <fileno.hpp>
 
 #include "stickyroot.hpp"
+#include "frame-element.hpp"
 #include "uniqtypes.hpp"
 #include "relf.h"
 
@@ -53,6 +54,7 @@ using std::map;
 using std::make_shared;
 using std::ios;
 using std::ifstream;
+using std::ostream;
 using std::dynamic_pointer_cast;
 using boost::optional;
 using std::ostringstream;
@@ -97,71 +99,7 @@ using dwarf::lib::Dwarf_Unsigned;
 
 using std::unordered_set;
 
-template <class Target>
-struct iter_hash
-{
-	typedef iterator_df<Target> T;
-	
-	static size_t hash_fn(const T& v) { return v.offset_here(); }
-	static bool eq_fn(const T& v1, const T& v2)
-	{ return v1.offset_here() == v2.offset_here(); }
-	
-	struct set : unordered_set<
-		T,
-		std::function<__typeof__(hash_fn)>,
-		std::function<__typeof__(eq_fn)>
-	>
-	{
-		set() : unordered_set<T, std::function<__typeof__(hash_fn)>, std::function<__typeof__(eq_fn)> >({}, 0, hash_fn, eq_fn) {}
-	};
-};
-
-template <class Target, class Second>
-struct iterfirst_pair_hash
-{
-	typedef pair<iterator_df<Target>, Second> T;
-	
-	static size_t hash_fn(const T& v)
-	{ return v.first.offset_here() ^ std::hash<Second>()(v.second); }
-	static bool eq_fn(const T& v1,  const T& v2)
-	{ return v1.first.offset_here() == v2.first.offset_here(); }
-
-	struct set : unordered_set< 
-		T,
-		std::function<__typeof__(hash_fn)>,
-		std::function<__typeof__(eq_fn)>
-	>
-	{
-		set() : unordered_set<T, std::function<__typeof__(hash_fn)>, std::function<__typeof__(eq_fn)> >
-			({}, 0, hash_fn, eq_fn) 
-			{}
-	};
-};
-
-template <class First, class Target>
-struct itersecond_pair_hash
-{
-	typedef pair<First, iterator_df<Target> > T;
-	
-	static size_t hash_fn(const T& v) 
-	{ return v.second.offset_here() ^ std::hash<First>()(v.first); }
-	static bool eq_fn(const T& v1, 	const T& v2)
-	{ return v1.first == v2.first &&
-	    v1.second.offset_here() == v2.second.offset_here(); }
-
-	struct set : unordered_set< 
-		T,
-		std::function<__typeof__(hash_fn)>,
-		std::function<__typeof__(eq_fn)>
-	>
-	{
-		set() : unordered_set<T, std::function<__typeof__(hash_fn)>, std::function<__typeof__(eq_fn)> >
-			({}, 0, hash_fn, eq_fn) 
-			{}
-	};
-};
-
-
+/* FIXME: put these elsewhere */
 namespace std {
 template <>
 struct hash<const dwarf::lib::Dwarf_Loc>
@@ -191,75 +129,6 @@ struct hash<dwarf::encap::loc_expr>
 };
 }
 
-// typedef iterfirst_pair_hash< 
-// 	with_dynamic_location_die, encap::loc_expr/* ,
-// 	compare_first_iter_offset<encap::loc_expr> */
-// >::set live_set_t;
-// typedef boost::icl::interval_map< Dwarf_Off, live_set_t > varset_intervals_t;
-struct frame_interval_map_set_value
- : pair< iterator_df< with_dynamic_location_die >,
-         pair< Dwarf_Unsigned /* caller regnum */, loc_expr /* where */ >
-       >
-{
-	using pair::pair;
-	frame_interval_map_set_value(Dwarf_Unsigned reg, const loc_expr& expr)
-	 : pair(iterator_base::END, make_pair(reg, expr)) {}
-	frame_interval_map_set_value(iterator_df<with_dynamic_location_die> d)
-	 : pair(d, make_pair(0, loc_expr())) { assert(d); }
-	opt<Dwarf_Unsigned> get_caller_regnum() const
-	{ if (first == iterator_base::END) return second.first; return opt<Dwarf_Unsigned>(); }
-	opt<loc_expr> get_save_location() const
-	{ if (first == iterator_base::END) return second.second; return opt<loc_expr>(); }
-	iterator_df<with_dynamic_location_die> get_die() const
-	{ return first; }
-};
-struct compare_frame_interval_map_set_value
-{
-	bool operator()(const frame_interval_map_set_value& x,
-		            const frame_interval_map_set_value& y)
-		const
-	{
-		return (x.first < y.first)
-			|| ((x.first == y.first) && x.second < y.second)
-		//	|| ((x.first == y.first) && x.second.first.offset_here() == y.second.first.offset_here()
-		//		&& x.second.first.second.second < y.second.first.second.second );
-		;
-	}
-};
-
-typedef set< frame_interval_map_set_value, compare_frame_interval_map_set_value >
-   frame_interval_map_set_t;
-typedef boost::icl::interval_map<
-		Dwarf_Off /* interval base type */,
-		frame_interval_map_set_t
-	> frame_intervals_t;
-
-typedef boost::icl::interval_map< 
-		Dwarf_Off /* interval base type */,
-		iterfirst_pair_hash< 
-			with_dynamic_location_die,
-			string
-		>::set/* ,
-			compare_first_iter_offset<string> */
-	> discarded_intervals_t;
-
-#ifndef NDEBUG
-// used for sanity-checking
-unsigned count_intervals(const frame_intervals_t& f)
-{
-	unsigned count = 0;
-	for (auto i = f.begin(); i != f.end(); ++i, ++count);
-	return count;
-}
-template<typename _Key, typename _Compare = std::less<_Key>,
-	   typename _Alloc = std::allocator<_Key> >
-bool sanity_check_set(const std::set<_Key, _Compare, _Alloc>& s)
-{
-	unsigned count = 0;
-	for (auto i = s.begin(); i != s.end(); ++i, ++count);
-	return count == s.size();
-}
-#endif
 struct iterator_bf_skipping_types : public core::iterator_bf<>
 {
 	typedef core::iterator_bf<> super;
@@ -322,6 +191,7 @@ void print_intervals_stats(sticky_root_die& root, /* iterator_df<subprogram_die>
 	cerr << count << std::endl;
 }
 
+// FIXME: unused? where did frametypes use this?
 static
 with_static_location_die::sym_binding_t
 resolve_subp_address(iterator_df<subprogram_die> i_subp, sticky_root_die& root)
@@ -354,31 +224,15 @@ resolve_subp_address(iterator_df<subprogram_die> i_subp, sticky_root_die& root)
 	throw No_entry();
 }
 
-struct subprogram_key : public pair< pair<string, string>, string > // ordering for free
-{
-	subprogram_key(const string& subprogram_name, const string& sourcefile_name, 
-		const string& comp_dir) : pair(make_pair(subprogram_name, sourcefile_name), comp_dir) {}
-	string subprogram_name() const { return first.first; }
-	string sourcefile_name() const { return first.second; }
-	string comp_dir() const { return second; }
-};
-
-/* We gather subprograms by the ranges they cover
- * AND by their identity (key).
- * We also store a key although. */
-typedef boost::icl::interval_map<
-	Dwarf_Off,
-	/* It's a set only so that we can detect and warn about overlaps... */
-	std::set< pair< subprogram_key, iterator_df<subprogram_die> > >
-> subprogram_vaddr_interval_map_t;
-
 void
 gather_defined_subprograms(sticky_root_die& root,
 	subprogram_vaddr_interval_map_t& out_by_vaddr,
 	map<subprogram_key, iterator_df<subprogram_die> >& out_by_key
 	)
 {
-	map<subprogram_key, iterator_df<subprogram_die> > gathered;
+	/* FIXME: could speed this up by cutting off the search underneath
+	 * certain tags. But which? Subprograms need not be grandchildren of the root,
+	 * if we have namespaces or the like. */
 	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
 	{
 		if (i.is_a<subprogram_die>())
@@ -443,450 +297,921 @@ gather_defined_subprograms(sticky_root_die& root,
 		}
 	}
 }
-static bool
-locexpr_is_for_all_vaddrs(const loc_expr& locexpr)
+
+void write_pairs(ostream& s,
+	map< pair<string, /*iterator_df<type_die>*/ codeful_name >, 
+	     vector< frame_element >
+	> const& by_name_and_type)
 {
-	return locexpr.lopc == 0 && 0 == locexpr.hipc
-		|| locexpr.lopc == 0 && locexpr.hipc == std::numeric_limits<Dwarf_Off>::max();
+	s << "name\ttype";
+	for (auto i_pair = by_name_and_type.begin(); i_pair != by_name_and_type.end(); ++i_pair)
+	{
+		s << i_pair->first.first << "\t";
+		s << mangle_typename(i_pair->first.second) << "\t";
+		for (auto i_el = i_pair->second.begin(); i_el != i_pair->second.end(); ++i_el)
+		{
+			// hmm, what to print?
+		}
+		s << "\t(" << i_pair->second.size() << " intervals)";
+		s << endl;
+	}
 }
 
-static bool
-locexpr_is_base_address_selector(const loc_expr& locexpr, root_die& root)
+unsigned get_frame_offset(frame_intervals_t const& subp_frame_intervals)
 {
-	// FIXME: disgusting hack for detecting base address selection entries
-	// -- should be sensitive to DWARF word size
-	return locexpr.lopc == 0xffffffffffffffffULL
-				|| locexpr.lopc == 0xffffffffUL;
+	// In the original code, frame_intervals_t is a map <K, V> where V is
+	// pair<Dwarf_Signed /* frame offset */, iterator_df<with_dynamic_location_die> >
+	// so they are naturally sorted by offset. So, retrieving the maximum and minimum
+	// for each interval is trivial, and then we have simply to compute the overall
+	// maximum and minimum.
+	/* In our case, by contrast, not all frame elements have an offset. So we are
+	 * better off walking *all* elements and simply computing the maximum and minimum
+	 * as we go. In fact we don't need the maximum (which was used only for the overall
+	 * frame size, which we don't even define any more), just the minimum.
+	 * But since we want to generate traditional output, we do need to keep
+	 * this around. */
+	Dwarf_Signed least_offset_seen = std::numeric_limits<Dwarf_Signed>::max();
+	for (auto i_frame_int = subp_frame_intervals.begin();
+		i_frame_int != subp_frame_intervals.end();
+		++i_frame_int)
+	{
+		for (auto i_el = i_frame_int->second.begin(); i_el != i_frame_int->second.end();
+			++i_el)
+		{
+			optional<Dwarf_Signed> maybe_offs = i_el->has_fixed_offset_from_frame_base();
+			if (maybe_offs && *maybe_offs < least_offset_seen) least_offset_seen = *maybe_offs;
+		}
+	}
+	Dwarf_Signed overall_frame_minoff = least_offset_seen;
+	unsigned offset_to_all = 0;
+	if (overall_frame_minoff < 0)
+	{
+		/* The offset we want to apply to everything is the negation of 
+		 * overall_frame_minoff, rounded *up* to a word. */
+		// FIXME: don't assume host word size
+		unsigned remainder = (-overall_frame_minoff) % (sizeof (void*));
+		unsigned quotient  = (-overall_frame_minoff) / (sizeof (void*));
+		offset_to_all =
+			remainder == 0 ? quotient * (sizeof (void*))
+				: (quotient + 1) * (sizeof (void*));
+	}
+	return offset_to_all;
 }
 
-static
-vector<boost::icl::discrete_interval<Dwarf_Off> >
-intervals_for_local_var_locexpr(const loc_expr& locexpr, iterator_df<subprogram_die> i_subp,
-	iterator_df<with_dynamic_location_die> i_dyn, sticky_root_die& root)
+unsigned frame_max_extent(frame_intervals_t const& subp_frame_intervals)
 {
-	vector<boost::icl::discrete_interval<Dwarf_Off> > out;
-	if (locexpr_is_for_all_vaddrs(locexpr))
+	// In the original code, frame_intervals_t is a map <K, V> where V is
+	// pair<Dwarf_Signed /* frame offset */, iterator_df<with_dynamic_location_die> >
+	// so they are naturally sorted by offset. So, retrieving the maximum and minimum
+	// for each interval is trivial, and then we have simply to compute the overall
+	// maximum and minimum.
+	/* In our case, by contrast, not all frame elements have an offset. So we are
+	 * better off walking *all* elements and simply computing the maximum and minimum
+	 * as we go. In fact we don't need the maximum (which was used only for the overall
+	 * frame size, which we don't even define any more), just the minimum.
+	 * But since we want to generate traditional output, we do need to keep
+	 * this around. */
+	Dwarf_Signed greatest_offset_seen = std::numeric_limits<Dwarf_Signed>::min();
+	frame_element *greatest_offset_element = nullptr;
+	for (auto i_frame_int = subp_frame_intervals.begin();
+		i_frame_int != subp_frame_intervals.end();
+		++i_frame_int)
 	{
-		/* we will just add the intervals of the containing subprogram */
-		auto subp_intervals = i_subp->file_relative_intervals(root, nullptr, nullptr);
-			//pc_intervals_by_subprogram[i_subp]; // re-use cached
-		for (auto i_subp_int = subp_intervals.begin();
-			i_subp_int != subp_intervals.end(); 
-			++i_subp_int)
+		for (auto i_el = i_frame_int->second.begin(); i_el != i_frame_int->second.end();
+			++i_el)
 		{
-			out.push_back(i_subp_int->first);
-			cerr << "Borrowing vaddr ranges of " << *i_subp
-				<< " for dynamic-location " << *i_dyn << endl;
-			// print_sp_expr(root, our_interval.lower(), our_interval.upper());
-			// print_intervals_stats(root, i_subp, subp_frame_intervals);
+			optional<Dwarf_Signed> maybe_offs = i_el->has_fixed_offset_from_frame_base();
+			if (maybe_offs && *maybe_offs > greatest_offset_seen)
+			{
+				greatest_offset_seen = *maybe_offs;
+				greatest_offset_element = &*i_el;
+			}
 		}
 	}
-	else /* we have nonzero lopc and/or hipc */
-	{
-		/* We *do* have to adjust these by cu_base, because 
-		 * we're getting them straight from the location expression. */
-		auto opt_cu_base = i_subp.enclosing_cu()->get_low_pc();
-		if (!opt_cu_base)
-		{
-			cerr << "ERROR: subprogram " << *i_subp 
-				<< " -- in CU with no base address (CU: "
-				<< *i_subp.enclosing_cu()
-				<< ")" << endl;
-			abort();
-			// FIXME: can CUs use DW_AT_ranges instead? should handle this if so
-		}
-		auto our_interval = boost::icl::interval<Dwarf_Off>::right_open(
-			locexpr.lopc + opt_cu_base->addr, locexpr.hipc + opt_cu_base->addr
-		); 
-		out.push_back(our_interval);
 
-		/* assert sane interval */
-		assert(our_interval.lower() < our_interval.upper());
-		/* assert sane size -- no bigger than biggest sane function */
-		assert(our_interval.upper() - our_interval.lower() < 1024*1024);
-		// print_sp_expr(root, our_interval.lower(), our_interval.upper());
-		// print_intervals_stats(root, i_subp, subp_frame_intervals);
+	if (greatest_offset_seen == std::numeric_limits<Dwarf_Signed>::min())
+	{
+		// nothing here, so max extent 0
+		return 0;
 	}
+	assert(greatest_offset_element);
+	optional<Dwarf_Unsigned> maybe_sz = greatest_offset_element->size_in_bytes();
+	if (!maybe_sz)
+	{
+		cerr << "Warning: highest-offset frame element has no size (assuming zero length)"
+			<< endl;
+		return greatest_offset_seen;
+	}
+	return greatest_offset_seen + *maybe_sz;
+}
+
+static string typename_for_vaddr_interval(iterator_df<subprogram_die> i_subp, 
+	const boost::icl::discrete_interval<Dwarf_Off> interval)
+{
+	std::ostringstream s_typename;
+	if (i_subp.name_here()) s_typename << *i_subp.name_here();
+	else s_typename << "0x" << std::hex << i_subp.offset_here() << std::dec;
+	s_typename << "_vaddrs_0x" << std::hex << interval.lower() << "_0x" 
+		<< interval.upper() << std::dec;
+
+	return s_typename.str();
+}
+
+multimap<Dwarf_Signed, frame_element>
+local_elements_by_stack_offset(set<frame_element> const& elts)
+{
+	multimap<Dwarf_Signed, frame_element> out;
+	for (auto i_el = elts.begin();
+		i_el != elts.end(); ++i_el)
+	{
+		auto maybe_offs = i_el->has_fixed_offset_from_frame_base();
+		if (maybe_offs && i_el->m_local)
+		{
+			out.insert(make_pair(*maybe_offs, *i_el));
+		}
+		else if (i_el->m_local) cerr << "local but not fixed-stack-offset: " << i_el->m_local.summary()
+			<< " (expr: " << i_el->effective_expr_piece.copy() << ")" << endl;
+	} /* end for i_el_pair */
 	return out;
 }
 
-void
-gather_local_var_locations_by_pc_interval(
-	frame_intervals_t& out,
-	iterator_df<subprogram_die> i_subp,
-	sticky_root_die& root)
+void write_traditional_output(
+	subprogram_vaddr_interval_map_t const& subprograms_by_vaddr,
+	map<subprogram_key, iterator_df<subprogram_die> > const& subprograms_by_key,
+	frame_intervals_t const& all_intervals)
 {
-	unsigned start_depth = i_subp.depth();
-	for (iterator_bf_skipping_types i_bf = i_subp;
-		i_bf != core::iterator_base::END;
-		/* After the first inc, we should always be at *at least* 1 + start_depth. */
-		i_bf.increment(start_depth + 1))
-	{
-		// skip if not a with_dynamic_location_die
-		if (!i_bf.is_a<with_dynamic_location_die>()) continue;
+	map< iterator_df<subprogram_die>, frame_intervals_t > frame_intervals_by_subprogram;
+	//set< iterator_df<subprogram_die> > all_subprograms;
+	/* The frame offset is the most negative stack frame offset for any member
+	 * of any frame belonging to the subprogram. We record this for every
+	 * subprogram and add it to the stack frame base before interpreting the 
+	 * frame as a uniqtype COMPOSITE (struct) object. Field offsets in the uniqtype
+	 * are all calculated from this "virtual frame base" position, which is the
+	 * numerically lowest used location on the stack ("used" by locals placed
+	 * relative to the frame base... alloca() is another matter).
+	 * NOTE: I think we don't need this any more, as we don't have a frame uniqtype
+	 * any more. We will need some way to capture overlaps though. */
+	map< iterator_df<subprogram_die>, unsigned > frame_offsets_by_subprogram;
 
-		// skip static variables
-		if (i_bf.is_a<variable_die>() && i_bf.as_a<variable_die>()->has_static_storage())
+	// we need to build frame_intervals_by_subprogram
+	for (auto i_int = all_intervals.begin(); i_int != all_intervals.end(); ++i_int)
+	{
+		Dwarf_Addr addr = i_int->first.lower();
+		auto found_subprograms = subprograms_by_vaddr.find(addr);
+		if (found_subprograms == subprograms_by_vaddr.end())
 		{
-			// FIXME: check that symbol-less static variables
-			// are handled in extrasyms.
+			/* This can happen for FDEs covering startup files, say... there's no
+			 * DW_TAG_subprogram for these. We can safely skip such intervals
+			 * for traditional output. */
+			cerr << "WARNING: pc 0x" << std::hex << addr << std::dec
+				<< " belongs to no DWARF-info'd subprogram, so ignoring" << endl;
 			continue;
 		}
-		auto i_dyn = i_bf.as_a<with_dynamic_location_die>();
-		// skip member/inheritance DIEs
-		if (i_dyn->location_requires_object_base()) continue;
-
-		/* enumerate the vaddr ranges of this DIE
-		 * -- note that some DIEs will be "for all vaddrs" */
-		auto var_loclist = i_dyn->get_dynamic_location();
-		// rewrite the loclist to use the CFA/frame_base maximally
-#ifdef DEBUG
-		cerr << "Saw loclist " << var_loclist << endl;
-#endif
-		var_loclist = encap::rewrite_loclist_in_terms_of_cfa(
-			var_loclist, 
-			root.get_frame_section(), 
-			dwarf::spec::opt<const encap::loclist&>() /* opt_fbreg */
-		);
-#ifdef DEBUG
-		cerr << "Rewrote to loclist " << var_loclist << endl;
-#endif
-
-		// for each of this variable's intervals, add it to the map
-		int interval_index = 0;
-		for (auto i_locexpr = var_loclist.begin(); 
-			i_locexpr != var_loclist.end(); ++i_locexpr)
+		assert(found_subprograms->second.size() > 0);
+		/* The value type of subprogram_vaddr_map is a set only so that we can detect
+		 * and warn about overlaps... */
+		if (found_subprograms->second.size() != 1)
 		{
-			if (locexpr_is_base_address_selector(*i_locexpr, root))
-			{
-				// we got a base address selection entry -- not handled yet
-				assert(false);
-				abort();
-			}
-			if (i_locexpr->lopc == i_locexpr->hipc && i_locexpr->hipc != 0) continue; // skip empties
-			if (i_locexpr->hipc <  i_locexpr->lopc)
-			{
-				cerr << "Warning: lopc (0x" << std::hex << i_locexpr->lopc << std::dec
-					<< ") > hipc (0x" << std::hex << i_locexpr->hipc << std::dec << ")"
-					<< " in " << *i_dyn << endl;
-				continue;
-			}
-			auto opt_cu_base = i_subp.enclosing_cu()->get_low_pc();
-			if (!opt_cu_base)
-			{
-				cerr << "Warning: skipping subprogram " << *i_dyn 
-					<< " -- in CU with no base address (CU: "
-					<< *i_subp.enclosing_cu()
-					<< ")" << endl;
-				continue;
-				// FIXME: can CUs use DW_AT_ranges instead? should handle this if so
-			}
-			Dwarf_Unsigned cu_base = opt_cu_base->addr;
-			if (locexpr_is_for_all_vaddrs(*i_locexpr))
-			{
-				// if we have a "for all vaddrs" entry, we should be the only index
-				assert(interval_index == 0);
-				assert(i_locexpr + 1 == var_loclist.end());
-			}
-
-			/* We need to remember not only that each i_dyn is valid 
-			 * in a given range, but with what loc_expr. So we pair the i_dyn with
-			 * the relevant loc_expr. */
-			frame_interval_map_set_t just_this_variable = { i_dyn };
-			//just_this_variable_loc_pair.insert(frame_interval_map_set_value(i_dyn));
-			//iterfirst_pair_hash< with_dynamic_location_die, encap::loc_expr >::set /*,
-			//	compare_first_iter_offset<encap::loc_expr> */ ;
-			//just_this_variable_loc_pair.insert(make_pair(i_dyn, *i_locexpr));
-
-			// handle "for all vaddrs" entries
-			vector<boost::icl::discrete_interval<Dwarf_Off> > our_intervals
-			= intervals_for_local_var_locexpr(*i_locexpr, i_subp, i_bf.as_a<with_dynamic_location_die>(),
-				root);
-			// An "all vaddrs" entry may have multiple intervals,
-			// if a function is not contiguous.
-			for (auto i_our_interval = our_intervals.begin();
-				i_our_interval != our_intervals.end();
-				++i_our_interval)
-			{
-				auto& our_interval = *i_our_interval;
-
-				/* assert sane interval */
-				assert(our_interval.lower() < our_interval.upper());
-				/* assert sane size -- no bigger than biggest sane function */
-				assert(our_interval.upper() - our_interval.lower() < 1024*1024);
-
-				// add it
-				out += make_pair(
-					our_interval,
-					just_this_variable
-				);
-			}
-		} // end for each locexpr
-	} /* end for each var bfs */
-}
-
-iterator_df<subprogram_die>
-unique_subprogram_at(
-	subprogram_vaddr_interval_map_t const& subprograms,
-	Dwarf_Addr pc)
-{
-	iterator_df<subprogram_die> one_seen = iterator_base::END;
-	bool unique = true;
-	auto i = subprograms.find(pc);
-	if (i == subprograms.end()) cerr << "No subprogram found at 0x" << std::hex << pc << std::dec
-		<< endl;
-	else cerr << "First subprogram found at 0x" << std::hex << pc << std::dec
-		<< " has interval " << std::hex << i->first << std::dec << endl;
-	unsigned nseen = 0;
-	for (; i != subprograms.end() && i->first.lower() <= pc; ++i, ++nseen)
-	{
-		if (i->second.size() == 0) continue;
-		if (i->second.size() > 1 || one_seen)
-		{
-			unique = false;
-			cerr << "Over interval (" << std::hex << i->first.lower()
-				<< ", " << i->first.upper() << "]" << std::dec
-				<< ", found multiple (" << i->second.size() << ") subprograms: {";
-			for (auto i_s = i->second.begin(); i_s != i->second.end(); ++i_s)
-			{
-				cerr << "Found overlap with subprogram ";
-				if (i_s->second.name_here()) cerr << *i_s->second.name_here();
-				else cerr << "0x" << std::dec << i_s->second.offset_here() << std::dec;
-				cerr << endl;
-			}
+			cerr << "WARNING: pc 0x" << std::hex << addr << std::dec
+				<< " belongs to more than one subprogram, so ignoring" << endl;
+			continue;
 		}
-		if (i->second.size() >= 1 && !one_seen) one_seen = i->second.begin()->second;
+		iterator_df<subprogram_die> i_subp = found_subprograms->second.begin()->second;
+		frame_intervals_by_subprogram[i_subp].insert(*i_int);
+		//all_subprograms.insert(i_subp);
 	}
-	cerr << "nseen at " << std::hex << pc << ": " << std::dec << nseen << endl;
-	if (unique && one_seen) return one_seen;
-	return iterator_base::END;
-}
 
-static
-bool is_callee_save_register(int col)
-{
-	return col == DWARF_X86_64_RBX
-		|| col == DWARF_X86_64_RBP
-		|| col == DWARF_X86_64_R12
-		|| col == DWARF_X86_64_R13
-		|| col == DWARF_X86_64_R14
-		|| col == DWARF_X86_64_R15;
-}
+	using dwarf::core::with_static_location_die;
+	cout << "#include \"allocmeta-defs.h\"\n";
+	cout << "#include \"uniqtype-defs.h\"\n\n";
+	set<string> names_emitted;
 
-void
-gather_saved_register_locations_by_pc_interval(
-	frame_intervals_t& out,
-	subprogram_vaddr_interval_map_t const& subprograms,
-	sticky_root_die& root)
-{
-	auto process_frame_section = [&out, subprograms](core::FrameSection& fs) {
-		using core::FrameSection;
-		using core::Cie;
-		using dwarf::encap::expr_instr;
-		for (auto i_fde = fs.fde_begin(); i_fde != fs.fde_end(); ++i_fde)
+#if 0 // this will need porting if we want to use it again...
+	/* Check we are not getting unreasonably big. */
+	static const unsigned MAX_INTERVALS = 10000;
+	if (out.size() > MAX_INTERVALS)
+	{
+		cerr << "Warning: abandoning gathering frame intervals for " << i_subp->summary() 
+				<< " in compilation unit " << i_subp.enclosing_cu().summary()
+				<< " after reaching " << MAX_INTERVALS << std::endl;
+		subp_frame_intervals.clear();
+		break;
+	}
+#endif
+
+	boost::icl::interval_map<Dwarf_Addr, multimap<Dwarf_Signed, frame_element> >
+		by_off_by_interval;
+	// for all subprograms...
+	for (auto i_i_subp = subprograms_by_key.begin(); i_i_subp != subprograms_by_key.end(); ++i_i_subp)
+	{
+		auto i_subp = i_i_subp->second;
+
+		/* Now we write a *series* of object layouts for this subprogram, 
+		 * discriminated by a set of (disjoint) vaddr ranges. */
+		
+		/* Our naive earlier algorithm had the problem that, once register-based 
+		 * locals are discarded, the frame layout is often unchanged from one vaddr range
+		 * to the next. But we were outputting a new uniqtype anyway, creating 
+		 * huge unnecessary bloat. So instead, we do a pre-pass where we remember
+		 * only the stack-located elements, and store them in a new interval map, 
+		 * by offset from frame base. 
+		 *
+		 * Also, we want to report discarded fps/locals once per subprogram, as 
+		 * completely discarded or partially discarded. How to do this? 
+		 * Keep an interval map of discarded items.
+		 * When finished, walk it and build another map keyed by 
+		  */
+		frame_intervals_t& subp_frame_intervals = frame_intervals_by_subprogram[i_subp];
+
+		/* Now figure out the positive and negative extents of the frame. */
+		Dwarf_Signed frame_offset = get_frame_offset(subp_frame_intervals);
+		frame_offsets_by_subprogram[i_subp] = frame_offset;
+
+		/* Dump a map of the subprogram */
+		//if (debug_out > 1) 	for (auto i_frame_int = subp_frame_intervals.begin();
+		//	i_frame_int != subp_frame_intervals.end(); ++i_frame_int)
+		//{
+			
+
+		/* Now for each distinct interval in the frame_intervals map... */
+		unsigned by_off_by_interval_nentries = by_off_by_interval.iterative_size();
+		unsigned n_real_intervals = 0;
+		for (auto i_frame_int = subp_frame_intervals.begin(); i_frame_int != subp_frame_intervals.end();
+			++i_frame_int, ++n_real_intervals)
 		{
-			Dwarf_Addr fde_lopc = i_fde->get_low_pc();
-			Dwarf_Addr fde_hipc = i_fde->get_low_pc() + i_fde->get_func_length();
-			auto fde_interval = boost::icl::interval<Dwarf_Addr>::right_open(fde_lopc, fde_hipc);
-
-			cerr << "Considering FDE beginning 0x" << std::hex << fde_lopc << std::dec << endl;
-
-			/* Enumerate the overlapping subprograms. Warn if the count is not
-			 * exactly 1. */
-			iterator_df<subprogram_die> i_subp;
-			if (!(i_subp = unique_subprogram_at(subprograms, fde_lopc)))
+			/* Our hack for consolidation/coalescing of equal intervals.... */
+			auto i_last_equal = find_equal_range_last<set<frame_element> >(
+				i_frame_int, subp_frame_intervals.end());
+			if (i_last_equal != i_frame_int)
 			{
-				cerr << "FDE address 0x" << std::hex << fde_lopc << " does not belong"
-					<< " to a unique subprogram" << endl;
-			}
-			/* Enumerate the locations of saved registers */
-			const Cie& cie = *i_fde->find_cie();
+				if (debug_out > 1) cerr << "Coalescing from up to "
+					<< std::hex << i_last_equal->first.upper()
+					<< " from " << i_frame_int->first.lower() << std::dec << std::endl;
+			} else if (debug_out > 1) cerr << "Not coalescing at " << std::hex
+				<< i_frame_int->first << std::dec << endl;
+			auto& frame_elements = i_frame_int->second;
+			auto interval = boost::icl::discrete_interval<Dwarf_Addr>::right_open(
+				i_frame_int->first.lower(), i_last_equal->first.upper());
 
-			cerr << "Processing FDE for range " << std::hex << fde_lopc << "-"
-				<< fde_hipc << std::dec << " (subprogram ";
-			if (!i_subp) { cerr << "(unknown)"; }
-			else
+			multimap<Dwarf_Signed, frame_element> by_off
+			 = local_elements_by_stack_offset(frame_elements);
+			by_off_by_interval.insert(make_pair(
+				i_frame_int->first,
+				by_off));
+			if (debug_out > 1)
 			{
-				if (i_subp.name_here()) cerr << *i_subp.name_here();
-				else cerr << "0x" << std::hex << i_subp.offset_here() << std::dec;
-			}
-			cerr << ")" << endl;
-
-			/* decode the FDE */
-			auto result = i_fde->decode();
-			result.add_unfinished_row(i_fde->get_low_pc() + i_fde->get_func_length());
-
-			// enumerate our columns
-			set<int> all_columns;
-			all_columns.insert(DW_FRAME_CFA_COL3);
-			for (auto i_row = result.rows.begin(); i_row != result.rows.end(); ++i_row)
-			{
-				for (auto i_reg = i_row->second.begin(); i_reg != i_row->second.end(); ++i_reg)
+				cerr << "Computed a frame layout over " << std::hex
+					<< i_frame_int->first << std::dec << " with " << by_off.size() << " on-stack elements "
+					<< "of " << i_frame_int->second.size() << " total: ";
+				//for (auto i_el = by_off.begin(); i_el != by_off.end(); ++i_el)
+				for (auto i_el = i_frame_int->second.begin();
+					i_el != i_frame_int->second.end(); ++i_el)
 				{
-					all_columns.insert(i_reg->first);
+					//if (i_el != by_off.begin()) cerr << ", ";
+					if (i_el != i_frame_int->second.begin()) cerr << ", ";
+					if (i_el->m_local) cerr << std::hex << i_el->m_local.offset_here()
+						<< std::dec;
+					else cerr << "caller_reg" << i_el->m_caller_regnum;
+					cerr << " @(" << std::hex << i_el->effective_expr_piece.copy() << std::dec << ")";
+				}
+				cerr << endl;
+				/* We should have weeded out everything that is not an on-stack
+				 * slot earlier, otherwise we will not replicate frametypes.*/
+				assert(i_frame_int->second.size() == by_off.size());
+			}
+			if (by_off.size() == 0)
+			{
+				cerr << "Warning: no stack-offset frame element intervals for subprogram " << i_subp
+					<< " in range " << std::hex << interval << std::dec << endl;
+				goto continue_loop;
+			}
+		
+			/* Before we output anything, extern-declare any that we need and haven't
+			 * declared yet. */
+			for (auto i_by_off = by_off.begin(); i_by_off != by_off.end(); ++i_by_off)
+			{
+				auto el_type = i_by_off->second.m_local->find_type();
+				auto name_pair = codeful_name(el_type);
+				string mangled_name = mangle_typename(name_pair);
+				if (names_emitted.find(mangled_name) == names_emitted.end())
+				{
+					emit_extern_declaration(std::cout, name_pair, /* force_weak */ false);
+					names_emitted.insert(mangled_name);
 				}
 			}
-			// visit them
-			typedef std::function<void(int, optional< pair<int, FrameSection::register_def> >)>
-			 visitor_function;
-			int ra_rule_number = cie.get_return_address_register_rule();
-			auto visit_columns = [all_columns, ra_rule_number](
-				 visitor_function visit, 
-				 optional<const set< pair<int, FrameSection::register_def> > &> opt_i_row
-				) {
 
-				auto get_column = [&opt_i_row](int col) {
+			{ // for goto-over purposes
+				/* Output in offset order, CHECKing that there is no overlap (sanity). */
+				cout << "\n/* uniqtype for stack frame ";
+				string unmangled_typename = typename_for_vaddr_interval(i_subp, interval);
 
-					if (!opt_i_row) return optional< pair<int, FrameSection::register_def> >();
+				string cu_name = *i_subp.enclosing_cu().name_here();
+
+				cout << unmangled_typename
+					 << " defined in " << cu_name << ", "
+					 << "vaddr range " << std::hex << interval << std::dec << " */\n";
+
+				ostringstream min_s; min_s << "actual min is "
+					<< ((by_off.size() == 0 ? 0 : by_off.begin()->first) + frame_offset);
+				string mangled_name = mangle_typename(make_pair(string(""), cu_name + unmangled_typename));
+
+				/* Is this the same as a layout we've seen earlier for the same frame? */
+				bool emitted_as_alias = false;
+				for (auto i_earlier_frame_int = subp_frame_intervals.begin();
+					i_earlier_frame_int != i_frame_int;
+					++i_earlier_frame_int)
+				{
+					auto found_earlier_by_off = by_off_by_interval.find(
+						i_earlier_frame_int->first);
+					assert(found_earlier_by_off != by_off_by_interval.end());
+					multimap<Dwarf_Signed, frame_element> const& earlier_by_off
+					 = found_earlier_by_off->second;
+					if (earlier_by_off == by_off)
+					{
+						// just output as an alias
+						auto i_earlier_last_equal = find_equal_range_last<set<frame_element> >(
+							i_earlier_frame_int, i_frame_int);
+						string unmangled_earlier_typename
+						 = typename_for_vaddr_interval(i_subp,
+							boost::icl::discrete_interval<Dwarf_Addr>::right_open(
+								i_earlier_frame_int->first.lower(), i_earlier_last_equal->first.upper()
+							)
+						);
+						string mangled_earlier_name = mangle_typename(
+							make_pair("", cu_name + unmangled_earlier_typename));
+						cout << "\n/* an alias will do */\n";
+						emit_weak_alias_idem(cout, mangled_name, mangled_earlier_name); // FIXME: not weak
+						emitted_as_alias = true;
+						break; // just one alias is enough, even if other duplicates exist
+							// (they themselves having been emitted as aliases)
+					}
+				}
+				if (emitted_as_alias) continue;
+
+				/* In frametypes we define the structure size as always extending up
+				 * to the CFA, i.e. maxoff of zero
+				 * */
+				Dwarf_Signed end_offset_of_highest_member = (by_off.size() == 0) ? 0
+				 : ({ auto i_end = by_off.end(); --i_end; i_end->first + *i_end->second.size_in_bytes(); });
+				// FIXME: in ambiguous/overlapping cases this is not entirely right:
+				// a lower-starting field might still end higher, if it is bigger.
+				// We want highest_end_offset, not end_offset_of_highest_(starting_)member.
+				Dwarf_Unsigned interval_maxoff = (end_offset_of_highest_member < 0) ? 0
+					: end_offset_of_highest_member;
+				write_uniqtype_section_decl(cout, mangled_name);
+				write_uniqtype_open_composite(cout,
+					mangled_name,
+					unmangled_typename,
+					interval_maxoff + frame_offset,
+					by_off.size(),
+					/* not_simultaneous */ false,
+					/* comment_str */ min_s.str()
+				);
+				opt<unsigned> prev_offset_plus_size;
+				opt<unsigned> highest_unused_offset = opt<unsigned>(0u);
+				// FIXME: prev_offset_plus_size needn't be the right thing.
+				// We want the highest offset yet seen.
+				for (auto i_by_off = by_off.begin(); i_by_off != by_off.end(); ++i_by_off)
+				{
+					ostringstream comment_s;
+					unsigned offset_after_fixup = i_by_off->first + frame_offset;
+					iterator_df<type_die> el_type = i_by_off->second.m_local->find_type();
+					if (i_by_off->second.m_local.name_here())
+					{
+						comment_s << *i_by_off->second.m_local.name_here();
+					}
+					else comment_s << "(anonymous)"; 
+					comment_s << " -- " << i_by_off->second.m_local.spec_here().tag_lookup(
+							i_by_off->second.m_local.tag_here())
+						<< " @" << std::hex << i_by_off->second.m_local.offset_here() << std::dec
+						<< "(size ";
+					if (el_type && el_type->calculate_byte_size()) comment_s << *el_type->calculate_byte_size();
+					else comment_s << "(no size)";
+					comment_s << ")";
+					if (highest_unused_offset)
+					{
+						if (offset_after_fixup > *highest_unused_offset)
+						{
+							unsigned hole_size = offset_after_fixup - *highest_unused_offset;
+							unsigned align = el_type.enclosing_cu()->alignment_of_type(el_type);
+							unsigned highest_unused_offset_rounded_to_align
+							 = ROUND_UP(highest_unused_offset, align);
+							comment_s << " (preceded by ";
+							if (hole_size ==
+								highest_unused_offset_rounded_to_align - highest_unused_offset)
+							{
+								comment_s << "an alignment-consistent hole";
+							}
+							else
+							{
+								comment_s << " (preceded by an alignment-unexpected HOLE";
+							}
+							comment_s << " of " << hole_size << " bytes)";
+						}
+						else if (offset_after_fixup < *highest_unused_offset)
+						{
+							comment_s << " (constituting an OVERLAP in the first " << (*highest_unused_offset - offset_after_fixup)
+								<< " bytes)";
+						}
+					}
+					// FIXME: also want to report holes at the start or end of the frame
+
+					string mangled_name = mangle_typename(codeful_name(el_type));
+					write_uniqtype_related_contained_member_type(cout,
+						/* is_first */ i_by_off == by_off.begin(),
+						offset_after_fixup,
+						mangled_name,
+						comment_s.str()
+					);
+					if (el_type && el_type->calculate_byte_size())
+					{
+						prev_offset_plus_size = offset_after_fixup + *el_type->calculate_byte_size();
+						highest_unused_offset = std::max<unsigned>(
+							offset_after_fixup + *el_type->calculate_byte_size(), highest_unused_offset);
+					}
 					else
 					{
-						map<int, FrameSection::register_def> m(opt_i_row->begin(), opt_i_row->end());
-						auto found = m.find(col);
-						return found != m.end() ? make_pair(found->first, found->second) : optional< pair<int, FrameSection::register_def> >();
-					}
-				};
-
-				// always visit CFA column
-				visit(DW_FRAME_CFA_COL3, get_column(DW_FRAME_CFA_COL3));
-
-				// visit other columns that exist, except the ra rule for now
-				for (auto i_col = all_columns.begin(); i_col != all_columns.end(); ++i_col)
-				{
-					if (*i_col != DW_FRAME_CFA_COL3 && *i_col != ra_rule_number)
-					{
-						visit(*i_col, get_column(*i_col));
+						prev_offset_plus_size = opt<unsigned>();
+						highest_unused_offset = opt<unsigned>();
 					}
 				}
+				write_uniqtype_close(cout, mangled_name);
+			} // end for goto-over purposes
 
-				// finally, always visit the ra rule 
-				visit(ra_rule_number, get_column(ra_rule_number));
-			};
+		continue_loop:
+			i_frame_int = i_last_equal;
+		} /* end for i_int */
+		/* The number of intervals we're dealing with should equal the number
+		 * of ... souldn't it? */
+		if (debug_out > 1) cerr << "processed " << n_real_intervals
+			<< " real intervals for this subprogram... by_off_by_interval iterative_size"
+			<< " was " << by_off_by_interval_nentries << ", now " << by_off_by_interval.iterative_size() 
+			<< endl;
+		assert(n_real_intervals == by_off_by_interval.iterative_size() -
+			by_off_by_interval_nentries);
 
-	#ifndef NDEBUG
-			auto sanity_check_post = [](const frame_intervals_t& f, unsigned previous_size) {
-				unsigned count = count_intervals(f);
-				if (count != f.size())
-				{
-					cerr << "Warning: count " << count << " != iterative size " << f.iterative_size() 
-						<< " (previous size: " << previous_size << ")" 
-						<< endl;
-				}
-				assert(count == f.iterative_size());
-				/* Also sanity-check the member sets. */
-				for (auto i = f.begin(); i != f.end(); ++i, ++count)
-				{
-					unsigned set_size = 0;
-					for (auto i_s = i->second.begin(); i_s != i->second.end(); ++i_s, ++set_size)
-					{
+		/* Now print a summary of what was discarded. */
+// 		for (auto i_discarded = discarded.begin(); i_discarded != discarded.end(); 
+// 			++i_discarded)
+// 		{
+// 			cout << "\n\t/* discarded: ";
+// 			if (i_discarded->first.name_here())
+// 			{
+// 				cout << *i_discarded->first.name_here();
+// 			}
+// 			else cout << "(anonymous)"; 
+// 			cout << " -- " << i_discarded->first->get_spec().tag_lookup(
+// 					i_discarded->first->get_tag())
+// 				<< " @" << std::hex << i_discarded->first->get_offset() << std::dec;
+// 			cout << "; reason: " << i_discarded->second;
+// 			cout << " */ ";
+// 		}
+	} // end for subprogram
+	
+	unsigned total_emitted = 0;
+	// FIXME: these records need to be exactly one-for-one with the
+	// records we emitted earlier, because each one includes a pointer back,
+	// and we calculate the name of the address-taken record by its address
+	// range.
+	boost::icl::interval_map<Dwarf_Addr, iterator_df<subprogram_die> > sorted_intervals;
+	for (map< iterator_df<subprogram_die>, frame_intervals_t >::iterator i_subp_intervals 
+	  = frame_intervals_by_subprogram.begin(); i_subp_intervals != frame_intervals_by_subprogram.end();
+	  ++ i_subp_intervals)
+	{
+		// now output an allocsites-style table for these 
+		for (auto i_int = i_subp_intervals->second.begin(); i_int != i_subp_intervals->second.end(); 
+			++i_int)
+		{
+			/* Skip any that don't contain a stack-offset'd element. In the original
+			 * frametypes, these intervals would never appear in the interval map.
+			 * But for us they do because we record extra stuff. */
+			auto found_earlier_by_off = by_off_by_interval.find(i_int->first);
+			assert(found_earlier_by_off != by_off_by_interval.end());
+			multimap<Dwarf_Signed, frame_element> const& by_off
+			 = found_earlier_by_off->second;
+			if (by_off.size() == 0) continue;
+			sorted_intervals.insert(make_pair(i_int->first, i_subp_intervals->first));
+		}
+	}
+	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
+	for (auto i_pair = sorted_intervals.begin(); i_pair != sorted_intervals.end(); ++i_pair)
+	{
+		auto i_last_equal = find_equal_range_last< iterator_df<subprogram_die> >(
+			i_pair, sorted_intervals.end());
+		auto interval = boost::icl::discrete_interval<Dwarf_Addr>::right_open(
+			i_pair->first.lower(), i_last_equal->first.upper());
 
-					}
-					if (set_size != i->second.size())
-					{
-						cerr << "Warning: set iterative size " << set_size
-							 << " != claimed size() " << i->second.size()
-						<< endl;
-					}
-				}
-			};
-			#define SANITY_CHECK_PRE(f) /* do { unsigned count = count_intervals(f); \
-				cerr << "Adding an interval (width " << (i.upper() - i.lower()) \
-					<< " to a map of size " << f.size() << ", count " << count << endl; */ \
-					do { for (auto i = f.begin(); i != f.end(); ++i) { \
-						assert(sanity_check_set(i->second)); \
-					} } while (0)
+		unsigned offset_from_frame_base = frame_offsets_by_subprogram[i_pair->second];
+	
+		if (i_pair != sorted_intervals.begin()) cout << ",";
+		cout << "\n\t/* frame alloc record for vaddr 0x" << std::hex << interval.lower() 
+			<< "+" << interval.upper() << std::dec << " */";
+		cout << "\n\t{\t" << offset_from_frame_base << ","
+			<< "\n\t\t{ 0x" << std::hex << interval.lower() << "UL, " << std::dec
+			<< "&" << mangle_typename(make_pair("", *i_pair->second.enclosing_cu().name_here() +
+				typename_for_vaddr_interval(i_pair->second, interval)))
+			<< " }"
+			<< "\n\t}";
+		++total_emitted;
 
-			#define SANITY_CHECK_POST(f) /* sanity_check_post(f, count); } while (0) */
-	#else
-			#define SANITY_CHECK_PRE(f) do { 
-			#define SANITY_CHECK_POST(f)  } while (0)
-	#endif
+	//continue_allocsite_loop:
+		// fast-forward
+		i_pair = i_last_equal;
+	}
+	// close the list
+	cout << "\n};\n";
+}
 
-			visitor_function row_column_visitor = [all_columns, ra_rule_number,
-				fde_lopc, fde_hipc, &out]
-				(int col, optional< pair<int, FrameSection::register_def> > found_col)  -> void {
+enum flags_t
+{
+	ONLY_POINTERS = 1,
+	INCLUDE_REGISTERS = 2,
+	INCLUDE_CFI = 4,
+	INCLUDE_COMPUTED = 8,
+	INCLUDE_INCOMPLETE = 16,
+	INCLUDE_STATIC = 32,
+	OUTPUT_TRADITIONAL = 64
+};
 
-				if (!found_col /*|| !is_callee_save_register(col)*/) {} // s << std::left << "u" << std::right;
-				else
-				{
-					switch (found_col->second.k)
-					{
-						case FrameSection::register_def::INDETERMINATE:
-						case FrameSection::register_def::UNDEFINED: 
-							break;
-
-						case FrameSection::register_def::REGISTER: {
-							// caller's register "col" is saved in callee register "regnum"
-							int regnum = found_col->second.register_plus_offset_r().first;
-							frame_interval_map_set_value v(col,
-								{ (expr_instr) { .lr_atom = DW_OP_reg0 + regnum } });
-
-							SANITY_CHECK_PRE(out);
-							out += make_pair(
-								boost::icl::interval<Dwarf_Addr>::right_open(
-									fde_lopc,
-									fde_hipc
-								),
-								frame_interval_map_set_t({ v })
-							);
-							SANITY_CHECK_POST(out);
-						} break;
-
-						case FrameSection::register_def::SAVED_AT_OFFSET_FROM_CFA: {
-							int saved_offset = found_col->second.saved_at_offset_from_cfa_r();
-							// caller's register "col" is saved at "saved_offset" from CFA
-							frame_interval_map_set_value v(col,
-								{ (expr_instr) { .lr_atom = DW_OP_call_frame_cfa },
-								  (expr_instr) { .lr_atom = DW_OP_consts, .lr_number = saved_offset },
-								  (expr_instr) { .lr_atom = DW_OP_plus } });
-							frame_interval_map_set_t singleton_set = { v };
-							//singleton_set.insert(
-							//    make_pair(iterator_base::END /* not a with_dynamic_location_die */,
-							//              make_pair(regnum /* yes a saved caller reg */,
-							//                (loc_expr) 
-							//);
-							SANITY_CHECK_PRE(out);
-							out += make_pair(
-								boost::icl::interval<Dwarf_Addr>::right_open(
-									fde_lopc,
-									fde_hipc
-								),
-								singleton_set
-							);
-							SANITY_CHECK_POST(out);
-						} break;
-						case FrameSection::register_def::SAVED_AT_EXPR:
-							// we can't represent this. :-(
-							break;
-						case FrameSection::register_def::VAL_IS_OFFSET_FROM_CFA:
-						case FrameSection::register_def::VAL_OF_EXPR: 
-						default:
-							// FIXME: is it useful for us to have VAL_IS and VAL_OF?
-							break;
-					}
-				}
-			};
-
-			// process the row contents
-			for (auto i_int = result.rows.begin(); i_int != result.rows.end(); ++i_int)
+void add_local_elements(frame_intervals_t& out, sticky_root_die& root,
+	map<subprogram_key, iterator_df<subprogram_die> > const& subprograms_by_key, flags_t flags)
+{
+	struct iterator_bf_skipping_types : public core::iterator_bf<>
+	{
+		typedef core::iterator_bf<> super;
+		void increment(unsigned min_depth)
+		{
+			/* The idea here is not that we skip types per se.
+			 * It's that we skip the children of types, e.g.
+			 * local vars or formals that actually belong to
+			 * methods. Remember that subprograms are types.
+			 * Also remember that we're allowed to start above
+			 * the minimum depth. */
+			if (*this != END && depth() < min_depth)
 			{
-				visit_columns(row_column_visitor, i_int->second);
+				this->increment_skipping_siblings();
 			}
-		} // end for each FDE
+			else if (tag_here() != DW_TAG_subprogram &&
+				spec_here().tag_is_type(tag_here()))
+			{
+				this->increment_skipping_subtree();
+			} else this->super::increment();
+			if (*this != END && depth() < min_depth) *this = END;
+		}
+		void increment() { this->increment(0); }
+		// forward constructors
+		using core::iterator_bf<>::iterator_bf;
 	};
 	
+	for (auto i_i_subp = subprograms_by_key.begin();
+		i_i_subp != subprograms_by_key.end(); ++i_i_subp)
+	{
+		iterator_df<subprogram_die> i_subp = i_i_subp->second;
+		iterator_bf_skipping_types start_bf(i_subp);
+		unsigned start_depth = i_subp.depth();
+		for (iterator_bf_skipping_types i_bf = start_bf;
+			i_bf != core::iterator_base::END;
+			/* After the first inc, we should always be at *at least* 1 + start_depth. */
+			i_bf.increment(start_depth + 1))
+		{
+			// skip if not a with_dynamic_location_die
+			if (!i_bf.is_a<with_dynamic_location_die>()) continue;
+
+			/* Exploit "clever" (hopefully) aggregation semantics of 
+			 * interval maps.
+			 * http://www.boost.org/doc/libs/1_51_0/libs/icl/doc/html/index.html
+			 */
+
+			// enumerate the vaddr ranges of this DIE
+			// -- note that some DIEs will be "for all vaddrs"
+			// -- noting also that static variables need handling!
+			//    ... i.e. they need to be handled in the *static* handler!
+
+			// skip static variables
+			if (i_bf.is_a<variable_die>() && i_bf.as_a<variable_die>()->has_static_storage())
+			{
+				/* FIXME: does sranges already deal with these? */
+				continue;
+			}
+			auto i_dyn = i_bf.as_a<with_dynamic_location_die>();
+
+			// skip member/inheritance DIEs
+			if (i_dyn->location_requires_object_base()) continue;
+
+			set< pair< boost::icl::discrete_interval<Dwarf_Addr>, frame_element > >
+			local_elements = frame_element::local_elements_for(i_dyn, i_subp, root);
+			for (auto i_el_pair = local_elements.begin(); i_el_pair != local_elements.end(); ++i_el_pair)
+			{
+				boost::icl::discrete_interval<Dwarf_Addr> interval = i_el_pair->first;
+				auto& element = i_el_pair->second;
+				set<frame_element> singleton_set = { element };
+
+#define DO_DISCARD(r) \
+				{ cerr << "Discarding element "; \
+				  if (element.m_local) cerr << element.m_local.summary(); \
+				  cerr << " at " << std::hex << i_el_pair->first << std::dec \
+				  	<< " for reason " << r << endl; \
+				  goto continue_to_next_element; \
+				}
+#if 0 /* discard logic salvaged from frametypes -- do something with this */
+
+
+	catch (dwarf::lib::No_entry)
+	{
+		/* Not much can cause this, since we scanned for registers.
+		 * One thing would be a local whose location gives DW_OP_stack_value,
+		 * i.e. it has only a debug-time-computable value but no location in memory,
+		 * or DW_OP_implicit_pointer, i.e. it points within some such value. */
+		if (debug_out > 1)
+		{
+			cerr << "Warning: failed to locate non-register-located local/fp "
+				<< "in the vaddr range " 
+				<< std::hex << the_int << std::dec
+				<< ": "
+				<< i_dyn.summary() << endl;
+		}
+		//discarded.push_back(make_pair(*i_el, "register-located"));
+		iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
+			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
+		just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("no location")));
+#ifdef DEBUG
+		discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
+#endif
+		return ret_t();
+	}
+	catch (dwarf::expr::Not_supported)
+	{
+		cerr << "Warning: unsupported DWARF opcode when computing location for fp: "
+			<< i_dyn.summary() << endl;
+		//discarded.push_back(make_pair(*i_el, "register-located"));
+		iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
+			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
+		just_this_variable_discard_reason_pair.insert(make_pair(i_dyn, string("unsupported-DWARF")));
+#ifdef DEBUG
+		discarded_intervals += make_pair(the_int, just_this_variable_discard_reason_pair);
+#endif
+		return ret_t();
+	}
+	catch (...)
+	{
+		cerr << "Warning: something strange happened when computing location for fp: " 
+			<< i_dyn.summary() << endl;
+		//discarded.push_back(make_pair(*i_el, "register-located"));
+		iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
+			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
+		just_this_variable_discard_reason_pair.insert(make_pair(i_dyn, string("something-strange")));
+#ifdef DEBUG
+		discarded_intervals += make_pair(the_int, just_this_variable_discard_reason_pair);
+#endif
+		return ret_t();
+	}
+	assert(false);
+}
+
+
+
+
+		//discarded.push_back(make_pair(*i_el, "register-located"));
+		iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
+			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
+		just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("no location")));
+#ifdef DEBUG
+		discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
+#endif
+
+
+
+		//discarded.push_back(make_pair(*i_el, "register-located"));
+		iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
+			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
+		just_this_variable_discard_reason_pair.insert(make_pair(i_dyn, string("unsupported-DWARF")));
+#ifdef DEBUG
+		discarded_intervals += make_pair(the_int, just_this_variable_discard_reason_pair);
+#endif
+
+
+		//discarded.push_back(make_pair(*i_el, "register-located"));
+		iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
+			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
+		just_this_variable_discard_reason_pair.insert(make_pair(i_dyn, string("something-strange")));
+#ifdef DEBUG
+		discarded_intervals += make_pair(the_int, just_this_variable_discard_reason_pair);
+#endif
+				
+				/* FIXME: DW_OP_piece complicates this. If we have part in a register, 
+				 * part on the stack, we'd like to record this somehow. Perhaps supply
+				 * a getter and setter in the make_precise()-generated uniqtype? */
+				
+				if (saw_register)
+				{
+					/* This means our variable/fp is in a register and not 
+					 * in a stack location. That's fine. Warn and continue. */
+					if (debug_out > 1)
+					{
+						cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp "
+							<< "in the vaddr range " 
+							<< std::hex << i_int->first << std::dec
+							<< ": "
+					 		<< *i_el << endl;
+					}
+					//discarded.push_back(make_pair(*i_el, "register-located"));
+					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
+						compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
+					just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("register-located")));
+#ifdef DEBUG
+					discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
+#endif
+					continue;
+				}
+				else 
+
+
+
+
+
+	
+					/* Check for vars that are part static, part on-stack. 
+					 * How does this happen? One example is 
+					 * the 'git_packed' that is local within rearrange_packed_git
+					 * which gets inlined into prepare_packed_git in sha1_file.c.
+					 * 
+					 * The answer is: they're static vars that are being manipulated
+					 * locally within the function. Because they're "variables" that are
+					 * "in scope" (I think this is an interaction with inlining), 
+					 * they get their own DW_TAG_variable DIEs within the inlined 
+					 * instance's DWARF. While they're being manipulated, these have 
+					 * register locations. It would be pointless to spill them to the 
+					 * stack, however, so I don't think we need to worry about them. */
+					if (i_el_pair->second.size() > 0 && i_el_pair->second.at(0).lr_atom == DW_OP_addr
+					 && i_el_pair->second.at(i_el_pair->second.size() - 1).lr_atom != DW_OP_stack_value)
+					{
+						cerr << "Skipping static var masquerading as local: "
+							<< *i_el 
+							<< "in the vaddr range " 
+							<< std::hex << i_int->first << std::dec << std::endl;
+						iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
+							compare_first_iter_offset<string>*/ just_this_variable_discard_reason_pair;
+						just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("static-masquerading-as-local")));
+	#ifdef DEBUG
+						discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
+	#endif
+						continue;
+					}
+                    
+                    					/* We only add to by_frame_off if we have complete type => nonzero length. */
+					if ((*i_el)->find_type() && (*i_el)->find_type()->get_concrete_type())
+					{
+						//by_frame_off[frame_offset] = *i_el;
+						frame_interval_map_set_t just_this_offset_variable_pair;
+						just_this_offset_variable_pair.insert(make_pair(frame_offset, *i_el));
+						frame_intervals += make_pair(i_int->first, just_this_offset_variable_pair);
+					}
+					else
+					{
+						iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
+							compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
+						just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("no_concrete_type")));
+	#ifdef DEBUG
+						discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
+	#endif
+					}
+
+
+
+
+
+#endif /* #if 0 */
+				if (!(flags & INCLUDE_REGISTERS) && element.has_fixed_register()) DO_DISCARD("register-located");
+				if (!(flags & INCLUDE_COMPUTED) && element.has_value_function()) DO_DISCARD("value-function");
+				if (!(flags & INCLUDE_STATIC) && element.is_static_masquerading_as_local()) DO_DISCARD("static-masquerading-as-local");
+				if (!(flags & INCLUDE_INCOMPLETE) && element.m_local &&
+					!(element.m_local->find_type() && element.m_local->find_type()->get_concrete_type())) DO_DISCARD("incomplete");
+				if ((flags & ONLY_POINTERS) && (
+					!element.m_local ||
+					!(element.m_local->find_type()
+						&& element.m_local->find_type()->get_concrete_type()
+						&& element.m_local->find_type()->get_concrete_type().is_a<address_holding_type_die>())
+					)
+				) DO_DISCARD("not-a-pointer");
+				if ((flags & OUTPUT_TRADITIONAL) && element.m_local)
+				{
+					/* Compatibility hack: drop if *any* piece (not just ours)
+					 * reads a register, and drop any non-initial piece.
+					 * These are to match the original frametypes.
+					 * Note that neither DW_OP_fbreg nor DW_OP_call_frame_cfa is
+					 * deemed to read a register *or* name a register. */
+					shared_ptr<encap::loc_expr> p_whole_expr
+					 = element.p_effective_expr;
+					for (auto i_instr = p_whole_expr->begin();
+						i_instr != p_whole_expr->end();
+						++i_instr)
+					{
+						if (element.m_local.spec_here().op_reads_register(i_instr->lr_atom))
+						{
+							DO_DISCARD("reads-register");
+						}
+						if (element.m_local.spec_here().op_names_register(i_instr->lr_atom))
+						{
+							DO_DISCARD("names-register");
+						}
+					}
+					if (element.effective_expr_piece.offset_in_bits() > 0)
+					{
+						DO_DISCARD("non-first-piece");
+					}
+					// also discard if the *initial* piece includes unsupported DWARF
+					// (we will never loop
+					auto is_recognised_dwarf = [](unsigned op) -> bool {
+#define computed_case(num, ignored...)   if (op == num) return true;
+#define special_case(num, ignored...)    if (op == num) return true;
+						dwarf_expr_computed_ops(computed_case)
+						dwarf_expr_special_ops(special_case)
+						return false;
+					};
+					for (auto i_instr = p_whole_expr->begin();
+						i_instr != p_whole_expr->end();
+						++i_instr)
+					{
+						/* hit the end of a piece? stop now */
+						if (i_instr->lr_atom == DW_OP_piece
+						|| i_instr->lr_atom == DW_OP_bit_piece) break;
+						/* needs memory? */
+						if (i_instr->lr_atom == DW_OP_deref
+						||  i_instr->lr_atom == DW_OP_deref_size
+						||  i_instr->lr_atom == DW_OP_xderef
+						||  i_instr->lr_atom == DW_OP_xderef_size)
+						{
+							DO_DISCARD("reads-memory");
+						}
+						/* unrecognised or known-unsupported-among-known-specials?
+						 * i.e. something that would have thrown Not_supported in our
+						 * old DWARF interprefer in libdwarfpp's expr.cpp.
+						 * But we covered the names-register/reads-register cases above. */
+						if (!is_recognised_dwarf(i_instr->lr_atom)
+						|| i_instr->lr_atom ==  DW_OP_bra
+						|| i_instr->lr_atom ==  DW_OP_skip
+#ifdef DW_OP_implicit_value
+						|| i_instr->lr_atom == DW_OP_implicit_value
+#endif
+#ifdef DW_OP_implicit_pointer
+						|| i_instr->lr_atom == DW_OP_implicit_pointer
+#endif
+						|| i_instr->lr_atom == DW_OP_GNU_implicit_pointer
+						) DO_DISCARD("unsupported-DWARF");
+						
+					}
+				}
+
+				out += make_pair(interval, singleton_set);
+			continue_to_next_element: ;
+			}
+		}
+	}
+}
+
+void add_cfi_elements(frame_intervals_t& out, sticky_root_die& root,
+	subprogram_vaddr_interval_map_t const& subprograms, flags_t flags)
+{
+	/* FIXME: handle the missing forms like VALUE_IS !!!111 */
+
+	if (!(flags & INCLUDE_CFI)) return;
+
+	auto process_frame_section = [subprograms, &out](core::FrameSection& fs) {
+		for (auto i_fde = fs.fde_begin(); i_fde != fs.fde_end(); ++i_fde)
+		{
+			set< pair< boost::icl::discrete_interval<Dwarf_Addr>, frame_element > >
+			fde_elements = frame_element::cfi_elements_for(*i_fde, fs, subprograms);
+			for (auto i_el_pair = fde_elements.begin();
+				i_el_pair != fde_elements.end();
+				++i_el_pair)
+			{
+				boost::icl::discrete_interval<Dwarf_Addr> interval = i_el_pair->first;
+				set<frame_element> singleton_set = { i_el_pair->second };
+				out += make_pair(interval, singleton_set);
+			}
+			// FIXME: ideally eliminate the copying here... means eliminating the
+			// set-of-pairs API for an uglier 'out' interval_map& pattern.
+		} // end for each FDE
+	};
+
 	/* PROBLEM:
 	 * In the case of 'strip --only-keep-debug', the .eh_frame remains
 	 * in the original binary. So our root_die may be bound to the
 	 * debuginfo binary, but we may need to look back at the original
 	 * 'base_fd' to get the frame section
 	 */
-	core::FrameSection fs(root.get_dbg(), /* use_eh */ true);
-	cerr << ".eh_frame in DWARF binary has " << fs.fde_element_count << " FDEs and "
-		<< fs.cie_element_count << " CIEs" << endl;
-	if (fs.fde_element_count > 0)
+	core::FrameSection *p_fs = root.find_nonempty_frame_section();
+	if (p_fs->fde_element_count > 0)
 	{
-		process_frame_section(fs);
+		cerr << "Found frame section with " << p_fs->fde_element_count << " FDEs and "
+			<< p_fs->cie_element_count << " CIEs" << endl;
+		process_frame_section(*p_fs);
 	}
+	else
+	{
+		cerr << "Failed to find a non-empty frame section" << std::endl;
+	}
+#if 0
 	else
 	{
 		if (root.base_elf_if_different)
@@ -907,29 +1232,22 @@ gather_saved_register_locations_by_pc_interval(
 			process_frame_section(frame_fs);
 		}
 	}
+#endif
 }
 
-enum flags_t
-{
-	ONLY_POINTERS = 1,
-	INCLUDE_REGISTERS = 2,
-	INCLUDE_CFA = 4,
-	INCLUDE_COMPUTED = 8,
-	INCLUDE_INCOMPLETE = 16,
-	INCLUDE_STATIC = 32
-};
 int main(int argc, char **argv)
 {
 	optional<string> input_filename;
-	flags_t flags = INCLUDE_REGISTERS | INCLUDE_CFA | INCLUDE_COMPUTED;
+	flags_t flags = INCLUDE_REGISTERS | INCLUDE_CFI | INCLUDE_COMPUTED;
 	auto usage = [=]() {
 		cerr << "Usage: " << argv[0]
 		<< "[--[no-]include-registers]" << " "
 		<< "[--[no-]only-pointers]" << " "
-		<< "[--[no-]include-cfa]" << " "
+		<< "[--[no-]include-cfi]" << " "
 		<< "[--[no-]include-computed]" << " "
 		<< "[--[no-]include-incomplete]" << " "
 		<< "[--[no-]include-static]" << " "
+		<< "[--[no-]output-traditional]" << " "
 		<< " input_file" << endl;
 	};
 	auto process_opt = [&](const string& s) {
@@ -937,14 +1255,17 @@ int main(int argc, char **argv)
 		if (s == "--no-include-registers") { flags &= ~INCLUDE_REGISTERS; return; }
 		if (s == "--only-pointers")        { flags |= ONLY_POINTERS; return; }
 		if (s == "--no-only-pointers")     { flags &= ~ONLY_POINTERS; return; }
-		if (s == "--include-cfa")          { flags |= INCLUDE_CFA; return; }
-		if (s == "--no-include-cfa")       { flags &= ~INCLUDE_CFA; return; }
+		if (s == "--include-cfi")          { flags |= INCLUDE_CFI; return; }
+		if (s == "--no-include-cfi")       { flags &= ~INCLUDE_CFI; return; }
 		if (s == "--include-computed")     { flags |= INCLUDE_COMPUTED; return; }
 		if (s == "--no-include-computed")  { flags &= ~INCLUDE_COMPUTED; return; }
 		if (s == "--include-incomplete")   { flags |= INCLUDE_INCOMPLETE; return; }
 		if (s == "--no-include-incomplete"){ flags &= ~INCLUDE_INCOMPLETE; return; }
 		if (s == "--include-static")       { flags |= INCLUDE_STATIC; return; }
 		if (s == "--no-include-static")    { flags &= ~INCLUDE_STATIC; return; }
+		if (s == "--output-traditional")   { flags |= OUTPUT_TRADITIONAL; /* implies others... */
+		 flags &= ~(INCLUDE_COMPUTED|INCLUDE_CFI|INCLUDE_STATIC|INCLUDE_INCOMPLETE); return; }
+		if (s == "--no-output-traditional"){ flags &= ~OUTPUT_TRADITIONAL; return; }
 		cerr << "Unrecognised option: " << s << endl;
 		usage();
 		exit(1);
@@ -960,12 +1281,12 @@ int main(int argc, char **argv)
 	};
 	for (unsigned i = 1; i < argc; ++i)
 	{
-		// '-' is a valid filename, otherwise it's an option
+		// '-' is a valid filename, but '-'-prefixed means it's an option
 		if (argv[i][0] == '-' && argv[i][1] != '\0') process_opt(argv[i]);
 		else set_input_file(argv[i]);
 	}
 	if (!input_filename) { usage(); exit(1); }
-	std::ifstream infstream(*input_filename);
+	std::ifstream infstream(*input_filename == "-" ? "/dev/stdin" : *input_filename);
 	if (!infstream)
 	{
 		cerr << "Could not open file " << *input_filename << endl;
@@ -987,27 +1308,15 @@ int main(int argc, char **argv)
 	subprogram_vaddr_interval_map_t subprograms_by_vaddr;
 	map<subprogram_key, iterator_df<subprogram_die> > subprograms_by_key;
 	gather_defined_subprograms(root, subprograms_by_vaddr, subprograms_by_key);
-
 	cerr << "Found " << subprograms_by_key.size() << " subprograms." << endl;
 	/* What's our new algorithm?
 	 * 1. Collect all intervals across all subprograms.
-	 *    We also add 
 	 */
-	frame_intervals_t all_local_intervals;
-	for (auto i_pair = subprograms_by_key.begin();
-		i_pair != subprograms_by_key.end(); ++i_pair)
-	{
-		gather_local_var_locations_by_pc_interval(
-			all_local_intervals,
-			i_pair->second,
-			root
-		);
-	}
-	// also gather the CFA
-	if (flags & INCLUDE_CFA) gather_saved_register_locations_by_pc_interval(
-		all_local_intervals,
-		subprograms_by_vaddr,
-		root);
+	frame_intervals_t elements_by_interval;
+	add_local_elements(elements_by_interval, root, subprograms_by_key, flags);
+
+	// also gather the CFI
+	if (flags & INCLUDE_CFI) add_cfi_elements(elements_by_interval, root, subprograms_by_vaddr, flags);
 	/* 2. Partition the set elements into interesting and not interesting,
 	 *    discarding the not-interesting ones. (To save memory we could
 	 *    do the partitioning/discarding as we collect, but for now we don't.)
@@ -1096,67 +1405,64 @@ int main(int argc, char **argv)
 	 *        command-line options? interval-gathering is library code, so
 	 *         at laast API-level options....
 	 */
-	map< pair<string, /*iterator_df<type_die>*/ codeful_name >, vector< frame_interval_map_set_value > >
-	by_name_and_type;
-	unsigned anonctr = 0; // for generating names for anonymous things
-	for (auto i_int = all_local_intervals.begin(); i_int != all_local_intervals.end();
-		++i_int)
+	if (!(flags & OUTPUT_TRADITIONAL))
 	{
-		auto& die_or_reg_pairs = i_int->second;
-		for (auto i_el = die_or_reg_pairs.begin(); i_el != die_or_reg_pairs.end(); ++i_el)
+		cerr << "Calculating name--type pairs for all elements" << endl;
+		map< pair<string, /*iterator_df<type_die>*/ codeful_name >, vector< frame_element > >
+		by_name_and_type;
+		unsigned anonctr = 0; // for generating names for anonymous things
+		for (auto i_int = elements_by_interval.begin(); i_int != elements_by_interval.end();
+			++i_int)
 		{
-			auto maybe_local = i_el->get_die();
-			if (maybe_local)
+			for (auto i_el = i_int->second.begin(); i_el != i_int->second.end(); ++i_el)
 			{
-				auto maybe_name = maybe_local->find_name();
-				string name;
-				if (!maybe_name)
+				auto maybe_local = i_el->m_local;
+				if (maybe_local)
 				{
-					ostringstream fake_name;
-					//fake_name << "__anon" << anonctr++;
-					fake_name << "__anon" << std::hex << maybe_local.offset_here();
-					cerr << "Strange: " << maybe_local
-						<< ". Calling it " << fake_name.str()
-						<< "." << endl;
-					name = fake_name.str();
-				} else name = *maybe_name;
-				auto t = maybe_local->find_type();
-				assert(t);
-				codeful_name tn = codeful_name(t);
-				by_name_and_type[make_pair(name, tn)].push_back(*i_el);
-			}
-			else
-			{
-				opt<Dwarf_Unsigned> caller_regnum = i_el->get_caller_regnum();
-				assert(caller_regnum);
-				opt<loc_expr> save_location = i_el->get_save_location();
-				assert(save_location);
-				// we make up a name
-				ostringstream name;
-				name << "__saved_caller_reg" << *caller_regnum;
-				// NOTE: __saved_caller_reg_1436 is the CFA column.
-				// It should never be stored anywhere, so when we filter out those
-				// intervals that don't have a stored location, it should disappear.
-				// But that tells us that we should filter out from our name--type pairs
-				// anything that is not stored. Except stuff that is computed might also
-				// be valuable? as the program itself might compute it? Hmm. And the CFA
-				// is computed. What is the right logic for this?
-				codeful_name tn = make_pair("", "__opaque_word");
-				by_name_and_type[make_pair(name.str(), tn)].push_back(*i_el);
+					auto maybe_name = maybe_local->find_name();
+					string name;
+					if (!maybe_name)
+					{
+						ostringstream fake_name;
+						//fake_name << "__anon" << anonctr++;
+						fake_name << "__anon" << std::hex << maybe_local.offset_here();
+						cerr << "Strange: " << maybe_local
+							<< ". Calling it " << fake_name.str()
+							<< "." << endl;
+						name = fake_name.str();
+					} else name = *maybe_name;
+					auto t = maybe_local->find_type();
+					assert(t);
+					codeful_name tn = codeful_name(t);
+					by_name_and_type[make_pair(name, tn)].push_back(*i_el);
+				}
+				else
+				{
+					Dwarf_Unsigned caller_regnum = i_el->m_caller_regnum;
+					assert(caller_regnum != 0);
+					auto save_location = i_el->effective_expr_piece.copy();
+					// we make up a name
+					ostringstream name;
+					name << "__saved_caller_reg" << caller_regnum;
+					// NOTE: __saved_caller_reg_1436 is the CFA column.
+					// It should never be stored anywhere, so when we filter out those
+					// intervals that don't have a stored location, it should disappear.
+					// But that tells us that we should filter out from our name--type pairs
+					// anything that is not stored. Except stuff that is computed might also
+					// be valuable? as the program itself might compute it? Hmm. And the CFA
+					// is computed. What is the right logic for this?
+					codeful_name tn = make_pair("", "__opaque_word");
+					by_name_and_type[make_pair(name.str(), tn)].push_back(*i_el);
+				}
 			}
 		}
+		cerr << "Finished calculating name--type pairs" << endl;
+		write_pairs(cerr, by_name_and_type);
 	}
-	cout << "name\ttype";
-	for (auto i_pair = by_name_and_type.begin(); i_pair != by_name_and_type.end(); ++i_pair)
+	else /* flags & OUTPUT_TRADITIONAL */
 	{
-		cout << i_pair->first.first << "\t";
-		cout << mangle_typename(i_pair->first.second) << "\t";
-		for (auto i_el = i_pair->second.begin(); i_el != i_pair->second.end(); ++i_el)
-		{
-			// hmm, what to print?
-		}
-		cout << "\t(" << i_pair->second.size() << " intervals)";
-		cout << endl;
+		write_traditional_output(subprograms_by_vaddr, subprograms_by_key, elements_by_interval);
+		exit(0);
 	}
 
 #if 0
@@ -1186,515 +1492,6 @@ int main(int argc, char **argv)
 	 * 
 	 * 
 	 */
-
-	map< iterator_df<subprogram_die>, frame_intervals_t > frame_intervals_by_subprogram;
-	/* The frame offset is the most negative stack frame offset for any member
-	 * of any frame belonging to the subprogram. We record this for every
-	 * subprogram and add it to the stack frame base before interpreting the 
-	 * frame as a uniqtype COMPOSITE (struct) object. Field offsets in the uniqtype
-	 * are all calculated from this "virtual frame base" position, which is the
-	 * numerically lowest used location on the stack ("used" by locals placed
-	 * relative to the frame base... alloca() is another matter).
-	 * NOTE: I think we don't need this any more, as we don't have a frame uniqtype
-	 * any more. We will need some way to capture overlaps though. */
-	map< iterator_df<subprogram_die>, unsigned > frame_offsets_by_subprogram;
-
-	using dwarf::core::with_static_location_die;
-	cout << "#include \"allocmeta-defs.h\"\n";
-	cout << "#include \"uniqtype-defs.h\"\n\n";
-	set<string> names_emitted;
-	
-				/* Check we are not getting unreasonably big. */
-			static const unsigned MAX_INTERVALS = 10000;
-			if (out.size() > MAX_INTERVALS)
-			{
-#if 0
-				cerr << "Warning: abandoning gathering frame intervals for " << i_subp->summary() 
-						<< " in compilation unit " << i_subp.enclosing_cu().summary()
-						<< " after reaching " << MAX_INTERVALS << std::endl;
-				subp_frame_intervals.clear();
-				break;
-#endif
-			}
-
-	// for all subprograms...
-	for (auto i_i_subp = subprograms_list.begin(); i_i_subp != subprograms_list.end(); ++i_i_subp)
-	{
-		auto i_subp = i_i_subp->second;
-
-		/* Now we write a *series* of object layouts for this subprogram, 
-		 * discriminated by a set of (disjoint) vaddr ranges. */
-		
-		/* Our naive earlier algorithm had the problem that, once register-based 
-		 * locals are discarded, the frame layout is often unchanged from one vaddr range
-		 * to the next. But we were outputting a new uniqtype anyway, creating 
-		 * huge unnecessary bloat. So instead, we do a pre-pass where we remember
-		 * only the stack-located elements, and store them in a new interval map, 
-		 * by offset from frame base. 
-		 *
-		 * Also, we want to report discarded fps/locals once per subprogram, as 
-		 * completely discarded or partially discarded. How to do this? 
-		 * Keep an interval map of discarded items.
-		 * When finished, walk it and build another map keyed by 
-		  */
-		frame_intervals_t subp_frame_intervals;
-#ifdef DEBUG
-		discarded_intervals_t subp_discarded_intervals;
-#endif
-		 
-		for (auto i_int = subp_frame_intervals.begin(); 
-			i_int != subp_frame_intervals.end(); ++i_int)
-		{
-			/* Get the set of <p_dyn, locexpr>s for this vaddr range. */
-			auto& frame_elements = i_int->second;
-			
-			/* Calculate their offset from the frame base, and sort. */
-			//std::map<Dwarf_Signed, shared_ptr<with_dynamic_location_die > > by_frame_off;
-			//std::vector<pair<shared_ptr<with_dynamic_location_die >, string> > discarded;
-
-			/* We used to check that we don't see the same DIE twice within the same interval.
-			 * But WHY? We could have two pairs in frame_elements, with different loc_exprs.
-			 * In fact this does happen. So I've deleted the check. */
-			for (auto i_el_pair = frame_elements.begin(); i_el_pair != frame_elements.end(); ++i_el_pair)
-			{
-				/* Note that thanks to the aggregation semantics of subp_frame_intervals, 
-				 * i_int is already the intersection of the loc_expr interval *and* all
-				 * other loc_expr intervals in use within this subprogram. W*/
-
-				/* NOTE: our offset can easily be negative! For parameters, it 
-				 * usually is. So we calculate the offset from the middle of the 
-				 * (imaginary) address space, a.k.a. 1U<<((sizeof(Dwarf_Addr)*8)-1). 
-				 * In a signed two's complement representation, 
-				 * this number is -MAX. 
-				 * NO -- just reinterpret_cast to a signed? */
-				
-				auto i_el = &i_el_pair->first;
-				
-				Dwarf_Addr addr_from_zero;
-				/* Check for vars that are part static, part on-stack. 
-				 * How does this happen? One example is 
-				 * the 'git_packed' that is local within rearrange_packed_git
-				 * which gets inlined into prepare_packed_git in sha1_file.c.
-				 * 
-				 * The answer is: they're static vars that are being manipulated
-				 * locally within the function. Because they're "variables" that are
-				 * "in scope" (I think this is an interaction with inlining), 
-				 * they get their own DW_TAG_variable DIEs within the inlined 
-				 * instance's DWARF. While they're being manipulated, these have 
-				 * register locations. It would be pointless to spill them to the 
-				 * stack, however, so I don't think we need to worry about them. */
-				if (i_el_pair->second.size() > 0 && i_el_pair->second.at(0).lr_atom == DW_OP_addr
-				 && i_el_pair->second.at(i_el_pair->second.size() - 1).lr_atom != DW_OP_stack_value)
-				{
-					cerr << "Skipping static var masquerading as local: "
-						<< *i_el 
-						<< "in the vaddr range " 
-						<< std::hex << i_int->first << std::dec << std::endl;
-					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
-						compare_first_iter_offset<string>*/ just_this_variable_discard_reason_pair;
-					just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("static-masquerading-as-local")));
-#ifdef DEBUG
-					discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-					continue;
-				}
-				
-				bool saw_register = false;
-				auto& spec = i_el_pair->first.spec_here();
-				for (auto i_instr = i_el_pair->second.begin(); i_instr != i_el_pair->second.end();
-					++i_instr)
-				{
-					if (spec.op_reads_register(i_instr->lr_atom))
-					{ saw_register = true; break; }
-				}
-				
-				/* FIXME: DW_OP_piece complicates this. If we have part in a register, 
-				 * part on the stack, we'd like to record this somehow. Perhaps supply
-				 * a getter and setter in the make_precise()-generated uniqtype? */
-				
-				if (saw_register)
-				{
-					/* This means our variable/fp is in a register and not 
-					 * in a stack location. That's fine. Warn and continue. */
-					if (debug_out > 1)
-					{
-						cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp "
-							<< "in the vaddr range " 
-							<< std::hex << i_int->first << std::dec
-							<< ": "
-					 		<< *i_el;
-					}
-					//discarded.push_back(make_pair(*i_el, "register-located"));
-					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
-						compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-					just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("register-located")));
-#ifdef DEBUG
-					discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-					continue;
-				}
-				else try
-				{
-					std::stack<Dwarf_Unsigned> initial_stack; 
-					// call the evaluator directly
-					// -- push zero (a.k.a. the frame base) onto the initial stack
-					initial_stack.push(0); 
-					// FIXME: really want to push the offset of the stack pointer from the frame base
-					dwarf::expr::evaluator e(i_el_pair->second,
-						i_el_pair->first.spec_here(),
-						/* fb */ 0, 
-						initial_stack);
-					switch (e.tos_state())
-					{
-						case dwarf::expr::evaluator::ADDRESS: // the good one
-							break;
-						default:
-							if (debug_out > 1)
-							{
-								cerr << "Top-of-stack indicates non-address result" << std::endl;
-							}
-					}
-					addr_from_zero = e.tos(dwarf::expr::evaluator::ADDRESS); // may *not* be value; must be loc
-				}
-				catch (dwarf::lib::No_entry)
-				{
-					/* Not much can cause this, since we scanned for registers.
-					 * One thing would be a local whose location gives DW_OP_stack_value,
-					 * i.e. it has only a debug-time-computable value but no location in memory,
-					 * or DW_OP_implicit_pointer, i.e. it points within some such value. */
-					if (debug_out > 1)
-					{
-						cerr << "Warning: failed to locate non-register-located local/fp "
-							<< "in the vaddr range " 
-							<< std::hex << i_int->first << std::dec
-							<< ": "
-					 		<< *i_el;
-					}
-					//discarded.push_back(make_pair(*i_el, "register-located"));
-					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
-						compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-					just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("no location")));
-#ifdef DEBUG
-					discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-					continue;
-				}
-				catch (dwarf::expr::Not_supported)
-				{
-					cerr << "Warning: unsupported DWARF opcode when computing location for fp: "
-						<< *i_el;
-					//discarded.push_back(make_pair(*i_el, "register-located"));
-					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
-						compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-					just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("unsupported-DWARF")));
-#ifdef DEBUG
-					discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-					continue;
-				}
-				catch (...)
-				{
-					cerr << "Warning: something strange happened when computing location for fp: " 
-					 	<< *i_el;
-					//discarded.push_back(make_pair(*i_el, "register-located"));
-					iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
-						compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-					just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("something-strange")));
-#ifdef DEBUG
-					discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-					continue;
-				}
-				Dwarf_Signed frame_offset = static_cast<Dwarf_Signed>(addr_from_zero);
-				// cerr << "Found on-stack location (fb + " << frame_offset << ") for fp/var " << *i_el 
-				// 		<< "in the vaddr range " 
-				// 		<< std::hex << i_int->first << std::dec << endl;
-
-				/* We only add to by_frame_off if we have complete type => nonzero length. */
-				if ((*i_el)->find_type() && (*i_el)->find_type()->get_concrete_type())
-				{
-					//by_frame_off[frame_offset] = *i_el;
-					frame_interval_map_set_t just_this_offset_variable_pair;
-					just_this_offset_variable_pair.insert(make_pair(frame_offset, *i_el));
-					frame_intervals += make_pair(i_int->first, just_this_offset_variable_pair);
-				}
-				else
-				{
-					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
-						compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-					just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("no_concrete_type")));
-#ifdef DEBUG
-					discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-				}
-			}
-		} /* end for i_int */
-		
-
-		
-		/* Now figure out the positive and negative extents of the frame. */
-		typedef decltype(frame_intervals) is_t;
-		std::map< is_t::key_type, unsigned> interval_maxoffs;
-		std::map< is_t::key_type, signed>   interval_minoffs;
-		signed overall_frame_minoff = 0;
-		for (auto i_frame_int = frame_intervals.begin(); i_frame_int != frame_intervals.end();
-			++i_frame_int)
-		{
-			unsigned interval_maxoff;
-			signed interval_minoff;
-			//if (by_frame_off.begin() == by_frame_off.end()) frame_size = 0;
-			if (i_frame_int->second.size() == 0) { interval_maxoff = 0; interval_minoff = 0; }
-			else
-			{
-				{
-					frame_intervals_t::codomain_type::iterator i_maxoff_el = i_frame_int->second.end(); --i_maxoff_el;
-// 					Dwarf_Signed seen_maxoff = std::numeric_limits<Dwarf_Signed>::min();
-// 					for (auto i_el = i_frame_int->second.begin(); i_el != i_frame_int->second.end(); ++i_el)
-// 					{
-// 						if (i_el->first > seen_maxoff)
-// 						{
-// 							seen_maxoff = i_el->first;
-// 							i_maxoff_el = i_el;
-// 						}
-// 					}
-					auto p_maxoff_type = i_maxoff_el->second->find_type();
-					unsigned calculated_maxel_size;
-					if (!p_maxoff_type || !p_maxoff_type->get_concrete_type()) 
-					{
-						cerr << "Warning: found local/fp with no type  (assuming zero length): " 
-							<< *i_maxoff_el->second;
-						calculated_maxel_size = 0;
-					}
-					else 
-					{
-						opt<Dwarf_Unsigned> opt_size = p_maxoff_type->calculate_byte_size();
-						if (!opt_size)
-						{
-							cerr << "Warning: found local/fp with no size (assuming zero length): " 
-								<< *i_maxoff_el->second;
-							calculated_maxel_size = 0;						
-						} else calculated_maxel_size = *opt_size;
-					}
-					signed interval_max_offset = i_maxoff_el->first + calculated_maxel_size;
-					interval_maxoff = (interval_max_offset < 0) ? 0 : interval_max_offset;
-				}
-				{
-					auto i_minoff_el = i_frame_int->second.begin();
-					signed interval_min_offset = i_minoff_el->first;
-					interval_minoff = (interval_min_offset > 0) ? 0 : interval_min_offset;
-				}
-			}
-			
-			interval_maxoffs.insert(make_pair(i_frame_int->first, interval_maxoff));
-			interval_minoffs.insert(make_pair(i_frame_int->first, interval_minoff));
-			if (interval_minoff < overall_frame_minoff) overall_frame_minoff = interval_minoff;
-		}
-		unsigned offset_to_all = 0;
-		if (overall_frame_minoff < 0)
-		{
-			/* The offset we want to apply to everything is the negation of 
-			 * overall_frame_minoff, rounded *up* to a word. */
-			// FIXME: don't assume host word size
-			unsigned remainder = (-overall_frame_minoff) % (sizeof (void*));
-			unsigned quotient  = (-overall_frame_minoff) / (sizeof (void*));
-			offset_to_all =
-				remainder == 0 ? quotient * (sizeof (void*))
-					: (quotient + 1) * (sizeof (void*));
-		}
-		frame_offsets_by_subprogram[i_subp] = offset_to_all;
-		
-		/* Now for each distinct interval in the frame_intervals map... */
-		for (auto i_frame_int = frame_intervals.begin(); i_frame_int != frame_intervals.end();
-			++i_frame_int)
-		{
-			auto found_maxoff = interval_maxoffs.find(i_frame_int->first);
-			assert(found_maxoff != interval_maxoffs.end());
-			unsigned interval_maxoff = found_maxoff->second;
-			auto found_minoff = interval_minoffs.find(i_frame_int->first);
-			assert(found_minoff != interval_minoffs.end());
-			signed interval_minoff = found_minoff->second;
-			auto& by_off = i_frame_int->second;
-			
-			/* Before we output anything, extern-declare any that we need and haven't
-			 * declared yet. */
-			for (auto i_by_off = by_off.begin(); i_by_off != by_off.end(); ++i_by_off)
-			{
-				auto el_type = i_by_off->second->find_type();
-				auto name_pair = codeful_name(el_type);
-				string mangled_name = mangle_typename(name_pair);
-				if (names_emitted.find(mangled_name) == names_emitted.end())
-				{
-					emit_extern_declaration(std::cout, name_pair, /* force_weak */ false);
-					names_emitted.insert(mangled_name);
-				}
-			}
-
-			/* Output in offset order, CHECKing that there is no overlap (sanity). */
-			cout << "\n/* uniqtype for stack frame ";
-			string unmangled_typename = typename_for_vaddr_interval(i_subp, i_frame_int->first);
-			
-			string cu_name = *i_subp.enclosing_cu().name_here();
-			
-			cout << unmangled_typename
-				 << " defined in " << cu_name << ", "
-				 << "vaddr range " << std::hex << i_frame_int->first << std::dec << " */\n";
-			ostringstream min_s; min_s << "actual min is " << interval_minoff + offset_to_all;
-			string mangled_name = mangle_typename(make_pair(string(""), cu_name + unmangled_typename));
-
-			/* Is this the same as a layout we've seen earlier for the same frame? */
-			bool emitted_as_alias = false;
-			for (auto i_earlier_frame_int = frame_intervals.begin();
-				i_earlier_frame_int != i_frame_int;
-				++i_earlier_frame_int)
-			{
-				if (by_off == i_earlier_frame_int->second)
-				{
-					// just output as an alias
-					string unmangled_earlier_typename
-					 = typename_for_vaddr_interval(i_subp, i_earlier_frame_int->first);
-					string mangled_earlier_name = mangle_typename(
-						make_pair("", cu_name + unmangled_earlier_typename));
-					cout << "\n/* an alias will do */\n";
-					emit_weak_alias_idem(cout, mangled_name, mangled_earlier_name); // FIXME: not weak
-					emitted_as_alias = true;
-				}
-			}
-			if (emitted_as_alias) continue;
-
-			write_uniqtype_section_decl(cout, mangled_name);
-			write_uniqtype_open_composite(cout,
-				mangled_name,
-				unmangled_typename,
-				interval_maxoff + offset_to_all,
-				i_frame_int->second.size(),
-				false,
-				min_s.str()
-			);
-			opt<unsigned> prev_offset_plus_size;
-			opt<unsigned> highest_unused_offset = opt<unsigned>(0u);
-			// FIXME: prev_offset_plus_size needn't be the right thing.
-			// We want the highest offset yet seen.
-			for (auto i_by_off = by_off.begin(); i_by_off != by_off.end(); ++i_by_off)
-			{
-				ostringstream comment_s;
-				auto el_type = i_by_off->second->find_type();
-				unsigned offset_after_fixup = i_by_off->first + offset_to_all;
-				opt<Dwarf_Unsigned> el_type_size = el_type ? el_type->calculate_byte_size() :
-					opt<Dwarf_Unsigned>();
-				if (i_by_off->second.name_here())
-				{
-					comment_s << *i_by_off->second.name_here();
-				}
-				else comment_s << "(anonymous)"; 
-				comment_s << " -- " << i_by_off->second.spec_here().tag_lookup(
-						i_by_off->second.tag_here())
-					<< " @" << std::hex << i_by_off->second.offset_here() << std::dec
-					<< "(size ";
-				if (el_type_size) comment_s << *el_type_size;
-				else comment_s << "(no size)";
-				comment_s << ")";
-				if (highest_unused_offset)
-				{
-					if (offset_after_fixup > *highest_unused_offset)
-					{
-						unsigned hole_size = offset_after_fixup - *highest_unused_offset;
-						unsigned align = el_type.enclosing_cu()->alignment_of_type(el_type);
-						unsigned highest_unused_offset_rounded_to_align
-						 = ROUND_UP(highest_unused_offset, align);
-						comment_s << " (preceded by ";
-						if (hole_size ==
-							highest_unused_offset_rounded_to_align - highest_unused_offset)
-						{
-							comment_s << "an alignment-consistent hole";
-						}
-						else
-						{
-							comment_s << " (preceded by an alignment-unexpected HOLE";
-						}
-						comment_s << " of " << hole_size << " bytes)";
-					}
-					else if (offset_after_fixup < *highest_unused_offset)
-					{
-						comment_s << " (constituting an OVERLAP in the first " << (*highest_unused_offset - offset_after_fixup)
-							<< " bytes)";
-					}
-				}
-				// FIXME: also want to report holes at the start or end of the frame
-
-				string mangled_name = mangle_typename(codeful_name(el_type));
-				write_uniqtype_related_contained_member_type(cout,
-					/* is_first */ i_by_off == i_frame_int->second.begin(),
-					offset_after_fixup,
-					mangled_name,
-					comment_s.str()
-				);
-				if (el_type_size)
-				{
-					prev_offset_plus_size = offset_after_fixup + *el_type_size;
-					highest_unused_offset = std::max<unsigned>(
-						offset_after_fixup + *el_type_size, highest_unused_offset);
-				}
-				else
-				{
-					prev_offset_plus_size = opt<unsigned>();
-					highest_unused_offset = opt<unsigned>();
-				}
-			}
-			write_uniqtype_close(cout, mangled_name);
-		}
-		/* Now print a summary of what was discarded. */
-// 		for (auto i_discarded = discarded.begin(); i_discarded != discarded.end(); 
-// 			++i_discarded)
-// 		{
-// 			cout << "\n\t/* discarded: ";
-// 			if (i_discarded->first.name_here())
-// 			{
-// 				cout << *i_discarded->first.name_here();
-// 			}
-// 			else cout << "(anonymous)"; 
-// 			cout << " -- " << i_discarded->first->get_spec().tag_lookup(
-// 					i_discarded->first->get_tag())
-// 				<< " @" << std::hex << i_discarded->first->get_offset() << std::dec;
-// 			cout << "; reason: " << i_discarded->second;
-// 			cout << " */ ";
-// 		}
-	} // end for subprogram
-	
-	unsigned total_emitted = 0;
-	
-	/* NOTE: our allocsite chaining trick in liballocs requires/d that our allocsites 
-	 * are sorted in vaddr order, so that adjacent allocsites in the memtable buckets
-	 * are adjacent in the table. So we sort them here. */
-	set< pair< boost::icl::discrete_interval<Dwarf_Addr>, iterator_df<subprogram_die> > > sorted_intervals;
-	for (map< iterator_df<subprogram_die>, frame_intervals_t >::iterator i_subp_intervals 
-	  = frame_intervals_by_subprogram.begin(); i_subp_intervals != frame_intervals_by_subprogram.end();
-	  ++ i_subp_intervals)
-	{
-		// now output an allocsites-style table for these 
-		for (auto i_int = i_subp_intervals->second.begin(); i_int != i_subp_intervals->second.end(); 
-			++i_int)
-		{
-			sorted_intervals.insert(make_pair(i_int->first, i_subp_intervals->first));
-		}
-	}
-	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
-	for (auto i_pair = sorted_intervals.begin(); i_pair != sorted_intervals.end(); ++i_pair)
-	{
-		unsigned offset_from_frame_base = frame_offsets_by_subprogram[i_pair->second];
-	
-		if (i_pair != sorted_intervals.begin()) cout << ",";
-		cout << "\n\t/* frame alloc record for vaddr 0x" << std::hex << i_pair->first.lower() 
-			<< "+" << i_pair->first.upper() << std::dec << " */";
-		cout << "\n\t{\t" << offset_from_frame_base << ","
-			<< "\n\t\t{ 0x" << std::hex << i_pair->first.lower() << "UL, " << std::dec
-			<< "&" << mangle_typename(make_pair("", *i_pair->second.enclosing_cu().name_here() +
-				typename_for_vaddr_interval(i_pair->second, i_pair->first)))
-			<< " }"
-			<< "\n\t}";
-		++total_emitted;
-	}
-	// close the list
-	cout << "\n};\n";
 #endif
 	// success! 
 	return 0;

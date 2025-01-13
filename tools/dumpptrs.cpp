@@ -767,15 +767,11 @@ int main(int argc, char **argv)
 				{
 					try
 					{
-						std::stack<Dwarf_Unsigned> initial_stack; 
-						// call the evaluator directly
-						// -- push zero (a.k.a. the frame base) onto the initial stack
-						initial_stack.push(0);
-						// FIXME: really want to push the offset of the stack pointer from the frame base
 						dwarf::expr::evaluator e(i_el_pair->second,
 							i_el_pair->first.spec_here(),
 							/* fb */ 0, 
-							initial_stack);
+							{ 0 } /* push zero (a.k.a. the frame base) onto the initial stack */);
+						// FIXME: really want to push the offset of the stack pointer from the frame base
 						addr_from_zero = e.tos(false); // may *not* be value; must be loc
 					} 
 					catch (dwarf::lib::No_entry)
