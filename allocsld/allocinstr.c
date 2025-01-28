@@ -113,6 +113,11 @@ void *write_monopoline_and_detour(void *func, void *func_limit,
 
 	// create the trampoline, beginning with the displaced instructions
 	memcpy((char*) trampoline_buf, func, ndisplaced_bytes);
+	fprintf(stderr, "Displaced instruction bytes are:");
+	for (unsigned i = 0; i < ndisplaced_bytes; ++i) fprintf(stderr,
+		" %02x", ((unsigned char*) trampoline_buf)[i]);
+	fprintf(stderr, "\n");
+
 	// apply any relocations
 	for (unsigned i = 0; i < n_reloc_fields; ++i)
 	{
@@ -157,7 +162,7 @@ void *write_monopoline_and_detour(void *func, void *func_limit,
 	memcpy_and_relocate((void*) func,
 		jump_to_detour,
 		(uintptr_t) detour_func);
-	memcpy(&buf, (char*) func + 1, 4);
+	memcpy(&buf, (char*) func + 1, 4); /* the 32-bit displacement is at an offset of 1 byte */
 	fprintf(stderr, "After relocation, 4-byte PC32 offset from %p is 0x%x "
 		"(signed displacement: %d; should point to %p)\n",
 		(char*) func + 1,
