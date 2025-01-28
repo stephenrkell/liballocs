@@ -11,7 +11,7 @@ jobs:
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               build-essential libbsd-dev libelf-dev libdw-dev binutils-dev \
               autoconf automake libtool pkg-config autoconf-archive \
-              g++ ocaml ocamlbuild ocaml-findlib \
+              g++ ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
               default-jdk-headless python3 \
               make git gawk gdb wget \
               libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
