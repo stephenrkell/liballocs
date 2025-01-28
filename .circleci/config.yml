@@ -2,14 +2,14 @@ version: 2.0
 jobs:
   build:
     docker:
-      - image: ubuntu:18.04
+      - image: ubuntu:20.04
     steps:
       - run:
           name: Install dependencies
           command: |
             apt update
-            apt install -y build-essential libbsd-dev \
-              libelf-dev libdw-dev binutils-dev \
+            DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
+              build-essential libbsd-dev libelf-dev libdw-dev binutils-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++ ocaml ocamlbuild ocaml-findlib \
               default-jdk-headless python3 python \
@@ -49,14 +49,14 @@ jobs:
     requires:
       - build
     docker:
-      - image: ubuntu:18.04
+      - image: ubuntu:20.04
     steps:
       - run:
           name: Install dependencies
           command: |
             apt update
             apt install -y ca-certificates make build-essential g++ autoconf automake libtool \
-              libelf-dev python3 python git gawk python3-distutils libunwind-dev \
+              libelf-dev python3 git gawk python3-distutils libunwind-dev \
               ocaml ocamlbuild ocaml-findlib \
               libdw-dev binutils-dev libffi6 libffi-dev \
               libboost-iostreams-dev libboost-regex-dev \
