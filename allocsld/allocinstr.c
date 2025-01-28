@@ -47,13 +47,19 @@ static void (*orig_free)(void*);
  * Symposium, 1999).
  */
 #include <instr.h> /* from libsystrap */
+/* We write into a buffer the information about relocatable fields in the
+ * instructions we skip over. PROBLEM: we need to record also for each
+ * instruction its byte offset, because the relocatable_field_info is always
+ * relative to the start of the instruction. */
 static void *prologue_get_first_non_displaced(const void *func, const void *func_limit,
-	struct relocatable_field_info *out_relocs, unsigned *inout_nrelocs)
+	struct relocatable_field_info *out_relocs, unsigned *out_byte_offsets, unsigned *inout_nrelocs)
 {
 #define NBYTES_TO_CLOBBER  5 /* FIXME: sysdep */
 #define CHECK_DISPLACEABLE(ptr) 1 /* FIXME: actually do this */
 #define MAYBE_APPEND_ONE_FIELD(f) do { if (inout_nrelocs && nrelocs_used < *inout_nrelocs) { \
-      out_relocs[nrelocs_used++] = f; \
+      out_byte_offsets[nrelocs_used] = nbytes_decoded; \
+      out_relocs[nrelocs_used] = f; \
+      ++nrelocs_used; \
 } } while (0)
 	/* + REMEMBER: displaceable instructions must not only be position-independent
 	 * but also have no incoming branches! */
@@ -106,9 +112,10 @@ void *write_monopoline_and_detour(void *func, void *func_limit,
 	 * for a call or a jump, but a call is easier when coming from
 	 * compiler-generated code. */
 	struct relocatable_field_info reloc_fields[4];
+	unsigned byte_offsets[4];
 	unsigned n_reloc_fields = 4;
 	void *first_non_displaced = prologue_get_first_non_displaced(func, func_limit,
-		reloc_fields, &n_reloc_fields);
+		reloc_fields, byte_offsets, &n_reloc_fields);
 	unsigned ndisplaced_bytes = (unsigned char *) first_non_displaced - (unsigned char*) func;
 
 	// create the trampoline, beginning with the displaced instructions
@@ -123,11 +130,11 @@ void *write_monopoline_and_detour(void *func, void *func_limit,
 	{
 		// the unique 'symaddr' is the old referent of the field
 		uintptr_t symaddr = read_one_relocated_field(func, (ElfW(Rela)) {
-			.r_offset = reloc_fields[i].fieldoff_nbits / 8,
+			.r_offset = byte_offsets[i] + reloc_fields[i].fieldoff_nbits / 8,
 			.r_info = ELFW_R_INFO(0, reloc_fields[i].reloc_type)
 		});
 		apply_one_reloc(trampoline_buf, (ElfW(Rela)) {
-			.r_offset = reloc_fields[i].fieldoff_nbits / 8,
+			.r_offset = byte_offsets[i] + reloc_fields[i].fieldoff_nbits / 8,
 			.r_info = ELFW_R_INFO(0, reloc_fields[i].reloc_type)
 			}, &symaddr);
 	}
