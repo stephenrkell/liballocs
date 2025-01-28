@@ -12,11 +12,11 @@ jobs:
               build-essential libbsd-dev libelf-dev libdw-dev binutils-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++ ocaml ocamlbuild ocaml-findlib \
-              default-jdk-headless python3 python \
+              default-jdk-headless python3 \
               make git gawk gdb wget \
               libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
               libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev libffi6 libffi-dev
+              libboost-serialization-dev libboost-filesystem-dev libffi-dev
       - run:
           name: Report OCaml version for debugging
           command: |
@@ -58,9 +58,9 @@ jobs:
             apt install -y ca-certificates make build-essential g++ autoconf automake libtool \
               libelf-dev python3 git gawk python3-distutils libunwind-dev \
               ocaml ocamlbuild ocaml-findlib \
-              libdw-dev binutils-dev libffi6 libffi-dev \
+              libdw-dev binutils-dev libffi-dev \
               libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev libffi6
+              libboost-serialization-dev libboost-filesystem-dev
       - attach_workspace:
           at: /
       - run:
