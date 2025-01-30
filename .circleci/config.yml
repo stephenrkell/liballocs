@@ -55,7 +55,8 @@ jobs:
           name: Install dependencies
           command: |
             apt update
-            apt install -y ca-certificates make build-essential g++ autoconf automake libtool \
+            DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
+              ca-certificates make build-essential g++ autoconf automake libtool \
               libelf-dev python3 git gawk python3-distutils libunwind-dev \
               ocaml ocamlbuild ocaml-findlib \
               libdw-dev binutils-dev libffi-dev \
