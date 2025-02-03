@@ -2,7 +2,7 @@ version: 2.0
 jobs:
   build:
     docker:
-      - image: ubuntu:22.04
+      - image: ubuntu:20.04  # stuck here until we can grok DWARF 5
     steps:
       - run:
           name: Install dependencies
