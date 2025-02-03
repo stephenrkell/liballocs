@@ -2,7 +2,7 @@ version: 2.0
 jobs:
   build:
     docker:
-      - image: ubuntu:20.04
+      - image: ubuntu:22.04
     steps:
       - run:
           name: Install dependencies
@@ -61,7 +61,8 @@ jobs:
               ocaml ocamlbuild ocaml-findlib \
               libdw-dev binutils-dev libffi-dev \
               libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev
+              libboost-serialization-dev libboost-filesystem-dev \
+              pkg-config libglib2.0-dev # <-- for 'simple-multi-alloc' test case only
       - attach_workspace:
           at: /
       - run:
