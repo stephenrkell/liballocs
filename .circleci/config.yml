@@ -2,19 +2,18 @@ version: 2.0
 jobs:
   build:
     docker:
-      - image: ubuntu:22.04  # stuck here until we can grok DWARF 5... unless...?
+      - image: ubuntu:20.04  # stuck here until we can grok DWARF 5
     steps:
       - run:
           name: Install dependencies
           command: |
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
-              make gcc-10 g++-10 libc6-dev \
-              libbsd-dev libelf-dev libdw-dev binutils-dev \
+              build-essential libbsd-dev libelf-dev libdw-dev binutils-dev \
               autoconf automake libtool pkg-config autoconf-archive \
-              ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
+              g++ ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
               default-jdk-headless python3 \
-              git gawk gdb wget \
+              make git gawk gdb wget \
               libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
               libboost-iostreams-dev libboost-regex-dev \
               libboost-serialization-dev libboost-filesystem-dev libffi-dev
@@ -50,16 +49,14 @@ jobs:
     requires:
       - build
     docker:
-      - image: ubuntu:22.04
+      - image: ubuntu:20.04
     steps:
       - run:
           name: Install dependencies
           command: |
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
-              ca-certificates \
-              make gcc-10 g++-10 libc6-dev \
-              autoconf automake libtool \
+              ca-certificates make build-essential g++ autoconf automake libtool \
               libelf-dev python3 git gawk python3-distutils libunwind-dev \
               ocaml ocamlbuild ocaml-findlib \
               libdw-dev binutils-dev libffi-dev \
