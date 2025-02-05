@@ -298,25 +298,6 @@ gather_defined_subprograms(sticky_root_die& root,
 	}
 }
 
-void write_pairs(ostream& s,
-	map< pair<string, /*iterator_df<type_die>*/ codeful_name >, 
-	     vector< frame_element >
-	> const& by_name_and_type)
-{
-	s << "name\ttype";
-	for (auto i_pair = by_name_and_type.begin(); i_pair != by_name_and_type.end(); ++i_pair)
-	{
-		s << i_pair->first.first << "\t";
-		s << mangle_typename(i_pair->first.second) << "\t";
-		for (auto i_el = i_pair->second.begin(); i_el != i_pair->second.end(); ++i_el)
-		{
-			// hmm, what to print?
-		}
-		s << "\t(" << i_pair->second.size() << " intervals)";
-		s << endl;
-	}
-}
-
 unsigned get_frame_offset(frame_intervals_t const& subp_frame_intervals)
 {
 	// In the original code, frame_intervals_t is a map <K, V> where V is
@@ -395,7 +376,7 @@ unsigned frame_max_extent(frame_intervals_t const& subp_frame_intervals)
 		return 0;
 	}
 	assert(greatest_offset_element);
-	optional<Dwarf_Unsigned> maybe_sz = greatest_offset_element->size_in_bytes();
+	optional<Dwarf_Unsigned> maybe_sz = greatest_offset_element->piece_size_in_bytes();
 	if (!maybe_sz)
 	{
 		cerr << "Warning: highest-offset frame element has no size (assuming zero length)"
@@ -430,7 +411,7 @@ local_elements_by_stack_offset(set<frame_element> const& elts)
 			out.insert(make_pair(*maybe_offs, *i_el));
 		}
 		else if (i_el->m_local) cerr << "local but not fixed-stack-offset: " << i_el->m_local.summary()
-			<< " (expr: " << i_el->effective_expr_piece.copy() << ")" << endl;
+			<< " (expr: " << i_el->effective_expr_piece.copy_as_if_whole() << ")" << endl;
 	} /* end for i_el_pair */
 	return out;
 }
@@ -571,7 +552,7 @@ void write_traditional_output(
 					if (i_el != i_frame_int->second.begin()) cerr << ", ";
 					if (i_el->m_local) cerr << std::hex << i_el->m_local.offset_here()
 						<< std::dec;
-					else cerr << "caller_reg" << i_el->m_caller_regnum;
+					else cerr << "caller_reg" << *i_el->m_caller_regnum;
 					cerr << " @(" << std::hex << i_el->effective_expr_piece.copy() << std::dec << ")";
 				}
 				cerr << endl;
@@ -649,10 +630,9 @@ void write_traditional_output(
 				if (emitted_as_alias) continue;
 
 				/* In frametypes we define the structure size as always extending up
-				 * to the CFA, i.e. maxoff of zero
-				 * */
+				 * to the CFA, i.e. maxoff of zero */
 				Dwarf_Signed end_offset_of_highest_member = (by_off.size() == 0) ? 0
-				 : ({ auto i_end = by_off.end(); --i_end; i_end->first + *i_end->second.size_in_bytes(); });
+				 : ({ auto i_end = by_off.end(); --i_end; i_end->first + *i_end->second.piece_size_in_bytes(); });
 				// FIXME: in ambiguous/overlapping cases this is not entirely right:
 				// a lower-starting field might still end higher, if it is bigger.
 				// We want highest_end_offset, not end_offset_of_highest_(starting_)member.
@@ -795,7 +775,8 @@ void write_traditional_output(
 	 * contiguous entries with the same offset value. This is because
 	 * each record includes a pointer back to a frame type structure,
 	 * and these are named according to the address range they cover.
-	 * We need to refer to that range. */
+	 * We need to refer to that range's frametype, even if the frame
+	 * offset is coincidentally the same as a neighbouring range's. */
 	cout << "struct frame_allocsite_entry frame_vaddrs[] = {" << endl;
 	for (auto i_pair = sorted_intervals.begin(); i_pair != sorted_intervals.end(); ++i_pair)
 	{
@@ -816,6 +797,284 @@ void write_traditional_output(
 	// close the list
 	cout << "\n};\n";
 }
+
+struct triple : public pair<string, pair< codeful_name, pair<unsigned,unsigned> > >
+{                    // element name, codeful name, piece pair (see below)
+	using pair::pair;
+	triple(const frame_element& el)
+	{
+		string name_to_use;
+		codeful_name type;
+		if (el.m_local)
+		{
+			auto maybe_name = el.m_local->find_name();
+			if (!maybe_name)
+			{
+				ostringstream fake_name;
+				fake_name << "__anon" << std::hex << el.m_local.offset_here();
+				cerr << "Strange: " << el.m_local
+					<< ". Calling it " << fake_name.str()
+					<< "." << endl;
+				name_to_use = fake_name.str();
+			} else name_to_use = *maybe_name;
+			auto t = el.m_local->find_type();
+			assert(t);
+			type = codeful_name(t);
+		}
+		else
+		{
+			assert(el.m_caller_regnum);
+			Dwarf_Signed caller_regnum = *el.m_caller_regnum;
+			auto save_location = el.effective_expr_piece.copy_as_if_whole();
+			// we make up a name
+			ostringstream name;
+			name << "__saved_caller_reg" << *el.m_caller_regnum;
+			assert(*el.m_caller_regnum != DW_FRAME_CFA_COL3);
+			/* NOTE: __saved_caller_reg_1436 is the CFA column.
+			 * Hmm. And the CFA is computed. What is the right logic for this?
+			 * We could pretend that every arch has an additional register,
+			 * number 1436, whose value is always computable and when we compute
+			 * it for a given caller, we get the *callee*'s CFA. This duplicates
+			 * our "frame offset" map, if we are still generating that, but
+			 * I guess we don't need it any more because there is no overall
+			 * frame layout. So keep the assertion and filter it out on the
+			 * caller side. */
+			name_to_use = name.str();
+			type = make_pair("", "__opaque_word");
+		}
+		this->first = name_to_use;
+		this->second.first = type;
+		/* The "piece pair" is encoded specially to account for the fact that
+		 * in some cases we don't know how many bits/bytes the entire element
+		 * covers, e.g. for an incomplete type. So:
+		 * - the second element of the pair is not the size in bits, but the
+		 *   number of uncovered bits remaining *after* this piece. If there
+		 *   is only one implicit piece, this number is always 0. (If there is
+		 *   only one piece but it's explicit, it has an explicit size.) */
+		this->second.second = make_pair(
+			el.effective_expr_piece.offset_in_bits(),
+			(el.effective_expr_piece.size_in_bits() && el.program_element_size_in_bytes()) ?
+				(8 * *el.program_element_size_in_bytes()
+				 - el.effective_expr_piece.offset_in_bits()
+				 - *el.effective_expr_piece.size_in_bits())
+				: 0 /* if we have no size bound and/or no next piece, assume it
+				       covers everything remaining */
+		);
+	}
+};
+std::ostream& operator<<(std::ostream& s, const triple& t)
+{
+	s << "<" << t.first << ", " << mangle_typename(t.second.first) << ", "
+		 << "(" << t.second.second.first << ", " << t.second.second.second << ")" << ">";
+	return s;
+}
+
+void write_triples(ostream& s,
+	map< triple, vector< frame_element > > const& m,
+	map< triple, unsigned >& out_idx_map)
+{
+	s << "name\ttype\tpiece-coords" << endl;
+	unsigned i = 0;
+	for (auto i_map_pair = m.begin(); i_map_pair != m.end(); ++i_map_pair)
+	{
+		s << i_map_pair->first.first << "\t";
+		s << mangle_typename(i_map_pair->first.second.first) << "\t";
+		s << std::dec << i_map_pair->first.second.second.first << " "
+			<< i_map_pair->first.second.second.second;
+		s << "\t(" << i_map_pair->second.size() << " elements)";
+		s << endl;
+		out_idx_map[i_map_pair->first] = i++;
+	}
+}
+
+void write_compact_output(
+	subprogram_vaddr_interval_map_t const& subprograms_by_vaddr,
+	map<subprogram_key, iterator_df<subprogram_die> > const& subprograms_by_key,
+	frame_intervals_t const& elements_by_interval)
+{
+	/* 3. emit a vector of <name, type> pairs are commoned across the whole DSO.
+	 *    How? Just build a map keyed on <name, type>, then walk it to emit.
+	 *    The map needs a way to represent complex cases:
+	 *        - no type -- OK, just use 
+	 *        - incomplete type -- OK, just use the type as-is
+	 *        - type of "opaque data" i.e. the saved-register case -- can we represent this
+	 *               specially? We already have some precedents like uninterpreted_byte...
+	 *               do we need something new here? The problem is that the type of a word
+	 *               is context-dependent. Potentially our stackframe query logic, which
+	 *               we have to rewrite, should even go up the stack one or more levels to
+	 *               answer the query... if, and only if, it is asked about such a save slot.
+	 *               Some remarks:
+	 *                - it should be possible to query an mcontext, vaguely uniformly
+	 *                      with an ordinary stack frame
+	 *                      (in a sense, an mcontext consists entirely of saved registers, albeit
+	 *                       not of the "caller" per se but of whatever state generated the
+	 *                       mcontext)
+	 *                - we seem no longer to be computing the "accidental stack maps"
+	 *                    that the previous uniqtype construction was producing.
+	 *                    That seems like a pity. Oh, but we are -- layout vectors are
+	 *                    just that -- just not quite so localised. We probably want at least
+	 *                    the comments in our .c file to redundantly elaborate the components
+	 *                    that the vector is referencing, so it can easily be read in one place.
+	 *     Meta-completeness issue:
+	 *         If we do the SHF_MERGE thing, to describe layouts, I'm tempted to encode the
+	 *         "run length" in the symbol that marks the start of each run.
+	 *         We probably want the run length to be represented elsewhere too,
+	 *           i.e. in the per-PC table (but could just use a symidx! not sure).
+	 *         But in any case, once we do merging, we have overlapping allocations,
+	 *           and that is a problem for liballocs's meta-model.
+	 *         In the long run we may have to support overlapping objects for
+	 *           the static allocators, and maybe any other non-mutable allocator?
+	 *         Then again, mutable unions are arguably mutable overlapping objects.
+	 *           I guess the point with those is that we want to trap writes to them,
+	 *           in order to track the "last written", whereas
+	 *           there's no need for that in the case of immutable sections.
+	 *     Reducing indirection:
+	 *          shall we initially just
+	 *             for each interval
+	 *                 emit the layout vector, as a mergeable pushsection
+	 *                    it's a vector of pairs...
+	 *                     pair-id, location-descr
+	 *                    but we could emit it as a pair of vectors -- TRY BOTH
+	 *                     + can we describe the location in one word?
+	 *                         simple cases yes: signed 32-bit number, except in the range
+	 *                           [INT_MAX - NREGS - 1, INT_MAX - 1] where it's a reg num
+	 *                           and [INT_MAX] means "too complex, use a side table"? yes + omit side table for now
+	 *                    or we could do bit-fields within a 64-bit number:
+	 *                    { pair-id:24;                 // max 16M pairs across a DSO
+	 *                      stack_offset:24;            // max +/- 8MB stack offset
+	 *                      regn:6;                     // max 64 regs (DWARF has 32 plus escape hatch)
+	 *                      piece_sz_if_not_whole:5;    // max 32-byte pieces
+	 *                      piece_byte_offs:5
+	 *                    }
+	 *                 emit the PC table entry, pointing back to the vector.
+	 *    How have we saved memory relative to emitting uniqtypes?
+	 *        merging of vectors, if we have it to any appreciable degree
+	 *        commoning of name-type pairs
+	 *        reduced width -- name-type pair idxs are narrower than a uniqtype 'related' entry
+	 *        NOT reduced width -- a vector entry pointer is te same width as a uniqtype ptr
+	 *    TO COMPARE against the old way, we really want a way to set
+	 *        the same discard criteria
+	 *        and to turn off the frame info...
+	 *        command-line options? interval-gathering is library code, so
+	 *         at laast API-level options....
+	 */
+
+
+	cerr << "Calculating name--type--piece triples for all elements" << endl;
+	map< triple, vector< frame_element > > m;
+	map< frame_element, triple > reverse_m;
+	/* We need to make getting a 'triple idx' easy. */
+	map< triple, unsigned > idx_map;
+	for (auto i_int = elements_by_interval.begin(); i_int != elements_by_interval.end();
+		++i_int)
+	{
+		for (auto i_el = i_int->second.begin(); i_el != i_int->second.end(); ++i_el)
+		{
+			/* Currently we don't add a synthetic "saved register"-like entry
+			 * for the current CFA. */
+			if (!i_el->is_current_cfa())
+			{
+				auto t = triple(*i_el);
+				m[t].push_back(*i_el);
+				auto inserted = reverse_m.insert(make_pair(*i_el, t));
+				/* Why do we think the element is unique in the reverse map?
+				 * Well, one element denotes one name--type--piece at one
+				 * location (e.g. stack or reg), but the same name--type--piece
+				 * may recur at the same location over many PC ranges. So the
+				 * best we can say is that we may see the same element many times
+				 * but it should be the same triple. */
+				if (!(inserted.second ||
+					inserted.first->second == t))
+				{
+					std::clog << "Re-inserting but triples non-equal: `"
+						<< inserted.first->second << "' vs `" << t << "'" << endl;
+				}
+				assert(inserted.second ||
+					inserted.first->second == t);
+			}
+		}
+	}
+	cerr << "Finished calculating name--type--piece triples" << endl;
+	write_triples(cout, m, idx_map);
+
+	/* After the triples, what's next? It's the location descriptions.
+	 * A description is always a *piece* of an "effective expression"
+	 * (see frame_element.hpp). Cases that need splitting here:
+	 * - implicit pointer value
+	 * - implicit literal value
+	 * - other computed values
+	 * - computed locations: simple cases (reg number or stack offset)
+	 * - other computed locations
+	 *
+	 * I THINK what we want to do is:
+	 * - walk PC intervals
+	 * - for each, emit the whole frame layout, as a mergeable sequence of 32-bit numbers
+	 *      -- emit (1) CFA-relative first as one sequence, sorted by offset
+	 *      -- emit regs next as another sequence, sorted by register number
+	 *      -- emit a set of functions that handle the computeds and implicit-values next
+	 *           (XXX: can functions handle the "implicit value" case?)
+	 *      -- then emit the computed as a final mergeable sequence,
+	 *           sorted by idx of the name--type triple
+	 * - MEASURE the merge gain
+	 * - label with symbols -- how are we going to consume this?
+	 *       -- liballocs querying a stack address will use table (1)
+	 *       -- liballocs may gain an "explain this mcontext" API? for regs
+	 *       -- .. and a "resolve source identifier" API? for computed/implicit-values
+	 */
+	auto i_prev_int = elements_by_interval.end();
+	vector< pair< Dwarf_Signed, frame_element > > prev_cfa_offset_elements;
+	for (auto i_int = elements_by_interval.begin(); i_int != elements_by_interval.end();
+		i_prev_int = i_int, ++i_int)
+	{
+		/* collect the CFA-relative locations,
+		 * sort them by offset,
+		 * output them as a mergeable sequence,
+		 * then point to that list (including a length) */
+		vector< pair< Dwarf_Signed, frame_element > > cfa_offset_elements;
+		for (auto i_el = i_int->second.begin(); i_el != i_int->second.end(); ++i_el)
+		{
+			optional<Dwarf_Signed> offset;
+			if (optional<Dwarf_Signed>() !=
+				(offset = i_el->has_fixed_offset_from_frame_base()))
+			{
+				cfa_offset_elements.push_back(make_pair(*offset, *i_el));
+			}
+		}
+		std::sort(cfa_offset_elements.begin(), cfa_offset_elements.end());
+		/* Skip output if we're contiguous with the last lot and identical. We will just
+		 * implicitly extend. */
+		if (i_prev_int != elements_by_interval.end()
+		 && i_prev_int->first.upper() == i_int->first.lower()
+		 && cfa_offset_elements == prev_cfa_offset_elements)
+		{
+			cout << "/* continuing: 0x" << std::hex << i_int->first.lower()
+				<< " to 0x" << std::hex << i_int->first.upper() << " */" << endl;
+			continue; // OK to skip "next" here
+		}
+		/* FIXME: if we're *not* contiguous with the last interval,
+		 * output an empty frame layout spanning the gap.
+		 * FIXME: clean up these macros... the address needs to go in the
+		 * invocation that defines the frame. Use #undef to avoid the FRAME_LAYOUT_0xnnn
+		 * definitions and SET_LOCATION, instead juts repeatedly defining FRAME_LAYOUT
+		 * and then invoking it, passing the address as one argument. */
+		cout << endl << "SET_LOCATION(0x" << std::hex << i_int->first.lower() << ")"
+			<< " /* to 0x" << std::hex << i_int->first.upper() << " */" << endl;
+		cout << "#define FRAME_LAYOUT_0x" << i_int->first.lower() << "(v) \\" << endl;
+		for (auto i_el_pair = cfa_offset_elements.begin();
+			i_el_pair != cfa_offset_elements.end(); ++i_el_pair)
+		{
+			cout << "\tv(0x" << std::hex << idx_map[triple(i_el_pair->second)] << ", "
+				<< std::dec << (Dwarf_Signed) i_el_pair->first << " ) \\" << endl;
+		}
+		cout << "\t/* (no more) */" << endl;
+		cout << "FRAME_LAYOUT_0x" << std::hex << i_int->first.lower()
+			<< "(define_layout)" << std::dec << endl;
+
+	next:
+	// store for next time around
+		prev_cfa_offset_elements = cfa_offset_elements;
+	}
+} /* end write_compact_output */
 
 enum flags_t
 {
@@ -908,174 +1167,6 @@ void add_local_elements(frame_intervals_t& out, sticky_root_die& root,
 				  	<< " for reason " << r << endl; \
 				  goto continue_to_next_element; \
 				}
-#if 0 /* discard logic salvaged from frametypes -- do something with this */
-
-
-	catch (dwarf::lib::No_entry)
-	{
-		/* Not much can cause this, since we scanned for registers.
-		 * One thing would be a local whose location gives DW_OP_stack_value,
-		 * i.e. it has only a debug-time-computable value but no location in memory,
-		 * or DW_OP_implicit_pointer, i.e. it points within some such value. */
-		if (debug_out > 1)
-		{
-			cerr << "Warning: failed to locate non-register-located local/fp "
-				<< "in the vaddr range " 
-				<< std::hex << the_int << std::dec
-				<< ": "
-				<< i_dyn.summary() << endl;
-		}
-		//discarded.push_back(make_pair(*i_el, "register-located"));
-		iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
-			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-		just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("no location")));
-#ifdef DEBUG
-		discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-		return ret_t();
-	}
-	catch (dwarf::expr::Not_supported)
-	{
-		cerr << "Warning: unsupported DWARF opcode when computing location for fp: "
-			<< i_dyn.summary() << endl;
-		//discarded.push_back(make_pair(*i_el, "register-located"));
-		iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
-			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-		just_this_variable_discard_reason_pair.insert(make_pair(i_dyn, string("unsupported-DWARF")));
-#ifdef DEBUG
-		discarded_intervals += make_pair(the_int, just_this_variable_discard_reason_pair);
-#endif
-		return ret_t();
-	}
-	catch (...)
-	{
-		cerr << "Warning: something strange happened when computing location for fp: " 
-			<< i_dyn.summary() << endl;
-		//discarded.push_back(make_pair(*i_el, "register-located"));
-		iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
-			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-		just_this_variable_discard_reason_pair.insert(make_pair(i_dyn, string("something-strange")));
-#ifdef DEBUG
-		discarded_intervals += make_pair(the_int, just_this_variable_discard_reason_pair);
-#endif
-		return ret_t();
-	}
-	assert(false);
-}
-
-
-
-
-		//discarded.push_back(make_pair(*i_el, "register-located"));
-		iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
-			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-		just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("no location")));
-#ifdef DEBUG
-		discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-
-
-
-		//discarded.push_back(make_pair(*i_el, "register-located"));
-		iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
-			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-		just_this_variable_discard_reason_pair.insert(make_pair(i_dyn, string("unsupported-DWARF")));
-#ifdef DEBUG
-		discarded_intervals += make_pair(the_int, just_this_variable_discard_reason_pair);
-#endif
-
-
-		//discarded.push_back(make_pair(*i_el, "register-located"));
-		iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
-			compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-		just_this_variable_discard_reason_pair.insert(make_pair(i_dyn, string("something-strange")));
-#ifdef DEBUG
-		discarded_intervals += make_pair(the_int, just_this_variable_discard_reason_pair);
-#endif
-				
-				/* FIXME: DW_OP_piece complicates this. If we have part in a register, 
-				 * part on the stack, we'd like to record this somehow. Perhaps supply
-				 * a getter and setter in the make_precise()-generated uniqtype? */
-				
-				if (saw_register)
-				{
-					/* This means our variable/fp is in a register and not 
-					 * in a stack location. That's fine. Warn and continue. */
-					if (debug_out > 1)
-					{
-						cerr << "Warning: we think this is a register-located local/fp or pass-by-reference fp "
-							<< "in the vaddr range " 
-							<< std::hex << i_int->first << std::dec
-							<< ": "
-					 		<< *i_el << endl;
-					}
-					//discarded.push_back(make_pair(*i_el, "register-located"));
-					iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
-						compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-					just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("register-located")));
-#ifdef DEBUG
-					discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-#endif
-					continue;
-				}
-				else 
-
-
-
-
-
-	
-					/* Check for vars that are part static, part on-stack. 
-					 * How does this happen? One example is 
-					 * the 'git_packed' that is local within rearrange_packed_git
-					 * which gets inlined into prepare_packed_git in sha1_file.c.
-					 * 
-					 * The answer is: they're static vars that are being manipulated
-					 * locally within the function. Because they're "variables" that are
-					 * "in scope" (I think this is an interaction with inlining), 
-					 * they get their own DW_TAG_variable DIEs within the inlined 
-					 * instance's DWARF. While they're being manipulated, these have 
-					 * register locations. It would be pointless to spill them to the 
-					 * stack, however, so I don't think we need to worry about them. */
-					if (i_el_pair->second.size() > 0 && i_el_pair->second.at(0).lr_atom == DW_OP_addr
-					 && i_el_pair->second.at(i_el_pair->second.size() - 1).lr_atom != DW_OP_stack_value)
-					{
-						cerr << "Skipping static var masquerading as local: "
-							<< *i_el 
-							<< "in the vaddr range " 
-							<< std::hex << i_int->first << std::dec << std::endl;
-						iterfirst_pair_hash< with_dynamic_location_die, string>::set /*,
-							compare_first_iter_offset<string>*/ just_this_variable_discard_reason_pair;
-						just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("static-masquerading-as-local")));
-	#ifdef DEBUG
-						discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-	#endif
-						continue;
-					}
-                    
-                    					/* We only add to by_frame_off if we have complete type => nonzero length. */
-					if ((*i_el)->find_type() && (*i_el)->find_type()->get_concrete_type())
-					{
-						//by_frame_off[frame_offset] = *i_el;
-						frame_interval_map_set_t just_this_offset_variable_pair;
-						just_this_offset_variable_pair.insert(make_pair(frame_offset, *i_el));
-						frame_intervals += make_pair(i_int->first, just_this_offset_variable_pair);
-					}
-					else
-					{
-						iterfirst_pair_hash< with_dynamic_location_die, string>::set/*,
-							compare_first_iter_offset<string> */ just_this_variable_discard_reason_pair;
-						just_this_variable_discard_reason_pair.insert(make_pair(*i_el, string("no_concrete_type")));
-	#ifdef DEBUG
-						discarded_intervals += make_pair(i_int->first, just_this_variable_discard_reason_pair);
-	#endif
-					}
-
-
-
-
-
-#endif /* #if 0 */
 				if (!(flags & INCLUDE_REGISTERS) && element.has_fixed_register()) DO_DISCARD("register-located");
 				if (!(flags & INCLUDE_COMPUTED) && element.has_value_function()) DO_DISCARD("value-function");
 				if (!(flags & INCLUDE_STATIC) && element.is_static_masquerading_as_local()) DO_DISCARD("static-masquerading-as-local");
@@ -1140,7 +1231,7 @@ void add_local_elements(frame_intervals_t& out, sticky_root_die& root,
 						}
 						/* unrecognised or known-unsupported-among-known-specials?
 						 * i.e. something that would have thrown Not_supported in our
-						 * old DWARF interprefer in libdwarfpp's expr.cpp.
+						 * old DWARF interpreter in libdwarfpp's expr.cpp.
 						 * But we covered the names-register/reads-register cases above. */
 						if (!is_recognised_dwarf(i_instr->lr_atom)
 						|| i_instr->lr_atom ==  DW_OP_bra
@@ -1312,147 +1403,12 @@ int main(int argc, char **argv)
 
 	// also gather the CFI
 	if (flags & INCLUDE_CFI) add_cfi_elements(elements_by_interval, root, subprograms_by_vaddr, flags);
-	/* 2. Partition the set elements into interesting and not interesting,
-	 *    discarding the not-interesting ones. (To save memory we could
-	 *    do the partitioning/discarding as we collect, but for now we don't.)
-	 *    The uninteresting cases in the original frametypes were:
-	 *     static-masquerading-as-local
-	 *     register-located
-	 *     no location
-	 *     unsupported DWARF
-	 *     incomplete type
-	 *    ... but now most of these are interesting. I think only no-location
-	 *    should be eliminated. For static-masquerading-as-local, we do want to
-	 *    record that a stack location holds a transient copy of a static variable,
-	 *    if it does.
-	 */
-	
-	// discard reasons:
-	// static-masquerading-as-local
-	// register-located
-	// no location (incl. DW_OP_stack_value)
-	// unsupported DWARF
-	// incomplete type
-	
-	/* 3. emit a vector of <name, type> pairs are commoned across the whole DSO.
-	 *    How? Just build a map keyed on <name, type>, then walk it to emit.
-	 *    The map needs a way to represent complex cases:
-	 *        - no type -- OK, just use 
-	 *        - incomplete type -- OK, just use the type as-is
-	 *        - type of "opaque data" i.e. the saved-register case -- can we represent this
-	 *               specially? We already have some precedents like uninterpreted_byte...
-	 *               do we need something new here? The problem is that the type of a word
-	 *               is context-dependent. Potentially our stackframe query logic, which
-	 *               we have to rewrite, should even go up the stack one or more levels to
-	 *               answer the query... if, and only if, it is asked about such a save slot.
-	 *               Some remarks:
-	 *                - it should be possible to query an mcontext, vaguely uniformly
-	 *                      with an ordinary stack frame
-	 *                      (in a sense, an mcontext consists entirely of saved registers, albeit
-	 *                       not of the "caller" per se but of whatever state generated the
-	 *                       mcontext)
-	 *                - we seem no longer to be computing the "accidental stack maps"
-	 *                    that the previous uniqtype construction was producing.
-	 *                    That seems like a pity. Oh, but we are -- layout vectors are
-	 *                    just that -- just not quite so localised. We probably want at least
-	 *                    the comments in our .c file to redundantly elaborate the components
-	 *                    that the vector is referencing, so it can easily be read in one place.
-	 *     Meta-completeness issue:
-	 *         If we do the merging thing, to describe layouts, I'm tempted to encode the
-	 *         "run length" in the symbol that marks the start of each run.
-	 *         We probably want the run length to be represented elsewhere too,
-	 *           i.e. in the per-PC table (but could just use a symidx! not sure).
-	 *         But in any case, once ew do merging, we have overlapping allocations,
-	 *           and that is a problem for liballocs's meta-model.
-	 *         In the long run we may have to support overlapping objects for
-	 *           the static allocators, and maybe any other non-mutable allocator?
-	 *         Then again, mutable unions are arguably mutable overlapping objects.
-	 *           I guess the point with those is that we want to trap writes to them,
-	 *           in order to track the "last written", whereas
-	 *           there's no need for that in the case of immutable sections.
-	 *     Reducing indirection:
-	 *          shall we initially just
-	 *             for each interval
-	 *                 emit the layout vector, as a mergeable pushsection
-	 *                    it's a vector of pairs...
-	 *                     pair-id, location-descr
-	 *                    but we could emit it as a pair of vectors -- TRY BOTH
-	 *                     + can we describe the location in one word?
-	 *                         simple cases yes: signed 32-bit number, except in the range
-	 *                           [INT_MAX - NREGS - 1, INT_MAX - 1] where it's a reg num
-	 *                           and [INT_MAX] means "too complex, use a side table"? yes + omit side table for now
-	 *                    or we could do bit-fields within a 64-bit number:
-	 *                    { pair-id:24;                 // max 16M pairs across a DSO
-	 *                      stack_offset:24;            // max +/- 8MB stack offset
-	 *                      regn:6;                     // max 64 regs (DWARF has 32 plus escape hatch)
-	 *                      piece_sz_if_not_whole:5;    // max 32-byte pieces
-	 *                      piece_byte_offs:5
-	 *                    }
-	 *                 emit the PC table entry, pointing back to the vector.
-	 *    How have we saved memory relative to emitting uniqtypes?
-	 *        merging of vectors, if we have it to any appreciable degree
-	 *        commoning of name-type pairs
-	 *        reduced width -- name-type pair idxs are narrower than a uniqtype 'related' entry
-	 *        NOT reduced width -- a vector entry pointer is te same width as a uniqtype ptr
-	 *    TO COMPARE against the old way, we really want a way to set
-	 *        the same discard criteria
-	 *        and to turn off the frame info...
-	 *        command-line options? interval-gathering is library code, so
-	 *         at laast API-level options....
-	 */
+
+	// do output
 	if (!(flags & OUTPUT_TRADITIONAL))
 	{
-		cerr << "Calculating name--type pairs for all elements" << endl;
-		map< pair<string, /*iterator_df<type_die>*/ codeful_name >, vector< frame_element > >
-		by_name_and_type;
-		unsigned anonctr = 0; // for generating names for anonymous things
-		for (auto i_int = elements_by_interval.begin(); i_int != elements_by_interval.end();
-			++i_int)
-		{
-			for (auto i_el = i_int->second.begin(); i_el != i_int->second.end(); ++i_el)
-			{
-				auto maybe_local = i_el->m_local;
-				if (maybe_local)
-				{
-					auto maybe_name = maybe_local->find_name();
-					string name;
-					if (!maybe_name)
-					{
-						ostringstream fake_name;
-						//fake_name << "__anon" << anonctr++;
-						fake_name << "__anon" << std::hex << maybe_local.offset_here();
-						cerr << "Strange: " << maybe_local
-							<< ". Calling it " << fake_name.str()
-							<< "." << endl;
-						name = fake_name.str();
-					} else name = *maybe_name;
-					auto t = maybe_local->find_type();
-					assert(t);
-					codeful_name tn = codeful_name(t);
-					by_name_and_type[make_pair(name, tn)].push_back(*i_el);
-				}
-				else
-				{
-					Dwarf_Unsigned caller_regnum = i_el->m_caller_regnum;
-					assert(caller_regnum != 0);
-					auto save_location = i_el->effective_expr_piece.copy();
-					// we make up a name
-					ostringstream name;
-					name << "__saved_caller_reg" << caller_regnum;
-					// NOTE: __saved_caller_reg_1436 is the CFA column.
-					// It should never be stored anywhere, so when we filter out those
-					// intervals that don't have a stored location, it should disappear.
-					// But that tells us that we should filter out from our name--type pairs
-					// anything that is not stored. Except stuff that is computed might also
-					// be valuable? as the program itself might compute it? Hmm. And the CFA
-					// is computed. What is the right logic for this?
-					codeful_name tn = make_pair("", "__opaque_word");
-					by_name_and_type[make_pair(name.str(), tn)].push_back(*i_el);
-				}
-			}
-		}
-		cerr << "Finished calculating name--type pairs" << endl;
-		write_pairs(cerr, by_name_and_type);
+		write_compact_output(subprograms_by_vaddr, subprograms_by_key, elements_by_interval);
+		exit(0);
 	}
 	else /* flags & OUTPUT_TRADITIONAL */
 	{
