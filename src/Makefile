@@ -161,17 +161,17 @@ endif
 CFLAGS += -I$(srcdir)
 
 # different outputs involve different subgroups of objects
-UTIL_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o
+CORE_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o \
+  meta-dso.o uniqtype-util.o counters.o rt-uniqtypes.o util.o private-libc.o err.o query.o walk.o \
+  liballocs.o workarounds.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) \
+  $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
 ifneq ($(USE_REAL_LIBUNWIND),)
 LDLIBS += -lunwind -lunwind-`uname -m`
 CFLAGS += -DUSE_REAL_LIBUNWIND
 else
-UTIL_OBJS += fake-libunwind.o
+CORE_OBJS += fake-libunwind.o
 CFLAGS += -fno-omit-frame-pointer
 endif
-ALLOCATOR_OBJS := $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
-#$(info ALLOCATORS_OBJS is $(ALLOCATOR_OBJS))
-MAIN_OBJS := liballocs.o workarounds.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) $(UTIL_OBJS) $(ALLOCATOR_OBJS)
 NOPRELOAD_OBJS := #uniqtypes.o # never link this into a preload lib! nor include in _preload.a!
  # recall that liballocs.a is only for static-linked client binaries (exe or solib).
  # What should liballocs.a include? E.g. does a client static-linked exe need this
@@ -195,7 +195,7 @@ endif
 DLMALLOC_A_OBJS := dlmalloc.o dlmalloc-ext.o
 
 # Generate deps.
-ALL_OBJS := $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(SYSTRAP_OBJS) $(DLMALLOC_A_OBJS)
+ALL_OBJS := $(CORE_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(SYSTRAP_OBJS) $(DLMALLOC_A_OBJS)
 # enumerate src files backwards from our .o files
 DEP_OBJS := $(ALL_OBJS)
 C_SRC := $(sort $(patsubst %.o,%.c,$(DEP_OBJS)))
@@ -246,8 +246,8 @@ $(SOLIB_TARGETS): dlmalloc.a
 $(SOLIB_TARGETS): EXCLUDE_LIBS += dlmalloc.a:libsystrap.a
 #$(SOLIB_TARGETS): LDFLAGS += -Wl,-z,initfirst
 
-LIBALLOCS_PRELOAD_A_OBJS := dlmalloc-ext.o $(MAIN_OBJS) $(PRELOAD_OBJS)
-LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(MAIN_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS)
+LIBALLOCS_PRELOAD_A_OBJS := dlmalloc-ext.o $(CORE_OBJS) $(PRELOAD_OBJS)
+LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(CORE_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS)
 
 liballocs_preload.so: LDFLAGS += $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
 liballocs_preload.so: private-malloc-wrapped.lds

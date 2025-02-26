@@ -134,9 +134,19 @@ static _Bool mapping_entries_equal(struct mapping_entry *e1,
 static _Bool mapping_sequence_prefix(struct mapping_sequence *s1,
 	struct mapping_sequence *s2)
 {
-	return s1->nused <= s2->nused && mapping_entries_equal(&s1->mappings[0],
-		&s2->mappings[0],
-		s1->nused);
+	return s1->nused <= s2->nused && (
+		(mapping_entries_equal(&s1->mappings[0], &s2->mappings[0], s1->nused)
+			|| ( // allow a trailing anonymous mapping to be a prefix
+				mapping_entries_equal(&s1->mappings[0], &s2->mappings[0], s1->nused - 1)
+					&& s1->nused == s2->nused
+					&& s1->mappings[s1->nused - 1].is_anon
+					&& s2->mappings[s2->nused - 1].is_anon
+					&& s1->mappings[s1->nused - 1].begin == s2->mappings[s2->nused - 1].begin
+					&& (uintptr_t) s1->mappings[s1->nused - 1].end <=
+					   (uintptr_t) s2->mappings[s2->nused - 1].end)
+			)
+		);
+			
 }
 static _Bool mem_range_prefix(struct mapping_sequence *s1,
 	struct mapping_sequence *s2)
@@ -151,6 +161,8 @@ static _Bool mapping_sequence_suffix(struct mapping_sequence *s1,
 			&s2->mappings[s2->nused - s1->nused],
 			&s1->mappings[0],
 			s1->nused);
+	/* FIXME: need analogous relaxation to mapping_sequence_prefix() about trailing
+	 * anonymous mapping? */
 }
 static _Bool mem_range_suffix(struct mapping_sequence *s1,
 	struct mapping_sequence *s2)
@@ -378,9 +390,9 @@ report_problem:
 	if (parent_begin)
 	{
 		write_string("\nExisting begin-bigalloc begin address: ");
-		write_ulong((unsigned long) parent_end->begin);
+		write_ulong((unsigned long) parent_begin->begin);
 		write_string("\nExisting begin-bigalloc end address: ");
-		write_ulong((unsigned long) parent_end->end);
+		write_ulong((unsigned long) parent_begin->end);
 	}
 	if (existing_seq)
 	{

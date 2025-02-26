@@ -91,11 +91,4 @@ allocsites_id_entry_slot_next_free __attribute__((visibility("hidden")));
 void
 init_allocsites_info(struct allocs_file_metadata *file) __attribute__((visibility("hidden")));
 
-struct allocsite_entry *__liballocs_find_allocsite_entry_at(
-	const void *allocsite) __attribute__((visibility("protected")));
-allocsite_id_t __liballocs_allocsite_id(const void *allocsite) __attribute__((visibility("protected")));
-struct allocsite_entry *__liballocs_allocsite_entry_by_id(allocsite_id_t id,
-	uintptr_t *out_file_base_addr) __attribute__((visibility("protected")));
-const void *__liballocs_allocsite_by_id(allocsite_id_t id) __attribute__((visibility("protected")));
-
 #endif

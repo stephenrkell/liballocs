@@ -2,7 +2,8 @@
 #define LIBALLOCS_MALLOC_META_H_
 
 /* NOTE: this file gets included by liballocs_cil_inlines.h
- * so needs to be written to be tolerant of many versions of C. */
+ * so needs to be written to be tolerant of many versions of C.
+ * FIXME: why is it included from there? Should not be necessary? */
 
 #ifndef offsetof
 #define __liballocs_defined_offsetof
@@ -55,6 +56,9 @@ struct insert
 	{
 		unsigned bits:16; /* used to store alloc site in compact form */
 	} un;
+#ifdef USE_LIFETIME_POLICIES
+	unsigned long unused;
+#endif
 } __attribute__((packed));
 
 static inline /*size_t*/ unsigned long caller_usable_size_for_chunk_and_usable_size(void *userptr,

@@ -15,6 +15,11 @@
 #include "liballocs_private.h"
 #include "pageindex.h"
 
+/* Beginning of main's stack frame. We snarf this as we walk the
+ * stack and then use it for sanity checking.
+ */
+void *__liballocs_main_bp __attribute__((visibility("hidden")));
+
 /* This is the allocator that knows about ABI-defined *stack frames*,
  * as distinct from the (machine/OS-defined) *stack mappings*. */
 
@@ -30,8 +35,6 @@ struct allocator __stackframe_allocator = {
 
 static _Bool trying_to_initialize;
 static _Bool initialized;
-
-static void *main_bp; // beginning of main's stack frame
 
 static struct frame_uniqtype_and_offset
 pc_to_frame_uniqtype(const void *addr);
@@ -87,16 +90,16 @@ void ( __attribute__((constructor(101))) __stackframe_allocator_init)(void)
 
 			if (have_bp)
 			{
-				main_bp = (void*) (intptr_t) bp;
+				__liballocs_main_bp = (void*) (intptr_t) bp;
 			}
 			else
 			{
 				// underapproximate bp as the sp
-				main_bp = (void*) (intptr_t) sp;
+				__liballocs_main_bp = (void*) (intptr_t) sp;
 			}
 		}
 #endif
-		if (main_bp == 0) 
+		if (__liballocs_main_bp == 0) 
 		{
 			// underapproximate bp as our current sp!
 			debug_printf(1, "Warning: using egregious approximation for bp of main().\n");
@@ -106,9 +109,9 @@ void ( __attribute__((constructor(101))) __stackframe_allocator_init)(void)
 		#else // assume X86_64 for now
 			__asm__("movq %%rsp, %0\n" : "=r"(our_sp));
 		#endif
-			main_bp = (void*) (intptr_t) our_sp;
+			__liballocs_main_bp = (void*) (intptr_t) our_sp;
 		}
-		assert(main_bp != 0);
+		assert(__liballocs_main_bp != 0);
 		
 		initialized = 1;
 		trying_to_initialize = 0;

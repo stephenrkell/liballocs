@@ -175,12 +175,6 @@ extern struct liballocs_err __liballocs_err_unrecognised_static_object;
 extern struct liballocs_err __liballocs_err_object_of_unknown_storage;
 
 const char *__liballocs_errstring(struct liballocs_err *err);
-liballocs_err_t extract_and_output_alloc_site_and_type(
-    struct insert *p_ins,
-    struct uniqtype **out_type,
-    void **out_site
-) __attribute__((visibility("hidden")));
-
 
 /* We define a dladdr that caches stuff. */
 Dl_info dladdr_with_cache(const void *addr);
@@ -746,6 +740,13 @@ struct mapping_entry
 };
 struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 		struct big_allocation **maybe_out_bigalloc);
+
+struct allocsite_entry *__liballocs_find_allocsite_entry_at(
+	const void *allocsite);
+allocsite_id_t __liballocs_allocsite_id(const void *allocsite);
+struct allocsite_entry *__liballocs_allocsite_entry_by_id(allocsite_id_t id,
+	uintptr_t *out_file_base_addr);
+const void *__liballocs_allocsite_by_id(allocsite_id_t id);
 
 static inline int __liballocs_walk_stack(int (*cb)(void *, void *, void *, void *), void *arg)
 {

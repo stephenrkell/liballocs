@@ -13,6 +13,7 @@
 #include "relf.h"
 #include "maps.h"
 #include "liballocs_private.h"
+#include "generic_malloc_index.h"
 
 #ifndef NO_PTHREADS
 #define BIG_LOCK \

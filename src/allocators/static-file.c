@@ -231,14 +231,10 @@ static void load_metadata(struct allocs_file_metadata *meta, void *handle)
 	init_allocsites_info(meta);
 	init_frames_info(meta);
 }
+
 void load_meta_objects_for_early_libs(void)
 {
 	assert(early_lib_handles[0]);
-	assert(!meta_base);
-	// the user can specify where we get our -meta.so
-	meta_base = getenv("META_BASE");
-	if (!meta_base) meta_base = "/usr/lib/meta";
-	meta_base_len = strlen(meta_base);
 
 	for (unsigned i = 0; i < MAX_EARLY_LIBS; ++i)
 	{

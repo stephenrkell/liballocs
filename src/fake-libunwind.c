@@ -1,6 +1,10 @@
+#define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
+#include <string.h>
 #include <stdint.h>
+#include <link.h>
+#include "relf.h"
 #include "fake-libunwind.h"
 
 long local_addr_space __attribute__((visibility("hidden")));
@@ -125,5 +129,24 @@ int unw_step(unw_cursor_t *cp)
 	{
 		*cp = new_ctxt;
 		return new_ctxt.frame_sp - ctxt.frame_sp;
+	}
+}
+
+int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp) __attribute__((visibility("hidden")));
+int unw_get_proc_name(unw_cursor_t *p_cursor, char *buf, size_t n, unw_word_t *offp)
+{
+	assert(!offp);
+	//dlerror();
+	//Dl_info info = dladdr_with_cache((void*) p_cursor->frame_ip);
+	//if (!info.dli_fname) return 1;
+	//if (!info.dli_sname) return 2;
+	/* For robustness, use fake_dladdr. */
+	const char *sname;
+	int success = fake_dladdr((void*) p_cursor->frame_ip, NULL, NULL, &sname, NULL);
+	if (!success) return 1;
+	else 
+	{
+		strncpy(buf, sname, n);
+		return 0;
 	}
 }

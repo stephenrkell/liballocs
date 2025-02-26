@@ -329,20 +329,24 @@ __liballocs_walk_environ_cb(struct big_allocation *maybe_the_allocation,
 extern struct big_allocation *__liballocs_get_bigalloc_containing(const void *obj);
 
 struct allocsite_entry;
+__attribute__((visibility("protected")))
 struct allocsite_entry *__liballocs_find_allocsite_entry_at(
 	const void *allocsite)
 {
 	return NULL;
 }
 
+__attribute__((visibility("protected")))
 unsigned short __liballocs_allocsite_id(const void *allocsite)
 { return 0; }
 
+__attribute__((visibility("protected")))
 struct allocsite_entry *__liballocs_allocsite_entry_by_id(unsigned short id,
 	unsigned long *out_file_base_addr)
 {
 	return NULL;
 }
+__attribute__((visibility("protected")))
 const void *__liballocs_allocsite_by_id(unsigned short id)
 {
 	return NULL;

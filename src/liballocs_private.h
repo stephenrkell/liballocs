@@ -67,6 +67,7 @@ typedef bool _Bool;
 extern char execfile_name[4096];
 extern const char *meta_base;
 extern unsigned meta_base_len;
+const char *ensure_meta_base(void) __attribute__((visibility("hidden")));
 
 char *realpath_quick(const char *arg);
 const char *format_symbolic_address(const void *addr);
@@ -185,6 +186,8 @@ extern unsigned long __liballocs_aborted_unindexed_heap;
 extern unsigned long __liballocs_aborted_unindexed_alloca;
 extern unsigned long __liballocs_aborted_unrecognised_allocsite;
 
+void print_exit_summary(void) __attribute__((visibility("hidden")));
+
 /* We're allowed to malloc, thanks to __private_malloc(), but we 
  * we shouldn't call strdup because libc will do the malloc. */
 char *__liballocs_private_strdup(const char *s);
@@ -199,6 +202,9 @@ void __liballocs_post_systrap_init(void);
  * the metadata for one object. */
 int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *meta_object_handle) __attribute__((weak));
 int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *out_meta_handle);
+
+const char *meta_libfile_name(const char *objname) __attribute__((visibility("hidden")));
+int find_and_open_meta_libfile(const char *objname) __attribute__((visibility("hidden")));
 
 void __notify_copy(void *dest, const void *src, unsigned long n);
 void __notify_free(void *dest);
@@ -221,7 +227,13 @@ static struct uniqtype *get_type(void *obj) \
 #define MAX(a, b) ((a)>(b)?(a):(b))
 #endif
 
+extern void *__liballocs_rt_uniqtypes_obj;
+extern ElfW(Sym) *__liballocs_rt_uniqtypes_dynsym;
+extern ElfW(Word) *__liballocs_rt_uniqtypes_gnu_hash;
+extern unsigned char *__liballocs_rt_uniqtypes_dynstr;
+
 void update_rt_uniqtypes_obj(void *handle, void *old_base);
+void init_rt_uniqtypes_obj(void);
 
 extern struct uniqtype *pointer_to___uniqtype__void;
 extern struct uniqtype *pointer_to___uniqtype__signed_char;

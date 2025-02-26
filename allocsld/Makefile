@@ -9,7 +9,9 @@ include ../config.mk
 vpath %.c $(DONALD)/src
 vpath %.S $(DONALD)/src
 
-CFLAGS += -std=gnu99 -g -fPIC -save-temps
+vpath %.c ../src
+
+CFLAGS += -std=gnu99 -g -fPIC
 CFLAGS += -fno-stack-protector
 CFLAGS += -I$(DONALD)/src # for donald.h, for non-vpath'd .c files
 CFLAGS += -I$(LIBRUNT)/include
@@ -21,7 +23,14 @@ CFLAGS += $(LIBALLOCSTOOL_CFLAGS)  # for allocmeta-defs.h
 CFLAGS += -DDONALD_NAME=\"allocsld\"
 CFLAGS += -DCHAIN_LOADER
 
-CFLAGS += -save-temps # TEMP for debugging alloc stub generation etc
+# for debugging build problems
+# CFLAGS += -save-temps
+# for debugging link problems
+LDFLAGS += -fno-lto -Wl,-Map=$@.map
+
+# HACK: we use a thread-local buffer in some places, but that doesn't work
+# in donald which lacks a TLS implementation
+meta-dso.o: CFLAGS += -DNO_TLS
 
 # Thanks to Dan Williams for the recipes that my link commands were based on.
 # http://www.cs.virginia.edu/~dww4s/articles/ld_linux.html
@@ -29,7 +38,7 @@ CFLAGS += -save-temps # TEMP for debugging alloc stub generation etc
 LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/lib/libc.a
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-OBJS := start.o premain.o main.o entry.o load.o chain.o debug.o allocinstr.o
+OBJS := start.o premain.o main.o entry.o load.o chain.o debug.o allocinstr.o meta-dso.o err.o
 C_DEPS := $(filter-out start.o,$(patsubst %.o,.%.d,$(OBJS)))
 DEPS := $(C_DEPS)
 

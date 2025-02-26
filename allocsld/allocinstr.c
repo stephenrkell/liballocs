@@ -9,6 +9,9 @@
 #include <sys/mman.h>
 #include <err.h>
 #include <assert.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <link.h>
 #include "relf.h"
 #define CURRENT_ALLOC_VARS_QUALIFIERS static /* we run before TLS is working! see comment below*/
@@ -208,19 +211,14 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 	/* Now see if we can get the extrasyms. PROBLEM: we want to
 	 * call dlopen, but we don't yet have a functioning dlopen.
 	 * Instead we map the meta.so ourselves, using routines from
-	 * donald. */
-	const char *meta_base = getenv("META_BASE") ?: "/usr/lib/meta";
-	char meta_buf[PATH_MAX];
-	char real_buf[PATH_MAX];
-	char *real_ret = realpath(SYSTEM_LDSO_PATH, real_buf);
-	real_buf[sizeof real_buf - 1] = '\0';
-	if (!real_ret) abort();
-	int ret = snprintf(meta_buf, sizeof meta_buf, "%s/%s-meta.so", meta_base, real_buf);
-	if (ret <= 0) abort();
-	meta_buf[sizeof meta_buf - 1] = '\0';
-	struct loadee_info ld_so_meta = load_file(meta_buf,
+	 * donald. We also use one liballocs routine. */
+	int find_and_open_meta_libfile(const char *objname);
+	const char *meta_libfile_name(const char *objname);
+	int fd_meta = find_and_open_meta_libfile(SYSTEM_LDSO_PATH);
+	if (fd_meta == -1) goto out_notloaded;
+	struct loadee_info ld_so_meta = load_from_fd(fd_meta, meta_libfile_name(SYSTEM_LDSO_PATH),
 		/* loadee_base_addr_hint */ NULL, NULL, NULL);
-	if (!ld_so_meta.dynamic_vaddr) abort(); // harsh but go with it for now
+	if (!ld_so_meta.dynamic_vaddr) goto out_notloaded; // harsh but go with it for now
 	ElfW(Dyn) *meta_dyn = (ElfW(Dyn) *) (ld_so_meta.dynamic_vaddr + ld_so_meta.base_addr);
 	// also look for  'extrasyms' and walk those
 	ElfW(Sym) *extrasyms_sym = symbol_lookup_in_dyn(meta_dyn,
@@ -237,7 +235,8 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 
 	// FIXME: we should really close/unload the meta file we just loaded
 	// munmap(ld_so_meta.
-			
+
+out_notloaded:
 	return 1;
 }
 

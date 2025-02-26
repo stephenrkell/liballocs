@@ -33,8 +33,14 @@ extern int __currently_freeing;
 extern int __currently_allocating;
 #endif
 
-/* HACK while we can't create protected symbols in linker scripts
- * (__liballocs_private_malloc = __private_malloc and so on ). */
+/* HACK while we can't create protected symbols in linker scripts.
+ * What we want to do is create protected symbols
+ *  __liballocs_private_malloc = __private_malloc
+ * and so on, i.e. aliases for the hidden symbols in liballocs. The
+ * protected aliases will be callable from outside liballocs, and we
+ * sometimes do want to use this header in code that lives in out-of-
+ * liballocs DSOs, e.g. when we link the indexing code directly into a
+ * malloc-defining exe. */
 #ifdef IN_LIBALLOCS_DSO
 //void *__private_malloc(size_t);
 #define __liballocs_private_malloc __private_malloc
@@ -48,6 +54,13 @@ extern int __currently_allocating;
 #define __liballocs_free_arena_bitmap_and_info __free_arena_bitmap_and_info
 #define __liballocs_extract_and_output_alloc_site_and_type extract_and_output_alloc_site_and_type
 #endif
+
+static inline
+liballocs_err_t extract_and_output_alloc_site_and_type(
+    struct insert *p_ins,
+    struct uniqtype **out_type,
+    void **out_site
+); // tedious function defined later
 
 /* Generic heap indexing implementation.
  * This can index any malloc-like heap, and do so pretty quickly.
@@ -680,6 +693,120 @@ liballocs_err_t __generic_malloc_set_type(struct allocator *a,
 	if (!ins) return &__liballocs_err_unindexed_heap_object;
 	ins->alloc_site = (uintptr_t) new_type;
 	ins->alloc_site_flag = 1; // meaning it's a type, not a site
+	return NULL;
+}
+
+static inline
+liballocs_err_t extract_and_output_alloc_site_and_type(
+    struct insert *p_ins,
+    struct uniqtype **out_type,
+    void **out_site
+)
+{
+	if (!p_ins)
+	{
+		++__liballocs_aborted_unindexed_heap;
+		return &__liballocs_err_unindexed_heap_object;
+	}
+	void *alloc_site_addr = (void *) ((uintptr_t) p_ins->alloc_site);
+
+	/* Now we have a uniqtype or an allocsite. For long-lived objects 
+	 * the uniqtype will have been installed in the heap header already.
+	 * This is the expected case.
+	 */
+	struct uniqtype *alloc_uniqtype;
+	if (__builtin_expect(p_ins->alloc_site_flag, 1))
+	{
+		if (out_site)
+		{
+			//unsigned short id = (unsigned short) p_ins->un.bits;
+			//if (id != (unsigned short) -1)
+			//{
+			//	const void *allocsite = __liballocs_allocsite_by_id(id);
+			//	*out_site = (void*) allocsite;
+			//}
+			//else 
+			*out_site = NULL;
+		}
+		/* Clear the low-order bit, which is available as an extra flag 
+		 * bit. libcrunch uses this to track whether an object is "loose"
+		 * or not. Loose objects have approximate type info that might be 
+		 * "refined" later, typically e.g. from __PTR_void to __PTR_T.
+		 * FIXME: this should just be determined by abstractness of the type. */
+		alloc_uniqtype = (struct uniqtype *)((uintptr_t)(p_ins->alloc_site) & ~0x1ul);
+	}
+	else
+	{
+		/* Look up the allocsite's uniqtype, and install it in the heap info 
+		 * (on NDEBUG builds only, because it reduces debuggability a bit). */
+		uintptr_t alloc_site_addr = p_ins->alloc_site;
+		void *alloc_site = (void*) alloc_site_addr;
+		if (out_site) *out_site = alloc_site;
+		struct allocsite_entry *entry = __liballocs_find_allocsite_entry_at(alloc_site);
+		alloc_uniqtype = entry ? entry->uniqtype : NULL;
+		/* Remember the unrecog'd alloc sites we see. */
+		if (!alloc_uniqtype && alloc_site && 
+				!__liballocs_addrlist_contains(&__liballocs_unrecognised_heap_alloc_sites, alloc_site))
+		{
+			__liballocs_addrlist_add(&__liballocs_unrecognised_heap_alloc_sites, alloc_site);
+		}
+#ifdef NDEBUG
+		// install it for future lookups
+		// FIXME: make this atomic using a union
+		// Is this in a loose state? NO. We always make it strict.
+		// The client might override us by noticing that we return
+		// it a dynamically-sized alloc with a uniqtype.
+		// This means we're the first query to rewrite the alloc site,
+		// and is the client's queue to go poking in the insert.
+		p_ins->alloc_site_flag = 1;
+		p_ins->alloc_site = (uintptr_t) alloc_uniqtype /* | 0x0ul */;
+		/* How do we get the id? Doing a binary search on the by-id spine is
+		 * okay because there will be very few of them. We don't want to do
+		 * a binary search on the table proper. But that's okay. We get
+		 * everything we need. */
+		allocsite_id_t allocsite_id = __liballocs_allocsite_id((const void *) alloc_site_addr);
+		if (allocsite_id != (allocsite_id_t) -1)
+		{
+			// what to do with the id?? We have no spare bits...
+			// we could scrounge a few but certainly not 16 of them.
+			// When we're using a bitmap, we will have the space.
+		}
+		
+#endif
+	}
+
+	// if we didn't get an alloc uniqtype, we abort
+	if (!alloc_uniqtype) 
+	{
+		//if (__builtin_expect(k == HEAP, 1))
+		//{
+			++__liballocs_aborted_unrecognised_allocsite;
+		//}
+		//else ++__liballocs_aborted_stack;
+			
+		/* We used to do this in clear_alloc_site_metadata in libcrunch... 
+		 * In cases where heap classification failed, we null out the allocsite 
+		 * to avoid repeated searching. We only do this for non-debug
+		 * builds because it makes debugging a bit harder.
+		 * NOTE that we don't want the insert to look like a deep-index
+		 * terminator, so we set the flag.
+		 */
+		if (p_ins)
+		{
+	#ifdef NDEBUG
+			p_ins->alloc_site_flag = 1;
+			p_ins->alloc_site = 0;
+	#endif
+			assert(INSERT_DESCRIBES_OBJECT(p_ins));
+			assert(!INSERT_IS_NULL(p_ins));
+		}
+			
+		return &__liballocs_err_unrecognised_alloc_site;;
+	}
+	// else output it
+	if (out_type) *out_type = alloc_uniqtype;
+	
+	/* return success */
 	return NULL;
 }
 
