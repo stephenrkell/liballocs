@@ -2,7 +2,7 @@ version: 2.0
 jobs:
   build:
     docker:
-      - image: ubuntu:22.04
+      - image: ubuntu:24.04
     steps:
       - run:
           name: Install dependencies
@@ -51,7 +51,7 @@ jobs:
     requires:
       - build
     docker:
-      - image: ubuntu:22.04
+      - image: ubuntu:24.04
     steps:
       - run:
           name: Install dependencies
