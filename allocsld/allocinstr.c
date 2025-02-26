@@ -316,6 +316,10 @@ void instrument_ld_so_allocators(uintptr_t ld_so_load_addr)
 		.recs = RELF_ROUND_UP_PTR_((char*) linear_malloc + sizeof (*linear_malloc),
 			_Alignof(struct linear_malloc_rec))  /* we map this */,
 		.nrecs = MAX_LINEAR_MALLOCS,
+		/* We take the address of these guys so that we can swap them out once
+		 * liballocs starts up, for ones that ensure the bigalloc is created.
+		 * Our versions are just the "early versions" for when that is not yet
+		 * possible. */
 		.p_orig_malloc = &orig_malloc,
 		.p_orig_calloc = &orig_calloc,
 		.p_orig_realloc = &orig_realloc,
@@ -517,8 +521,8 @@ _Bool instr_cb(ElfW(Sym) *sym, unsigned char *dynstr,
 	)
 	{
 		void *function_entry = sym_to_addr_given_base(load_addr, sym);
-		debug_printf(0, "ld.so defines a malloc-family function: %s at %p\n", name,
-			function_entry);
+		debug_printf(0, "ld.so defines a malloc-family function: %s at %p (%p+0x%lx)\n", name,
+			function_entry, (void*) load_addr, (unsigned long) sym->st_value);
 		size_t function_size = sym->st_size; // FIXME: wrong for IFUNCs?
 		void *protect_begin = RELF_ROUND_DOWN_PTR_(function_entry, page_size);
 		void *protect_end = RELF_ROUND_UP_PTR_(function_entry + NBYTES_TO_CLOBBER, page_size);
