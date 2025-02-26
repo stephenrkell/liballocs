@@ -134,6 +134,8 @@ checkrun-%:
 # disabled cases
 checkrun-plugin-hello:
 	true # disabled plugin-hello while expected to fail
+checkrun-ld-so-malloc:
+	true # disabled ld-so-malloc while DWARF 5-using ld.so is not introspectable
 
 # Some cases are special and require only to build OK
 checkrun-allocsld-as-cmd:
