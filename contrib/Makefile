@@ -49,6 +49,11 @@ CONFIG_MK += \nLIBSYSTRAP_DIR := $(CONTRIB)/libsystrap\n
 varlist += LIBSYSTRAP_DIR LIBRUNT_DIR
 subconfigs += libsystrap/contrib/config.mk
 
+clean::
+	$(MAKE) -C libsystrap/contrib clean
+	$(MAKE) -C libsystrap clean
+
+
 # ----------------------------liballocstool
 liballocstool/contrib/config.mk \
 $(CONTRIB)/liballocstool/contrib/env.sh \
@@ -76,7 +81,9 @@ build-liballocstool: liballocstool/config.status
 	$(MAKE) -C liballocstool
 
 clean::
+	$(MAKE) -C liballocstool/contrib clean
 	if test -f liballocstool/Makefile; then $(MAKE) -C liballocstool clean; fi
+	rm -f liballocstool/config.status
 
 LIBALLOCSTOOL_DIR := $(CONTRIB)/liballocstool
 CONFIG_MK += \nLIBALLOCSTOOL_CXXFLAGS := -I$(LIBALLOCSTOOL_DIR)/include
@@ -91,6 +98,9 @@ build-libdlbind:
 
 CONFIG_MK += \nLIBDLBIND ?= $(CONTRIB)/libdlbind\n
 varlist += LIBDLBIND
+
+clean::
+	if test -f libdlbind/src/*.o; then $(MAKE) -C libdlbind clean; fi
 
 # ----------------------------cil
 
@@ -108,6 +118,10 @@ CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/cil/lib\n
 varlist += CIL_INSTALL
 export CIL_INSTALL
 
+clean::
+	$(MAKE) -C cil clean
+	rm -f cil.stamp
+
 # ----------------------------toolsub
 
 .PHONY: build-toolsub
@@ -116,6 +130,9 @@ build-toolsub: build-cil
 	$(MAKE) -C toolsub/wrapper/example/constructor-priority-checker dumpconstr
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB
+
+clean::
+	$(MAKE) -C toolsub/wrapper clean
 
 # ----------------------------elftin
 
@@ -133,15 +150,26 @@ build-elftin:
 CONFIG_MK += \nELFTIN ?= $(CONTRIB)/elftin\n
 varlist += ELFTIN
 
+clean::
+	cd elftin/normrelocs && rm -f normrelocs *.o
+	cd elftin/abs2und && rm -f abs2und *.o
+	cd elftin/dynappend && rm -f dynappend *.o
+	cd elftin/base-ldplugin && rm -f *.so *.o *.a
+	cd elftin/xwrap-ldplugin && rm -f *.so *.o
+
 # ----------------------------malloc-hooks
 
 CONFIG_MK += \nLIBMALLOCHOOKS := $(CONTRIB)/libmallochooks\n
 varlist += LIBMALLOCHOOKS
 
+# no build or clean targets -- we just pull in source files
+
 # ----------------------------donald
 
 CONFIG_MK += \nDONALD := $(CONTRIB)/donald\n
 varlist += DONALD
+
+# no build or clean targets -- we just pull in source files
 
 # ----------------------------config.mk
 # If the user nukes a sub-config.mk that our config.mk depends on,
