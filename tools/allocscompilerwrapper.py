@@ -1,6 +1,4 @@
 import os, sys, re, subprocess, tempfile, copy
-import distutils
-import distutils.spawn
 from compilerwrapper import *
 
 # we have an extra phase
@@ -98,7 +96,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def getRunPath(self):
         return self.getLinkPath()
 
-    # please override me
+    # please override me... e.g. allocscc overrides this to cilly
     def getBasicCompilerCommand(self):
         return ["cc"]
     
@@ -106,7 +104,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
     # to compile generate code. To avoid infinite regress or unwanted
     # recursive application of whatever compiler-wrapping cleverness
     # we're doing, we need to get one that *is not us*. 
-    def getBasicCCompilerCommand(self):
+    def getPlainCCompilerCommand(self):
         ourPath = os.path.realpath(sys.argv[0])
         whichOutput = subprocess.Popen(["which", "-a", "cc"], stdout=subprocess.PIPE, stderr=sys.stderr).communicate()[0].decode()
         for cmd in [l for l in whichOutput.split("\n") if l != '']:
@@ -191,7 +189,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
             ret2 = 42
             with self.makeErrFile(errfilename, "w+") as errfile:
-                cmd = ["make", "CC=" + " ".join(self.getBasicCCompilerCommand()), \
+                cmd = ["make", "CC=" + " ".join(self.getPlainCCompilerCommand()), \
                     "-C", self.getLibAllocsBaseDir() + "/tools", \
                     "-f", "Makefile.meta"] +  targetNames
                 errfile.write("Running: " + " ".join(cmd) + "\n")
@@ -468,7 +466,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 extraFlags += ["-fPIC"]
                 # WHERE do we get relf.h, in the librunt era?
                 # Bit of a hack: in the contrib. FIXME FIXME.
-                stubs_pp_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-E", "-Wp,-dD", "-Wp,-P"] \
+                stubs_pp_cmd = self.getPlainCCompilerCommand() + ["-std=c11", "-E", "-Wp,-dD", "-Wp,-P"] \
                     + extraFlags + ["-o", stubs_pp, \
                     "-I" + self.getLibAllocsBaseDir() + "/tools", \
                     "-I" + self.getLibAllocsBaseDir() + "/include", \
@@ -500,7 +498,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 #    self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
                 #        % (stubs_pp, ret_stubs_sed))
                 #    exit(1)
-                stubs_cc_cmd = self.getBasicCCompilerCommand() + ["-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
+                stubs_cc_cmd = self.getPlainCCompilerCommand() + ["-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
                     "-I" + self.getLibAllocsBaseDir() + "/tools", \
                     stubs_pp]
                 self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
