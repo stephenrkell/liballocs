@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #if 0
-#include "relf.h" /* for fake_dlsym, used by callee wrappers, but they are also ifdef'd out just now */
+#include "relf.h" /* for fake_dlsym, used by callee wrappers (below), but they are also ifdef'd out just now */
 #endif
 
 #ifndef CURRENT_ALLOC_VARS_QUALIFIERS
@@ -327,8 +327,8 @@ void __unindex_small_alloc(void *ptr, int level);
 	void __wrap___real_ ## sym( make_argdecls(argtup) ) \
 	{ \
 		assert(corresponding_alloc_name ## _alloclevel); \
-		/* HACK: assume void */ __real_ ## sym( make_argnames(argtup) ); \
 		__unindex_small_alloc(cap_arg(argtup), corresponding_alloc_name ## _alloclevel); \
+		/* HACK: assume void */ __real_ ## sym( make_argnames(argtup) ); \
 	}
 
 /* We also have some macros for generating callee wrappers. These are what 
