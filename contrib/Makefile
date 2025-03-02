@@ -43,11 +43,21 @@ endif
 # up-front in order to include it. Instead we need to use a build stamp or... maybe
 # depending on the env.sh is enough? Not sure I understand the interaction of these
 # rules with the subconfigs rules yet.
-build-libsystrap: libsystrap/contrib/config.mk
+#
+# Redux of what's going wrong:
+# from a 'clean' start,
+# 'make' dies with missing musl stuff
+# BUT
+# 'make build-libsystrap' correctly builds it
+# 'make libsystrap/contrib/env.sh' correctly builds it.
+build-libsystrap: libsystrap/contrib/build.stamp
 	$(MAKE) -C libsystrap src lib
 
-libsystrap/contrib/config.mk $(CONTRIB)/libsystrap/contrib/env.sh:
-	$(MAKE) -C libsystrap/contrib default config.mk
+# XXX: used to have an env.sh rule here to, but no better than the generic rule?
+libsystrap/contrib/config.mk:
+	$(MAKE) -C libsystrap/contrib config.mk
+libsystrap/contrib/build.stamp: libsystrap/contrib/config.mk libsystrap/contrib/env.sh
+	$(MAKE) -C libsystrap/contrib build.stamp
 
 CONFIG_MK += \nLIBRUNT_DIR := $(CONTRIB)/libsystrap/contrib/librunt\n
 CONFIG_MK += \nLIBSYSTRAP_DIR := $(CONTRIB)/libsystrap\n
@@ -60,11 +70,17 @@ clean::
 
 
 # ----------------------------liballocstool
-liballocstool/contrib/config.mk \
-$(CONTRIB)/liballocstool/contrib/env.sh \
-$(CONTRIB)/liballocstool/contrib/config.mk:
-	$(MAKE) -C liballocstool/contrib config.mk env.sh
-
+$(CONTRIB)/liballocstool/contrib/config.mk \
+liballocstool/contrib/config.mk:
+	$(MAKE) -C liballocstool/contrib config.mk
+# FIXME: need the 'build.stamp' treatment here too? to ensure that the contrib/ stuff is built.
+# TODO:
+# change env.sh to config.sh
+# always enable building the contrib configs without actually doing the contrib build
+# use build.stamp for actually depending on the contrib configs, like with libsystrap
+# REMEMBER we are just trying to define the structure for a build-* recipe:
+# first build its contrib, then build the thing proper.
+# Why does a phony target not work?
 liballocstool/config.status: liballocstool/configure
 
 liballocstool/configure: liballocstool/configure.ac
@@ -82,7 +98,7 @@ build-liballocstool: liballocstool/config.status
 
 clean::
 	$(MAKE) -C liballocstool/contrib clean
-	if test -f liballocstool/Makefile; then $(MAKE) -C liballocstool clean; fi
+	if test -f liballocstool/Makefile; then $(MAKE) -C liballocstool clean || true; fi # fails if not configured yet
 	rm -f liballocstool/config.status
 
 LIBALLOCSTOOL_DIR := $(CONTRIB)/liballocstool
@@ -180,6 +196,8 @@ config.mk: $(subconfigs)
 	printf "$(foreach cfg,$(subconfigs),\ninclude $(CONTRIB)/$(cfg))"; \
 	printf '$(CONFIG_MK)'; echo) > "$@" || (rm -f "$@"; false)
 # env.sh exports some vars
+# We put $(CONTRIB)/env.sh and env.sh in the same target because $(CONTRIB) is always realpath'd
+# and so when the generic env.sh rule tries to build a fully-qualified env.sh, it matches.
 env.sh $(CONTRIB)/env.sh: $(foreach cfg,$(subconfigs),$(dir $(CONTRIB)/$(cfg))env.sh)
 	(printf "$(foreach cfg,$(subconfigs),\n. $$(dirname $(CONTRIB)/$(cfg))/env.sh)"; \
 	printf '$(foreach var,$(varlist),\nexport $(var)="$($(var))")'; echo )>"$@" || (rm -f "$@"; false)
