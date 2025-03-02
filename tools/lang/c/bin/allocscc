@@ -86,7 +86,8 @@ class AllocsCC(AllocsCompilerWrapper):
         # Should fix this.
         #"--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpmemacc/dumpmemacc.cmxs"), \
         #   "--dodumpmemacc", \
-        return [
+        maybeGccArg = ["--gcc=%s" % os.environ["ALLOCSCC_CC"]] if "ALLOCSCC_CC" in os.environ else []
+        return maybeGccArg + [
             "--save-temps",
             "--decil",
             "--native",
