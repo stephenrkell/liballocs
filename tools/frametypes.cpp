@@ -438,26 +438,29 @@ int main(int argc, char **argv)
 			
 			// for each of this variable's intervals, add it to the map
 			int interval_index = 0;
+			Dwarf_Addr base_addr = 0;
 			for (auto i_locexpr = var_loclist.begin(); 
-				i_locexpr != var_loclist.end(); ++i_locexpr)
+				i_locexpr != var_loclist.end(); ++i_locexpr, ++interval_index)
 			{
-				iterfirst_pair_hash< with_dynamic_location_die, encap::loc_expr >::set /*,
-					compare_first_iter_offset<encap::loc_expr> */ singleton_set;
-				/* PROBLEM: we need to remember not only that each i_dyn is valid 
-				 * in a given range, but with what loc_expr. So we pair the i_dyn with
-				 * the relevant loc_expr. */
-				singleton_set.insert(make_pair(i_dyn, *i_locexpr));
-				
 				// FIXME: disgusting hack
 				if (i_locexpr->lopc == 0xffffffffffffffffULL
 				|| i_locexpr->lopc == 0xffffffffUL)
 				{
-					// we got a base address selection entry -- not handled yet
-					assert(false);
+					// we got a base address selection entry
+					/*
+						A base address selection entry consists of:
+
+						1. The value of the largest representable address offset (for example,
+						   0xffffffff when the size of an address is 32 bits).
+
+						2. An address, which defines the appropriate base address for use in
+						   interpreting the beginning and ending address offsets of subsequent
+						   entries of the location list.
+					 */
+					base_addr = i_locexpr->hipc;
 				}
-				
 				if (i_locexpr->lopc == i_locexpr->hipc && i_locexpr->hipc != 0) continue; // skip empties
-				if (i_locexpr->hipc <  i_locexpr->lopc)
+				if (i_locexpr->hipc < i_locexpr->lopc)
 				{
 					cerr << "Warning: lopc (0x" << std::hex << i_locexpr->lopc << std::dec
 						<< ") > hipc (0x" << std::hex << i_locexpr->hipc << std::dec << ")"
@@ -478,7 +481,17 @@ int main(int argc, char **argv)
 					continue;
 				}
 				Dwarf_Unsigned cu_base = opt_cu_base->addr;
-				
+
+				iterfirst_pair_hash< with_dynamic_location_die, encap::loc_expr >::set /*,
+					compare_first_iter_offset<encap::loc_expr> */ singleton_set;
+				/* PROBLEM: we need to remember not only that each i_dyn is valid
+				 * in a given range, but with what loc_expr. So we pair the i_dyn with
+				 * the relevant loc_expr. */
+				auto loc = *i_locexpr;
+				loc.lopc += base_addr;
+				loc.hipc += base_addr;
+				singleton_set.insert(make_pair(i_dyn, loc));
+
 				// handle "for all vaddrs" entries
 				boost::icl::discrete_interval<Dwarf_Off> our_interval;
 				auto print_sp_expr = [&our_interval, &root]() {
@@ -563,7 +576,7 @@ int main(int argc, char **argv)
 					/* We *do* have to adjust these by cu_base, because 
 					 * we're getting them straight from the location expression. */
 					our_interval = boost::icl::interval<Dwarf_Off>::right_open(
-						i_locexpr->lopc + cu_base, i_locexpr->hipc + cu_base
+						loc.lopc + cu_base, loc.hipc + cu_base
 					); 
 					
 					// cerr << "Considering location of " << i_dyn << endl;
