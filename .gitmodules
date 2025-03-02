@@ -1,9 +1,6 @@
 [submodule "contrib/libmallochooks"]
 	path = contrib/libmallochooks
 	url = https://github.com/stephenrkell/libmallochooks
-[submodule "tools/lang/c/cil"]
-	path = tools/lang/c/cil
-	url = https://github.com/stephenrkell/cil.git
 [submodule "contrib/libdlbind"]
 	path = contrib/libdlbind
 	url = https://github.com/stephenrkell/libdlbind.git
