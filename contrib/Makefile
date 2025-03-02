@@ -38,6 +38,11 @@ endif
 # ----------------------------libsystrap
 
 .PHONY: build-libsystrap
+# HMM. I *think( depending on a config.mk is not enough to depend on the
+# completion of a contrib/ build, because we generate the config.mk recursively
+# up-front in order to include it. Instead we need to use a build stamp or... maybe
+# depending on the env.sh is enough? Not sure I understand the interaction of these
+# rules with the subconfigs rules yet.
 build-libsystrap: libsystrap/contrib/config.mk
 	$(MAKE) -C libsystrap src lib
 
@@ -65,11 +70,6 @@ liballocstool/config.status: liballocstool/configure
 liballocstool/configure: liballocstool/configure.ac
 	cd liballocstool && ./autogen.sh
 
-# HACK: this mess is because dwarfidl is not in contrib/ of liballocstool.
-# (And also because the config script does not take a --with-foo= for
-# these other libs.) Was there a reason not to put dwarfidl under liballocstool?
-# sysfoot uses liballocstool and also syscall-interfaces, so we'd want to
-# share their dwarfidl. I think this is doable though.
 liballocstool/config.status: liballocstool/configure $(CONTRIB)/liballocstool/contrib/env.sh
 	cd liballocstool && \
         $(MAKE) -C contrib && \
@@ -112,7 +112,7 @@ build-cil: cil.stamp
 cil.stamp: cil/Makefile $(shell find cil -name '*.c' -o -name '*.ml' -o -name '*.mli' -o -name '*.in' -o -name '*.mly' )
 	$(MAKE) -C cil all install-local && touch $@
 cil/Makefile: cil/configure
-	cd cil && ./configure INSTALL="`which install` -p"
+	cd cil && ./configure INSTALL="`which install` -p" ${ALLOCSCC_CC:+CC="${ALLOCSCC_CC}"}
 
 CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/cil/lib\n
 varlist += CIL_INSTALL
