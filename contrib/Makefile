@@ -53,10 +53,10 @@ endif
 build-libsystrap: libsystrap/contrib/build.stamp
 	$(MAKE) -C libsystrap src lib
 
-# XXX: used to have an env.sh rule here to, but no better than the generic rule?
 libsystrap/contrib/config.mk:
 	$(MAKE) -C libsystrap/contrib config.mk
-libsystrap/contrib/build.stamp: libsystrap/contrib/config.mk libsystrap/contrib/env.sh
+# XXX: used to have an env.sh rule here to, but no better than the generic rule? if we use the fq path
+libsystrap/contrib/build.stamp: libsystrap/contrib/config.mk $(CONTRIB)/libsystrap/contrib/env.sh
 	$(MAKE) -C libsystrap/contrib build.stamp
 
 CONFIG_MK += \nLIBRUNT_DIR := $(CONTRIB)/libsystrap/contrib/librunt\n
