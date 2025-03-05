@@ -107,7 +107,7 @@ class AllocsCC(AllocsCompilerWrapper):
 
     def getBasicCompilerCommand(self):
         return [cilly_cmd] + \
-           ["--gcc=%s" % os.environ["ALLOCSCC_CC"]] if "ALLOCSCC_CC" in os.environ else []
+           (["--gcc=%s" % os.environ["ALLOCSCC_CC"]] if "ALLOCSCC_CC" in os.environ else [])
 
         
     def getExtraLinkArgs(self):
