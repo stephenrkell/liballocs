@@ -286,8 +286,15 @@ class CompilerWrapper:
                 skipNext = True
             elif args[num].startswith('-l'):
                 self.argItem({Phase.LINK}, num)
+            elif args[num] == '-I':
+                self.argOption({Phase.PREPROCESS}, num, "-I%s" % args[num+1], None)
+                skipNext = True
             elif args[num].startswith('-I'):
                 self.argOption({Phase.PREPROCESS}, num, args[num], None)
+            elif args[num] == '-L':
+                self.argItem({Phase.LINK}, num)
+                self.argItem({Phase.LINK}, num+1)
+                skipNext = True
             elif args[num].startswith('-L'):
                 self.argItem({Phase.LINK}, num)
             elif args[num] in {'-flto', "-fno-lto"}:
