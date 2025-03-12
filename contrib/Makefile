@@ -128,7 +128,7 @@ build-cil: cil.stamp
 cil.stamp: cil/Makefile $(shell find cil -name '*.c' -o -name '*.ml' -o -name '*.mli' -o -name '*.in' -o -name '*.mly' )
 	$(MAKE) -C cil all install-local && touch $@
 cil/Makefile: cil/configure
-	cd cil && CC=${ALLOCSCC_CC:-${CC:-cc}} ./configure INSTALL="`which install` -p"
+	cd cil && CC=$${ALLOCSCC_CC:-$${CC:-cc}} ./configure INSTALL="`which install` -p"
 
 CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/cil/lib\n
 varlist += CIL_INSTALL
