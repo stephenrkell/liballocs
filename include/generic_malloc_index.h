@@ -14,7 +14,7 @@
 #include "liballocs_ext.h"
 #include "pageindex.h"
 #include "malloc-meta.h"
-#include "bitmap.h"
+#include "bitmap.h"         /* from librunt */
 
 /* A thread-local variable to override the "caller" arguments. 
  * Platforms without TLS have to do without this feature. */
@@ -76,26 +76,27 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
  * mprobe() (or whatever non-standard per-chunk functions are provided).
  *
  * We have to be careful about sizes:
- *    ____________________....________.._______..
- *   |____________________....______|_.._|_____..|
- *   |<----------------------------------------->|  malloc-usable
- *   |<------------------------------------>|    :  caller-usable (this is not a mistake -- see below)
- *   |<---------------------------->|    :  :    :  requested by caller
- *                                  |<--->| :    :  padding to _Alignof (struct insert)  (maybe empty)
- *                                  :    :|<-->| :  size of insert
- *   |<--------------------------------------->| :  how much we actually request from malloc
- *                                  :    :  :  |z|  possible padding added by malloc     (maybe empty)
- *                                  :    :  |<-->|  **the actual insert** is always at base + malloc_usable - sizeof insert
+ *    ____________________...._________________   the entire issued chunk from the malloc's p.o.v.
+ *   |____________________...._________________|
+ *   |<--------------------------------------->|  malloc-usable
+ *   |<---------------------------->|     :    :  requested by caller
+ *                                  |<->| :    :  padding to _Alignof (struct insert)  (maybe empty)
+ *                                  :   |<-->| :  size of insert (but the insert may not be placed in the range shown -- see below)
+ *   |<------------------------------------->| :  how much we actually request from malloc
+ *                                  :     :  |z|  possible padding added by malloc     (maybe empty)
+ *   |<---------------------------------->|    :  caller-usable (our wrapped malloc_usable_size returns *this*, not the true malloc-usable)
+ *                                  :     |<-->|  **the actual insert** is always at base + malloc_usable - sizeof insert
  *
- *   FIXME: this means inserts may be misaligned.
+ *   FIXME: this means inserts may be misaligned, if the malloc-usable size is not "_Alignof (struct insert)"-aligned.
  *   In practice this seems not to happen, because
  *   malloc pads to a #words and inserts are word-sized.
- *   We can easily fix this by rounding down to _Alignof (struct insert).
+ *   We can easily fix this by rounding down to _Alignof (struct insert)
+ *   and adjusting our caller-usable calculation accordingly.
  *   (A perverse malloc might pad even more, s.t. this rounding-down
  *   doesn't hit the boundary we rounded up to, but a later one. That's fine.)
  *
  * - 'requested size' means the size requested by the caller
- * - 'malloc usable size' means the size returned by malloc_usable_size() or
+ * - 'malloc usable size' means the size returned by the *real* malloc_usable_size() or
  *      any comparable size-getting function (we parameterise on this).
  *      This size includes our trailer space
  *      (and just unqualified 'usable size' by default also means this)
