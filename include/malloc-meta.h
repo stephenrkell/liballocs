@@ -107,10 +107,10 @@ static inline struct insert *insert_for_chunk(void *userptr, sizefn_t *sizefn)
  */
 typedef /*LIFETIME_INSERT_TYPE*/ unsigned char lifetime_insert_t;
 #define LIFETIME_POLICY_FLAG(id) (0x1 << (id))
-// By convention lifetime policy 0 is the manual deallocation policy
+/* By convention lifetime policy 0 is the manual deallocation policy */
 #define MANUAL_DEALLOCATION_POLICY 0
 #define MANUAL_DEALLOCATION_FLAG LIFETIME_POLICY_FLAG(MANUAL_DEALLOCATION_POLICY)
-// Manual deallocation is not an "attached" policy
+/* Manual deallocation is not an "attached" policy */
 #define HAS_LIFETIME_POLICIES_ATTACHED(lti) ((lti) & ~(MANUAL_DEALLOCATION_FLAG))
 
 #if 0
@@ -130,7 +130,7 @@ struct extended_insert
 	 * allocators using extended_insert and allocators only using insert.
 	 * See insert_for_chunk. */
 	struct insert base;
-} __attribute__((packed)); // Alignment from the end guaranteed by ourselves
+} __attribute__((packed)); /* Alignment from the end guaranteed by ourselves */
 struct uniqtype;
 static inline struct extended_insert *extended_insert_for_chunk(void *userptr, sizefn_t *sizefn)
 {
@@ -139,7 +139,7 @@ static inline struct extended_insert *extended_insert_for_chunk(void *userptr, s
 #endif
 static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr, sizefn_t *sizefn)
 {
-	return (void*)0; /* FIXME: restore this */ // &extended_insert_for_chunk(userptr, sizefn)->lifetime;
+	return (void*)0; /* FIXME: restore this */ /* &extended_insert_for_chunk(userptr, sizefn)->lifetime; */
 }
 #define INSERT_TYPE struct insert
 

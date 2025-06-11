@@ -18,12 +18,12 @@
 #endif
 #ifndef assert
 #define __liballocs_defined_assert
-//#ifdef DEBUG
+/* #ifdef DEBUG */
 #define assert(cond) \
 	if (!(cond)) abort()
-//#else
-//#define assert(cond)
-//#endif
+/* #else */
+/* #define assert(cond) */
+/* #endif */
 #endif
 
 /* Prototypes we omit. */
@@ -53,7 +53,7 @@ struct uniqtype; /* forward decl */
 # endif
 #endif
 
-// This must match the required alignment of an allocation after the insert is added
+/* This must match the required alignment of an allocation after the insert is added */
 #ifndef ALLOCA_ALIGN
 #define ALLOCA_ALIGN 16
 #endif
@@ -94,7 +94,7 @@ extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liba
 	unsigned long our_sp;
 	#ifdef UNW_TARGET_X86
 		__asm__ volatile ("movl %%esp, %0\n" :"=r"(our_sp));
-	#else // assume X86_64 for now
+	#else /* assume X86_64 for now */
 		__asm__ volatile ("movq %%rsp, %0\n" : "=r"(our_sp));
 	#endif
 	return (const void*) our_sp;
@@ -126,10 +126,13 @@ extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_
 #ifndef LIBALLOCS_NO_ZERO
 	__builtin_memset(userchunk, 0, chunk_size);
 #endif
-	// write the usable size into the word preceding the userchunk, then return the userchunk.
+	/* write the usable size into the word preceding the userchunk, then return the userchunk. */
 	*((unsigned long *)userchunk - 1) = chunk_size;
 	
-	/* We add only the "usable size" part, because that is what the heap index code
+	/* FIXME: this byte-counting approach works for GCC but not Clang.
+	 * But maybe it's overkill anyway?
+	 * Can we not say "unindex everything starting below <frame base> up to <stack limit>?"
+	 * We add only the "usable size" part, because that is what the heap index code
 	 * can see, and that is the code that will be consuming this value. */
 	*frame_counter += chunk_size;
 	
@@ -198,17 +201,17 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	for (unsigned char i = cache->head_mru; i != 0; i = cache->entries[i].next_mru)
 	{
 		assert(cache->validity & (1<<(i-1)));
-		// assert we haven't been here before
+		/* assert we haven't been here before */
 		assert(!(visited_mru & (1<<(i-1))));
 		visited_mru |= (1<<(i-1));
 	}
 	assert(visited_linear == visited_mru);
-	// go the other way too
+	/* go the other way too */
 	unsigned visited_lru = 0u;
 	for (unsigned char i = cache->tail_mru; i != 0; i = cache->entries[i].prev_mru)
 	{
 		assert(cache->validity & (1<<(i-1)));
-		// assert we haven't been here before
+		/* assert we haven't been here before */
 		assert(!(visited_lru & (1<<(i-1))));
 		visited_lru |= (1<<(i-1));
 	}
@@ -220,10 +223,10 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_unlink )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
 	__liballocs_check_cache_sanity(cache);
-	// unset validity and make this the next victim
+	/* unset validity and make this the next victim */
 	cache->validity &= ~(1u<<(i-1));
 	cache->next_victim = i;
-	// unhook us from the mru list
+	/* unhook us from the mru list */
 	unsigned char our_next = cache->entries[i].next_mru;
 	unsigned char our_prev = cache->entries[i].prev_mru;
 	if (our_prev) cache->entries[our_prev].next_mru = our_next;
@@ -257,7 +260,7 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_victim )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
 	__liballocs_check_cache_sanity(cache);
-	// make sure we're not the next victim
+	/* make sure we're not the next victim */
 	if (unlikely(cache->next_victim == i))
 	{
 		if (cache->size_plus_one > 1)
@@ -309,7 +312,7 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 							&& (!require_period || cache->entries[i].period == require_period)
 							&& diff % cache->entries[i].period == 0)))
 			{
-				// hit
+				/* hit */
 				__liballocs_cache_bump_mru(cache, i);
 				return &cache->entries[i];
 			}
@@ -347,7 +350,7 @@ __liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *ca
 							&& (!require_period || cache->entries[i].period == require_period)
 							&& diff % cache->entries[i].period == 0)))
 			{
-				// hit
+				/* hit */
 				__liballocs_cache_bump_mru(cache, i);
 				return &cache->entries[i];
 			}
@@ -383,7 +386,7 @@ extern inline void
 #ifdef LIBALLOCS_CACHE_REPLACE_FIFO
 	unsigned pos = c->next_victim;
 #else
-	// "one plus the index of the least significant 0-bit" of validity
+	/* "one plus the index of the least significant 0-bit" of validity */
 	unsigned pos = __builtin_ffs(~(c->validity));
 	assert(pos <= c->size_plus_one);
 	if (pos == c->size_plus_one)
@@ -392,7 +395,7 @@ extern inline void
 		assert(pos != 0);
 	}
 #endif
-	// unsigned pos = __liballocs_ool_cache.next_victim;
+	/* unsigned pos = __liballocs_ool_cache.next_victim; */
 	c->entries[pos] = (struct __liballocs_memrange_cache_entry_s) {
 		.obj_base = obj_base,
 		.obj_limit = obj_limit,
@@ -402,7 +405,7 @@ extern inline void
 		.prev_mru = c->entries[pos].prev_mru,
 		.next_mru = c->entries[pos].next_mru
 	};
-	// bump us to the top
+	/* bump us to the top */
 	__liballocs_cache_bump_mru(c, pos);
 	__liballocs_cache_bump_victim(c, pos);
 	assert((__liballocs_check_cache_sanity(c), 1));
