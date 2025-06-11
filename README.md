@@ -32,9 +32,10 @@ If you want to try it, here's how to run a simple demo in a container:
     $ LD_PRELOAD=/usr/local/src/liballocs/lib/liballocs_preload.so ./test
 
 You should see something like the following. This is just a simple demo
-of how liballocs knows what is in memory, having precise dynamic
-information and an awareness of allocators (there are four different
-allocators visible in this example).
+of how liballocs knows what is in memory, having precise dynamic type
+information and an awareness of allocators. There are four different
+allocators visible in this example. (If you're wondering why functions
+have size zero, this is correct; see [GitHub issue #82](https://github.com/stephenrkell/liballocs/issues/82).)
 
     At 0x55d223c01436 is a static-allocated object of size 0, type __FUN_FROM___ARG0_int$32__ARG1___PTR___PTR_signed_char$8__FUN_TO_int$32
     At 0x55d2259235c0 is a __default_lib_malloc-allocated object of size 176, type __ARR0_int$32
@@ -249,4 +250,4 @@ metadata for your C library binary. (This is slow because libdwarf calls
 If you've got this far, you may as well run the tests.
 
     $ cd liballocs/tests
-    $ make                        # please report failures
+    $ make -k                     # please report failures
