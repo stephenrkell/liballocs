@@ -113,6 +113,7 @@ mmap           -- all top-level (parentless) bigallocs are made by mmap
 auxv           -- a region of the initial stack, only
 stack          -- any thread's stack has a bigalloc
 stackframe     -- nested within a stack are one or more frames
+static-file    -- a loaded file (DSO)
 static-segment -- a memory mapping overlaid (nested) with program data
 static-section -- a region of a segment
 static-symbol  -- a region of a section (roughly!)

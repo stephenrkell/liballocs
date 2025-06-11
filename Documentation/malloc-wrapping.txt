@@ -1,3 +1,6 @@
+FIXME: this file is culled from various comments in the code but it should
+probably go away, as it is out-of-date. See malloc-indexing.txt instead.
+
 /* Callee wrappers are the __wrap___real_X ones,
  * responsible for indexing.
  * For these we link with both --defsym,X=__wrap___real_X and --wrap __real_X.

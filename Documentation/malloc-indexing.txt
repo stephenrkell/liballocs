@@ -1,4 +1,10 @@
-Currently the preload case looks like this
+Currently the preload case looks like this. In short, liballocs contains
+indexing code, built out of a few layers from libmallochooks, and it
+interposes on the caller by preloading. To handle wrappers, the ultimate
+call site is hooked by client-side instrumentation ("caller stubs"). As
+a fallback, although not shown here, if there is no caller stub then a
+wrapperless call to malloc will still get the correct call site, but a
+wrapper (mymalloc(), xmalloc(), whatever) will lead us astray.
 
       /-- client exe or .so--\/-------------------liballocs_preload.so--------------------------------\/----libc.so---
 
@@ -52,7 +58,7 @@ friends
 
 PROBLEM 1 with the new approach to the exe case: it used to be that the
 __wrap___real_* entry points got defsym'd to the unqualified symbol name,
-thereby taking over for dynamic linking purposes. NOw, with xwrap, it's
+thereby taking over for dynamic linking purposes. Now, with xwrap, it's
 the caller-side wrapper that gets the global symbol name. So we sometimes
 have an extra layer of caller-side hooking going on, if the caller is in
 another DSO that gets linked the more common way, with just caller-side stubs
