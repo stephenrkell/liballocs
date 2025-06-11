@@ -6,6 +6,10 @@ $(info Initially CFLAGS is $(CFLAGS) and CPPFLAGS is $(CPPFLAGS))
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 -include $(dir $(THIS_MAKEFILE))/../config.mk
 
+# tell allocscc which C compiler to use -- TEST / FIXME
+#export ALLOCSCC_CC := clang-13
+#export CC_IS_CLANG := 1
+
 CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types
 CFLAGS += -Wl,-q             # FIXME: I think this is no longer needed
 ifeq ($(TEST_OPT_LEVEL),)
@@ -97,39 +101,43 @@ default: checkall
 
 checkall: $(patsubst %,checkrun-%,$(cases))
 
+define set_out_err
+printf "%-20s\t" "$(1)" && out=$$(mktemp) && err=$$(mktemp) && printf '\texpected: %-10s\t' "$(2)"
+endef
+dollar := $$
+define fail_action_escaped
+{ echo "FAIL$$(dollar){status:+ (exit status $$(dollar){status})}; out $$(dollar)out, err $$(dollar)err"; \
+(if [ -e $$(dollar)err ]; then tail -n20 $$(dollar)err; fi); }
+endef
+define fail_action
+{ echo "FAIL$${status:+ ($${status})}"; \
+(tail -n20 $$err; false); }
+endef
+define success_action
+echo 'PASS'
+endef
 # Some cases are expected to fail
 checkrun-fail-%:
-	@echo "expected-fail case is fail-$*" && \
-	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
-	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
+	@$(call set_out_err,fail-$*,fail) && \
 	$(MAKE) cleanrun-fail-$* 1>$$out 2>$$err && \
 		sed -n '/liballocs summary/,/^========/ p' "$$err" | tr '\n' '\f' | \
-		grep ' 0.* 0.* 0.* 0\+.* [1-9][0-9]*.* 0\+$$' >/dev/null || \
-		(tail -n20 $$err; false)
-# special: this failing case aborts, for now
-checkrun-fail-alloca-clang:
-	@echo "expected-fail case is fail-alloca-clang" && \
-		out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
-		err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
-		! $(MAKE) cleanrun-fail-alloca-clang 1>$$out 2>$$err
+		grep ' 0.* 0.* 0.* 0\+.* [1-9][0-9]*.* 0\+$$' >/dev/null && \
+		$(success_action) || \
+		$(fail_action)
 
 # Some cases are expected to abort
 checkrun-abort-%:
-	@echo "expected-fail case is abort-$*" && \
-	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
-	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
-	if $(MAKE) cleanrun-abort-$* 1>$$out 2>$$err; then false; else true; fi
+	@$(call set_out_err,abort-$*,abort) && \
+	if $(MAKE) cleanrun-abort-$* 1>$$out 2>$$err; then $(fail_action); else $(success_action); fi
 
 # Most test cases should output a liballocs summary in which
 # -- zero queries aborted (the last four counts in the summary, followed by '===='...)
 checkrun-%:
-	@echo "case is $*" && \
-	out=$$( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
-	err=$$( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
+	@$(call set_out_err,$*,zero-aborts) && \
 	$(MAKE) cleanrun-$* 1>$$out 2>$$err && \
 		sed -n '/liballocs summary/,/^========/ p' "$$err" | tr '\n' '\f' | \
-		grep ' 0.* 0.* 0.* 0=\+$$' >/dev/null || \
-		(tail -n20 $$err; false)
+		grep ' 0.* 0.* 0.* 0=\+$$' >/dev/null && $(success_action) || \
+		$(fail_action)
 
 # disabled cases
 checkrun-plugin-hello:
@@ -139,18 +147,15 @@ checkrun-ld-so-malloc:
 
 # Some cases are special and require only to build OK
 checkrun-allocsld-as-cmd:
-	$(MAKE) cleanbuild-allocsld-as-cmd >/dev/null 2>&1
+	@/bin/echo -ne "$*\tbuild only" && \
+	$(MAKE) cleanbuild-allocsld-as-cmd >/dev/null 2>&1 && $(success_action) || $(fail_action)
 
 # Some cases are special and require only an exit status of zero
 # NOTE: this define is going to be eval'd, so we need two layers of escaping
-dollar := $$
 define exit-zero-case
 checkrun-$(1):
-	@echo "exit-zero case is $(1)" && \
-	out=$$(dollar)( echo -n "out is " 1>&2; mktemp | tee /dev/stderr ) && \
-	err=$$(dollar)( echo -n "err is " 1>&2; mktemp | tee /dev/stderr ) && \
-	$(MAKE) cleanrun-$(1) >$$(dollar)out 2>$$(dollar)err; status=$$(dollar)?; if ! [ $$(dollar)status -eq 0 ]; then echo "Status of checkrun-$(1) was $$(dollar)status"; fi; exit $$(dollar)status
-
+	@$$(call set_out_err,$(1),exit-zero) && \
+	$(MAKE) cleanrun-$(1) >$$(dollar)out 2>$$(dollar)err; status=$$(dollar)?; if ! [ $$(dollar)status -eq 0 ]; then $(fail_action_escaped); else $(success_action); fi; exit $$(dollar)status
 endef
 define exit-zero-case-names
 allocsld-as-ldso \
@@ -168,11 +173,12 @@ forward-decls \
 metavec-layout \
 packed-seq-walk \
 hello-via-wrapper \
-ld-so-malloc \
 hello-environ \
 ifunc
 endef
 $(foreach case,$(exit-zero-case-names),$(eval $(call exit-zero-case,$(case))))
+# disabled above:
+# ld-so-malloc \
 
 _onlyrun-nopreload-%:
 	./nopreload-$*
