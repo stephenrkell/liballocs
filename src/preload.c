@@ -9,7 +9,19 @@
 #include <link.h>
 #include <assert.h>
 #include <sys/types.h>
-#include <sys/mman.h>
+/* Some libc versions of mman.h will create 'mmap' with linkage name 'mmap64', which
+ * messes with our ability to define/override both 'mmap' and 'mmap64'. It's important for
+ * preload coverage that we do this, since there is no guarantee that some other DSO
+ * in the link does not use plain 'mmap', say. */
+// #include <sys/mman.h>
+#define MAP_FAILED ((void*)-1)
+#ifdef __linux__
+// HACK: just include the bits
+#define _SYS_MMAN_H
+#include <bits/mman-shared.h>
+#else
+#error "Unrecognised operating system (need to know MREMAP_FIXED)"
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -184,6 +196,7 @@ void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p
  * ourselves. This ensures that the handling is an either-or; exactly one of these
  * paths (preload or systrap) should be hit. We must take care to do the
  * (logically) same things in both. */
+#undef mmap
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
 {
@@ -251,6 +264,12 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	}
 	return ret;
 }
+
+// XXX: mysterious error with GCC 10.2.1: `mmap64' aliased to undefined symbol `mmap'
+// I thought this could be caused by a glibc header #define-ing mmap as mmap64, but
+// it's actually caused by sys/mman.h having a declaration of mmap with __asm__("mmap64")
+// (made by __REDIRECT_NTH, where "NTH" means "nothrow"). We have hacked around this
+// above by not including sys/mman.h, so hopefully this will no longer emerge.
 void *mmap64(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset) __attribute__((alias("mmap")));
 
