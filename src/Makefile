@@ -4,6 +4,7 @@ SRCROOT := $(dir $(THIS_MAKEFILE))../
 srcdir := $(SRCROOT)/src
 include $(SRCROOT)/config.mk
 
+CFLAGS += -D_FILE_OFFSET_BITS=64
 CFLAGS += -DIN_LIBRUNT_DSO
 CFLAGS += -DIN_LIBALLOCS_DSO
 CFLAGS += -std=gnu11 -fPIC -Wall -g -I../include -I$(SRCROOT)/include -I$(LIBMALLOCHOOKS)/include \
@@ -161,7 +162,7 @@ endif
 CFLAGS += -I$(srcdir)
 
 # different outputs involve different subgroups of objects
-CORE_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o \
+CORE_OBJS := cache.o fuse.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o \
   meta-dso.o uniqtype-util.o counters.o rt-uniqtypes.o util.o private-libc.o err.o query.o walk.o \
   liballocs.o workarounds.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) \
   $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
@@ -249,13 +250,15 @@ $(SOLIB_TARGETS): EXCLUDE_LIBS += dlmalloc.a:libsystrap.a
 LIBALLOCS_PRELOAD_A_OBJS := dlmalloc-ext.o $(CORE_OBJS) $(PRELOAD_OBJS)
 LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(CORE_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS)
 
+LIBSYSTRAP_A := $(LIBSYSTRAP)/build/$(shell uname -m)/libsystrap.a
 liballocs_preload.so: LDFLAGS += $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
 liballocs_preload.so: private-malloc-wrapped.lds
 liballocs_preload.so: LDFLAGS += -Wl,-Map,liballocs_preload.so.map
-liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a
+liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP_A)
 liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 # also set the dependencies, for make purposes
-liballocs_preload.so: $(LIBDLBIND)/lib/libdlbind.a $(LIBSYSTRAP)/lib/libsystrap.a # anything that goes in ldlibs should be a dependency
+liballocs_preload.so: $(LIBDLBIND)/lib/libdlbind.a $(LIBSYSTRAP_A) # anything that goes in ldlibs should be a dependency
+liballocs_preload.so: LDLIBS += -lfuse -lpthread
 
 # FIXME: this is supposed to obsolete liballocs_test.so and tests/lib-test
 # ... but I'm not sure it can. Some unit tests need to run within a wider liballocs
@@ -267,7 +270,7 @@ liballocs_preload.so: $(LIBDLBIND)/lib/libdlbind.a $(LIBSYSTRAP)/lib/libsystrap.
 # test code. Perhaps we really want a 'test' build, sibling of 'debug' and 'opt'
 # builds, which 
 liballocs_preload.so-test-%: LDFLAGS += $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
-liballocs_preload.so-test-%: LDLIBS += -ldlbind $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP)/lib/libsystrap.a -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
+liballocs_preload.so-test-%: LDLIBS += -ldlbind $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP_A) -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 liballocs_preload.so-test-%.c.test: %.c $(filter-out %.o,$(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS)) dlmalloc.a
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DUNIT_TEST -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)
 vpath %.h $(SRCROOT)/include
@@ -283,11 +286,14 @@ RUNT_LDFLAGS := -Wl,--wrap,__runt_files_notify_load \
 # if we don't do --whole-archive, then the wrapping of __runt_* doesn't work...
 # ... though with a behaviour that makes no sense: librunt still calls itself rather
 # than its wrapper __static_file_allocator notify_load.
-RUNT_LDLIBS := -Wl,--whole-archive $(LIBRUNT)/lib/librunt_preload.a -Wl,--no-whole-archive
+# HACK: hard-code build and arch for now
+LIBRUNT_BUILD_DIR := $(LIBRUNT)/build/opt-x86_64
+LIBRUNT_A := $(LIBRUNT_BUILD_DIR)/librunt_preload.a
+RUNT_LDLIBS := -Wl,--whole-archive $(LIBRUNT_A) -Wl,--no-whole-archive
 liballocs_preload.so: LDFLAGS += $(RUNT_LDFLAGS) -Wl,-O0
 liballocs_preload.so: LDLIBS += $(RUNT_LDLIBS)
 # dependency for make
-liballocs_preload.so: $(LIBRUNT)/lib/librunt_preload.a
+liballocs_preload.so: $(LIBRUNT_A)
 
 # liballocs_preload.so build rule is funky because dlmalloc.a is in LDFLAGS.
 # It needs to be there because it goes inside --whole-archive (and these options
@@ -327,7 +333,7 @@ liballocs_dummyweaks.o: dummyweaks.o
 # Because our dummyweaks also includes private_strdup, it brings in a whole private malloc.
 # FIXME: it shouldn't. But unclear how else to satisfy the dependency on __private_strdup
 # in libcrunch's _stubs.so.
-vpath %.o $(LIBRUNT)/lib
+vpath %.o $(LIBRUNT_BUILD_DIR)
 liballocs_dummyweaks.so: private-malloc-plain.lds
 liballocs_dummyweaks.so: LDLIBS += $(PRIVATE_MALLOC_LDLIBS)
 liballocs_dummyweaks.so: dummyweaks.o librunt_dummyweaks.o
