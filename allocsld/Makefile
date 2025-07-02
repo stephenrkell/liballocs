@@ -63,7 +63,7 @@ allocsld.so: LDFLAGS += -fuse-ld=bfd \
             -nostdlib -nostartfiles \
             -Wl,--spare-dynamic-tags,2 \
             -Wl,-soname=ld-linux.so.2 -Wl,-Bsymbolic \
-            -L$(LIBSYSTRAP)/lib -L$(LIBRUNT)/build/opt-x86_64 # HACK to hard-code this
+            -L$(LIBSYSTRAP)/lib -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
 allocsld.so: LDLIBS += -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
 
 # FIXME: localize all global symbols except maybe _start?

@@ -286,8 +286,7 @@ RUNT_LDFLAGS := -Wl,--wrap,__runt_files_notify_load \
 # if we don't do --whole-archive, then the wrapping of __runt_* doesn't work...
 # ... though with a behaviour that makes no sense: librunt still calls itself rather
 # than its wrapper __static_file_allocator notify_load.
-# HACK: hard-code build and arch for now
-LIBRUNT_BUILD_DIR := $(LIBRUNT)/build/opt-x86_64
+LIBRUNT_BUILD_DIR := $(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
 LIBRUNT_A := $(LIBRUNT_BUILD_DIR)/librunt_preload.a
 RUNT_LDLIBS := -Wl,--whole-archive $(LIBRUNT_A) -Wl,--no-whole-archive
 liballocs_preload.so: LDFLAGS += $(RUNT_LDFLAGS) -Wl,-O0
