@@ -12,8 +12,12 @@
  *      to the xwrap plugin, unless it's a deterministic function of the name
  *    ** can we just get the xwrap plugin to do this? no because it's generic
  *
- * This is a bit nasty. We use a toolsub-esque wrapper to add one
- * plugin, then it adds more (+ more options, like --wrap).
+ * Because the GNU plugin API does not currently give us control of everything
+ * that the linker command line can control, we rely on techniques that are a
+ * bit nasty. In particular, we restart the link with additional/changed command-
+ * -line options. Those options include adding new plugins! In particular, for
+ * symbol wrapping we use our own 'xwrap-plugin' which is a higher-coverage
+ * version of ld's --wrap option.
  */
 #define _GNU_SOURCE
 #include <vector>
@@ -309,8 +313,6 @@ public:
 		 * orig_main or something? */
 		linker->add_input_file("/lib64/ld-linux-x86-64.so.2");
 
-
-
 		// now just do the super call for good measure
 		return this->linker_plugin::all_symbols_read();
 	}
@@ -356,7 +358,7 @@ private:
 		std::smatch m;
 		if (!regex_match(in, m, whole_var_re))
 		{
-			linker->message(LDPL_ERROR, "options must match regex `%s'",
+			linker->message(LDPL_ERROR, "allocs linker plugin options 1--6 must match regex `%s', e.g. `malloc;(Z);p realloc;(p;Z);p calloc;(z;Z);p'",
 				whole_var_re_s.c_str());
 			abort();
 		}
@@ -766,6 +768,7 @@ public:
 				}
 				else continue;
 				// now we definitely have 'arg'
+				assert(arg != "");
 				if (current_dynamic_linker != "")
 				{
 					linker->message(LDPL_WARNING, "dynamic linker specified multiple times");

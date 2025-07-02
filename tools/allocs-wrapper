@@ -28,7 +28,7 @@ case "$0" in
           LIBALLOCS_SUBALLOC_FNS LIBALLOCS_SUBFREE_FNS LIBALLOCS_ALLOCSITE_OVERRIDE; do
             extra_ld_args="$extra_ld_args -Wl,-plugin-opt=\"`rewrite_liballocs_var $v`\""
         done
-        eval echo "$extra_ld_args"
+        printf "%s" "$extra_ld_args"
         exit 0
     ;;
     (*) # silently continue, i.e. actually act as the wrapper command
