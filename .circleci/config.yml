@@ -7,16 +7,18 @@ jobs:
       - run:
           name: Install dependencies
           command: |
+            dpkg --add-architecture i386
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
-              build-essential libbsd-dev libelf-dev libdw-dev binutils-dev \
+              build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++-10 gcc-10 ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
               default-jdk-headless python3 \
-              make git gawk gdb wget \
-              libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \
+              make git gawk gdb wget libc6-dbg \
+              libunwind-dev libunwind-dev:i386 linux-libc-dev-i386-cross libc6-dev-i386 \
               libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev libffi-dev
+              libboost-serialization-dev libboost-filesystem-dev libffi-dev \
+              gettext-base # for envsubst
             cd /usr/bin && ln -sf gcc-10 gcc
             cd /usr/bin && ln -sf g++-10 g++
       - run:
