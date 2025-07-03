@@ -7,7 +7,7 @@ LIBALLOCSTOOL="${LIBALLOCSTOOL:-"$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 
 case "$0" in
     (*cflags|*cppflags|*cxxflags)
-        /bin/echo -no-integrated-cpp -wrapper "$(readlink -f "$(dirname "$0")")"/allocs-wrapper
+        /bin/echo -no-integrated-cpp -wrapper $(readlink -f "$(dirname "$0")")/allocs-wrapper
         exit 0
     ;;
     (*ldflags)
@@ -23,10 +23,10 @@ case "$0" in
                 echo "${ident};($(echo "$args" | sed 's/./&;/g' | sed 's/;$//'))$(echo "$after" | sed 's/->//' | sed -E 's/.+/;&/')"
             done
         }
-        extra_ld_args="-Wl,-plugin=\"$(readlink -f "$(dirname "$0")")\"/gold-plugin.so"
+        extra_ld_args="-Wl,-plugin=$(readlink -f "$(dirname "$0")")/gold-plugin.so"
         for v in LIBALLOCS_ALLOC_FNS LIBALLOCS_FREE_FNS LIBALLOCS_ALLOCSZ_FNS \
           LIBALLOCS_SUBALLOC_FNS LIBALLOCS_SUBFREE_FNS LIBALLOCS_ALLOCSITE_OVERRIDE; do
-            extra_ld_args="$extra_ld_args -Wl,-plugin-opt=\"`rewrite_liballocs_var $v`\""
+            extra_ld_args="$extra_ld_args -Wl,-plugin-opt=`rewrite_liballocs_var $v`"
         done
         printf "%s" "$extra_ld_args"
         exit 0
