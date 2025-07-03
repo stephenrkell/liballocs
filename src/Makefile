@@ -162,7 +162,7 @@ endif
 CFLAGS += -I$(srcdir)
 
 # different outputs involve different subgroups of objects
-CORE_OBJS := cache.o fuse.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o \
+CORE_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o \
   meta-dso.o uniqtype-util.o counters.o rt-uniqtypes.o util.o private-libc.o err.o query.o walk.o \
   liballocs.o workarounds.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) \
   $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
@@ -258,7 +258,7 @@ liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LD
 liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 # also set the dependencies, for make purposes
 liballocs_preload.so: $(LIBDLBIND)/lib/libdlbind.a $(LIBSYSTRAP_A) # anything that goes in ldlibs should be a dependency
-liballocs_preload.so: LDLIBS += -lfuse -lpthread
+liballocs_preload.so: LDLIBS += -lpthread
 
 # FIXME: this is supposed to obsolete liballocs_test.so and tests/lib-test
 # ... but I'm not sure it can. Some unit tests need to run within a wider liballocs
