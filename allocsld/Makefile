@@ -35,7 +35,7 @@ meta-dso.o: CFLAGS += -DNO_TLS
 # Thanks to Dan Williams for the recipes that my link commands were based on.
 # http://www.cs.virginia.edu/~dww4s/articles/ld_linux.html
 
-LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/lib/libc.a
+LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/build-$(shell uname -m)/lib/libc.a
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 OBJS := start.o premain.o main.o entry.o load.o chain.o debug.o allocinstr.o meta-dso.o err.o
@@ -63,7 +63,7 @@ allocsld.so: LDFLAGS += -fuse-ld=bfd \
             -nostdlib -nostartfiles \
             -Wl,--spare-dynamic-tags,2 \
             -Wl,-soname=ld-linux.so.2 -Wl,-Bsymbolic \
-            -L$(LIBSYSTRAP)/lib -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
+            -L$(LIBSYSTRAP)/build/$(shell uname -m) -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
 allocsld.so: LDLIBS += -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
 
 # FIXME: localize all global symbols except maybe _start?
@@ -145,7 +145,7 @@ malloc-patcher-self-test: return-hook.o malloc-patcher-with-main.o
 malloc-patcher-with-main.o: malloc-patcher.c
 	$(CC) -o $@ -c $< -DSELF_TEST $(CFLAGS) $(CPPFLAGS)
 
-malloc-patcher-self-test: LDFLAGS += -fno-lto -L$(LIBSYSTRAP)/lib -L$(LIBRUNT)/lib
+malloc-patcher-self-test: LDFLAGS += -fno-lto -L$(LIBSYSTRAP)/build/$(shell uname -m) -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
 
 #   -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
 #   -Wl,--defsym,__wrap___runt_files_metadata_by_addr=__runt_files_metadata_by_addr
