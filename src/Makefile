@@ -332,7 +332,7 @@ liballocs_dummyweaks.o: dummyweaks.o
 # Because our dummyweaks also includes private_strdup, it brings in a whole private malloc.
 # FIXME: it shouldn't. But unclear how else to satisfy the dependency on __private_strdup
 # in libcrunch's _stubs.so.
-vpath %.o $(LIBRUNT_BUILD_DIR)
+vpath librunt_%.o $(LIBRUNT_BUILD_DIR)
 liballocs_dummyweaks.so: private-malloc-plain.lds
 liballocs_dummyweaks.so: LDLIBS += $(PRIVATE_MALLOC_LDLIBS)
 liballocs_dummyweaks.so: dummyweaks.o librunt_dummyweaks.o
