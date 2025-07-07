@@ -5,6 +5,12 @@ TOOLSUB="${TOOLSUB:-"$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/../contrib
 # HACK: know where to find liballocstool
 LIBALLOCSTOOL="${LIBALLOCSTOOL:-"$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/../contrib/liballocstool}" #"
 
+# protect our output from expansion in the client shell
+# FIXME: this is very rough and ready
+quote_metachars () {
+    sed 's/\([() ;]\)/\\\1/g'
+}
+
 case "$0" in
     (*cflags|*cppflags|*cxxflags)
         /bin/echo -no-integrated-cpp -wrapper $(readlink -f "$(dirname "$0")")/allocs-wrapper
@@ -16,19 +22,24 @@ case "$0" in
         # GAH, commas interact with "-Wl," so we have to use ';'
         rewrite_liballocs_var () {
             varname="$1"
+            written_one=0
             for v in ${!varname}; do
                 IFS=$'\t' read ident args after <<<"$( echo "$v" | tr '()' '\t' )"
                 # our format is "<ident>(<argchar> [, <argchar> ]..),[retchar]"
                 # except with semicolons not commas
-                echo "${ident};($(echo "$args" | sed 's/./&;/g' | sed 's/;$//'))$(echo "$after" | sed 's/->//' | sed -E 's/.+/;&/')"
+                if [[ $written_one -eq 1 ]]; then
+                    printf " "
+                fi
+                printf "${ident};($(echo "$args" | sed 's/./&;/g' | sed 's/;$//'))$(echo "$after" | sed 's/->//' | sed -E 's/.+/;&/')"
+                written_one=1
             done
         }
         extra_ld_args="-Wl,-plugin=$(readlink -f "$(dirname "$0")")/gold-plugin.so"
         for v in LIBALLOCS_ALLOC_FNS LIBALLOCS_FREE_FNS LIBALLOCS_ALLOCSZ_FNS \
           LIBALLOCS_SUBALLOC_FNS LIBALLOCS_SUBFREE_FNS LIBALLOCS_ALLOCSITE_OVERRIDE; do
-            extra_ld_args="$extra_ld_args -Wl,-plugin-opt=`rewrite_liballocs_var $v`"
+            extra_ld_args="${extra_ld_args:+${extra_ld_args} }-Wl,-plugin-opt=`rewrite_liballocs_var $v | quote_metachars`"
         done
-        printf "%s" "$extra_ld_args"
+        printf "%s\n" "$extra_ld_args"
         exit 0
     ;;
     (*) # silently continue, i.e. actually act as the wrapper command
