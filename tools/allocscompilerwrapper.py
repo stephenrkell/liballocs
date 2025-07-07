@@ -69,7 +69,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         
     def getLibAllocsBaseDir(self):
         # FIXME: don't assume we're run in-place
-        return os.path.dirname(__file__) + "/../"
+        return os.path.dirname(os.path.dirname(__file__))
 
     def getLibNameStem(self):
         return "allocs"
@@ -198,6 +198,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 if ret2 != 0:
                     errfile.write("Metadata build failed, so will not strip relocs from output binary")
                 if (ret2 != 0 or "DEBUG_CC" in os.environ):
+                    sys.stderr.write("printing to %s\n" % errfile)
                     self.printErrors(errfile)
                 # Now if the metadata build succeeded, and if we're asked to
                 # strip relocs
@@ -521,8 +522,15 @@ class AllocsCompilerWrapper(CompilerWrapper):
         liballocsRightishLinkArgs = []
         if self.doingFinalLink() and not self.doingStaticLink() and not self.linkingSharedObject():
             # we're building a dynamically linked executable
-            liballocsLeftishLinkArgs += ["-Wl,--dynamic-linker," + self.getLibAllocsBaseDir() + "/lib/allocsld.so"]
-            liballocsLeftishLinkArgs += [self.getLibAllocsBaseDir() + "lib/interp-pad.o"]
+            # We extract the dynamic linker path name exactly from the interp-pad.o,
+            # because it MUST match. Otherwise we will not merge the strings correctly
+            # and we will get a *third* NUL-terminated string in the output .interp section,
+            # instead of just /path/to/allocsld.so\0/lib64/ld-linux-x86-64-so.2
+            interpPadO = self.getLibAllocsBaseDir() + "/lib/interp-pad.o"
+            dynamicLinkerArg = subprocess.Popen(["objcopy", "-Obinary", "-j.interp", interpPadO, "/dev/stdout"], \
+                stdout=subprocess.PIPE, stderr=sys.stderr).communicate()[0].decode().split('\0')[0]
+            liballocsLeftishLinkArgs += ["-Wl,--dynamic-linker," + dynamicLinkerArg]
+            liballocsLeftishLinkArgs += [interpPadO]
             liballocsLeftishLinkArgs += ["-Wl,-rpath," + self.getRunPath()]
             if "LIBALLOCS_USE_PRELOAD" in os.environ and os.environ["LIBALLOCS_USE_PRELOAD"] == "no":
                 liballocsRightishLinkArgs += [self.getLdLibBase()]

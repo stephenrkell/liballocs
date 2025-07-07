@@ -239,6 +239,7 @@ AC_ARG_WITH([cil-install],
             ],
             [ac_cil_install=${CIL_INSTALL:-$(realpath $srcdir)/contrib/cil/lib]})
 
+# things on the left will be substituted, if @-surrounded, by the right, in .in files
 AC_SUBST([libmallochooks], [$ac_libmallochooks])
 AC_SUBST([librunt], [$ac_librunt])
 AC_SUBST([libsystrap], [$ac_libsystrap])

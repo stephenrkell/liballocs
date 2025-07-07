@@ -62,7 +62,7 @@ DYNAPPEND ?= $(ELFTIN)/dynappend/dynappend
 allocsld.so: LDFLAGS += -fuse-ld=bfd \
             -nostdlib -nostartfiles \
             -Wl,--spare-dynamic-tags,2 \
-            -Wl,-soname=ld-linux.so.2 -Wl,-Bsymbolic \
+            -Wl,-soname=allocsld.so -Wl,-Bsymbolic \
             -L$(LIBSYSTRAP)/build/$(shell uname -m) -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
 allocsld.so: LDLIBS += -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
 
