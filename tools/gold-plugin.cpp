@@ -358,8 +358,8 @@ private:
 		std::smatch m;
 		if (!regex_match(in, m, whole_var_re))
 		{
-			linker->message(LDPL_ERROR, "allocs linker plugin options 1--6 must match regex `%s', e.g. `malloc;(Z);p realloc;(p;Z);p calloc;(z;Z);p'",
-				whole_var_re_s.c_str());
+			linker->message(LDPL_ERROR, "allocs linker plugin options 1--6 must match regex `%s', e.g. `malloc;(Z);p realloc;(p;Z);p calloc;(z;Z);p'; got: `%s'",
+				whole_var_re_s.c_str(), in.c_str());
 			abort();
 		}
 		// now replace ';' with ',' so that they are cppable. we do the
@@ -752,8 +752,8 @@ public:
 
 		auto missing_allocsld =
 			[this](vector<string> const& cmdline_vec) -> pair<bool, vector<string> > {
-			string current_dynamic_linker = "";
-			vector<string>::const_iterator current_dynamic_linker_pos;
+			std::optional<string> current_dynamic_linker;
+			vector<string>::const_iterator current_dynamic_linker_pos = cmdline_vec.end();
 			for (auto i_str = cmdline_vec.begin(); i_str != cmdline_vec.end(); ++i_str)
 			{
 				string arg;
@@ -769,7 +769,7 @@ public:
 				else continue;
 				// now we definitely have 'arg'
 				assert(arg != "");
-				if (current_dynamic_linker != "")
+				if (!!current_dynamic_linker)
 				{
 					linker->message(LDPL_WARNING, "dynamic linker specified multiple times");
 				}
@@ -789,25 +789,28 @@ public:
 			};
 			if (!liballocs_env) linker->message(LDPL_WARNING, "can't set dynamic linker to allocsld; no LIBALLOCS");
 			if (!liballocs_env
-				|| (current_dynamic_linker != "" && realpath_match(
-					 (boost::filesystem::path(liballocs_env) / "lib/allocsld.so").c_str(),
-					 current_dynamic_linker)
+				|| (!!current_dynamic_linker && realpath_match(
+					     (boost::filesystem::path(liballocs_env) / "lib/allocsld.so").c_str(),
+					     *current_dynamic_linker
+					  )
 					)
 				)
 			{
+				// --dynamic-linker is already passed, specifying allocsld -- no need to change anything
 				return make_pair(false, cmdline_vec);
 			}
-			if (current_dynamic_linker != ""
-				&& std::optional<string>(current_dynamic_linker) != job->system_dynamic_linker())
+			if (!!current_dynamic_linker
+				&& current_dynamic_linker != job->system_dynamic_linker())
 			{
 				linker->message(LDPL_WARNING, "not setting dynamic linker to allocsld; "
 					"already set to another non-standard one (`%s')",
-					current_dynamic_linker.c_str());
+					current_dynamic_linker->c_str());
 				return make_pair(false, cmdline_vec);
 			}
 			string allocsld_path = (boost::filesystem::path(liballocs_env) / "lib/allocsld.so").c_str();
+			assert(allocsld_path != "");
 			vector<string> new_vec = cmdline_vec;
-			if (current_dynamic_linker != "")
+			if (!!current_dynamic_linker)
 			{
 				new_vec[current_dynamic_linker_pos - cmdline_vec.begin() + 1] = allocsld_path;
 			}

@@ -140,8 +140,6 @@ checkrun-%:
 		$(fail_action)
 
 # disabled cases
-checkrun-plugin-hello:
-	true # disabled plugin-hello while expected to fail
 checkrun-ld-so-malloc:
 	true # disabled ld-so-malloc while DWARF 5-using ld.so is not introspectable
 
