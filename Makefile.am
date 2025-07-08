@@ -105,8 +105,12 @@ x86_emulate.o: CFLAGS += -include $(libsystrap)/x86_defs.h
 x86_emulate.o: .depbase
 .depbase:
 	mkdir -p "$@"
+# the prefix matters.. for now, we expect to run only from the build dir
+# ALLOCSLD_PREFIX ?= $(shell printf "$(prefix)" | sed 's^/$$^^' )
+ALLOCSLD_PREFIX ?= $(shell pwd | sed 's^/$$^^' )
+SYSTEM_LDSO_PATH ?= $(shell $(CC) -\#\#\# -o /dev/null -x c /dev/null 2>&1 | sed -nE '/.*-dynamic-linker[[:blank:]]+([^[:blank:]]+).*/ {s//\1/;p}' )
 lib/interp-pad.o: tools/interp-pad.S
-	$(CC) -c -o $@ $<
+	$(CC) -DINTERP_STRING="\"$(ALLOCSLD_PREFIX)/lib/allocsld.so\\0$(SYSTEM_LDSO_PATH)\\0\"" -c -o $@ $<
 tools_ifacetypes_LDADD = $(TOOLS_LDADD) #x86_emulate.o
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
