@@ -90,15 +90,15 @@ class AllocsCC(AllocsCompilerWrapper):
             "--save-temps",
             "--decil",
             "--native",
-            "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/cilallocs/cilallocs.cmxs"),
-            "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/dumpallocs/dumpallocs.cmxs"),
+            "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/cilallocs/cilallocs.cmxs"),
+            "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/dumpallocs/dumpallocs.cmxs"),
             "--dodumpallocs",
             "--keepunused",
-            "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/monalloca/monalloca.cmxs")] + \
+            "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/monalloca/monalloca.cmxs")] + \
             (["--domonalloca"]
                 if len(sourceFiles) > 0 and allSourceFilesAreC else []) + \
             ["-Wno-unused-variable", "-Wno-unused-label",
-            "--load=%s" % (self.getLibAllocsBaseDir() + "tools/lang/c/trapptrwrites/trapptrwrites.cmxs"),
+            "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/trapptrwrites/trapptrwrites.cmxs"),
             "--dotrap-ptr-writes"]
         # We need the above -Wno-unused-... because CIL creates
         # some unused stuff (unavoidably, I believe) which will
