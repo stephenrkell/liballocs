@@ -842,6 +842,36 @@ public:
 		 */
 
 	}
+	virtual ~allocs_plugin()
+	{
+		/* HACK: run metadata build on output. This probably doesn't belong in
+		 * a destructor, but we don't get an upcall for "all done" from the linker
+		 * that is distinct from "cleanup". Also, I'm not sure we really ought to
+		 * be doing the metadata build from here in the plugin. It's convenient
+		 * for current work though, so we can run with it for now. */
+		if (job->output_file_type != LDPO_REL)
+		{
+// HACK
+#ifndef META_BASE
+#define META_BASE "/usr/lib/meta"
+#endif
+			boost::filesystem::path output_path(job->output_file_name);
+			int ret;
+			char *cwd = get_current_dir_name();
+			// sanity check: list the output file, to check it exists
+			// ret = system((string("ls -l ") + output_path.string()).c_str());
+			// assert(ret == 0);
+			// (it does)
+			ret = system((string("${MAKE:-make} -f ${LIBALLOCS}/tools/Makefile.meta ")
+				+ (boost::filesystem::path(META_BASE) /
+					(output_path.is_relative()
+					? boost::filesystem::path(cwd) / output_path
+					: output_path)).string() + "-meta.so").c_str()); // FIXME: quoting
+			if (cwd) free(cwd);
+		}
+		/* call parent destructor */
+		//this->linker_plugin::~linker_plugin();
+	}
 };
 LINKER_PLUGIN(allocs_plugin);
 #define define_regex(name, contents) \

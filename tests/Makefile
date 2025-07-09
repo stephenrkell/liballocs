@@ -172,7 +172,8 @@ metavec-layout \
 packed-seq-walk \
 hello-via-wrapper \
 hello-environ \
-ifunc
+ifunc \
+plugin-hello
 endef
 $(foreach case,$(exit-zero-case-names),$(eval $(call exit-zero-case,$(case))))
 # disabled above:
