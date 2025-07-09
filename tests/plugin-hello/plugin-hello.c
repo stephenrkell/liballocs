@@ -1,5 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
+// struct uniqtype;
+// extern struct uniqype __uniqtype__int;
+#include "allocs.h"
 
 void *fail_alloc(size_t sz)
 {
@@ -19,11 +22,9 @@ static void *static_fail_alloc(size_t sz)
 	return NULL;
 }
 
-struct uniqtype;
-extern struct uniqype __uniqtype__int;
-
 int main(void)
 {
 	printf("Hello, world (%p, %p)!\n", static_fail_alloc, &__uniqtype__int);
+	printf("The type of main is '%s'\n", UNIQTYPE_NAME(__liballocs_get_alloc_type(main)));
 	return 0;
 }
