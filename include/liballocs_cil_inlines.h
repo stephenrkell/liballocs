@@ -105,9 +105,13 @@ extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liba
 {
 	return (const void *) __builtin_frame_address(0);
 }
-
-extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller);
-extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca)(unsigned long size, unsigned long *frame_counter, void *caller)
+/* We have to pad the alloca chunk at both ends: prepend a header
+ * that lets us retrieve the size, and then append our usual trailer
+ * for the allocation site / type metadata. We call a helper to get
+ * the *overall* size, and then the __liballocs_notify_and_adjust_alloca()
+ * function will fill in both the header and the trailer. */
+extern inline unsigned long (__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca_size)(unsigned long orig_size);
+extern inline unsigned long (__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca_size)(unsigned long orig_size)
 {
 	/* Insert heap trailer etc..
 	 * Basically we have to do everything that our malloc hooks, allocator wrappers
@@ -116,28 +120,44 @@ extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_
 	 * AND only do the indexing things if liballocs is preloaded. Otherwise....
 	 *
 	 * We need to ensure 16-byte alignment, equivalently with malloc. */
-	unsigned long chunk_size = PAD_TO_ALIGN(size + ALLOCA_TRAILER_SIZE, ALLOCA_ALIGN);
-	void *alloc = __builtin_alloca(PAD_TO_ALIGN(ALLOCA_HEADER_SIZE, ALLOCA_ALIGN) + chunk_size);
+	unsigned long size_with_trailer = PAD_TO_ALIGN(orig_size + ALLOCA_TRAILER_SIZE, ALLOCA_ALIGN);
+	unsigned long size_with_trailer_and_header
+	 = PAD_TO_ALIGN(ALLOCA_HEADER_SIZE, ALLOCA_ALIGN) + size_with_trailer;
+	return size_with_trailer_and_header;
 	/* The alloca-returned pointer may be only 8-byte-aligned. Since we asked for
 	 * 16 extra bytes but we only need 8, we *will* waste 8 bytes, either at the
 	 * beginning or the end of the returned chunk. They just become a hole on the stack;
 	 * we don't track them. */
-	void *userchunk = (void*)(PAD_TO_ALIGN((unsigned long) alloc + ALLOCA_HEADER_SIZE, ALLOCA_ALIGN));
+}
+
+extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_notify_and_adjust_alloca)(void *allocated, unsigned long orig_size, unsigned long tweaked_size, unsigned long *frame_counter, void *caller);
+extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_notify_and_adjust_alloca)(void *allocated, unsigned long orig_size, unsigned long tweaked_size, unsigned long *frame_counter, void *caller)
+{
 #ifndef LIBALLOCS_NO_ZERO
-	__builtin_memset(userchunk, 0, chunk_size);
+	__builtin_memset(allocated, 0, tweaked_size);
 #endif
-	/* write the usable size into the word preceding the userchunk, then return the userchunk. */
-	*((unsigned long *)userchunk - 1) = chunk_size;
+	void *userchunk = (void*)(PAD_TO_ALIGN((unsigned long) allocated + ALLOCA_HEADER_SIZE, ALLOCA_ALIGN));
+	unsigned long header_effective_size = (unsigned long) userchunk - (unsigned long) allocated;
+	unsigned long non_header_size = tweaked_size - header_effective_size;
+	/* The non-header size is like the size returned by the system malloc_usable_size(),
+	 * i.e. it includes the trailer (but not our special alloca header, which a normal
+	 * malloc provides its own equivalent of). */
+
+	/* write the non-header size into the word preceding the userchunk, then return the userchunk. */
+	*((unsigned long *)userchunk - 1) = non_header_size;
 	
-	/* FIXME: this byte-counting approach works for GCC but not Clang.
+	/* FIXME: this byte-counting approach works for GCC but not Clang. GitHub issue #107.
 	 * But maybe it's overkill anyway?
 	 * Can we not say "unindex everything starting below <frame base> up to <stack limit>?"
 	 * We add only the "usable size" part, because that is what the heap index code
-	 * can see, and that is the code that will be consuming this value. */
-	*frame_counter += chunk_size;
+	 * can see, and that is the code that will be consuming this value.
+	 * XXX: for now, hope that our modified instrumentation pass that leaks every alloca
+	 * ptr, will prevent Clang from doing any funky optimisations that drop an alloca'd
+	 * chunk early. */
+	*frame_counter += non_header_size;
 	
 	/* Note that we pass the caller directly; __current_allocsite is not required. */
-	__alloca_allocator_notify(userchunk, size, frame_counter, caller,
+	__alloca_allocator_notify(userchunk, orig_size, frame_counter, caller,
 		__liballocs_get_sp(), __liballocs_get_bp());
 	
 	return userchunk;

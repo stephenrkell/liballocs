@@ -97,11 +97,13 @@ let ensureCleanupLocal (fn : fundec) =
 
 class monAllocaExprVisitor = fun (fl: Cil.file) 
                             -> fun enclosingFunction
-                            -> fun liballocsAllocaFun
+                            -> fun liballocsAllocaSizeFun
+                            -> fun liballocsNotifyAndAdjustAllocaFun
                             -> fun liballocsAllocaCleanupFun
                             -> fun currentAllocsiteVar
                             -> object(self)
   inherit nopCilVisitor
+  val builtinAllocaFunVar = (match findVarDecl "__builtin_alloca" fl.globals with Some(f) -> f | None -> failwith "no __builtin_alloca in file")
 
   method vinst (i: instr) : instr list visitAction = 
     let isAllocaFun fe = match fe with
@@ -112,7 +114,7 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
       | _ -> false
     in
     match i with 
-        Call(tgt, funExpr, args, l) when isAllocaFun funExpr -> begin
+        Call(tgt, funExpr, [sizeArg], l) when isAllocaFun funExpr -> begin
             (* We need to
              * - ensure we have a local in the function for recording 
                  the fact that this frame does alloca
@@ -135,20 +137,29 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
               mov %rax, __current_allocsite
              
              *)
-             let v = ensureCleanupLocal enclosingFunction
+             let counterVar = ensureCleanupLocal enclosingFunction
              in
              let mkLabel num = ".L__monalloca_alloca_label_" 
                 ^ (identFromString l.file) ^ "_" 
                 ^ (if l.line >=0 then string_of_int l.line else "NONUMBER") ^ "_"
                 ^ (string_of_int num)
              in
-             let labelString1 = mkLabel 1
-             in 
-             let callSiteVar = makeTempVar enclosingFunction voidPtrType
-             in
-             ChangeTo([Asm([(* attrs *)], 
+             let labelString1 = mkLabel 1 in
+             let callSiteVar = makeTempVar enclosingFunction voidPtrType in
+             (* We have to pad the alloca chunk at both ends: prepend a header
+              * that lets us retrieve the size, and then append our usual trailer
+              * for the allocation site / type metadata. We call a helper to get
+              * the *overall* size, and then the __liballocs_notify_and_adjust_alloca()
+              * function will fill in both the header and the trailer. *)
+             let fixedSizeVar = makeTempVar enclosingFunction longType in
+             let tempPtrVar = makeTempVar enclosingFunction voidPtrType in
+             ChangeTo([
+                Call(Some(Var(fixedSizeVar), NoOffset),
+                     Lval(Var(liballocsAllocaSizeFun.svar), NoOffset),
+                     [sizeArg], l);
+                Asm([(* attrs *)],
                            [(* template strings *)
-                                "   callq "^ labelString1 ^"_%=\n\
+                                "   call "^ labelString1 ^"_%=\n\
                                 "^ labelString1 ^"_%=: \n\
                                     pop %0\n"
                            ], 
@@ -157,9 +168,16 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
                            ], 
                            [(* inputs *) ], 
                            [(* clobbers *)],
-                           (* location *) l ); 
-                Call(tgt, Lval(Var(liballocsAllocaFun.svar), NoOffset), 
-                    args @ [mkAddrOf (Var(v), NoOffset); Lval(Var(callSiteVar), NoOffset)], l)
+                           (* location *) l );
+                Call(Some(Var(tempPtrVar), NoOffset), Lval(Var(builtinAllocaFunVar), NoOffset),
+                    [Lval(Var(fixedSizeVar), NoOffset)], l);
+                Call(tgt, Lval(Var(liballocsNotifyAndAdjustAllocaFun.svar), NoOffset),
+                    [Lval(Var(tempPtrVar), NoOffset);
+                     sizeArg;
+                     Lval(Var(fixedSizeVar), NoOffset);
+                     mkAddrOf (Var(counterVar), NoOffset);
+                     Lval(Var(callSiteVar), NoOffset)
+                    ], l)
             ])
         end
     | _ -> SkipChildren 
@@ -168,22 +186,30 @@ end (* class monAllocaVisitor *)
 class monAllocaFunVisitor = fun (fl: Cil.file) -> object(self)
     inherit nopCilVisitor
 
-    val mutable liballocsAllocaFun = emptyFunction "__liballocs_alloca"
+    val mutable liballocsNotifyAndAdjustAllocaFun = emptyFunction "__liballocs_notify_and_adjust_alloca"
+    val mutable liballocsAllocaSizeFun = emptyFunction "__liballocs_alloca_size"
     val mutable liballocsAllocaCleanupFun = emptyFunction "__liballocs_alloca_caller_frame_cleanup"
     
     initializer
-        liballocsAllocaFun <- findOrCreateExternalFunctionInFile
-                        fl "__liballocs_alloca" (TFun(voidPtrType, 
-                        Some [ ("sz", ulongType, []);
+        liballocsNotifyAndAdjustAllocaFun <- findOrCreateExternalFunctionInFile
+                        fl "__liballocs_notify_and_adjust_alloca" (TFun(voidPtrType,
+                        Some [ ("tgt", voidPtrType, []);
+                               ("sz", ulongType, []);
+                               ("fixedSz", ulongType, []);
                                ("counter", ulongPtrType, []);
                                ("caller", voidPtrType, []) ], 
                         false, [])) 
+                        ;
+        liballocsAllocaSizeFun <- findOrCreateExternalFunctionInFile
+                        fl "__liballocs_alloca_size" (TFun(ulongType,
+                        Some [ ("sz", ulongType, []) ],
+                        false, []))
                         ;
         liballocsAllocaCleanupFun <- findOrCreateExternalFunctionInFile
                         fl "__liballocs_alloca_caller_frame_cleanup" (TFun(voidType, 
                         Some [ ("obj", voidPtrType, [])], 
                         false, []))
-   
+
     method vfunc (f: fundec) : fundec visitAction = 
         let currentAllocsiteVar = 
             let rec findVar gs = match gs with
@@ -200,7 +226,7 @@ class monAllocaFunVisitor = fun (fl: Cil.file) -> object(self)
         (* fn.sbody.bstmts <- (mkStmtOneInstr (Set((Var(v), NoOffset), zero, v.vdecl)))
                            :: fn.sbody.bstmts; *)
 
-        let maExprVisitor = new monAllocaExprVisitor fl f liballocsAllocaFun liballocsAllocaCleanupFun currentAllocsiteVar
+        let maExprVisitor = new monAllocaExprVisitor fl f liballocsAllocaSizeFun liballocsNotifyAndAdjustAllocaFun liballocsAllocaCleanupFun currentAllocsiteVar
         in
         let modifiedFunDec = visitCilFunction maExprVisitor f
         in 

@@ -625,6 +625,13 @@ let rec findFun nm gs = match gs with
             if dec.svar.vname = nm then Some(dec) else findFun nm gg
       | _ -> findFun nm gg
 
+let rec findVarDecl nm gs = match gs with
+  [] -> None
+|  g :: gg -> match g with
+        GVarDecl(svar, _) ->
+            if svar.vname = nm then Some(svar) else findVarDecl nm gg
+      | _ -> findVarDecl nm gg
+
 let rec findFunOrFail nm gs = match findFun nm gs with
   None -> failwith ("findFun failed: " ^ nm)
 | Some f -> f
