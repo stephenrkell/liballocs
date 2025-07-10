@@ -44,7 +44,7 @@ DEPS := $(C_DEPS)
 
 $(C_DEPS): .%.d: %.c
 	$(CC) -MM $(CFLAGS) "$<" > "$@" || rm -f "$@"
-	
+
 -include $(DEPS)
 
 # We use the 'dynappend' tool to add a DT_DEBUG entry to our .dynamic section.
@@ -64,7 +64,7 @@ allocsld.so: LDFLAGS += -fuse-ld=bfd \
             -Wl,--spare-dynamic-tags,2 \
             -Wl,-soname=allocsld.so -Wl,-Bsymbolic \
             -L$(LIBSYSTRAP)/build/$(shell uname -m) -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
-allocsld.so: LDLIBS += -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
+allocsld.so: LDLIBS += -Wl,--exclude-libs=libsystrap.a:librunt_preload.a -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
 
 # FIXME: localize all global symbols except maybe _start?
 allocsld.so: allocsld.lds $(OBJS)
