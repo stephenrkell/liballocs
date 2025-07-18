@@ -96,7 +96,7 @@ ifneq ($(LIBALLOCS_USE_PRELOAD),no)
 export PRELOAD := "$(LIBALLOCS_LIB)"
 endif
 
-INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then printf "%s %s" -f mk.inc; else true; fi
+INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then printf "%s %s" -f mk.inc; else true; fi`
 
 default: checkall
 
