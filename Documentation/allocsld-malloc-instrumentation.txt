@@ -1,0 +1,83 @@
+allocsld now uses a Detours-style binary instrumentation to catch
+malloc-family calls happening early on.
+
+In future we may want to apply the same instrumentation elsewhere, in
+place of link-time instrumentation, e.g. because it works even if the
+binary was not linked with our linker plugin.
+
+This is a brief summary of how this works.
+
+- We map some memory (the "pre-mapping") immediately before the DSO
+containing the target function. For now, that's just the inferior ld.so.
+In order to generalise, we probably want to map some before every loaded
+DSO.
+
+- There are four pieces of text to consider. The original caller, the
+original callee, the detour function and the trampoline. The
+pre-instrumentation situation looks like this.
+
+  : original caller                                    ultimate callee
+  | ...         |                                      | malloc:     |
+  | call malloc |  --------------------------------->  | push %rbp   |
+  | ...         |  <---------------.                   : ...         :
+  :                                 '----------------  | ret         |
+                                                       |_____________|
+- Instrumentation clobbers the first N bytes of the target function
+prologue with a jump *direct to the detour function*. The clobbered
+bytes are written to the trampoline, which is used only to segue from
+the detour function to the original callee. That's normally done as a
+call, so control passes back to the detour function and from there to
+the original callee.
+
+
+  : original caller                                    ultimate callee
+  | ...         |                                      | malloc:     |
+  | call malloc |  --------------------------------->  | XXXsh %rbp -+-.
+  | ...         |  <--.                        .---->  : ...         : |
+  :                   |                        | .-<-  | ret         | |
+     .----------------'                        | |     |_____________|
+     |   .-------------------------------------+-+---------------------'
+     |   |   detour function   trampoline____  | |
+     |   |   |detour_malloc: .-> push %rbp   | | |
+     |   '-> | ...         | | | jmp --------+-' |
+     |       | call *%rdx -+-' |_____________|   |
+     |       | ...        <+---------------------'
+     |       | ret --------+-.
+     |       |_____________| |
+     '-----------------------'
+
+- The trampoline ("monopoline") is terminated by a direct jump to the
+first non-clobbered instruction in the original callee. (The name arose
+as I thought about a polymorphic trampoline that takes its callee from a
+thread-local. The concept flawed though: the clobbered instructions are
+specific to the originally instrumented callee, so the trampoline really
+is tailored to that one function.)
+
+- The detour function is written in C and is like any other malloc
+wrapper. It is generated using libmallochooks. Its __terminal_hook_*
+calls out into the original function, incidentally by an indirect call.
+But weirdly we  generate it using terminal-hooks-direct.c, because we have
+a bespoke approach to keeping the orig_* pointers. So we #define the
+callee expression as "(*orig_malloc)" or whatever, but in the
+surrounding macroised code it looks like a direct call. Specifically,
+the __terminal_hook_* code is generated in allocsld/allocinstr.c like
+this.
+
+#undef MALLOC_PREFIX
+#define MALLOC_PREFIX(s) (*orig_##s)
+#undef HOOK_PREFIX /* terminal-direct will define this itself */
+#undef MALLOC_LINKAGE
+#define MALLOC_LINKAGE static
+#include "../src/terminal-direct.c"
+
+- Where does this orig_* function pointer get initialized? Rather
+obscurely, it happens at the following line of code in allocinstr.c
+(write_monopoline_and_detour).
+
+	*(void**) detour_func_orig_callee_slot = trampoline_buf;
+
+... i.e. we have taken the address of the orig_ function pointer, and
+here we update that pointer by an indirect store. The address we write
+into it is just the trampoline buffer address. This is the buffer into
+which we wrote the displaced instruction bytes followed by a jump to the
+first non-displaced instruction.
