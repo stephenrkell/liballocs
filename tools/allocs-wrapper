@@ -46,8 +46,9 @@ case "$0" in
     ;;
 esac
 
-# source the wrapper funcs
-. "${WRAPPER_FUNCS:-${TOOLSUB}/wrapper/lib/wrapper-funcs.sh}"
+# We care about certain arguments, because our subordinate tools
+# (cilpp, etc) want us to parse the command line on their behalf.
+
 
 my_cc () {
     # Run the compiler. We force debugging information to be generated.
@@ -65,14 +66,25 @@ my_cc () {
         (*) true ;;
     esac; done
     echo "CC_DRIVER is $CC_DRIVER" 1>&2
-    echo $CC_DRIVER "$@" -g3 -ggdb -fno-eliminate-unused-debug-types 1>&2
-    $CC_DRIVER "$@" -g3 -ggdb -fno-eliminate-unused-debug-types 1>&2
+    echo $CC_DRIVER "$@" -g3 -ggdb -gdwarf-4 -fno-eliminate-unused-debug-types 1>&2
+    $CC_DRIVER "$@" -g3 -ggdb -gdwarf-4 -fno-eliminate-unused-debug-types 1>&2
     status=$?
     # FIXME: if we forced the generation of debug info, append a .note section
     # to the output file (or if it's '-', write to stdout)
     if ! [[ $status -eq 0 ]]; then return $status; else true; fi
 }
 export CC=my_cc
+
+# source cilpp's wrapper funcs, which will source the main wrapper funcs
+. "${WRAPPER_FUNCS:-${TOOLSUB}/cilpp/bin/wrapper}"
+# override cilpp's default CPP 
+export CPP="$TOOLSUB/cilpp/bin/cilpp -real-cpp \"$CC_DRIVER -E\" \
+  -plugin ${LIBALLOCS}/tools/lang/c/cilallocs/cilallocs.cmxs \
+  -plugin ${LIBALLOCS}/tools/lang/c/monalloca/monalloca.cmxs -fpass-monalloca \
+  -plugin ${LIBALLOCS}/tools/lang/c/dumpallocs/dumpallocs.cmxs -fpass-dumpallocs \
+  -include ${LIBALLOCS}/include/liballocs_cil_inlines.h"
+# XXX: keep the -include *after* the -plugin, or the stupid cilpp arg-parsing logic will
+# bail after seeing an "-include" that it does not understand.
 
 # we wrap 'as' so that if it's a C source file -- check from .debug_info? --
 # the resulting object gets objcopy_and_redefine_c_names'd
@@ -105,55 +117,6 @@ my_as () {
     status=$?
     # FIXME: perhaps this rewrite should be done after cc1, not after the assembly,
     # to avoid the hacky test for C-derived assembly.
-    #
-    # FIXME: can we eliminate the typename fixup pass?
-    # Is there a way we can use funky introspection, maybe _Generic, to directly
-    # generate the correct typenames? Problem is whether this can work even with
-    # old C standards that we want to support... ACTUALLY it seems to work!
-    # The more annoying problem is that we need to include stdint.h which may
-    # pollute the namespace.
-    #
-    # Even if that is not workable, maybe there is a way to do it with funky inline asm?
-    # The compiler does know the size of stuff, so if we can magic up an lvalue
-    # even just by a conditional expression (sizeof (int) == 4 ? &__uniqtype ... )
-    # then we are good. Exactly what is it that we don't know at compile time?
-    # If we can enumerate all the possible sizes of stuff, extern-declare uniqtypes
-    # for them all, then only use the ones that actually apply, we will be sorted.
-    # Need to ensure dollars-in-identifiers.
-    # ARGH. The main problem is that we need to be able to build compound type names
-    # like __uniqtype____FUN_FROM_int$$64__FUN_TO_int$$32.
-    # Still maybe we can predefine BASETYPESTR_INT "int$$32". Oh, but defines don't
-    # help us.
-    #
-    # PERHAPS a better way to do it is as follows. Do a pre-pass over the preprocessor
-    # output to infer the size of base types from stuff like __SIZEOF_LONG__.
-    # Then ... WHAT? A second run through the preprocessor is not out of the question,
-    # but 
-    # Or maybe we can run the preprocessor -dM and then scrape the #define
-    # lines that we see? Can CIL grok this, or can we make it do so?
-    # I think doing so is the best bet, and would allow CIL to avoid Machdep
-    # except as a fallback.
-    #
-    # We still have to turn codeless into codeful uniqtypes. Why do we treat base
-    # types specially? Can we just scrap this entirely? If we have a function from
-    # struct S to struct T, we generate a uniqtype name that does not account for the
-    # difference.
-    #
-    # YES, try this. The only transformation we should need is codeless->codeful,
-    # which is not C-specific.
-    # HMM. Is this messing with our canonicalisation logic?
-    # We tend to treat all base type names as if they were a typedef
-    # of a 'true' unambiguous name [that uses '$']. And then we always write compound names
-    # in terms of the '$-containing non-typedefs. Will things break if we no longer have
-    # this canonicalisation in place? My 'struct' argument above suggests not.
-    # But hmm. So could we have distinct-identity uniqtypes for the same
-    # base type? Not from C code, because we normalise by name. We only split
-    # if the code is different. But with another lang where 32-bit signed
-    # integers  are called something else, what would happen? AH, no problem.
-    # Hmm, but on the generation side we need to be careful. And again the
-    # compound uniqtypes are likely to be the problem... real issue is when
-    # distinct symnames imply distinct identities. Our treatment of typedefs
-    # is already not perfect (see GitHub).
     if ! [[ $status -eq 0 ]]; then return $status; else
         for infile in "${as_infiles[@]}"; do
             if asm_infile_is_from_c_source "${infile}" ; then
