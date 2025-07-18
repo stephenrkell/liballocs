@@ -47,8 +47,9 @@ export LIBALLOCS_BUILD
 # these are HACKs! Need more robust liballocs interface
 export LIBRUNT # needed by stubgen.h in allocscompilerwrapper.py
 export ELFTIN # needed by allocscompilerwrapper.py
+export TOOLSUB
 
-CC := $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
+CC ?= $(realpath $(dir $(THIS_MAKEFILE))/../tools/lang/c/bin/allocscc)
 #CC := cc
 META_CC := cc
 #CFLAGS += $(shell $(realpath $(dir $(THIS_MAKEFILE)))/../tools/allocs-cflags)
@@ -95,7 +96,7 @@ ifneq ($(LIBALLOCS_USE_PRELOAD),no)
 export PRELOAD := "$(LIBALLOCS_LIB)"
 endif
 
-INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then /bin/echo -f mk.inc; else true; fi`
+INCLUDE_MK_INC = `if test -e $(dir $(realpath $(THIS_MAKEFILE)))/$*/mk.inc; then printf "%s %s" -f mk.inc; else true; fi`
 
 default: checkall
 
