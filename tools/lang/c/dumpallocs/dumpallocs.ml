@@ -858,7 +858,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
 end (* class dumpAllocsVisitor *)
 
 let addAsm (fl: Cil.file) (contents: string): unit =
-   fl.globals <- GAsm (".pushsection .allocs_srcallocs,\"a\",@progbits\n\t.asciz \""
+   fl.globals <- GAsm (".pushsection .allocs_srcallocs,\"a\",@progbits\n\t.ascii \""
     ^ (Escape.escape_string contents) ^ "\"\n\t.popsection\n", locUnknown) :: fl.globals
 
 let feature : Feature.t = 
