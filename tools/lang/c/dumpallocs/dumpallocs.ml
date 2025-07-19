@@ -547,19 +547,6 @@ let rec getAllocExpr (i: instr) (maybeFun: varinfo option) (arglist: exp list) e
   in 
   getUserAllocExpr i maybeFunName arglist env (allAllocFunctions ()) calledFunctionType gs
 
-(* I so do not understand Pretty.dprintf *)
-let printAllocFn fileAndLine chan maybeFunvar allocType mightBeArrayOfThis = 
-   (* debug_print 1 ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
-   output_string chan fileAndLine;
-   let targetFunc = match maybeFunvar with 
-     Some(funvar) -> Pretty.sprint 80 
-       (Pretty.dprintf  "\t%a\t"
-            d_lval (Var(funvar), NoOffset)) 
-   | None -> "\t(indirect)\t"
-   in
-   output_string chan (targetFunc ^ allocType ^ "\t" ^ (if mightBeArrayOfThis then "1" else "0") ^ "\n");
-   flush chan
-
 (* What we do is:
    - an intraprocedural analysis
    - each SSA local is labelled with Maybe sizeExpr
@@ -689,7 +676,23 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
       end 
       with _ ->
         raise (Arg.Bad ("Cannot open file " ^ allocFileName))
-   
+
+  (* I so do not understand Pretty.dprintf *)
+  method printAllocFn fileAndLine maybeFunvar allocType mightBeArrayOfThis = 
+     (* debug_print 1 ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
+     let chan = match !outChannel with
+      | Some(s) -> s
+      | None    -> Pervasives.stderr
+     in
+     output_string chan fileAndLine;
+     let targetFunc = match maybeFunvar with 
+       Some(funvar) -> Pretty.sprint 80 
+         (Pretty.dprintf  "\t%a\t"
+              d_lval (Var(funvar), NoOffset)) 
+     | None -> "\t(indirect)\t"
+     in
+     output_string chan (targetFunc ^ allocType ^ "\t" ^ (if mightBeArrayOfThis then "1" else "0") ^ "\n");
+     flush chan
 
   method vfunc (f: fundec) : fundec visitAction = 
     Cil.prepareCFG(f);
@@ -792,10 +795,6 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
               for that header).
             *)
             (* (debug_print 1 ("processing a function " ^ v.vname ^ "\n"); *)
-            let chan = match !outChannel with
-             | Some(s) -> s
-             | None    -> Pervasives.stderr
-            in
             let fileAndLine = l.file ^ "\t" ^ (string_of_int l.line) ^ "\t" ^ (string_of_int l.line)
             in
             begin
@@ -821,7 +820,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
                     ("__uniqtype____uninterpreted_byte", true)
               in
               instrsToLabel := (i, [Attr("allocstmt", [AStr(allocString)])]) :: !instrsToLabel;
-              printAllocFn fileAndLine chan maybeFunvar allocString isComplete;
+              self#printAllocFn fileAndLine maybeFunvar allocString isComplete;
               SkipChildren
               end
             end (* ) *)
@@ -862,7 +861,7 @@ let feature : Feature.t =
       let daVisitor = new dumpAllocsVisitor f in
       (* Cfg.computeFileCFG f;
       computeAEs f; *)
-      visitCilFileSameGlobals daVisitor f);
+      visitCilFileSameGlobals (daVisitor :> cilVisitor) f);
     fd_post_check = true;
   } 
 
