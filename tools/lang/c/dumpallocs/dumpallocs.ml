@@ -666,6 +666,10 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
   (* the mapping of local variables to their sizeofness *)
   val sizeEnv : (int * sz) list ref = ref []
   
+  (* We build a big string of all our output. *)
+  val collectedOutput : string ref = ref ""
+  method getCollectedOutput = !collectedOutput
+  
   (* at construction time, open the output file *)
   initializer 
     let allocFileName = fl.fileName ^ ".allocs" in
@@ -677,7 +681,6 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
       with _ ->
         raise (Arg.Bad ("Cannot open file " ^ allocFileName))
 
-  (* I so do not understand Pretty.dprintf *)
   method printAllocFn fileAndLine maybeFunvar allocType mightBeArrayOfThis = 
      (* debug_print 1 ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
      let chan = match !outChannel with
@@ -686,13 +689,16 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
      in
      output_string chan fileAndLine;
      let targetFunc = match maybeFunvar with 
-       Some(funvar) -> Pretty.sprint 80 
+       Some(funvar) -> Pretty.sprint 80 (* I so do not understand Pretty.dprintf *)
          (Pretty.dprintf  "\t%a\t"
               d_lval (Var(funvar), NoOffset)) 
      | None -> "\t(indirect)\t"
      in
-     output_string chan (targetFunc ^ allocType ^ "\t" ^ (if mightBeArrayOfThis then "1" else "0") ^ "\n");
-     flush chan
+     let theString = (targetFunc ^ allocType ^ "\t" ^ (if mightBeArrayOfThis then "1" else "0") ^ "\n")
+     in
+     output_string chan theString;
+     flush chan;
+     collectedOutput := !collectedOutput ^ theString
 
   method vfunc (f: fundec) : fundec visitAction = 
     Cil.prepareCFG(f);
@@ -851,6 +857,10 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
    (* ) *)
 end (* class dumpAllocsVisitor *)
 
+let addAsm (fl: Cil.file) (contents: string): unit =
+   fl.globals <- GAsm (".pushsection .allocs_srcallocs,\"a\",@progbits\n\t.asciz \""
+    ^ (Escape.escape_string contents) ^ "\"\n\t.popsection\n", locUnknown) :: fl.globals
+
 let feature : Feature.t = 
   { fd_name = "dumpallocs";
     fd_enabled = false;
@@ -861,7 +871,9 @@ let feature : Feature.t =
       let daVisitor = new dumpAllocsVisitor f in
       (* Cfg.computeFileCFG f;
       computeAEs f; *)
-      visitCilFileSameGlobals (daVisitor :> cilVisitor) f);
+      visitCilFileSameGlobals (daVisitor :> cilVisitor) f;
+      addAsm f (daVisitor#getCollectedOutput)
+    );
     fd_post_check = true;
   } 
 
