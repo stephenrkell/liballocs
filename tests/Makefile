@@ -195,30 +195,30 @@ _onlyrrrun-%:
 	$(RR) record env LD_PRELOAD="$(PRELOAD)" ./$* ./$*
 
 build-%:
-	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" 
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*"
 
 run-%:
-	$(MAKE) build-$* && ( $(MAKE) -C "$*" $(INCLUDE_MK_INC) -f ../Makefile _onlyrun-$* )
+	$(MAKE) build-$* && ( $(MAKE) -C "$*" -f ../Makefile $(INCLUDE_MK_INC) _onlyrun-$* )
 
 cleanbuild-%:
-	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && \
-	$(MAKE) build-$* 
+	$(MAKE) -C $* -f ../Makefile $(INCLUDE_MK_INC) clean && \
+	$(MAKE) build-$*
 
-cleanrun-%: 
-	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && \
+cleanrun-%:
+	$(MAKE) -C $* -f ../Makefile $(INCLUDE_MK_INC) clean && \
 	$(MAKE) run-$*
 
 gdbrun-%: # run the test case with itself as input
-	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( cd "$*" && $(MAKE) $(INCLUDE_MK_INC) -f ../Makefile _onlygdbrun-$* )
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( cd "$*" && $(MAKE) -f ../Makefile $(INCLUDE_MK_INC) _onlygdbrun-$* )
 
 rrrun-%: # run the test case with itself as input
-	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( cd "$*" && $(MAKE) $(INCLUDE_MK_INC) -f ../Makefile _onlyrrrun-$* )
+	$(MAKE) -C "$*" $(INCLUDE_MK_INC) "$*" && ( cd "$*" && $(MAKE) -f ../Makefile $(INCLUDE_MK_INC) _onlyrrrun-$* )
 
 gdbcleanrun-%:
-	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && $(MAKE) gdbrun-$*
+	$(MAKE) -C $* -f ../Makefile $(INCLUDE_MK_INC) clean && $(MAKE) gdbrun-$*
 
 rrcleanrun-%:
-	$(MAKE) -C $* $(INCLUDE_MK_INC) -f ../Makefile clean && $(MAKE) rrrun-$*
+	$(MAKE) -C $* -f ../Makefile $(INCLUDE_MK_INC) clean && $(MAKE) rrrun-$*
 
 clean-%:
 	$(MAKE) -C "$*" $(INCLUDE_MK_INC) -f $(realpath $(THIS_MAKEFILE)) clean
