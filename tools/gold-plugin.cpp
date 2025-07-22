@@ -857,19 +857,32 @@ public:
 #endif
 			boost::filesystem::path output_path(job->output_file_name);
 			int ret;
-			char *cwd = get_current_dir_name();
+			/* stat the output file. If the link failed, we will still be
+			 * called, but we should not do anything. */
+			struct stat dummy;
+			ret = stat(output_path.string().c_str(), &dummy);
+			if (ret != 0) return;
 			// sanity check: list the output file, to check it exists
 			// ret = system((string("ls -l ") + output_path.string()).c_str());
 			// assert(ret == 0);
 			// (it does)
+
+			char *cwd = get_current_dir_name();
 			ret = system((string("${MAKE:-make} -f ${LIBALLOCS}/tools/Makefile.meta ")
 				+ (boost::filesystem::path(META_BASE) /
 					(output_path.is_relative()
 					? boost::filesystem::path(cwd) / output_path
 					: output_path)).string() + "-meta.so").c_str()); // FIXME: quoting
+			// FIXME: typical use cases will carry LDFLAGS in the environment and these
+			// flow into this Makefile invocation, s.t. we (the gold plugin) will run again
+			// when linking the -meta.so, in turn trying to create a -meta.so-meta.so, and
+			// so on. Currently the cycle gets broken because /usr/lib/meta/usr/lib/meta
+			// probably does not exist, so this inner link fails. However, we should not
+			// rely on this... need somehow to remove ourselves from the toolchain.
 			if (cwd) free(cwd);
 		}
 		/* call parent destructor */
+		// FIXME: why does this segfault?
 		//this->linker_plugin::~linker_plugin();
 	}
 };
