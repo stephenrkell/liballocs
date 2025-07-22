@@ -22,6 +22,38 @@ esac
 
 test -n "$cu_compdir" || (echo "args: <sourcepath> <obj> <cu_fname> <cu_compdir>" 1>&2; false) || exit 1
 
+# XXX: we expect to find the metadata file in the same directory as the
+# source file, but that's not sensible because not all codebases build in-tree.
+# Why not use the output filename? i.e. the .o file. The problem is that we
+# don't know it. We are running on a linked binary (this script: one CU at a
+# time of a linked binary -- outer loop in gather-srcallocs) so don't have sight
+# of the .o files that went into the link. In principle they might not exist any
+# more, or never have existed. We could make dumpallocs output to an .i.allocs
+# file in whatever the cpp output dir is. But how would we find it from this
+# script? HMM.
+# Q. If we build in a tree separate from the source dir, how does
+# DW_AT_comp_dir come out, and how does the DW_AT_name of the CU relate to that?
+# A. As two absolute paths. And they may not be canonicalised, e.g.
+# DW_AT_name /var/local/stephen/work/devel/librunt.git/src/..//src/sections.c
+# DW_AT_comp_dir /home/stephen/work/devel/librunt.git/build/debug-x86_64
+#
+# Some ideas:
+# - Take the link map as input to this tool, then find via the .o files. Requires
+#   that we generated a map. How do we need to modify dumpallocs? It needs an output filenamae.
+# - Bundle the .i.allocs info into the .o file, maybe by assembler intervention, then
+#   let the linker concatenate them and pull the data out at the end, stripping the section somehow.
+# - Let dumpallocs output to a .i.allocs alongside its output, but have the wrapper script
+#   move it somewhere if it knows that the output is going to be compiled to .o or .s. Then we would
+#   eventually find it... where? If we accept an extra optional argument, for the .o file, then
+#   gather-srcallocs could look there *additionally*. This is more complex though. :-(
+#   Remember the use case where allocation sites are annotated manually, so the .i.allocs in the
+#   source tree is not silly.
+#   Since this is complex, want to write down some rules. I think we have:
+#     For any linked binary B, .i.allocs files are searched:
+#        - in the s/.o/.i.allocs/ files mentioned in its link map (all languages?);
+#        - in the s/.c/.i.allocs/ files mentioned in its C-language DWARF CUs
+#     In a normal link, cilpp/dumpallocs will write alongside a temporary .i file,
+#     and the wrapper script will move this to alongside the (eventual) .o file.
 cu_allocspath="$( echo "$cu_sourcepath" | grep '\.cil\.[ci]$' | sed "s/\.cil\.[ci]/.i.$extension/" )"
 
 # If we're using clang instead of CIL then the source path will just be '%.c',
@@ -35,18 +67,5 @@ echo "Warning: cu_allocspath is $cu_allocspath" 1>&2
 if [[ ! -r "$cu_allocspath" ]]; then
     echo "Warning: missing expected allocs file ($cu_allocspath) for source file: $cu_sourcepath" 1>&2
 else
-    # we need to sed its symnames
-    cat "$cu_allocspath" | \
-    while read fname rest; do
-        # if the filename is relative, it's relative to the compilation directory.
-        # prepend the full path *as the compiler saw it*, i.e. cu_compdir.
-        case "$fname" in
-            ('/'*)
-                echo "$fname"$'\t'"$rest"
-                ;;
-            (*)
-                echo "$cu_compdir"/"$fname"$'\t'"$rest"
-                ;;
-        esac
-    done | translate_symnames "$obj" "$cu_fname" "$cu_compdir"
+    cat "$cu_allocspath"
 fi

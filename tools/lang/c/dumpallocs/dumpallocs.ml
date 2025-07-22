@@ -687,17 +687,14 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
       | Some(s) -> s
       | None    -> Pervasives.stderr
      in
-     output_string chan fileAndLine;
      let targetFunc = match maybeFunvar with 
        Some(funvar) -> Pretty.sprint 80 (* I so do not understand Pretty.dprintf *)
-         (Pretty.dprintf  "\t%a\t"
-              d_lval (Var(funvar), NoOffset)) 
-     | None -> "\t(indirect)\t"
+         (Pretty.dprintf  "%a" d_lval (Var(funvar), NoOffset))
+     | None -> "(indirect)"
      in
-     let theString = (targetFunc ^ allocType ^ "\t" ^ (if mightBeArrayOfThis then "1" else "0") ^ "\n")
+     let theString = (fileAndLine ^ "\t" ^ targetFunc ^ "\t" ^ allocType ^ "\t" ^ (if mightBeArrayOfThis then "1" else "0") ^ "\n")
      in
-     output_string chan theString;
-     flush chan;
+     output_string chan theString; flush chan;
      collectedOutput := !collectedOutput ^ theString
 
   method vfunc (f: fundec) : fundec visitAction = 
