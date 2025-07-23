@@ -148,14 +148,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # do we need to unbind? 
         with (self.makeErrFile(os.path.realpath(filename) + ".fixuplog", "w+") if not errfile else errfile) as errfile:
 
-            # also link the file with the uniqtypes it references
-            linkUsedTypesCmd = [self.getLibAllocsBaseDir() + "/tools/lang/c/bin/link-used-types", filename]
-            self.debugMsg("Calling " + " ".join(linkUsedTypesCmd) + "\n")
-            ret = subprocess.call(linkUsedTypesCmd, stderr=errfile)
-            if ret != 0:
-                self.printErrors(errfile)
-                return ret  # give up now
-
             # Now deal with globalizing wrapped functions
             self.debugMsg("Looking for wrapped functions that need globalizing\n")
             # grep for local symbols -- a lower-case letter after the symname is the giveaway
@@ -214,6 +206,13 @@ class AllocsCompilerWrapper(CompilerWrapper):
     def getStubGenHeaderPath(self):
         return self.getLibAllocsBaseDir() + "/tools/stubgen.h"
 
+    def getUsedtypesCompileArgs(self):
+        if "LIBALLOCSTOOL" in os.environ:
+            liballocstool_include_dir = os.environ["LIBALLOCSTOOL"] + "/include"
+        else:
+            liballocstool_include_dir = self.getLibAllocsBaseDir() + "/contrib/liballocstool/include"
+        return ["-I" + liballocstool_include_dir]
+
     def getStubGenCompileArgs(self):
         if "LIBRUNT" in os.environ:
             runt_include_dir = os.environ["LIBRUNT"] + "/include"
@@ -223,12 +222,8 @@ class AllocsCompilerWrapper(CompilerWrapper):
             mallochooks_include_dir = os.environ["LIBMALLOCHOOKS"] + "/include"
         else:
             mallochooks_include_dir = self.getLibAllocsBaseDir() + "/contrib/libmallochooks/include"
-        if "LIBALLOCSTOOL" in os.environ:
-            liballocstool_include_dir = os.environ["LIBALLOCSTOOL"] + "/include"
-        else:
-            liballocstool_include_dir = self.getLibAllocsBaseDir() + "/contrib/liballocstool/include"
-        return ["-I" + runt_include_dir, "-I", liballocstool_include_dir, \
-                "-I" + mallochooks_include_dir] #"-DRELF_DEFINE_STRUCTURES", \
+        return ["-I" + runt_include_dir] + self.getUsedtypesCompileArgs() + \
+               ["-I" + mallochooks_include_dir] #"-DRELF_DEFINE_STRUCTURES", \
 
     def generateAllocatorMods(self, linkedRelocFilename, errfile):
         # make a temporary file for the stubs
@@ -679,6 +674,28 @@ class AllocsCompilerWrapper(CompilerWrapper):
             ret = self.runCompiler(allArgs, {FAKE_RELOC_LINK})
             if ret != 0:
                 return ret
+            # also link the file with the uniqtypes it references
+            usedTypesFileName = self.getOutputFilename(Phase.LINK) + ".usedtypes.c"
+            usedTypesFile = open(usedTypesFileName, "w")
+            usedTypesCmd = [self.getLibAllocsBaseDir() + "/tools/usedtypes", relocFilename]
+            self.debugMsg("Calling " + " ".join(usedTypesCmd) + "\n")
+            try:
+                outp = subprocess.call(usedTypesCmd, stdout=usedTypesFile)
+            except subprocess.CalledProcessError as e:
+                self.debugMsg("Could not generate usedtypes file %s: usedtypes returned %d and said %s\n" \
+                    % (usedTypesFileName, e.returncode, str(e.output)))
+            usedTypesObjFileName = self.getOutputFilename(Phase.LINK) + ".usedtypes.o"
+            usedTypesCcCmd = self.getPlainCCompilerCommand() + self.getUsedtypesCompileArgs() + \
+                ["-std=c11"] + [usedTypesFileName] + ["-c", "-o", usedTypesObjFileName]
+            self.debugMsg("Calling " + " ".join(usedTypesCcCmd) + "\n")
+            try:
+                outp = subprocess.check_output(usedTypesCcCmd)
+            except subprocess.CalledProcessError as e:
+                self.debugMsg("Could not generate usedtypes object file %s: compiler returned %d and said %s\n" \
+                    % (usedTypesObjFileName, e.returncode, str(e.output)))
+            libroottypesAFileName = self.getLibAllocsBaseDir() + "/tools/libroottypes.a"
+            finalLinkArgsSavedForEnd += [usedTypesObjFileName, libroottypesAFileName]
+
             # Q. what did this fixup step do? A. For any defined allocator function `malloc', append
             #  -Wl,--defsym,malloc=__wrap___real_malloc
             #  -Wl,--wrap,__real_malloc
