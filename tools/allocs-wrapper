@@ -77,11 +77,15 @@ export CC=my_cc
 
 # source cilpp's wrapper funcs, which will source the main wrapper funcs
 . "${WRAPPER_FUNCS:-${TOOLSUB}/cilpp/bin/wrapper}"
-# override cilpp's default CPP 
+# override cilpp's default CPP.
+# NOTE: "dumpallocs" must appear before "monalloca" because it will only
+# see the sizeof flowing into alloca() *before* the monalloca rewrite... after
+# that, it gets laundered via a __liballocs_alloca_size() helper. We need that
+# interprocedural approach to sizeofness in order to be robust to such transformations....
 export CPP="$TOOLSUB/cilpp/bin/cilpp -real-cpp \"$CC_DRIVER -E\" \
   -plugin ${LIBALLOCS}/tools/lang/c/cilallocs/cilallocs.cmxs \
-  -plugin ${LIBALLOCS}/tools/lang/c/monalloca/monalloca.cmxs -fpass-monalloca \
   -plugin ${LIBALLOCS}/tools/lang/c/dumpallocs/dumpallocs.cmxs -fpass-dumpallocs \
+  -plugin ${LIBALLOCS}/tools/lang/c/monalloca/monalloca.cmxs -fpass-monalloca \
   -include ${LIBALLOCS}/include/liballocs_cil_inlines.h"
 # XXX: keep the -include *after* the -plugin, or the stupid cilpp arg-parsing logic will
 # bail after seeing an "-include" that it does not understand.
