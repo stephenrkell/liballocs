@@ -11,9 +11,9 @@ CIL_TOOLS ?= cilallocs dumpallocs monalloca dumpmemacc trapptrwrites
 OCAMLFLAGS +=  -package findlib
 OCAMLFLAGS += -I $(CIL_INSTALL)/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
 
-CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) $(realpath $(dir $(THIS_MAKEFILE)))/lib -name '*.ml') 
+CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) $(realpath $(dir $(THIS_MAKEFILE)))/lib -name '*.ml')
 
-default: src bin $(foreach t,$(CIL_TOOLS),$(t)/$(t).cmxs $(t)/$(t).cma)
+default: $(foreach t,$(CIL_TOOLS),$(t)/$(t).cmxs $(t)/$(t).cma)
 
 OCAML_DEPS := $(patsubst %.ml,%.d,$(CIL_TOOLS_SRC))
 
@@ -23,7 +23,7 @@ $(OCAML_DEPS): %.d: %.ml
 DEPS += $(OCAML_DEPS)
 -include $(DEPS)
 
-%.cmxs: %.cmx 
+%.cmxs: %.cmx
 	$(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
 %.cmx %.cmi: %.ml
 	$(OCAMLFIND) ocamlopt -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) -c "$<"
@@ -47,12 +47,3 @@ monalloca/monalloca.cmo: cilallocs/cilallocs.cmo
 .PHONY: clean
 clean:
 	for dir in $(CIL_TOOLS); do (cd $$dir && rm -f *.o *.cmo *.cma *.cmi *.cmx *.cmxa *.cmxs *.cil.c *.i ); done
-	$(MAKE) -C src clean
-
-.PHONY: src
-src: 
-	$(MAKE) -C src
-
-.PHONY: bin
-bin: src
-	cd bin && ln -sf ../src/base-types-translation .

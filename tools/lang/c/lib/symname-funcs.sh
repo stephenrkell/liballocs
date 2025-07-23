@@ -21,7 +21,7 @@ translate_symnames() {
     # We want to select out only a certain CU, if the caller asks. 
     # That's because we might be being run on a whole binary
     # (from c-gather-srcallocs)
-    # or on a single relocatable file (link-used-types).
+    # or on a single relocatable file (usedtypes).
     cu_fname="$2"
     cu_compdir="$3"
     

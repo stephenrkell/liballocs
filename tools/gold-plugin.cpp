@@ -3,7 +3,7 @@
  * Copyright 2017, 2022 Stephen Kell <stephen.kell@cl.cam.ac.uk>
  * 
  * This replaces various logic of allocscompilerwrapper.py:
- * - calling link-used-types to generate uniqtypes
+ * - calling usedtypes to generate uniqtypes
  * - allocator instrumentation (generateAllocatorMods)
  * - globalizing any allocator functions that are currently local symbols
         (named by a dwarfidl-esque pathname?
@@ -211,7 +211,6 @@ public:
 		//         -- this needs to be a separate pass over .o files generated from C compilation jobs
 		//         -- is this easy to do with toolsub?
 		//            we can even perhaps *assume* we're compiling C, in a -cflags
-		//    ... the logic is just objcopy_and_redefine_c_names from tools/lang/c/bin/link-used-types
 		//    ... one problem with current handling is that it breaks e.g. if a struct is named
 		//        'unsigned_long' etc.
 		// 0. generate+add the usedtypes file. Input: list of undefined __uniqtype_* symbols

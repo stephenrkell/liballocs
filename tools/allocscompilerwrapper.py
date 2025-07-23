@@ -620,7 +620,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
             # FIXME: I no longer understand this. Try deleting it / see what happens
             finalLinkArgs += ["-Wl,--export-dynamic"]
             # ANSWER: it breaks uniqtype uniquing, because in-exe uniqtypes
-            # (put into .o files by usedtypes / link-used-types) really need to be export-dynamic'd.
+            # (put into .o files by usedtypes) really need to be export-dynamic'd.
             # We should really do all this at link time,
             # allowing us to be selective about what gets export-dynamic'd.
             leftishLinkArgs, rightishLinkArgs = self.getLiballocsLinkArgs()
