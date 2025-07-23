@@ -93,6 +93,7 @@ cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
             (*) # unknown
                 echo "Warning: could not gather source-level allocs for unknown language: $cu_language_fullstr ($cu_language_num, $( echo -n "$cu_language_fullstr" | hd ))" 1>&2
             ;;
-        esac | rewrite_relative_src_filenames | translate_symnames "$obj" "$cu_fname" "$cu_compdir"
+        esac
     done
+    echo "$embedded_info"
 done | pad_numbers | sort -t$'\t' -k1 -k2 | uniq        #use_src_realpaths | 

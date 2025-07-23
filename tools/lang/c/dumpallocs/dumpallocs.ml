@@ -798,7 +798,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
               for that header).
             *)
             (* (debug_print 1 ("processing a function " ^ v.vname ^ "\n"); *)
-            let fileAndLine = l.file ^ "\t" ^ (string_of_int l.line) ^ "\t" ^ (string_of_int l.line)
+            let fileAndLine = (abspath l.file) ^ "\t" ^ (string_of_int l.line) ^ "\t" ^ (string_of_int l.line)
             in
             begin
               (* Here we need to identify the size argument and

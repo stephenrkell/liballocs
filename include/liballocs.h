@@ -121,42 +121,43 @@ void *__liballocs_my_metaobj(void);
  * So they go in a nasty .a, and the -lallocs .so is a linker script.
  * That way, an executable linking -lallocs will get them, together with
  * a reference to the liballocs .so. The .so does not define them.
+ *
+ * The linkage names for these depend on their bit size. We can't know this
+ * portably in source code, but the preprocessor should know the byte size already.
+ * To get the bit size from the byte size, we use a look-up table.
+ *
+ * We use the canonical source name as given by libcxxgen/src/cxx_compiler.cpp -- the first
+ * member of each equivalence class. We could define the full set of aliases if we wanted,
+ * assuming the compiler is happy to generate aliases with its '__asm__' label feature.
+ *
  */
+#define BITS_STRING_CAT(tok1, tok2) tok1 ## tok2 /* extra indirection, working around how '##' inhibits expansion... */
+#define BITS_STRING(nbytes) BITS_STRING_CAT(BITS_STRING_, nbytes) /* ... i.e. it wouldn't work to just '##' in here */
+#define BITS_STRING_1 "8"
+#define BITS_STRING_2 "16"
+#define BITS_STRING_4 "32"
+#define BITS_STRING_8 "64"
+#define BITS_STRING_16 "128"
 
-extern struct uniqtype __uniqtype__void/* __attribute__((weak))*/;
-extern struct uniqtype __uniqtype__int/* __attribute__((weak))*/;
-extern struct uniqtype __uniqtype__unsigned_int/* __attribute__((weak))*/;
-extern struct uniqtype __uniqtype__signed_char/* __attribute__((weak))*/;
-extern struct uniqtype __uniqtype__unsigned_char/* __attribute__((weak))*/;
-extern struct uniqtype __uniqtype____FUN_FROM___FUN_TO_uint$64 /* __attribute__((weak))*/;
+extern struct uniqtype __uniqtype__void;
+extern struct uniqtype __uniqtype__int                           __asm__("__uniqtype__int$$" BITS_STRING(__SIZEOF_INT__));
+extern struct uniqtype __uniqtype__unsigned_int                  __asm__("__uniqtype__unsigned_int$$" BITS_STRING(__SIZEOF_INT__));
+extern struct uniqtype __uniqtype__signed_char                   __asm__("__uniqtype__signed_char$$8");
+extern struct uniqtype __uniqtype__unsigned_char                 __asm__("__uniqtype__unsigned_char$$8");
+extern struct uniqtype __uniqtype____FUN_FROM___FUN_TO_uint$$64;
 // #pragma 
 #define __liballocs_uniqtype_of_typeless_functions __uniqtype____FUN_FROM___FUN_TO_uint$64
-extern struct uniqtype __uniqtype__long_int;
-extern struct uniqtype __uniqtype__unsigned_long_int;
-extern struct uniqtype __uniqtype__short_int;
-extern struct uniqtype __uniqtype__short_unsigned_int;
+extern struct uniqtype __uniqtype__long_int                      __asm__("__uniqtype__long_int$$" BITS_STRING(__SIZEOF_LONG__));
+extern struct uniqtype __uniqtype__unsigned_long_int             __asm__("__uniqtype__long_unsigned_int$$" BITS_STRING(__SIZEOF_LONG__));
+extern struct uniqtype __uniqtype__short_int                     __asm__("__uniqtype__short_int$$" BITS_STRING(__SIZEOF_SHORT__));
+extern struct uniqtype __uniqtype__short_unsigned_int            __asm__("__uniqtype__short_unsigned_int$$" BITS_STRING(__SIZEOF_SHORT__));
 extern struct uniqtype __uniqtype____PTR_void;
-extern struct uniqtype __uniqtype____PTR_signed_char;
-extern struct uniqtype __uniqtype__float;
-extern struct uniqtype __uniqtype__double;
+extern struct uniqtype __uniqtype____PTR_signed_char             __asm__("__uniqtype__unsigned_char$$8");
+extern struct uniqtype __uniqtype__float                         __asm__("__uniqtype__float" BITS_STRING(__SIZEOF_FLOAT__));
+extern struct uniqtype __uniqtype__double                        __asm__("__uniqtype__double" BITS_STRING(__SIZEOF_DOUBLE__));
 
-#ifdef __GNUC__ /* HACK. FIXME: why do we need this? maybe libfootprints uses them? */
-extern struct uniqtype __uniqtype__float$32;
-extern struct uniqtype __uniqtype__float$64;
-extern struct uniqtype __uniqtype__int$16;
-extern struct uniqtype __uniqtype__int$32;
-extern struct uniqtype __uniqtype__int$64;
-extern struct uniqtype __uniqtype__uint$16;
-extern struct uniqtype __uniqtype__uint$32;
-extern struct uniqtype __uniqtype__uint$64;
-extern struct uniqtype __uniqtype__signed_char$8;
-extern struct uniqtype __uniqtype__unsigned_char$8;
-extern struct uniqtype __uniqtype____PTR_int$32;
-extern struct uniqtype __uniqtype____PTR_int$64;
-extern struct uniqtype __uniqtype____PTR_uint$32;
-extern struct uniqtype __uniqtype____PTR_uint$64;
-extern struct uniqtype __uniqtype____PTR_signed_char$8;
-#endif
+extern struct uniqtype __uniqtype__signed_char$$8;
+extern struct uniqtype __uniqtype__unsigned_char$$8;
 
 struct liballocs_err
 {
