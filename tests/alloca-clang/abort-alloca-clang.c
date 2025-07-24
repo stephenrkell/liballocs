@@ -2,6 +2,7 @@
  * with GCC won't lex them as Clang needs (_Float64 as an ident, etc).
  */
 struct uniqtype;
+#include "uniqtype.h"
 struct uniqtype *__liballocs_get_alloc_type(void *);
 void *dlsym(void *, const char *);
 extern void
@@ -29,7 +30,8 @@ int main(void)
 	struct uniqtype *int_type = dlsym(/*RTLD_NEXT*/ (void*)-1l, "__uniqtype__int");
 	assert(int_type);
 	assert(got_type);
-	assert(got_type == int_type);
+	assert(UNIQTYPE_IS_ARRAY_TYPE(got_type));
+	assert(UNIQTYPE_ARRAY_ELEMENT_TYPE(got_type) == int_type);
 	
 	return 0;
 }
