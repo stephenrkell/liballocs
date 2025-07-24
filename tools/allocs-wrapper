@@ -101,7 +101,6 @@ asm_infile_is_from_c_source () {
     # ... or (bit of a HACK) a .ident string that has 'cc' at the end of a word
 }
 
-. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/lang/c/bin/link-used-types
 my_as () {
     echo "as_infiles is ${as_infiles[@]}" 1>&2
     # run the assembler
@@ -121,163 +120,124 @@ my_as () {
     status=$?
     # FIXME: perhaps this rewrite should be done after cc1, not after the assembly,
     # to avoid the hacky test for C-derived assembly.
-    if ! [[ $status -eq 0 ]]; then return $status; else
-        for infile in "${as_infiles[@]}"; do
-            if asm_infile_is_from_c_source "${infile}" ; then
-                echo "Rewriting uniqtype symnames in C-derived file $as_outfile" 1>&2
-                objcopy_and_redefine_c_names "$as_outfile"
-                # This .o-rewriting using the DWARF is a hack we would like to avoid.
-                # Why? 
-                # 1. It's papering over a problem with CIL that it doesn't reliably know
-                # the actual sizes of base types.
-                # 2. It's applying C-specific knowledge to .o files, requiring the nasty
-                # 'grepping the assembly for something that looks like a C compiler' hack.
-                # 3. It requires the gross 'until a fixed point' sed hack, i.e re-running
-                # the same substitution a bounded number of times in the hope that it will
-                # catch all uses of a substitutable base type name.
-                #
-                # Can we instead either:
-                # 1. make it possible for CIL to generate the right symbol names first time? or
-                # 2. do .s-rewriting in cc1, using the cpp input?
-                #
-                # We can do (1) by feeding CIL something preprocessed with -Wp,-dMD,
-                # and teaching it to process the #-defines to scrape the machine information.
-                # It should already do this; Machdep is broken. PROBLEM: does MSVC support this?
-                # We will leave Machdep as a fallback.
-                #
-                # We can do (2) if we also use -Wp,-dMD do the same scraping here,
-                # and then rewrite the assembly using the same sort of sedding. This doesn't
-                # address problem 3 above and is still pretty gross.
-                #
-                # So let's try to make CIL generate the right symbol names first time.
-                # What is 'right'? Do we want to eliminate the use of non-canonical base
-                # type names altogether, say? This seems foolish because the knowledge
-                # that a given alias was used seems worth hanging on to.
-                # Similarly, even for the exponential blow-up case, actually generating
-                # the subset of aliases that has been used in the program 
-                # seems worth doing. I think 'usedtypes' needs to grok this.
-                #
-                # And if 'usedtypes' can grok this, why do we need the rewrite hack at all?
-                # Maybe it all just needs to go in 'usedtypes' and that's that?
-                # In other words, for any alias used in the file, as evidenced by an UND,
-                # generate *both* that alias and the 'proper' canonical form?
-                #
-                # Possibly issue: what about section group discarding? If one section
-                # group contains an alias and the other one doesn't, can we be sure
-                # we will discard the one lacking the alias? What about if they each
-                # contain a disjoint set of aliases? How can we merge them? This seems tricky.
-                # It's related to the already-messed-up semantics of symbol aliases.
-                # See GitHub issue #18 (https://github.com/stephenrkell/liballocs/issues/18).
-                # That is a dynamic-link-time problem where aliases are bound too early,
-                # so might get bound to a 'losing'(-at-uniquing-time) instance of the definition.
-                # It seems this is the batch-link-time analogue of the same problem.
-                # Perhaps we need to do something radical like:
-                # - defer all generation of aliases until run time
-                # - somehow remember which alias was requested at each reference site, e.g. as a NOTE
-                # - define aliases as ABS symbols in a dlbind library, consuming the NOTES
-                # - reroute the references? What would this mean? Basically nothing.
-                # The NOTE section we need would I guess be "one per aliased canonical uniqtype"
-                # and its contents would just list the aliases for that canonical type.
-                # We could then even create the aliases at final link time, in our plugin,
-                # but would need a separate (dlbind) mechanism to override the 'losing' aliases
-                # that might remain visible. At each load-lib or dlopen we would have to
-                # check whether the loaded lib has "would-remain-exposed" aliases of an overridden
-                # symbol, and arrange to override those.
-                # Are these two mechanisms both necessary?
-                # (and should 'usedtypes' be a ld plugin for a relocatable link? NO, we
-                # already defer 'usedtypes' until final link time).
-                # There is a take-home here about ELF link-time aliasing/uniquing mechanisms
-                # in general not being sufficient.
-                #
-                # I can't see how we could get away without the NOTE mechanism.
-                # We could skip generating final-link symbols from them, and
-                # simply link the notes together and handle them at run time.
-                # However, we would have to resolve references to non-canonicals
-                # to their canonicals. In fact I think we currently do the right thing
-                # here because now that we run 'usedtypes' only at final link time,
-                # we happen to union all the aliases together before we generate uniqtypes.
-                # This might mean that section groups are unnecessary, even.
-                # AHA. That means we don't need the NOTE mechanism, except to solve the
-                # specific base-type-alias problem that we're worried about.
-                # OK, small tweak: we pipe into 'usedtypes' all the UND symbols
-                # beginning __uniqtype_  that there are in the link. Then, it needs
-                # to generate the right aliases for these.
-                #
-                # This is interesting because it shows that a C++-style 'local' approach
-                # to COMDAT-like stuff isn't always possible. Here we are using 'usedtypes'
-                # in effect to get a bespoke merging semantics, where aliases are unioned
-                # and where we use the set of extant UND references to limit how many
-                # aliases we need to generate (i.e. avoiding the exponential blow-up).
-                #
-                # How can we do the analogous dynamic-linking thing? We need to vet
-                # libraries as they're loaded, even via DT_NEEDED, which gets tricky.
-                # Could make ourselves an audit client? Audit libraries get loaded
-                # separately and can't easily interreference. So where does an audit
-                # lib's fprintf come from? Seems to be in the ld.so, but the
-                # ld.so does not contain an fprintf. Maybe its PLT does get wired up
-                # to stuff in the libc?
-                # The fprintf function address seems to be a register-saving trampoline.
-                # Hmm, it does indeed manage to call into libc by some path.
-                # Let's look at glibc's code for loading the LD_AUDIT and relocating it.
-                # In rtld.c:998 it has load_audit_module   which uses dlmopen_doit,
-                # i.e. it uses namespacing.
-                #
-                #  struct dlmopen_args *args = (struct dlmopen_args *) a;
-                #  args->map = _dl_open (args->fname,
-                #            (RTLD_LAZY | __RTLD_DLOPEN | __RTLD_AUDIT
-                #             | __RTLD_SECURE),
-                #            dl_main, LM_ID_NEWLM, _dl_argc, _dl_argv,
-                #            __environ);
-                #                                            ^--I think __RTLD_AUDIT just means "yes, do audit this"
+    if ! [[ $status -eq 0 ]]; then return $status; fi
+    for infile in "${as_infiles[@]}"; do
+        if asm_infile_is_from_c_source "${infile}" ; then
+            # Possibly issue: what about section group discarding? If one section
+            # group contains an alias and the other one doesn't, can we be sure
+            # we will discard the one lacking the alias? What about if they each
+            # contain a disjoint set of aliases? How can we merge them? This seems tricky.
+            # It's related to the already-messed-up semantics of symbol aliases.
+            # See GitHub issue #18 (https://github.com/stephenrkell/liballocs/issues/18).
+            # That is a dynamic-link-time problem where aliases are bound too early,
+            # so might get bound to a 'losing'(-at-uniquing-time) instance of the definition.
+            # It seems this is the batch-link-time analogue of the same problem.
+            # Perhaps we need to do something radical like:
+            # - defer all generation of aliases until run time
+            # - somehow remember which alias was requested at each reference site, e.g. as a NOTE
+            # - define aliases as ABS symbols in a dlbind library, consuming the NOTES
+            # - reroute the references? What would this mean? Basically nothing.
+            # The NOTE section we need would I guess be "one per aliased canonical uniqtype"
+            # and its contents would just list the aliases for that canonical type.
+            # We could then even create the aliases at final link time, in our plugin,
+            # but would need a separate (dlbind) mechanism to override the 'losing' aliases
+            # that might remain visible. At each load-lib or dlopen we would have to
+            # check whether the loaded lib has "would-remain-exposed" aliases of an overridden
+            # symbol, and arrange to override those.
+            # Are these two mechanisms both necessary?
+            # (and should 'usedtypes' be a ld plugin for a relocatable link? NO, we
+            # already defer 'usedtypes' until final link time).
+            # There is a take-home here about ELF link-time aliasing/uniquing mechanisms
+            # in general not being sufficient.
+            #
+            # I can't see how we could get away without the NOTE mechanism.
+            # We could skip generating final-link symbols from them, and
+            # simply link the notes together and handle them at run time.
+            # However, we would have to resolve references to non-canonicals
+            # to their canonicals. In fact I think we currently do the right thing
+            # here because now that we run 'usedtypes' only at final link time,
+            # we happen to union all the aliases together before we generate uniqtypes.
+            # This might mean that section groups are unnecessary, even.
+            # AHA. That means we don't need the NOTE mechanism, except to solve the
+            # specific base-type-alias problem that we're worried about.
+            # OK, small tweak: we pipe into 'usedtypes' all the UND symbols
+            # beginning __uniqtype_  that there are in the link. Then, it needs
+            # to generate the right aliases for these.
+            #
+            # This is interesting because it shows that a C++-style 'local' approach
+            # to COMDAT-like stuff isn't always possible. Here we are using 'usedtypes'
+            # in effect to get a bespoke merging semantics, where aliases are unioned
+            # and where we use the set of extant UND references to limit how many
+            # aliases we need to generate (i.e. avoiding the exponential blow-up).
+            #
+            # How can we do the analogous dynamic-linking thing? We need to vet
+            # libraries as they're loaded, even via DT_NEEDED, which gets tricky.
+            # Could make ourselves an audit client? Audit libraries get loaded
+            # separately and can't easily interreference. So where does an audit
+            # lib's fprintf come from? Seems to be in the ld.so, but the
+            # ld.so does not contain an fprintf. Maybe its PLT does get wired up
+            # to stuff in the libc?
+            # The fprintf function address seems to be a register-saving trampoline.
+            # Hmm, it does indeed manage to call into libc by some path.
+            # Let's look at glibc's code for loading the LD_AUDIT and relocating it.
+            # In rtld.c:998 it has load_audit_module   which uses dlmopen_doit,
+            # i.e. it uses namespacing.
+            #
+            #  struct dlmopen_args *args = (struct dlmopen_args *) a;
+            #  args->map = _dl_open (args->fname,
+            #            (RTLD_LAZY | __RTLD_DLOPEN | __RTLD_AUDIT
+            #             | __RTLD_SECURE),
+            #            dl_main, LM_ID_NEWLM, _dl_argc, _dl_argv,
+            #            __environ);
+            #                                            ^--I think __RTLD_AUDIT just means "yes, do audit this"
 
-                #
-                # AND the last thing it does is
-                #
-                #  /* Mark the DSO as being used for auditing.  */
-                #  dlmargs.map->l_auditing = 1;
-                #
-                # And in dl-open.c we have /* Do not call the functions for any auditing object.  */
-                #
-                # So I think it just loads it in a fresh namespace (but can still resolve libc?
-                # how many copies of libc do we have? Just one. What are the semantics of
-                # namespacing? MAybe already-loaded NEEDED objects from the default namespace
-                # can still be used? Why is libc already loaded?
-                
-                # We only know about the base types' definitions if -dMD was passed.
-                # HMM. A clever ruse suggests itself.
-                # Is there a bunch of stuff we can output
-                # inside a toplevel __asm__("..."); construct
-                # that uses these? It would need to be subject to
-                # preprocessing, meaning we would need to insert it
-                # right at the beginning, before we run cpp.
-                # Basically it would be a set of weak aliases.
-                # GAH. No. This won't work.
-                # Again it's the compound typenames that are the problem.
-                # Any __uniqtype_* symbol that comes out of the CIL pass
-                # will need rewriting. Unless CIL can generate the right
-                # typenames in the first place. 
-                # The deeper problem is that aliases don't scale to compound types.
-                # So we need compound types' names to use canonicals.
-                # Does this call into question the sanity of offering aliases for
-                # simple typedefs too? Is this inherently a partial feature?
-                # I think it is, yes. It might still be worth having. Or not!
-                # The basic idea of issue #52 was that in 'struct stat', say,
-                # it's useful to know that a given member is of type 'mode_t'
-                # not just an int$16. It doesn't follow that all possible synonyms of
-                # int$16 need to be materialised; the struct uses only a single
-                # one of them, because it is defined in a single place.
-                # The problem is types that can just be used without being
-                # defined, like those using array-of or function-from or pointer-to. Each
-                # use of these might use a different synonym, but still be
-                # generating 'the same' array or function type.
-                # Array types are OK; we can materialise those on demand.
-                # Function types are a problem because the number of synonyms is
-                # exponential in the number of arguments.
-                # But we clearly don't need to output all the synonyms.
-                break  # only do this once, if *any* infile is from C (bit of a HACK)
-            fi
-        done
-    fi
+            #
+            # AND the last thing it does is
+            #
+            #  /* Mark the DSO as being used for auditing.  */
+            #  dlmargs.map->l_auditing = 1;
+            #
+            # And in dl-open.c we have /* Do not call the functions for any auditing object.  */
+            #
+            # So I think it just loads it in a fresh namespace (but can still resolve libc?
+            # how many copies of libc do we have? Just one. What are the semantics of
+            # namespacing? MAybe already-loaded NEEDED objects from the default namespace
+            # can still be used? Why is libc already loaded?
+
+            # We only know about the base types' definitions if -dMD was passed.
+            # HMM. A clever ruse suggests itself.
+            # Is there a bunch of stuff we can output
+            # inside a toplevel __asm__("..."); construct
+            # that uses these? It would need to be subject to
+            # preprocessing, meaning we would need to insert it
+            # right at the beginning, before we run cpp.
+            # Basically it would be a set of weak aliases.
+            # GAH. No. This won't work.
+            # Again it's the compound typenames that are the problem.
+            # Any __uniqtype_* symbol that comes out of the CIL pass
+            # will need rewriting. Unless CIL can generate the right
+            # typenames in the first place. 
+            # The deeper problem is that aliases don't scale to compound types.
+            # So we need compound types' names to use canonicals.
+            # Does this call into question the sanity of offering aliases for
+            # simple typedefs too? Is this inherently a partial feature?
+            # I think it is, yes. It might still be worth having. Or not!
+            # The basic idea of issue #52 was that in 'struct stat', say,
+            # it's useful to know that a given member is of type 'mode_t'
+            # not just an int$16. It doesn't follow that all possible synonyms of
+            # int$16 need to be materialised; the struct uses only a single
+            # one of them, because it is defined in a single place.
+            # The problem is types that can just be used without being
+            # defined, like those using array-of or function-from or pointer-to. Each
+            # use of these might use a different synonym, but still be
+            # generating 'the same' array or function type.
+            # Array types are OK; we can materialise those on demand.
+            # Function types are a problem because the number of synonyms is
+            # exponential in the number of arguments.
+            # But we clearly don't need to output all the synonyms.
+            break
+        fi
+    done
 }
 export AS=my_as
 

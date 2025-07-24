@@ -33,13 +33,13 @@ use_src_realpaths () {
 . $(dirname $0)/debug-funcs.sh
 
 our_name="$(basename "$0")"
-our_name_frag="$( echo "$our_name" | sed -n '/gather-\(.*\)\.sh/ {s//\1/;p}' )"
+our_name_frag="$( echo "$our_name" | sed -n '/gather-src\(.*\)\.sh/ {s//\1/;p}' )"
 if [[ -z "$our_name_frag" ]]; then echo "Did not understand our name ($0)"; exit 1; fi
-our_name_rewritten=gather-${our_name_frag}
+our_name_rewritten=gather-src${our_name_frag}
 
 all_obj_allocs_file="$1"
 
-# echo Hello 1>&2
+echo Hello 1>&2
 
 rewrite_relative_src_filenames () {
     while read fname rest; do
@@ -73,17 +73,15 @@ rewrite_relative_src_filenames () {
 # base-types-translation and this translate_symnames pass.
 cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
     echo "Saw line $obj $rest" 1>&2
-    embedded_info="$( ${OBJCOPY:-objcopy} -Obinary -j.allocs_src${frag} "$obj" /dev/stdout )"
-    # XXX: we don't currently use this, but this is how we can get it out of the obj file
-    # XXX: we need to do the same stuff to the embedded info that we do with
-    # the .i.allocs files. That means ensuring absolute pathnames (do this in dumpallocs.ml)
-    # and translating base type symnames (ideally also do this in dumpallocs.ml! but
-    # that will take some doing... eliminate Machdep first, then require barenameFromSig / 
-    # symnameFromSig to take an extra argument modelling the ABI (somehow), so it can generate
-    # the right symnames from the off. PROBLEM: some symnames, like bitfields, might always
+    embedded_info="$( ${OBJCOPY:-objcopy} -Obinary -j.allocs_src${our_name_frag} "$obj" /dev/stdout )"
+    echo "Embedded info is \`$embedded_info'" 1>&2
+    # We dropped the step of rewriting uniqtype names s.t. base type names are canonicalised.
+    # PROBLEM: might not some to-be-dumped symnames, like bitfields, always
     # need DWARF to figure out. So can we really eliminate this step? Probably we should
     # work around the bitfield issue by assuming a certain algorithm for allocating bit positions
     # and then checking later that we were correct.
+    # Dumpallocs never has to output a bitfield type, though... even with synthetic (dwarfidl)
+    # typenames, I think it just never does, even when sizing structs that use bitfields.
     all_cus_info="$( get_cu_info "$obj" )"
     echo "$all_cus_info" | while read_cu_info; do
         case "$cu_language_num" in
