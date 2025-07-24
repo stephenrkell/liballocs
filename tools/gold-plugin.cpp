@@ -858,9 +858,19 @@ public:
 			int ret;
 			/* stat the output file. If the link failed, we will still be
 			 * called, but we should not do anything. */
-			struct stat dummy;
-			ret = stat(output_path.string().c_str(), &dummy);
-			if (ret != 0) return;
+			struct stat s;
+			ret = stat(output_path.string().c_str(), &s);
+			if (ret != 0)
+			{
+				linker->message(LDPL_WARNING, "not building metadata for nonexistent output");
+				return;
+			}
+			if (s.st_size == 0)
+			{
+				linker->message(LDPL_WARNING, "not building metadata for zero-sized output");
+				return;
+			}
+			linker->message(LDPL_INFO, "output file has size %ld bytes", (long) s.st_size);
 			// sanity check: list the output file, to check it exists
 			// ret = system((string("ls -l ") + output_path.string()).c_str());
 			// assert(ret == 0);
@@ -872,6 +882,10 @@ public:
 					(output_path.is_relative()
 					? boost::filesystem::path(cwd) / output_path
 					: output_path)).string() + "-meta.so").c_str()); // FIXME: quoting
+			if (ret != 0)
+			{
+				linker->message(LDPL_WARNING, "could not build metadata for output binary");
+			}
 			// FIXME: typical use cases will carry LDFLAGS in the environment and these
 			// flow into this Makefile invocation, s.t. we (the gold plugin) will run again
 			// when linking the -meta.so, in turn trying to create a -meta.so-meta.so, and
