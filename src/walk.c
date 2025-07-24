@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <stdio.h>
 #include "liballocs.h"
 #include "liballocs_private.h"
 

@@ -1,8 +1,10 @@
 #define _GNU_SOURCE
 
+#include <stdio.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <link.h>
+#include "dlbind.h"
 #include "librunt.h"
 #include "relf.h"
 #include "maps.h"

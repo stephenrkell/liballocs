@@ -1,4 +1,5 @@
 #define _GNU_SOURCE  /* get the right basename() */
+#include <stdio.h>
 #include <string.h>
 #include <link.h>
 #include "relf.h"

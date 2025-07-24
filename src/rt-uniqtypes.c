@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <stdio.h>
 #include <link.h>
 /* Bit of a hack: we don't assume a system-wide 'dwarf.h' and instead vendor
  * our chosen libdwarf. The best way to get at it is still via libdwarfpp. */

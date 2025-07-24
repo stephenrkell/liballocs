@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <stdio.h>
 
 /* If the malloc doesn't know the size of its own chunks, we have to
  * use a different approach to indexing it. Here we use a very stupid

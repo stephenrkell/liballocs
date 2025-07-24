@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <stdio.h>
 #include <link.h>
 #include "librunt.h"
 #include "liballocs_private.h"
