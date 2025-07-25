@@ -28,5 +28,5 @@ int main(int argc, char **argv)
 	}
 	
 	cout << "#include \"uniqtype-defs.h\"\n\n";
-	return dump_usedtypes(fnames, cout, cerr);
+	return dump_usedtypes(fnames, cout, cerr, /* continue_on_error */ true);
 }
