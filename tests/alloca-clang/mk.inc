@@ -10,7 +10,7 @@ CLANG ?= $(shell which clang || echo clang-13)
 # with the driver version. -cc1 has to be the first argument it seems.
 # A quick hack might be to prepend "-Xclang" to everything.
 export CC_DRIVER := $(shell which $(CLANG))
-CC := $(LIBALLOCS)/tools/allocs-wrap $(CC_DRIVER) -std=gnu99  \
+CC := $(LIBALLOCS)/tools/allocs-wrap $(CC_DRIVER) -std=gnu99 -gdwarf-4 \
   `$(LIBALLOCS)/tools/allocs-ldflags` -Wp,-dD -Wp,-save-temps \
   -fno-addrsig # HACK but by itself doesn't work... hacked toolsub 'wrapper' to undo -faddrsig that creeps in earlier
 export LIBALLOCS # the linker plugin needs this
