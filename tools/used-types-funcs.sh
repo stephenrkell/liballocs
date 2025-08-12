@@ -19,7 +19,6 @@ this_filename () {
 LIBALLOCS="${LIBALLOCS:-$( dirname "$(this_filename)" )/..}"
 LIBALLOCSTOOL="${LIBALLOCSTOOL:-$( dirname "$(this_filename)" )/../contrib/liballocstool}"
 USEDTYPES=${USEDTYPES:-${LIBALLOCS}/tools/usedtypes}
-BASE_TYPES_TRANSLATION=${BASE_TYPES_TRANSLATION:-${LIBALLOCS}/tools/lang/c/bin/base-types-translation}
 CC=${CC:-$(which cc)}
 LD=${LD:-$(which ld)}
 OBJCOPY=${OBJCOPY:-$(which objcopy)}

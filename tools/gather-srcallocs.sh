@@ -57,20 +57,11 @@ rewrite_relative_src_filenames () {
     done
 }
 
-# HACK: C-specific stuff creeping in here
-. "$(dirname "${BASH_SOURCE[0]}")"/lang/c/lib/symname-funcs.sh
-
 # For each linked binary file (probably just one!), do a per-CU loop
 # where we iterate over CUs and dispatch to a per-language allocs-gatherer.
 # HOWEVER, the linked binary may contain a .allocs_srcallocs section...
 # if it does, we slurp that. Since we sort and uniq our output, it does not
 # hurt if there are duplicates between these sources of data.
-# XXX: the c-gather-srcallocs.sh script used to do some rewriting of the .i.allocs
-# content: it rewrites relative filenames and 'translate_symnames' i.e. rewrite base
-# type names into canonical uniqtype form, both individually and when they appear
-# within compounds (pointers, arrays, functions, pointers to arrays, etc). We now
-# do that here, even though it's a C-specific thing. The plan is to eliminate
-# base-types-translation and this translate_symnames pass.
 cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
     echo "Saw line $obj $rest" 1>&2
     embedded_info="$( ${OBJCOPY:-objcopy} -Obinary -j.allocs_src${our_name_frag} "$obj" /dev/stdout )"

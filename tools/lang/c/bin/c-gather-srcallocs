@@ -1,7 +1,5 @@
 #!/bin/bash
 
-. $(dirname $0)/../lib/symname-funcs.sh
-
 cu_sourcepath="$1"
 obj="$2"
 cu_fname="$3"
