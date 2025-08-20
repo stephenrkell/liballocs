@@ -1,5 +1,3 @@
-# NOTE: these functions use lots of GNU bashisms.
-
 echo_then_sudo () {
     echo "About to execute privileged command: $@" 1>&2
     sudo -k "$@"
@@ -14,11 +12,11 @@ fixup_debuglink () {
     current_debuglink="$( read_debuglink "$obj" )"
     has_debuglink=$?
     
-    if [[ $has_debuglink -eq 0 ]] && [[ "$current_debuglink" == "$debuglink" ]]; then
+    if [ $has_debuglink -eq 0 ] && [ "$current_debuglink" == "$debuglink" ]; then
         echo "detected that debuglink $debuglink_value is already valid" 1>&2
         return 0
     else
-        if [[ $has_debuglink -eq 0 ]]; then 
+        if [ $has_debuglink -eq 0 ]; then
             echo "detected that debuglink $current_debuglink needs fixing up to $debuglink" 1>&2
             # For safety, we use a tempfile
             tmpfile="$(mktemp)"
@@ -50,15 +48,15 @@ contains_debug_symbols () {
 
 read_debuglink () {
     debuglink_info="$( objdump -h "$1" | grep '\.gnu_debuglink' )"
-    if [[ -z "$debuglink_info" ]]; then
+    if [ -z "$debuglink_info" ]; then
         echo "no debuglink in $1" 1>&2
         return 1
     fi
     debuglink_off="$( echo "$debuglink_info" | sed 's/^[[:blank:]]*//' | tr -s '[:blank:]' '\t' | cut -f6 )"
     echo "read debuglink_off: $debuglink_off" 1>&2
-    if [[ -n "$debuglink_off" ]]; then
-        debuglink_off_bytes=$(( 0x$debuglink_off + 0 ))
-        if [[ -z "$debuglink_off_bytes" ]]; then
+    if [ -n "$debuglink_off" ]; then
+        debuglink_off_bytes=$( awk "BEGIN { print 0x$debuglink_off + 0; }" )
+        if [ -z "$debuglink_off_bytes" ]; then
             echo "bad debuglink header" 1>&2 
             return 1
         else
@@ -70,23 +68,23 @@ read_debuglink () {
 }
 read_build_id () {
     build_id_info="$( objdump -h "$1" | grep '\.note.gnu.build-id' )"
-    if [[ -z "$build_id_info" ]]; then
+    if [ -z "$build_id_info" ]; then
         echo "no build ID in $1" 1>&2
         return 1
     fi
     build_id_note_off="$( echo "$build_id_info" | sed 's/^[[:blank:]]*//' | tr -s '[:blank:]' '\t' | cut -f6 )"
     echo "read build-ID note off: $build_id_note_off" 1>&2
-    if [[ -n "$build_id_note_off" ]]; then
-        build_id_off_nbytes=$(( 0x$build_id_note_off + 0 ))
-        if [[ -z "$build_id_off_nbytes" ]]; then
+    if [ -n "$build_id_note_off" ]; then
+        build_id_off_nbytes=$( awk "BEGIN { print 0x$build_id_note_off + 0; }" )
+        if [ -z "$build_id_off_nbytes" ]; then
             echo "bad build-ID header" 1>&2 
             return 1
         else
             name_size="$( od --skip-bytes=${build_id_off_nbytes} -t d4 -N4 "$1" | tr -s '[:space:]' '\t' | cut -f2 )"
             echo "name_size: $name_size" 1>&2
-            desc_size="$( od --skip-bytes=$(( 4 + ${build_id_off_nbytes} )) -t d4 -N4 "$1" | tr -s '[:space:]' '\t'| cut -f2 )"
+            desc_size="$( od --skip-bytes=$( expr 4 + ${build_id_off_nbytes} ) -t d4 -N4 "$1" | tr -s '[:space:]' '\t'| cut -f2 )"
             echo "desc_size: $desc_size" 1>&2
-            od --skip-bytes=$(( $build_id_off_nbytes + 4 + 4 + 4 + $name_size )) -t x1 -w20 -N20 "$1"  | tr -s '[:space:]' '\t'| cut -f2-21 | tr -d '\t'
+            od --skip-bytes=$( expr $build_id_off_nbytes + 4 + 4 + 4 + $name_size ) -t x1 -w20 -N20 "$1"  | tr -s '[:space:]' '\t'| cut -f2-21 | tr -d '\t'
             return 0
         fi
     fi
@@ -98,14 +96,14 @@ find_debug_file_for () {
     # handle the case where there's no DWARF in the file, but is a debug link
     if ! readelf -wi "$file" | grep -m1 . >/dev/null; then
         debuglink_val="$( read_debuglink "$file" )"
-        if [[ -n "$debuglink_val" ]]; then
+        if [ -n "$debuglink_val" ]; then
             echo "Read debuglink val: $debuglink_val" 1>&2
             resolved_debuglink="$( resolve_debuglink "$file" "$debuglink_val" )"
             echo "Resolved debuglink to: $resolved_debuglink" 1>&2
             echo "$resolved_debuglink"
         else
             build_id_val="$( read_build_id "$file" )"
-            if [[ -n "$build_id_val" ]]; then
+            if [ -n "$build_id_val" ]; then
                 echo "Read build ID val: $build_id_val" 1>&2
                 resolved_build_id="$( resolve_build_id "$file" "$debuglink_val" )"
                 echo "Resolved build_id to: $resolved_build_id" 1>&2
@@ -126,12 +124,12 @@ readelf_debug () {
     while true; do
         args[$ctr]=$1
         shift || break;
-        ctr=$(( $ctr + 1 ))
+        ctr=$( expr $ctr + 1 )
     done
-    file=${args[$(( $ctr - 1 ))]}
+    file=${args[$( expr $ctr - 1 )]}
     echo "Slurped args: ${args[@]}" 1>&2
     echo "Guessed file arg: $file" 1>&2
-    unset args[$(( $ctr - 1 ))]
+    unset args[$( expr $ctr - 1 )]
     readelf ${args[@]} "$( find_debug_file_for "$file" )"
 }
 
@@ -142,7 +140,7 @@ get_cu_info () {
 read_cu_info () {
     read cu_info
     ret=$?
-    if [[ -n "$cu_info" ]]; then
+    if [ -n "$cu_info" ]; then
         cu_fname="$( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_name | head -n1 | sed 's/.*DW_AT_name[[:blank:]]*:[[:blank:]]*\((.*, offset: 0x[0-9a-f]*): \)\?\(.*\)/\2/' | sed 's/[[:blank:]]*$//')"
         cu_language_fullstr="$( echo "$cu_info" | tr '\f' '\n' | grep DW_AT_language | head -n1 | sed 's/.*DW_AT_language[[:blank:]]*:[[:blank:]]*//' | sed 's/[[:blank:]]*$//')"
         echo "Note: found CU $cu_fname" 1>&2
@@ -169,7 +167,7 @@ read_cu_info () {
         cu_language_num=""
     fi
 
-    if [[ $ret -eq 0 ]]; then true; else false; fi
+    if [ $ret -eq 0 ]; then true; else false; fi
 }
 
 resolve_debuglink () {
@@ -230,7 +228,7 @@ ensure_debug_symbols () {
     # no; do we have a working .gnu_debuglink?
     if debuglink_value="$( read_debuglink "$obj" )"; then
         resolved_debuglink="$( resolve_debuglink "$obj" "$debuglink_value" )"
-        if [[ -n "$resolved_debuglink" ]] && contains_debug_symbols "$resolved_debuglink"; then
+        if [ -n "$resolved_debuglink" ] && contains_debug_symbols "$resolved_debuglink"; then
             echo "detected debug info within debuglink $debuglink_value resolved at $candidate" 1>&2
             echo "$candidate"
             return 0
@@ -238,7 +236,7 @@ ensure_debug_symbols () {
         # else we failed to resolve a good debuglink
     elif build_id_value="$( read_build_id "$obj" )"; then
         resolved_build_id="$( resolve_build_id "$obj" "$build_id_value" )"
-        if [[ -n "$resolved_build_id" ]] && contains_debug_symbols "$resolved_build_id"; then
+        if [ -n "$resolved_build_id" ] && contains_debug_symbols "$resolved_build_id"; then
             echo "detected debug info within build ID $build_id_value resolved at $candidate" 1>&2
             echo "$candidate"
             return 0
@@ -303,10 +301,10 @@ ensure_debug_symbols () {
     /usr/lib/debug"$( dirname "$( readlink -f "$obj" )" )/$( basename "$obj" )" ; do 
         echo "looking for a package containing $attempt" 1>&2
         apt_found="$( echo_then_sudo apt-file -F find "$attempt" | sed 's^: /.*^^' )"
-        if [[ -n "$apt_found" ]]; then
+        if [ -n "$apt_found" ]; then
             pkg="$( echo "$apt_found" | cut -f1 )"
             echo "found $pkg" 1>&2
-            if [[ -n "$pkg" ]]; then
+            if [ -n "$pkg" ]; then
                 if dpkg -p "$pkg" >/dev/null 2>/dev/null; then
                     echo "$pkg is already installed" 1>&2
                 else
@@ -327,7 +325,7 @@ ensure_debug_symbols () {
                     fi
                     # else succeeded -- check that debuglink is now correct_debuglink
                     verify_debuglink="$( read_debuglink "$obj" )"
-                    if [[ "$verify_debuglink" == "$correct_debuglink" ]]; then
+                    if [ "$verify_debuglink" == "$correct_debuglink" ]; then
                         echo "$attempt" 
                         return 0
                     else
@@ -370,7 +368,7 @@ ensure_debug_source () {
     echo "extracted compilation directory: $comp_dir" 1>&2
     
     # does the given file exist in the given dir?
-    if [[ -r "${comp_dir}/${compile_unit_name}" ]]; then
+    if [ -r "${comp_dir}/${compile_unit_name}" ]; then
         echo "guessing that source does exist already" 1>&2
         return 0
     else
@@ -378,7 +376,7 @@ ensure_debug_source () {
     fi
     
     # no; download the source using apt-get source `dpkg -S ... `
-    if [[ -z "$DPKG_SOURCE_ROOT" ]]; then
+    if [ -z "$DPKG_SOURCE_ROOT" ]; then
         DPKG_SOURCE_ROOT="$( mktemp -d )"
     fi
     echo "downloading source to $DPKG_SOURCE_ROOT" 1>&2
