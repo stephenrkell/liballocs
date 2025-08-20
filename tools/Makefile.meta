@@ -139,9 +139,38 @@ $(info Generating frametypes)
 meta_sources += $(META_BASE)/$(1)-frametypes.c
 endif
 
+# When we build a meta .so, we now link it until the build ID.
+# We *hard* link it!
+# If we symlinked it, it would mean that filename at which the binary was built would
+# be the only "first-class" filename. If we were to move the built binary, say during
+# installation, and then re-build in the installed-from source tree, generating a new build
+# ID, then the symlink would incorrectly point to the new meta-DSO with a mismatched
+# build ID. Hard-linking seems like the right thing. The downside is that this will
+# leak space, not only keeping alive meta-DSOs that have no corresponding DSO (this can
+# already happen), but also *even* when we delete *both* /path/to/my/binary and
+# /usr/lib/meta/path/to/my/binary. Probably the right thing to do is periodically
+# scan /usr/lib/meta for semi-orphaned meta-DSOs (nlink==1) and figure out what to do.
+# These binaries are only "semi-orphaned" because if we installed and then cleaned the
+# source tree, nlink==1 is what we would expect. A good install script would also re-
+# link the meta-DSO's by-path hardlink, keeping nlink==2. But even if not, we should be
+# able to find a binary of this build ID on the system and then re-link it. This would
+# involve scanning the whole system searching for particular build IDs, which is a bit
+# gross.
+define link_under_build_id
+build_id=$$( . $(dir $(THIS_MAKEFILE))/debug-funcs.sh && read_build_id "$<" ); \
+if [ -n "$$build_id" ]; then \
+ dirname="$(META_BASE)"/.build-id/"$$( echo "$$build_id" | head -c2 )"; \
+ mkdir -p "$$dirname" && \
+ ln -T "$@" "$$dirname"/"$$( echo "$$build_id" | tail -c+3 )"; \
+else \
+ echo "Warning: could not get build ID for $< so not linking meta-DSO" 1>&2; \
+fi
+endef
+
 # for debugging, try: @echo all dependencies: $+
 $(META_BASE)/%-meta.so: /% $(call meta_sources,%)
-	$(META_CC) $(META_CFLAGS) -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+)
+	$(META_CC) $(META_CFLAGS) -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+) && \
+$(link_under_build_id)
 
 SWAP_STDOUT_STDERR := 3>&2 2>&1 1>&3
 
