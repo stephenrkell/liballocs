@@ -117,8 +117,6 @@ class AllocsCC(AllocsCompilerWrapper):
             # TW: This should probably error if ALLOCSCC_CC isn't in environ, but for now...
             if "ALLOCSCC_CC" in os.environ:
                 return [os.environ["ALLOCSCC_CC"]]
-            if "CC" in os.environ:
-                return [os.environ["CC"]]
             return ["cc"]
 
         return [cilly_cmd] + \
