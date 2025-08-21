@@ -581,6 +581,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
            del os.environ["CC"]
         self.debugMsg(sys.argv[0] + " called with args  " + " ".join(sys.argv) + "\n")
 
+        if self.onlyPreprocessing:
+            self.debugMsg("We are only preprocessing, so we won't do anything liballocs-related.")
+
         if Phase.LINK in self.enabledPhases:
             self.debugMsg("We are a link command\n")
         else:
