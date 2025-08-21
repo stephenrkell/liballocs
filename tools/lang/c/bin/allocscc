@@ -38,7 +38,7 @@ class AllocsCC(AllocsCompilerWrapper):
         return ["free(P)"]
 
     def getCustomCompileArgs(self):
-        if self.onlyPreprocessing:
+        if self.onlyPreprocessing():
             return []
         # "-pipe" interferes with -save-temps, with disastrous conseqeunces
         # trying to create files named "-.i", "-.s" which then get interpreted
@@ -76,7 +76,7 @@ class AllocsCC(AllocsCompilerWrapper):
     def getIncludeArgs(self, sourceFiles):
         return ["-include", \
                REAL_DIR + "/../../../../include/liballocs_cil_inlines.h"] \
-               if len(sourceFiles) > 0 and self.areAllSourceFilesC(sourceFiles) and not self.onlyPreprocessing else []
+               if len(sourceFiles) > 0 and self.areAllSourceFilesC(sourceFiles) and not self.onlyPreprocessing() else []
 
     def getCillyArgs(self, sourceFiles):
         allSourceFilesAreC = self.areAllSourceFilesC(sourceFiles)
@@ -91,7 +91,7 @@ class AllocsCC(AllocsCompilerWrapper):
 
         # If we're only preprocessing (i.e. if -E is passed) we bypass cilly
         # So, cilly arguments shouldn't be added...!
-        if self.onlyPreprocessing:
+        if self.onlyPreprocessing():
             return []
         return [
             "--save-temps",
@@ -113,7 +113,7 @@ class AllocsCC(AllocsCompilerWrapper):
         # silence them.
 
     def getBasicCompilerCommand(self):
-        if self.onlyPreprocessing:
+        if self.onlyPreprocessing():
             # TW: This should probably error if ALLOCSCC_CC isn't in environ, but for now...
             if "ALLOCSCC_CC" in os.environ:
                 return [os.environ["ALLOCSCC_CC"]]

@@ -184,8 +184,9 @@ class CompilerWrapper:
     # the phase options themselves
     phaseOptions = [dict({}) for n in range(Phase.DRIVER, 1+Phase.LINK)]
 
-    # tracks whether we're only preprocessing, i.e. whether -E was passed.
-    onlyPreprocessing = False
+    # Report whether we're doing anything other than preprocessing
+    def onlyPreprocessing(self):
+        return self.enabledPhases == {Phase.PREPROCESS}
     
     # What do we do with '--' or equivalents?
     # It *is* still necessary, and part of "items", because some "options" are actually "options"
@@ -320,7 +321,6 @@ class CompilerWrapper:
             elif args[num] == '-E':
                 self.argItem({Phase.DRIVER}, num)
                 self.enabledPhases = {Phase.PREPROCESS}
-                self.onlyPreprocessing = True
             elif args[num] == '-S':
                 self.argItem({Phase.DRIVER}, num)
                 self.enabledPhases = {Phase.PREPROCESS, Phase.COMPILE}
