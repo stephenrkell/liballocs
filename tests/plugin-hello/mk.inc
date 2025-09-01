@@ -5,7 +5,10 @@ export USE_LD := ld.gold
 # for normal people... but note that --push-state isn't supported by gold
 LDFLAGS += -fuse-ld=gold
 
-# Declare some bogus allocation functions. (WHY?)
+# To test the env var / plugin arg interface, our .c file contains
+# some bogus always-failing allocator functions. Declare these here.
+# Note that the vanilla/standard alloc functions are not being declared.
+# I think doing so currently fails the link (FIXME).
 LIBALLOCS_ALLOC_FNS := fail_alloc(Z)p fail_realloc(pZ)p fail_calloc(zZ)p
 
 # HACK: export doesn't take effect for $(shell ...)
