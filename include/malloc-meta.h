@@ -20,7 +20,14 @@
 #if __STDC_VERSION__ >= 201112L
 #define ALIGNOF _Alignof
 #else
+/* Clang barfs at offsetof in a constant expression, e.g. _Static_assert:
+ * "cast that performs the conversions of a reinterpret_cast is not allowed in a constant expression"
+ * --- so we avoid this on Clang. */
+#ifdef __clang__
+#define ALIGNOF(type) __builtin_offsetof (struct { char c; type member; }, member)
+#else
 #define ALIGNOF(type) offsetof (struct { char c; type member; }, member)
+#endif
 #endif
 #endif
 #ifndef PAD_TO_ALIGN
