@@ -74,7 +74,9 @@ void __static_segment_setup_metavector(
 	}
 	else
 	{
-		debug_printf(5, "no meta object loaded for %s\n", afile->m.l->l_name);
+		debug_printf(4, "error setting up metavector for phdr %u of %s: no meta object loaded\n",
+			phndx,
+			afile->m.l->l_name);
 	}
 	assert(afile->m.segments[loadndx].phdr_idx == phndx); // librunt has already done it
 	afile->m.segments[loadndx].metavector = metavector;
