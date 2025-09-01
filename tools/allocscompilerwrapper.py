@@ -190,7 +190,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 if ret2 != 0:
                     errfile.write("Metadata build failed, so will not strip relocs from output binary")
                 if (ret2 != 0 or "DEBUG_CC" in os.environ):
-                    sys.stderr.write("printing to %s\n" % errfile)
+                    sys.stderr.write("\nstatus %d; printing Makefile.meta errors %sto %s\n" % (ret2, "(if any) " if "DEBUG_CC" in os.environ else "", errfile))
                     self.printErrors(errfile)
                 # Now if the metadata build succeeded, and if we're asked to
                 # strip relocs
