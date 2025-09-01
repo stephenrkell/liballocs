@@ -43,8 +43,6 @@ _Bool __static_file_allocator_notify_brk(void *new_curbrk) __attribute__((weak))
 _Bool __static_segment_allocator_notify_brk(void *new_curbrk) __attribute__((weak));
 extern _Bool __liballocs_is_initialized __attribute__((weak));
 int __liballocs_global_init(void);
-_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l, const char *meta_suffix)
-			__attribute__((visibility("hidden")));
 /* avoid standard headers */
 char *realpath(const char *path, char *resolved_path);
 int snprintf(char *str, size_t size, const char *format, ...);
