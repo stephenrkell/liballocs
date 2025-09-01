@@ -183,6 +183,10 @@ class CompilerWrapper:
 
     # the phase options themselves
     phaseOptions = [dict({}) for n in range(Phase.DRIVER, 1+Phase.LINK)]
+
+    # Report whether we're doing anything other than preprocessing
+    def onlyPreprocessing(self):
+        return self.enabledPhases == {Phase.PREPROCESS}
     
     # What do we do with '--' or equivalents?
     # It *is* still necessary, and part of "items", because some "options" are actually "options"
