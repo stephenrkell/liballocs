@@ -469,3 +469,9 @@ void __liballocs_uncache_all(const void *allocptr, unsigned long size)
 {}
 
 _Bool __liballocs_notify_unindexed_address(const void *obj) { return 1; }
+
+void *__liballocs_get_specific_by_allocator(const void *obj,
+		struct allocator *a, struct uniqtype **out_specific_type)
+{
+	return NULL;
+}

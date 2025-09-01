@@ -206,11 +206,14 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 {
 	for (struct link_map *inner_l = _r_debug.r_map; inner_l; inner_l = inner_l->l_next)
 	{
+		/* I haven't implemented is_meta_object_for_lib in the build_id era. It could
+		 * be done although probably we want the allocs_file_metadata for the base lib
+		 * we are testing against. */
+#if 0
 		if (is_meta_object_for_lib(inner_l, l)) /* HACK: we shouldn't need this... or should we? */
 		{
 			ElfW(Sym) *statics_sym = symbol_lookup_in_object(inner_l, "statics");
 			if (!statics_sym) abort();
-#if 0
 			struct static_allocsite_entry *statics = sym_to_addr(statics_sym);
 			for (struct static_allocsite_entry *cur_ent = statics;
 					!STATIC_ALLOCSITE_IS_NULL(cur_ent);
@@ -228,9 +231,9 @@ _Bool __lookup_static_allocation_by_name(struct link_map *l, const char *name,
 				}
 			}
 			// didn't find the symbol we were looking for -- oh well
-#endif
 			return 0;
 		}
+#endif
 	}	
 	return 0;
 }

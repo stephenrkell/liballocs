@@ -276,7 +276,13 @@ struct interpreter
  * only if it is not already available in memory (fsvo 'available'). FIXME:
  * how do such allocations get freed? One possible answer is that they don't;
  * another is that they are either GC'd or are reclaimed only when their
- * whole container is reclaimed, i.e. region-style.
+ * whole container is reclaimed, i.e. region-style. Another is that they
+ * are refcounted, possibly invasively, like the void* returned by dlopen()
+ * already is. Compare this to opening files in libc... if we multiply open
+ * the same file, we don't bump a refcount on th same FILE, but rather we
+ * create a new one i.e. a fresh (non-idempotent) denotation-allocation.
+ * Could we implement the libc interface in an idempotent-plus-refcount manner?
+ * I think this screws with the semantics of file handles, so probably no.
  */
 
 struct allocated_chunk;   /* the start of an allocation, opaquely (gen this per-allocator?) */
@@ -331,8 +337,9 @@ fun(unsigned long      ,get_size,      arg(void *, obj))  /* size? */ \
 fun(const char *       ,get_name,      arg(void *, obj), arg(char *, namebuf), arg(size_t, buflen))  /* name? */ \
 fun(const void *       ,get_site,      arg(void *, obj))  /* where allocated?   optional   */ \
 fun(liballocs_err_t    ,get_info,      arg(void *, obj), arg(struct big_allocation *, maybe_alloc), arg(struct uniqtype **,out_type), arg(void **,out_base), arg(unsigned long*,out_size), arg(const void**, out_site)) \
+fun(void *             ,get_specific,  arg(void *, obj), arg(struct uniqtype **, out_specific_type)) \
 fun(struct big_allocation *,ensure_big,arg(void *, obj), arg(size_t, sz)) \
-fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static*/ \
+fun(Dl_info            ,dladdr,        arg(void *, obj))  /* dladdr-like -- only for static; FIXME: should be done with get_specific */ \
 fun(lifetime_policy_t *,get_lifetime,  arg(void *, obj)) \
 fun(addr_discipl_t     ,get_discipl,   arg(void *, site)) /* what will the code (if any) assume it can do with the ptr? */ \
 fun(_Bool              ,can_issue,     arg(void *, obj), arg(off_t, off)) \

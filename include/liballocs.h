@@ -191,6 +191,21 @@ struct liballocs_err *__liballocs_get_alloc_info(const void *obj,
 	struct allocator **out_allocator, const void **out_alloc_start,
 	unsigned long *out_alloc_size_bytes,
 	struct uniqtype **out_alloc_uniqtype, const void **out_alloc_site);
+/* The above is the one-shot call for all the "generic" metadata that
+ * we support, i.e. the things that we expect all/most allocators to be
+ * able to tell us about all/most objects. There is also allocator-specific
+ * metadata. FIXME: we don't have a good API for this at present. We can
+ * think of roughly two kinds: stuff that lives in the *allocator_private
+ * data attached to a bigalloc, and stuff that is associated with small
+ * allocations in ways that only the allocator knows. Presumably we should
+ * define some kind of key-value interface that allows access to these. We
+ * should also investigate ways of metaprogramming with computed offsets...
+ * I've already thought about this for purposes of "reflecting on the ld.so",
+ * but it could also be used for reflective access to allocator-defined
+ * metadata, such as in allocator-private structures... if we defined
+ * allocator_private_uniqtype, and had a meta-complete liballocs, we would
+ * be put clients in a good position to use this. */
+
 /* Some inlines follow at the bottom. */
 
 /* Public API for l0index / mappings was here. FIXME: why was it public? Presumably
@@ -741,6 +756,11 @@ struct mapping_entry
 };
 struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 		struct big_allocation **maybe_out_bigalloc);
+/* FIXME: this is really an instance of allocator-specific metadata,
+ * for which we should have a more general API but currently don't.
+ * Let's define the following for now. */
+void *__liballocs_get_specific_by_allocator(const void *obj,
+		struct allocator *a, struct uniqtype **out_specific_type);
 
 struct allocsite_entry *__liballocs_find_allocsite_entry_at(
 	const void *allocsite);

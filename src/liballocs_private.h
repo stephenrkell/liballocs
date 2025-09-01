@@ -127,6 +127,7 @@ extern _Bool __thread __private_malloc_usable_size_active;
 void *__private_malloc(size_t);
 void *__private_realloc(void*, size_t);
 void __private_free(void *);
+char *__private_strndup(const char *, size_t);
 void __private_malloc_init(void) __attribute__((constructor(101)));
 extern void *__private_malloc_heap_base;
 extern void *__private_malloc_heap_limit;
@@ -163,8 +164,6 @@ struct frame_uniqtype_and_offset
 };
 
 #define META_OBJ_SUFFIX "-meta.so"
-_Bool is_meta_object_for_lib(struct link_map *maybe_types, struct link_map *l);
-
 #define MAX_EARLY_LIBS 128
 extern struct link_map *early_lib_handles[MAX_EARLY_LIBS];
 
@@ -201,10 +200,14 @@ void __liballocs_post_systrap_init(void);
 /* If this weak function is defined, it will be called when we've loaded
  * the metadata for one object. */
 int __hook_loaded_one_object_meta(struct dl_phdr_info *info, size_t size, void *meta_object_handle) __attribute__((weak));
-int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *out_meta_handle);
+struct load_and_init_all_metadata_args
+{
+	struct allocs_file_metadata *in_meta;
+	void *out_handle;
+};
+int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *inout_args);
 
-const char *meta_libfile_name(const char *objname) __attribute__((visibility("hidden")));
-int find_and_open_meta_libfile(const char *objname) __attribute__((visibility("hidden")));
+int find_and_open_meta_libfile(struct allocs_file_metadata *meta) __attribute__((visibility("hidden")));
 
 void __notify_copy(void *dest, const void *src, unsigned long n);
 void __notify_free(void *dest);

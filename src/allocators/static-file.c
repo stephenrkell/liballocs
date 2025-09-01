@@ -222,8 +222,13 @@ struct file_metadata *__wrap___runt_files_metadata_by_addr(const void *addr)
 static void load_metadata(struct allocs_file_metadata *meta, void *handle)
 {
 	/* Load the separate meta-object for this object. */
+	assert(meta);
+	struct load_and_init_all_metadata_args args = {
+		.in_meta = meta
+	};
 	int ret_meta = dl_for_one_object_phdrs(handle,
-		load_and_init_all_metadata_for_one_object, &meta->meta_obj_handle);
+		load_and_init_all_metadata_for_one_object, &args);
+	meta->meta_obj_handle = args.out_handle;
 	// meta_obj_handle may be null -- we continue either way
 	meta->extrasym = (meta->meta_obj_handle ? dlsym(meta->meta_obj_handle, "extrasym") : NULL);
 	meta->extrastr = (meta->meta_obj_handle ? dlsym(meta->meta_obj_handle, "extrastr") : NULL);

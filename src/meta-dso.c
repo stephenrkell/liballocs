@@ -77,7 +77,7 @@ static const void *typestr_to_uniqtype_from_lib(void *handle, const char *typest
 }
 
 __attribute__((visibility("hidden")))
-const char *meta_libfile_name(const char *objname)
+const char *meta_libfile_name_by_path(const char *objname)
 {
 	/* we must have a canonical filename */
 	if (objname[0] != '/') return NULL;
@@ -107,53 +107,111 @@ const char *meta_libfile_name(const char *objname)
 	
 	return &libfile_name[0];
 }
-const char *__liballocs_meta_libfile_name(const char *objname)
+__attribute__((visibility("hidden")))
+const char *meta_libfile_name_by_build_id(char build_id[20])
 {
-	return meta_libfile_name(objname);
+	ensure_meta_base();
+#ifndef NO_TLS
+	static __thread char libfile_name[4096]; // FIXME
+#else
+	static char libfile_name[4096]; // FIXME
+#endif
+	unsigned bytes_left = sizeof libfile_name - 1;
+	libfile_name[0] = '\0';
+	bytes_left--;
+
+	// append the uniqtypes base path
+	strncat(libfile_name, meta_base, bytes_left);
+	bytes_left -= (bytes_left < meta_base_len) ? bytes_left : meta_base_len;
+	// append the infix we use for build-ID-based naming
+#define BUILD_ID_INFIX "/.build-id/"
+	strncat(libfile_name, BUILD_ID_INFIX, bytes_left);
+	bytes_left -= (bytes_left < sizeof BUILD_ID_INFIX - 1) ? bytes_left : sizeof BUILD_ID_INFIX - 1;
+
+	/* Now append the build ID, as hex characters NOT the binary blob we have.
+	 * Also note the slash: we separate out the first two chars of the hex string. */
+	snprintf(libfile_name + strlen(libfile_name),
+		bytes_left,
+		"%02hhx/%02hhx%02hhx%02hhx%02hhx" "%02hhx%02hhx%02hhx%02hhx%02hhx"
+		"%02hhx%02hhx%02hhx%02hhx%02hhx"  "%02hhx%02hhx%02hhx%02hhx%02hhx",
+		build_id[0], build_id[1], build_id[2], build_id[3], build_id[4],
+		build_id[5], build_id[6], build_id[7], build_id[8], build_id[9],
+		build_id[10], build_id[11], build_id[12], build_id[13], build_id[14],
+		build_id[15], build_id[16], build_id[17], build_id[18], build_id[19]
+	);
+	bytes_left -= 40;
+
+	// now append the suffix
+	strncat(libfile_name, META_OBJ_SUFFIX, bytes_left);
+	// no need to compute the last bytes_left
+
+	return &libfile_name[0];
 }
 
 /* HACK to avoid too much librunt dependency in this allocsld-borrowed code. */
 #ifndef IN_LIBALLOCS_DSO
 #define get_exe_command_basename(...) "(no name)"
 #endif
+/* This is our single function for grabbing a meta-DSO. If we need the filename
+ * we should use realpath on the /proc/self/fd symlink (HACK: Linux-specific).
+ * This will avoid TOCTOU races on the filename. */
 __attribute__((visibility("hidden")))
-int find_and_open_meta_libfile(const char *objname)
+int find_and_open_meta_libfile(struct allocs_file_metadata *meta)
 {
-	const char *meta_buf = meta_libfile_name(objname);
-	/* open it and fstat it */
-	int fd_meta = open(meta_buf, O_RDONLY);
-	if (fd_meta == -1)
+	const char *objname = meta->m.filename;
+	/* We might not have a build ID. We represent this, somewhat hackily,
+	 * as a build ID of all-zero. We don't include the build ID as a
+	 * candidate if it is all zeroes... use memcmpy().
+	 * The by-build-ID path should be tried first. (This is tested for
+	 * in the hello-build-ID test case.) */
+	char zero_build_id[20]; bzero(zero_build_id, sizeof zero_build_id);
+	_Bool have_build_id = (0 != memcmp(zero_build_id, meta->m.build_id, sizeof zero_build_id));
+	const char *candidates[] = {
+		have_build_id ? meta_libfile_name_by_build_id(meta->m.build_id) :
+			meta_libfile_name_by_path(objname),
+		have_build_id ? meta_libfile_name_by_path(objname) : NULL
+	};
+	int fd_meta = -1;
+	for (int i = 0; i < sizeof candidates / sizeof candidates[0] && !!candidates[i]; ++i)
 	{
-		debug_printf(1, "Could not open meta-DSO `%s' (%s)\n", meta_buf, strerror(errno));
-		return -1;
+		const char *candidate = candidates[i];
+		/* open it and fstat it */
+		int fd_meta = open(candidate, O_RDONLY);
+		if (fd_meta == -1)
+		{
+			debug_printf(1, "Could not open meta-DSO `%s' (%s)\n", candidate, strerror(errno));
+			continue;
+		}
+		struct stat statbuf_meta;
+		int ret = fstat(fd_meta, &statbuf_meta);
+		if (ret != 0)
+		{
+			debug_printf(1, "Could not fstat meta-DSO `%s' (%s)\n", candidate, strerror(errno));
+			close(fd_meta);
+			fd_meta = -1; continue;
+		}
+		// also stat the actual base DSO...
+		struct stat statbuf_base;
+		ret = stat(objname, &statbuf_base);
+		if (ret != 0)
+		{
+			/* Is it a problem if we can't stat it? We just can't do our newer-than check. 
+			 * FIXME: our approach here is already vulnerable to false positives e.g.
+			 * if a new binary/metadata is being installed while an old process is running
+			 * this code... we will compare against the timestamp of the new base binary. */
+			debug_printf(0, "Could not stat base DSO `%s' (%s) -- deleted on disk?\n", objname, strerror(errno));
+		}
+		// is the base file newer than the meta file? if so, we don't load it
+		if (statbuf_base.st_mtime > statbuf_meta.st_mtime)
+		{
+			debug_printf(0, "Declining to load out-of-date meta-DSO `%s'\n", candidate);
+			close(fd_meta);
+			fd_meta = -1; continue;
+		}
+		debug_printf(4, "Successfully opened meta-DSO `%s'\n", candidate);
+		return fd_meta;
 	}
-	struct stat statbuf_meta;
-	int ret = fstat(fd_meta, &statbuf_meta);
-	if (ret != 0)
-	{
-		debug_printf(1, "Could not fstat meta-DSO `%s' (%s)\n", meta_buf, strerror(errno));	
-		close(fd_meta);
-		return -1;
-	}
-	// also stat the actual ld.so!
-	struct stat statbuf_base;
-	ret = stat(objname, &statbuf_base);
-	if (ret != 0)
-	{
-		/* Is it a problem if we can't stat it? We just can't do our newer-than check. 
-		 * FIXME: our approach here is already vulnerable to false positives e.g.
-		 * if a new binary/metadata is being installed while an old process is running
-		 * this code... we will compare against the timestamp of the new base binary. */
-		debug_printf(0, "Could not stat base DSO `%s' (%s) -- deleted on disk?\n", objname, strerror(errno));
-	}
-	// is the base file newer than the meta file? if so, we don't load it
-	if (statbuf_base.st_mtime > statbuf_meta.st_mtime)
-	{
-		debug_printf(0, "Declining to load out-of-date meta-DSO `%s' (%s)\n", meta_buf, strerror(errno));
-		close(fd_meta);
-		return -1;
-	}
-	return fd_meta;
+	return -1;
 }
 #ifndef IN_LIBALLOCS_DSO
 #undef get_exe_command_basename
@@ -171,28 +229,10 @@ int find_and_open_meta_libfile(const char *objname)
 // HACK
 extern void __libcrunch_scan_lazy_typenames(void *handle) __attribute__((weak));
 
-_Bool is_meta_object_for_lib(struct link_map *maybe_meta, struct link_map *l)
-{
-	// get the canonical libfile name
-	const char *canon_l_objname = dynobj_name_from_dlpi_name(l->l_name,
-		(void*) l->l_addr); // always returns non-null
-	const char *types_objname_not_norm = meta_libfile_name(canon_l_objname);
-	if (!types_objname_not_norm) return 0;
-	const char *types_objname_norm = realpath_quick(types_objname_not_norm);
-	if (!types_objname_norm) return 0; /* meta obj does not exist */
-	char types_objname_buf[4096];
-	strncpy(types_objname_buf, types_objname_norm, sizeof types_objname_buf - 1);
-	types_objname_buf[sizeof types_objname_buf - 1] = '\0';
-	const char *canon_types_objname = dynobj_name_from_dlpi_name(maybe_meta->l_name,
-		(void*) maybe_meta->l_addr); // always returns nonnull
-	if (0 == strcmp(types_objname_buf, canon_types_objname)) return 1;
-	else return 0;
-}
-
 int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t size, void *data)
 {
 	void *meta_handle = NULL;
-	void **maybe_out_handle = (void**) data;
+	struct load_and_init_all_metadata_args *args = data;
 	// get the canonical libfile name
 	const char *canon_objname = dynobj_name_from_dlpi_name(info->dlpi_name, (void *) info->dlpi_addr);
 	if (!canon_objname) return 0;
@@ -205,32 +245,43 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	// FIXME: what about embedded meta objects? we haven't implemented those yet....
 	if (0 == strcmp(canon_objname, ensure_meta_base())) return 0;
 	
-	// get the -meta.so object's name
-	const char *libfile_name = meta_libfile_name(canon_objname);
-	if (!libfile_name) return 0;
 	// don't load if we end with "-meta.so", wherever we are
 	// FIXME: not sure we need *both* this test and the one above (for being under meta_base)
 	if (0 == strcmp(META_OBJ_SUFFIX, canon_objname + strlen(canon_objname) - strlen(META_OBJ_SUFFIX)))
 	{
 		return 0;
 	}
-	
-	/* FIXME: do a stat() check on the mtime of our meta-obj
-	 * versus the mtime of the base obj.
-	 * If the base obj is newer, complain. */
 
 	// FIXME BUG: dlerror can SEGFAULT if called here (why?), also appears below
 	//dlerror();
 	// load with NOLOAD first, so that duplicate loads are harmless
 	/* Towards meta-completeness: use the real dlopen, so that meta-objs
 	 * are also loaded. We will fail to load their meta-obj. */
+
+	// get the -meta.so object's name
+	int fd = find_and_open_meta_libfile(args->in_meta);
+	if (fd == -1) return 0;
+	char *symlink_path = NULL;
+	int ret = asprintf(&symlink_path, "/proc/self/fd/%d", fd);
+	if (ret < 0) { close(fd); return 0; }
+	assert(ret > 0); // printing zero characters, but succeeding with allocation, should never happen
+	assert(strlen(symlink_path) > 0);
+	/* We need the realpath across a few more liballocs calls, so strdup it. */
+	const char *libfile_name_quick = realpath_quick(symlink_path);
+	char *libfile_name = __private_strndup(libfile_name_quick, strlen(libfile_name_quick));
+	debug_printf(1, "meta-DSO at `%s' is really `%s'\n", symlink_path, libfile_name);
+	if (!libfile_name) { free(symlink_path); __private_free(libfile_name); close(fd); return 0; }
+
 	meta_handle = dlopen(libfile_name, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+	close(fd); /* This fd was keeping the /proc/self/fd entry alive -- OK to close now */
 	if (meta_handle)
 	{
 		/* That means the object is already loaded. How did that happen? */
-		debug_printf(0, "meta object unexpectedly already loaded: %s\n", libfile_name);
-		*maybe_out_handle = meta_handle;
+		debug_printf(0, "meta-DSO unexpectedly already dlopened: %s\n", libfile_name);
+		args->out_handle = meta_handle;
 		dlclose(meta_handle); // decrement the refcount, but won't free the link_map
+		free(symlink_path);
+		__private_free(libfile_name);
 		return 0;
 	}
 	errno = 0;
@@ -240,12 +291,16 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	if (!meta_handle)
 	{
 		/* The dlerror message will repeat the libfile name, so no need to print it. */
-		debug_printf((is_exe || is_libc) ? 0 : 1, "error loading meta object: %s\n",
-			dlerror());
+		debug_printf((is_exe || is_libc) ? 0 : 1, "error dlopening meta-DSO `%s': %s\n",
+			symlink_path, dlerror());
+		__private_free(libfile_name);
+		free(symlink_path);
 		return 0;
 	}
-	debug_printf(3, "loaded meta object: %s\n", libfile_name);
-	if (maybe_out_handle) *maybe_out_handle = meta_handle;
+	debug_printf(3, "dlopened meta-DSO: %s (as %s)\n", libfile_name, symlink_path);
+	__private_free(libfile_name);
+	free(symlink_path);
+	args->out_handle = meta_handle;
 
 	// HACK: scan it for lazy-heap-alloc types
 	if (__libcrunch_scan_lazy_typenames) __libcrunch_scan_lazy_typenames(meta_handle);
@@ -379,6 +434,7 @@ int __liballocs_iterate_types(void *typelib_handle, int (*cb)(struct uniqtype *t
 
 static void *metaobj_handle_for_addr(void *caller)
 {
+#if 0
 	// find out what object the caller is in
 	Dl_info info;
 	dlerror();
@@ -401,6 +457,8 @@ static void *metaobj_handle_for_addr(void *caller)
 	}
 	dlclose(handle); // unbump refcount; it will remain at least 1
 	return handle;
+#endif
+	return NULL; /* FIXME: reinstate for the build-id era */
 }
 
 void *__liballocs_my_metaobj(void) __attribute__((visibility("protected")));

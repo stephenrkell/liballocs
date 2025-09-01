@@ -224,6 +224,17 @@ struct mapping_entry *__liballocs_get_memory_mapping(const void *obj,
 	return NULL;
 }
 
+/* A basic API for access to "allocator-specific metadata" (see liballocs.h). */
+void *__liballocs_get_specific_by_allocator(const void *obj,
+		struct allocator *a, struct uniqtype **out_specific_type)
+{
+	void *start = NULL;
+	struct big_allocation *b = __lookup_bigalloc_from_root(obj, a, &start);
+	if (b) return b->allocator_private; /* FIXME: also output out_specific_type.
+	* For this we will have to delegate to the underlying allocator. */
+	return NULL;
+}
+
 
 /* Utility code. Suspiciously convenient for bzip2. */
 int __liballocs_add_type_to_block(void *block, struct uniqtype *t)
