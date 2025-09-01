@@ -161,7 +161,9 @@ build_id=$$( . $(dir $(THIS_MAKEFILE))/debug-funcs.sh && read_build_id "$<" ); \
 if [ -n "$$build_id" ]; then \
  dirname="$(META_BASE)"/.build-id/"$$( echo "$$build_id" | head -c2 )"; \
  mkdir -p "$$dirname" && \
- ln -T "$@" "$$dirname"/"$$( echo "$$build_id" | tail -c+3 )"; \
+ linkname="$$dirname"/"$$( echo "$$build_id" | tail -c+3 )"-meta.so && \
+ ln -f -T "$@" "$$linkname"; \
+ stat "$@"; stat "$$linkname"; \
 else \
  echo "Warning: could not get build ID for $< so not linking meta-DSO" 1>&2; \
 fi
