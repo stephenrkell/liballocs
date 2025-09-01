@@ -127,6 +127,7 @@ int main(int argc, char **argv)
 	cout << "#include \"uniqtype-defs.h\"\n\n";
 	write_master_relation(master_relation, cout, cerr,
 		names_emitted, types_by_name, /* emit_codeless_alises */ true);
+	cerr << endl;
 	// HACK: we emit codeless aliases here, but better if it were a wrapper shell
 	// script on the -meta.so afterwards, because types don't only come from dwarftypes.
 
