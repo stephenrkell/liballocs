@@ -296,8 +296,10 @@ void __pageindex_init(void)
 				(void*) (MAXIMUM_USER_ADDRESS + 1), (const void *) PAGEINDEX_ADDRESS);
 			if (pageindex == MAP_FAILED) abort();
 			debug_printf(3, "pageindex at %p (mapped eagerly)\n", pageindex);
-		} else {
-			pageindex = PAGEINDEX_ADDRESS; /* ... but nothing mapped here yet! */
+		}
+		else
+		{
+			pageindex = (bigalloc_num_t *) PAGEINDEX_ADDRESS; /* ... but nothing mapped here yet! */
 			install_segv_handler();
 			debug_printf(3, "pageindex at %p (to be mapped lazily)\n", pageindex);
 		}

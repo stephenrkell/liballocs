@@ -6,8 +6,10 @@
 #include <sys/mman.h>
 #include "pageindex.h"
 #include "vas.h"
-#include "raw-syscalls-defs.h" /* we need raw_mmap() */
+#include "raw-syscalls-defs.h" /* we need raw_mmap() and write_string() */
 #include "liballocs_private.h"
+
+static struct sigaction oldaction; /* We will restore this... */
 
 /* FIXME: we should really use some handler chaining, not
  * just clobbering whatever handler pre-exists. libcrunch
@@ -34,8 +36,25 @@ static void handle_sigsegv(int n, siginfo_t *info, void *ucontext)
 		if (ret != (void*) range_base) abort();
 		debug_printf(0, "lazily mapped a piece of pageindex at %p (idx 0x%lx)\n",
 			ret, (unsigned long) range_idx);
+		return; // we explicitly resume from the segfault
 	}
+	/* FIXME: be more compositional, w.r.t. other possible handlers (installed
+	 * either before we install ours or after!).
+	 * For now, we want to do whatever would happen if our handler was not installed...
+	 * probably that's just exit. However, exiting has the side effect of disabling
+	 * the core handling path. Instead we disable ourselves and then resume! FIXME: this
+	 * is not foolproof, e.g. if there are concurrent threads futzing with the memory map. */
+	write_string("Segmentation fault not handleable by lazy memory mapping\n");
+	//raw_exit(128 + SIGSEGV);
+	sigaction(SIGSEGV, &oldaction, NULL);
 }
+
+/* FIXME: consider using SIGBUS here, as it is more rarely triggered
+ * than SIGSEGV and so is less confusing/disruptive at debug time. We could
+ * memory-map a zero-length temporary file that we immediately unlink. I
+ * suppose a third party could still re-truncate that file while we're running,
+ * using the /proc/pid/fd/* symlink, but would that be a useful attack? More
+ * importantly, does this SIGBUS approach also avoid huge core files? */
 
 __attribute__((visibility("hidden")))
 void install_segv_handler(void)
@@ -44,7 +63,6 @@ void install_segv_handler(void)
 		.sa_handler = (void*) &handle_sigsegv,
 		.sa_flags = SA_NODEFER | SA_SIGINFO
 	};
-	static struct sigaction oldaction;
 	int ret = sigaction(SIGSEGV, &action, &oldaction);
 	if (ret != 0) abort();
 }
