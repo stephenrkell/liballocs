@@ -164,7 +164,7 @@ CFLAGS += -I$(srcdir)
 # different outputs involve different subgroups of objects
 CORE_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o \
   meta-dso.o uniqtype-util.o counters.o rt-uniqtypes.o util.o private-libc.o err.o query.o walk.o \
-  init.o workarounds.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) \
+  init.o workarounds.o segv.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) \
   $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
 ifneq ($(USE_REAL_LIBUNWIND),)
 LDLIBS += -lunwind -lunwind-`uname -m`

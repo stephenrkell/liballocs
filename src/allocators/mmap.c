@@ -767,9 +767,7 @@ struct add_missing_cb_args
 };
 void add_missing_mappings_from_proc(void *executable_end_addr)
 {
-	struct maps_entry entry;
-
-	char proc_buf[4096];
+	char proc_buf[sizeof "/proc/%d/maps" - 2 + 10 /* max #digits in an int */];
 	int ret;
 	ret = snprintf(proc_buf, sizeof proc_buf, "/proc/%d/maps", getpid());
 	if (!(ret > 0)) abort();
@@ -778,9 +776,25 @@ void add_missing_mappings_from_proc(void *executable_end_addr)
 	
 	/* We used to use getline(), but in some deployments it's not okay to 
 	 * use malloc when we're called early during initialization. So we write
-	 * our own read loop. */
+	 * our own read loop. Also we read everything in one go, because add_missing_cb
+	 * may . */
+#define MAX_LINES 1024
+#define MAX_ALLBUF 81920 // 80kB
+	static char *lines[MAX_LINES];
+	static char allbuf[MAX_ALLBUF];
 	char linebuf[8192];
-	
+	/* librunt defines the get_a_line_from_maps_fd helper.
+	 * It's really important that during this loop, the memory map does not change.
+	 * Otherwise, the contents of the maps file will change under our feet and
+	 * our fd will no longer point at a line break. Therefore, we don't do add_missing
+	 * for each line as we go along... now that pageindex space is allocated lazily, this
+	 * can easily change the maps file. Instead, we read all lines up-front... librunt now
+	 * has this code factored out from libsystrap (was in example/trace-syscalls.c). */
+	int nlines_read = read_all_maps_lines_from_fd(fd,
+		linebuf, sizeof linebuf, lines, MAX_LINES, allbuf, sizeof allbuf);
+	/* We run during startup, so the number of distinct /proc lines should be small. */
+	assert(nlines_read > 0);
+	/* Now we have an array containing the lines. */
 	struct mapping_sequence current = {
 		.begin = NULL
 	};
@@ -788,8 +802,11 @@ void add_missing_mappings_from_proc(void *executable_end_addr)
 		.seq = &current,
 		.end_addr = executable_end_addr
 	};
-	for_each_maps_entry(fd, get_a_line_from_maps_fd, linebuf, sizeof linebuf, &entry,
-		add_missing_cb, &args);
+	struct maps_entry entry;
+	for (int i = 0; i < nlines_read; ++i)
+	{
+		process_one_maps_line(lines[i], &entry, add_missing_cb, &args);
+	}
 	/* Finish off the last mapping. */
 	if (current.nused > 0) add_mapping_sequence_bigalloc_if_absent(&current);
 

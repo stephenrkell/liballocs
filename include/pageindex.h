@@ -3,6 +3,10 @@
 #include <assert.h>
 #include "vas.h"
 
+// FIXME: sysdep
+#define PAGEINDEX_ADDRESS 0x410000000000ul
+#define PAGEINDEX_SIZE_BYTES ((sizeof (bigalloc_num_t)) * DIVIDE_ROUNDING_UP(((uintptr_t)MAXIMUM_USER_ADDRESS), MIN_PAGE_SIZE) )
+
 /* We maintain two structures:
  *
  * - an array of "big allocations";

@@ -288,16 +288,19 @@ void __pageindex_init(void)
 #undef CHAR_TO_PRINT
 		}
 		/* Mmap our region. We map one 16-bit number for every page in the user address region. */
-		/* HACK: always place at 0x410000000000, to avoid problems with shadow space.
-		 * The generic malloc index goes at 0x400000000000 
-		 *          and is 2 ** 38 bytes or   0x4000000000 in size
-		 *          but we don't want to assume too much about its size.
-		 */
-		pageindex = MEMTABLE_NEW_WITH_TYPE_AT_ADDR(bigalloc_num_t, PAGE_SIZE, (void*) 0,
-			(void*) (MAXIMUM_USER_ADDRESS + 1), (const void *) 0x410000000000ul);
-		if (pageindex == MAP_FAILED) abort();
-		debug_printf(3, "pageindex at %p\n", pageindex);
-
+		/* HACK: always place at a known address (see pageindex.h, but it's 0x410000000000),
+		 * to avoid problems with libcrunch shadow space. */
+		if (getenv("LIBALLOCS_PAGEINDEX_NO_LAZY_MAPPING"))
+		{
+			pageindex = MEMTABLE_NEW_WITH_TYPE_AT_ADDR(bigalloc_num_t, PAGE_SIZE, (void*) 0,
+				(void*) (MAXIMUM_USER_ADDRESS + 1), (const void *) PAGEINDEX_ADDRESS);
+			if (pageindex == MAP_FAILED) abort();
+			debug_printf(3, "pageindex at %p (mapped eagerly)\n", pageindex);
+		} else {
+			pageindex = PAGEINDEX_ADDRESS; /* ... but nothing mapped here yet! */
+			install_segv_handler();
+			debug_printf(3, "pageindex at %p (to be mapped lazily)\n", pageindex);
+		}
 		create_private_malloc_heap();
 	}
 }
