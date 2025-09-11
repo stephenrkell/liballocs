@@ -5,9 +5,13 @@
  * so needs to be written to be tolerant of old-ish versions of C.
  * Ditto for anything it includes. */
 
+/* This file should also not include any standard headers.
+ * Soem codebases will replace them with their own version that
+ * does not like being included first, e.g. before a config.h.
+ * See GitHub issue #125. */
 #include "liballocs_config.h"
 #include "malloc-meta.h"
-#include <stddef.h>
+
 #ifndef unlikely
 #define __liballocs_defined_unlikely
 #define unlikely(cond) (__builtin_expect( (cond), 0 ))
@@ -105,6 +109,10 @@ extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liba
 {
 	return (const void *) __builtin_frame_address(0);
 }
+
+#ifndef PAD_TO_ALIGN
+#define PAD_TO_ALIGN(n, a) 	((0 == ((n) % (a))) ? (n) : (n) + (a) - ((n) % (a)))
+#endif
 /* We have to pad the alloca chunk at both ends: prepend a header
  * that lets us retrieve the size, and then append our usual trailer
  * for the allocation site / type metadata. We call a helper to get
