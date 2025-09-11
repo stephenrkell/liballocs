@@ -118,9 +118,21 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
  * entitled to opportunistically use extra space that it learns about from
  * malloc_usable_size. So the allocation size returned by liballocs should reflect
  * that. So we should round down the size at the point of sizing the array.
+ *
+ * About 'usersize', 'allocsize', 'allocptr' and 'userptr':
+ * as you would expect, these refer to respectively the client code's believed
+ * size and base pointer of a given chunk, and the allocator's size and base pointer
+ * for the same. However, we always have allocptr==userptr because we only use
+ * inserts as a trailer. Using them as a header is not reliable because, as covered
+ * at the top of this comment, we would have to interpose on the entire malloc API
+ * to rewrite all userptrs to allocptrs, and that rules out ad-hoc per-malloc-impl
+ * extensions (e.g. imagine some per-chunk version of mallinfo() or mallopt(), or
+ * whatever).
+ *
+ * The sizes are more tricky, as covered above.
  */
-static inline size_t allocsize_to_usersize(size_t usersize) { return usersize; }
-static inline size_t usersize_to_allocsize(size_t allocsize) { return allocsize; }
+static inline size_t allocsize_to_usersize(size_t allocsz) { return allocsz - sizeof (struct insert); }
+static inline size_t usersize_to_allocsize(size_t usersz) { return usersz + sizeof (struct insert); }
 static inline size_t usersize(void *userptr, sizefn_t *sizefn) { return allocsize_to_usersize(sizefn(userptr)); }
 static inline size_t allocsize(void *allocptr, sizefn_t *sizefn) { return sizefn(allocptr); }
 
@@ -305,7 +317,7 @@ static inline void ensure_has_bitmap_to(struct allocator *a,
 	}
 }
 
-static inline void __generic_malloc_index_insert(
+static inline struct insert *__generic_malloc_index_insert(
 	struct allocator *a,
 	struct arena_bitmap_info *info,
 	void *allocptr, size_t caller_requested_size, const void *caller,
@@ -314,6 +326,7 @@ static inline void __generic_malloc_index_insert(
 		 * than b->suballocator->get_size
 		 * because the compiler will know which function it is. */
 {
+	struct insert *p_insert = NULL;
 	int lock_ret;
 	BIG_LOCK
 	// first check our bitmap is big enough
@@ -344,7 +357,7 @@ static inline void __generic_malloc_index_insert(
 	size_t alloc_usable_size = sizefn(allocptr);
 	size_t caller_usable_size = caller_usable_size_for_chunk_and_usable_size(allocptr,
 			alloc_usable_size);
-	struct insert *p_insert = insert_for_chunk_and_caller_usable_size(allocptr,
+	p_insert = insert_for_chunk_and_caller_usable_size(allocptr,
 		caller_usable_size);
 	/* Populate our extra in-chunk fields */
 	p_insert->alloc_site_flag = 0U;
@@ -403,6 +416,7 @@ static inline void __generic_malloc_index_insert(
 	bitmap_set_l(bitmap, (allocptr - info->bitmap_base_addr) / MALLOC_ALIGN);
 out:
 	BIG_UNLOCK
+	return p_insert;
 }
 
 static inline void __generic_malloc_index_delete(struct allocator *a,
@@ -502,7 +516,7 @@ out:
 }
 
 static inline
-void __generic_malloc_index_reinsert_after_resize(
+struct insert *__generic_malloc_index_reinsert_after_resize(
 	struct allocator *a,
 	struct arena_bitmap_info *oldinfo, /* new and old need not share a bitmap! */
 	void *userptr,
@@ -511,13 +525,14 @@ void __generic_malloc_index_reinsert_after_resize(
 	size_t requested_size,
 	const void *caller, void *new_allocptr, sizefn_t *sizefn)
 {
+	struct insert *ins = NULL;
 	if (new_allocptr && new_allocptr != userptr)
 	{
 		/* FIXME: check the new type metadata against the old! We can probably do this
 		 * in a way that's uniform with memcpy... the new chunk will take its type
 		 * from the realloc site, and we then check compatibility on the copy. */
 		struct arena_bitmap_info *newinfo = ensure_arena_info_for_userptr(a, new_allocptr);
-		__generic_malloc_index_insert(a, newinfo, new_allocptr,
+		ins = __generic_malloc_index_insert(a, newinfo, new_allocptr,
 			requested_size, __current_allocsite ?: caller, sizefn);
 		/* HACK: this is a bit racy. Not sure what to do about it really. We can't
 		 * pre-copy (we *could* speculatively pre-snapshot though, into a thread-local
@@ -536,7 +551,7 @@ void __generic_malloc_index_reinsert_after_resize(
 		 * allocating it, so we pass it as the modified_size to
 		 * __generic_malloc_index_insert. */
 		// FIXME: is this right? what if new_allocptr is null?
-		__generic_malloc_index_insert(a, oldinfo, userptr, requested_size,
+		ins = __generic_malloc_index_insert(a, oldinfo, userptr, requested_size,
 			__current_allocsite ? __current_allocsite : caller, sizefn);
 	}
 #ifndef NO_BIGALLOCS
@@ -547,6 +562,7 @@ void __generic_malloc_index_reinsert_after_resize(
 		__liballocs_truncate_bigalloc_at_end(b, (char*) userptr + modified_size);
 	}
 #endif
+	return ins;
 }
 
 static inline

@@ -406,7 +406,7 @@ void __unindex_small_alloc(void *ptr, int level);
  * the generation by alignment, or some other parameter of the malloc,
  * so that the code is tailored to that malloc. */
 #define ALLOC_ALLOCATOR_NAME(frag) frag ## _allocator
-#define ALLOC_EVENT_INDEXING_DEFS4(allocator_namefrag, index_namefrag, sizefn, do_lifetime_policies) \
+#define ALLOC_EVENT_INDEXING_DEFS4(allocator_namefrag, index_namefrag, sizefn, initial_lifetime_policies /* 0 => no lifetime policies */ ) \
 ALLOC_EVENT_ATTRIBUTES void ALLOC_EVENT(post_init)(void) {} \
 ALLOC_EVENT_ATTRIBUTES \
 void  \
@@ -417,6 +417,12 @@ ALLOC_EVENT(post_successful_alloc)(void *allocptr, size_t modified_size, size_t 
 		ensure_arena_info_for_userptr(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), allocptr), \
 		allocptr /* == userptr */, requested_size, \
 		__current_allocsite ? __current_allocsite : caller, sizefn); \
+	if (initial_lifetime_policies) /* always statically known but we can't #ifdef here */ \
+	{ \
+		lifetime_insert_t *lti = lifetime_insert_for_chunk(allocptr /* == userptr */, sizefn); \
+		if (lti) *lti |= initial_lifetime_policies; \
+		/* GitHub issue #21: make initial_lifetime_policies caller-sensitive somehow? */ \
+	} \
 } \
 ALLOC_EVENT_ATTRIBUTES \
 void ALLOC_EVENT(pre_alloc)(size_t *p_size, size_t *p_alignment, const void *caller) \
@@ -431,11 +437,12 @@ void ALLOC_EVENT(pre_alloc)(size_t *p_size, size_t *p_alignment, const void *cal
 ALLOC_EVENT_ATTRIBUTES \
 int ALLOC_EVENT(pre_nonnull_free)(void *userptr, size_t freed_usable_size) \
 { \
-	if (do_lifetime_policies) /* always statically known but we can't #ifdef here */ \
+	if (initial_lifetime_policies) /* always statically known but we can't #ifdef here */ \
 	{ \
 		lifetime_insert_t *lti = lifetime_insert_for_chunk(userptr, sizefn); \
-		*lti &= ~MANUAL_DEALLOCATION_FLAG; \
-		if (*lti) return 1; /* Cancel free if we are still alive */ \
+		/* GitHub issue #21: are different free functions different policies? not yet... */ \
+		if (lti) *lti &= ~MANUAL_DEALLOCATION_FLAG; \
+		if (lti && *lti) return 1; /* Cancel free if we are still alive */ \
 		__notify_free(userptr); \
 	} \
 	index_namefrag ## _index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
@@ -524,9 +531,9 @@ struct allocator ALLOC_ALLOCATOR_NAME(allocator_namefrag) = { \
 };
 
 #ifdef LIFETIME_POLICIES
-#define __do_lp 1
+#define __default_initial_lifetime_policies MANUAL_DEALLOCATION_FLAG
 #else
-#define __do_lp 0
+#define __default_initial_lifetime_policies 0 /* => LP-related code paths in the above will be skipped */
 #endif
 
 #ifndef index_namefrag
@@ -534,5 +541,5 @@ struct allocator ALLOC_ALLOCATOR_NAME(allocator_namefrag) = { \
 #endif
 
 #define ALLOC_EVENT_INDEXING_DEFS(allocator_namefrag, sizefn) \
-  ALLOC_EVENT_INDEXING_DEFS4(allocator_namefrag, __generic_malloc, sizefn, __do_lp) \
-  ALLOC_EVENT_ALLOCATOR_DEFS4(allocator_namefrag, __generic_malloc, sizefn, __do_lp)
+  ALLOC_EVENT_INDEXING_DEFS4(allocator_namefrag, __generic_malloc, sizefn, __default_initial_lifetime_policies) \
+  ALLOC_EVENT_ALLOCATOR_DEFS4(allocator_namefrag, __generic_malloc, sizefn, __default_initial_lifetime_policies)

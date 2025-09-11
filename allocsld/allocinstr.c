@@ -506,7 +506,7 @@ void __notify_free(void *arg) {}
  * of them. */
 
 #include "stubgen.h"
-ALLOC_EVENT_INDEXING_DEFS4(__ld_so_malloc, linear_malloc, ld_so_malloc_usable_size, __do_lp)
+ALLOC_EVENT_INDEXING_DEFS4(__ld_so_malloc, linear_malloc, ld_so_malloc_usable_size, __default_initial_lifetime_policies)
 
 
 static

@@ -38,7 +38,18 @@ static size_t __default_lib_malloc_usable_size(void *ptr)
 	}
 	return real_malloc_usable_size(ptr);
 }
-ALLOC_EVENT_INDEXING_DEFS(__default_lib_malloc, __default_lib_malloc_usable_size)
+ALLOC_EVENT_INDEXING_DEFS4(
+	/* allocator_namefrag */__default_lib_malloc,
+	/* index_namefrag */ __generic_malloc,
+	/* sizefn */ __default_lib_malloc_usable_size,
+	/* initial_policies */ MANUAL_DEALLOCATION_FLAG
+);
+ALLOC_EVENT_ALLOCATOR_DEFS4(
+	/* allocator_namefrag */__default_lib_malloc,
+	/* index_namefrag */ __generic_malloc,
+	/* sizefn */ __default_lib_malloc_usable_size,
+	/* initial_policies */ MANUAL_DEALLOCATION_FLAG
+);
 
 /* By default, the 'malloc' first in libraries' link order, i.e. the one */
 /* our preload sits in front of, is deemed the global malloc. But if the */

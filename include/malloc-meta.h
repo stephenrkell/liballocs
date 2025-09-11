@@ -120,30 +120,6 @@ typedef /*LIFETIME_INSERT_TYPE*/ unsigned char lifetime_insert_t;
 /* Manual deallocation is not an "attached" policy */
 #define HAS_LIFETIME_POLICIES_ATTACHED(lti) ((lti) & ~(MANUAL_DEALLOCATION_FLAG))
 
-#if 0
-/* srk: I think extended inserts need to go away. Instead any build of
- * liballocs will have a single insert type that it is using, and that build
- * will or won't support lifetime policies features. That may prove too
- * draconian but I'd like to try it for now, to conserve complexity. */
-struct extended_insert
-{
-	lifetime_insert_t lifetime;
-#ifdef PRECISE_REQUESTED_ALLOCSIZE
-	/* Include any padding inserted such that
-	 * usable_size - insert_size = requested_size */
-	unsigned char insert_size;
-#endif
-	/* The base insert is at the end because we want interoperabiliy between
-	 * allocators using extended_insert and allocators only using insert.
-	 * See insert_for_chunk. */
-	struct insert base;
-} __attribute__((packed)); /* Alignment from the end guaranteed by ourselves */
-struct uniqtype;
-static inline struct extended_insert *extended_insert_for_chunk(void *userptr, sizefn_t *sizefn)
-{
-	return /*NULL*/ (void*)0; /* FIXME: restore this */
-}
-#endif
 static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr, sizefn_t *sizefn)
 {
 	return (void*)0; /* FIXME: restore this */ /* &extended_insert_for_chunk(userptr, sizefn)->lifetime; */
