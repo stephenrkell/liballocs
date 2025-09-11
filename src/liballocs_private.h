@@ -109,7 +109,8 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post);
 void __liballocs_systrap_init(void);
 void __systrap_brk_hack(void);
 
-void install_segv_handler(void);
+#define PAGEINDEX_LAZY_MAPPING_USE_SIGBUS
+void install_lazy_pageindex_handler(void);
 
 int load_types_for_one_object(struct dl_phdr_info *, size_t, void *data);
 int load_and_init_allocsites_for_one_object(struct dl_phdr_info *, size_t, void *data);
