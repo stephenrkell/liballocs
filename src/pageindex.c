@@ -297,8 +297,7 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
  * less confusing/disruptive at debug time, while still achieving the intention
  * of not generating huge core files from the unused pageindex areas. We
  * memory-map a zero-length temporary file that we immediately unlink. */
-__attribute__((visibility("hidden")))
-void install_lazy_pageindex_handler(void)
+static void install_lazy_pageindex_handler(void)
 {
 	struct sigaction action = {
 		.sa_handler = (void*) &handle_signal,
@@ -357,7 +356,7 @@ void __pageindex_init(void)
 		}
 		else
 		{
-			int fd = memfd_create("zero-length file used to create bus errors", 0);
+			int fd = memfd_create("pageindex-lazy-region", 0);
 			if (fd == -1) abort();
 			pageindex = (bigalloc_num_t *) mmap((void*) PAGEINDEX_ADDRESS,
 				sizeof (bigalloc_num_t) * ((uintptr_t)(MAXIMUM_USER_ADDRESS + 1) >> LOG_PAGE_SIZE),
