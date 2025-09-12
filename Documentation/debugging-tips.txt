@@ -1,0 +1,40 @@
+- Running with LIBALLOCS_DEBUG_LEVEL=11 will print the maximum number of
+debugging messages to the console. Level 5 will show the most important stuff.
+
+- To get an unoptimised debug build of liballocs, do 'make DEBUG=1' at top
+level. The debug build will coexist alongside an optimised build, and just
+switch the lib/ symlink to point into the debug build dir.
+
+- Don't be alarmed by SIGILL or SIGBUS being reported by your debugger. Both of
+these are used by liballocs internally and do not necessarily signify an error.
+SIGILL is used for system call trapping (see libsystrap) and SIGBUS for lazy
+mapping of the pageindex (see overview-runtime.txt).
+
+- If you are debugging a program built using allocscc, it will be loaded by
+allocsld. In that case, the first 'main' you will hit is in allocsld (code from
+donald). Only later will you hit the actual program's main. (See also
+allocs-debugging.txt.)
+
+- Attaching gdb can be tricky if there is a crash early on during startup.
+Sometimes gdb just says something like "During startup, program exited with
+status 42". To actually get control when the problem occurs, start the process
+without gdb attached, but set the environment variable
+LIBALLOCS_DELAY_STARTUP=10, then use `gdb -p` to attach.
+
+- Remember that liballocs can help you understand what is in memory during
+debugging. For some memory address 0x123456789, print pageindex[0x123456] to
+get the index of the outermost big_allocation covering that page of memory.
+From there, navigate through the related big_allocation records (first_child,
+next_sib) as needed to understand what (or what liballocs thinks) is in memory
+at that location. (It would be nice to have some gdb macros to package this
+more nicely, but I have managed without so far.)
+
+- Other super-common gdb commands: `info proc stat` (to get the process ID),
+`shell cat /proc/NNN/maps` to get the kernel's view of memory in process NNN,
+`info shared` to see (among other libraries) what liballocs metadata has been
+loaded.
+
+- It is also useful to put a breakpoint on a liballocs query function, like
+`__liballocs_get_alloc_type`, and then run that function from the debugger
+("print __liballocs_get_alloc_type(0x12345678)"). The breakpoint will be hit
+and you can step through the liballocs code that services the query.
