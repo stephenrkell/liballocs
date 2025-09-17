@@ -1,3 +1,8 @@
+# This is used by the dummyweaks library only.
+# It need a private malloc because it uses private strdup.
+# (Why? For incidental reasons to do with librunt and libcrunch.
+# See the comment in dummyweaks.c.)
+# We don't include the dlmalloc extension / wrapping stuff, as it is not needed.
 # FIXME: really want these to be protected not hidden.
 HIDDEN(__private_malloc = dlmalloc);
 HIDDEN(__private_calloc = dlcalloc);

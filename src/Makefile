@@ -193,14 +193,14 @@ SYSTRAP_OBJS := systrap.o
 else
 SYSTRAP_OBJS := systrap.o
 endif
-DLMALLOC_A_OBJS := dlmalloc.o dlmalloc-ext.o
+DLMALLOC_OBJS := dlmalloc.o dlmalloc-ext.o
 
 # Generate deps.
-ALL_OBJS := $(CORE_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(SYSTRAP_OBJS) $(DLMALLOC_A_OBJS)
+ALL_OBJS := $(CORE_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJS) $(SYSTRAP_OBJS) $(DLMALLOC_OBJS)
 # enumerate src files backwards from our .o files
 DEP_OBJS := $(ALL_OBJS)
 C_SRC := $(sort $(patsubst %.o,%.c,$(DEP_OBJS)))
-# Becuase of our vpath'd rules, we can't do patsubst on the source path to get the
+# Because of our vpath'd rules, we can't do patsubst on the source path to get the
 # obj path... $< will be something wacky. Instead, work from the object file.
 # All our objs are from C files, for now
 C_OBJ_DEPS := $(foreach f,$(DEP_OBJS),$(patsubst %.o,%.d,$(f)))
@@ -224,8 +224,15 @@ endif
 $(ALL_OBJS): CFLAGS += -no-integrated-cpp \
 -wrapper $(TOOLSUB)/wrapper/example/constructor-priority-checker/wrapper
 
-# we include our own malloc impl, for which we use dlmalloc
-# of which libsystrap already has a copy, so borrow that (HACK)
+# We include our own malloc impl, for which we use dlmalloc,
+# of which libsystrap already has a copy in its source tree, so borrow that (HACK).
+#
+# We actually include two copies of dlmalloc:
+# dlmalloc...        <-- uses mmap and not morecore
+# nommap_dlmalloc... <-- uses morecore emulation, not mmap
+# Each of these, we wrap so that we are meta-complete and have some uniformity
+# across all malloc chunks in the program (we can reflect on all of them, identify
+# the underlying malloc/free functions, etc).
 vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: actually in trap-syscalls but should be in libsystrap
 dlmalloc.a: dlmalloc.o
 dlmalloc.o: CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=0 -DHAVE_MORECORE=1 -DMSPACES=1 -DMORECORE=emulated_sbrk -DUSE_DL_PREFIX -fPIC
