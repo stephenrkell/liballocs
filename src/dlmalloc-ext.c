@@ -15,21 +15,42 @@
 #include "librunt.h"
 #endif
 
+/* We will compile two versions of this file.
+ * One is the "nommap_" version and links against nommap_dl* symbols.
+ * In turn, they are defined by a nommap-dlmalloc.o which uses a morecore()/sbrk() emulation
+ * (defined in this file).
+ * The other is the plain version which links against dl* symbols
+ * defined in dlmalloc.o which uses mmap only, and has no morecore().
+ * We need a way to generate the nommap_ symbol names or the plain ones. */
+#define NOMMAP /* TEMPORARY -- our current implementation is always no-mmap, but just use plain symbols */
+#ifdef NOMMAP
+#define MKIDENT(prefix, suffix) prefix /*## nommap_*/ ## suffix
+#define INFIX_STRLIT /*"nommap_"*/
+#else
+#define MKIDENT(prefix, suffix) prefix ## suffix
+#define INFIX_STRLIT ""
+#endif
+
 /* Here we lightly extend dlmalloc so that we can probe whether a chunk
  * belongs to it or not. We use liballocs's bigallocs to do this. */
-void *__real_dlmalloc(size_t size);
-void *__real_dlcalloc(size_t nmemb, size_t size);
-void __real_dlfree(void *ptr);
-void *__real_dlrealloc(void *ptr, size_t size);
-void *__real_dlmemalign(size_t boundary, size_t size);
-int __real_dlposix_memalign(void **memptr, size_t alignment, size_t size);
-size_t __real_dlmalloc_usable_size(void *userptr);
+void *MKIDENT(__real_, dlmalloc)(size_t size);
+void *MKIDENT(__real_, dlcalloc)(size_t nmemb, size_t size);
+void MKIDENT(__real_, dlfree)(void *ptr);
+void *MKIDENT(__real_, dlrealloc)(void *ptr, size_t size);
+void *MKIDENT(__real_dl, memalign)(size_t boundary, size_t size);
+int MKIDENT(__real_, dlposix_memalign)(void **memptr, size_t alignment, size_t size);
+size_t MKIDENT(__real_, dlmalloc_usable_size)(void *userptr);
 
 __attribute__((visibility("hidden")))
-struct allocator __private_malloc_allocator = (struct allocator) {
+struct allocator MKIDENT(__private_, malloc_allocator) = (struct allocator) {
+#ifdef NOMMAP
+	.name = "liballocs private no-mmap malloc"
+#else
 	.name = "liballocs private malloc"
+#endif
 };
 
+#ifdef NOMMAP
 __attribute__((visibility("protected")))
 struct big_allocation *__liballocs_private_malloc_bigalloc;
 __attribute__((visibility("hidden")))
@@ -145,12 +166,16 @@ static void clear_metadata(void *ptr)
 	);
 	// FIXME: this is just index_delete. Make it so.
 }
+#else /* we are not NOMMAP */
+static void set_metadata(void *ptr, size_t size, const void *allocsite) {} // FIXME
+static void clear_metadata(void *ptr) {}
+#endif
 
-void *__wrap_dlmalloc(size_t size)
+void *MKIDENT(__wrap_, dlmalloc)(size_t size)
 {
-	void *ret = __real_dlmalloc(size);
+	void *ret = MKIDENT(__real_, dlmalloc)(size);
 #ifdef TRACE_PRIVATE_MALLOC
-	write_string("private dlmalloc(");
+	write_string("private " INFIX_STRLIT "dlmalloc(");
 	write_ulong((unsigned long) size);
 	write_string(") returned ");
 	write_ulong((unsigned long) ret);
@@ -159,11 +184,11 @@ void *__wrap_dlmalloc(size_t size)
 	if (ret) set_metadata(ret, size, __builtin_return_address(0));
 	return ret;
 }
-void *__wrap_dlcalloc(size_t nmemb, size_t size)
+void *MKIDENT(__wrap_, dlcalloc)(size_t nmemb, size_t size)
 {
-	void *ret = __real_dlcalloc(nmemb, size);
+	void *ret = MKIDENT(__real_, dlcalloc)(nmemb, size);
 #ifdef TRACE_PRIVATE_MALLOC
-	write_string("private dlcalloc(nmemb=");
+	write_string("private " INFIX_STRLIT "dlcalloc(nmemb=");
 	write_ulong((unsigned long) nmemb);
 	write_string(",size=");
 	write_ulong((unsigned long) size);
@@ -174,34 +199,34 @@ void *__wrap_dlcalloc(size_t nmemb, size_t size)
 	if (ret) set_metadata(ret, size, __builtin_return_address(0));
 	return ret;
 }
-void __wrap_dlfree(void *ptr)
+void MKIDENT(__wrap_, dlfree)(void *ptr)
 {
 	clear_metadata(ptr);
 #ifdef TRACE_PRIVATE_MALLOC
-	write_string("private dlfree(");
+	write_string("private " INFIX_STRLIT "dlfree(");
 	write_ulong((unsigned long) ptr);
 	write_string(") called\n");
 #endif
-	__real_dlfree(ptr);
+	MKIDENT(__real_, dlfree)(ptr);
 }
-void *__wrap_dlrealloc(void *ptr, size_t size)
+void *MKIDENT(__wrap_, dlrealloc)(void *ptr, size_t size)
 {
 	if (ptr) clear_metadata(ptr);
 #ifdef TRACE_PRIVATE_MALLOC
-	write_string("private dlrealloc(ptr=");
+	write_string("private " INFIX_STRLIT "dlrealloc(ptr=");
 	write_ulong((unsigned long) ptr);
 	write_string(",size=");
 	write_ulong((unsigned long) size);
 	write_string(") called...\n");
 #endif
 	// don't mess with the size-zero case, because it means free()
-	if (!size) { __real_dlfree(ptr); return NULL; }
-	void *ret = __real_dlrealloc(ptr, size + sizeof (struct insert)); // FIXME: aligned
+	if (!size) { MKIDENT(__real_, dlfree)(ptr); return NULL; }
+	void *ret = MKIDENT(__real_, dlrealloc)(ptr, size + sizeof (struct insert)); // FIXME: aligned
 	// FIXME: better to copy the old metadata, not set new?
 	// FIXME: all this should be common to generic-malloc.c, extracted/macroised somehow
 	if (ret && size > 0) set_metadata(ret, size, __builtin_return_address(0));
 #ifdef TRACE_PRIVATE_MALLOC
-	write_string("private dlrealloc(ptr=");
+	write_string("private " INFIX_STRLIT "dlrealloc(ptr=");
 	write_ulong((unsigned long) ptr);
 	write_string(",size=");
 	write_ulong((unsigned long) size);
@@ -211,36 +236,26 @@ void *__wrap_dlrealloc(void *ptr, size_t size)
 #endif
 	return ret;
 }
-void *__wrap_dlmemalign(size_t boundary, size_t size)
+void *MKIDENT(__wrap_, dlmemalign)(size_t boundary, size_t size)
 {
-	void *ret = __real_dlmemalign(boundary, size);
+	void *ret = MKIDENT(__real_, dlmemalign)(boundary, size);
 	if (ret) set_metadata(ret, size, __builtin_return_address(0));
 	return ret;
 }
-int __wrap_dlposix_memalign(void **memptr, size_t alignment, size_t size)
+int MKIDENT(__wrap_, dlposix_memalign)(void **memptr, size_t alignment, size_t size)
 {
-	int ret = __real_dlposix_memalign(memptr, alignment, size);
+	int ret = MKIDENT(__real_, dlposix_memalign)(memptr, alignment, size);
 	if (ret) set_metadata(*memptr, size, __builtin_return_address(0));
 	return ret;
 }
 
-size_t __wrap_dlmalloc_usable_size(void *userptr)
+size_t MKIDENT(__wrap_, dlmalloc_usable_size)(void *userptr)
 {
-  size_t ret = __real_dlmalloc_usable_size(userptr);
-  return ret - sizeof (struct insert);
+  size_t ret = MKIDENT(__real_, dlmalloc_usable_size)(userptr);
+  return ret - sizeof (struct insert); /* FIXME: do we increment the size on malloc??!??! */
 }
 
-/* This is used by libmallochooks. That is a giant HACK. */
-_Bool __private_malloc_is_chunk_start(void *ptr) __attribute__((visibility("hidden")));
-_Bool __private_malloc_is_chunk_start(void *ptr)
-{
-	struct big_allocation *b = __lookup_bigalloc_top_level(ptr);
-	if (b && b->allocated_by == &__mmap_allocator
-	      && b->suballocator == &__private_malloc_allocator) return 1;
-	// FIXME: actually check the chunk-start thing, duh
-	return 0;
-}
-
+#ifdef NOMMAP
 void *__private_malloc_heap_base __attribute__((visibility("hidden")));
 void *__private_malloc_heap_limit __attribute__((visibility("hidden")));
 static void *emulated_curbrk;
@@ -267,3 +282,4 @@ err:
 	errno = ENOMEM;
 	return (void*) -1;
 }
+#endif
