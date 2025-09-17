@@ -6,6 +6,7 @@ $(info Initially CFLAGS is $(CFLAGS) and CPPFLAGS is $(CPPFLAGS))
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 -include $(dir $(THIS_MAKEFILE))/../config.mk
 
+$(info CIL_INSTALL is $(CIL_INSTALL))
 # tell allocscc which C compiler to use -- TEST / FIXME
 #export ALLOCSCC_CC := clang-13
 #export CC_IS_CLANG := 1
@@ -142,7 +143,7 @@ checkrun-%:
 
 # disabled cases
 checkrun-ld-so-malloc:
-	true # disabled ld-so-malloc while DWARF 5-using ld.so is not introspectable
+	true # disabled case 'ld-so-malloc' while DWARF 5-using ld.so is not introspectable
 
 # Some cases are special and require only to build OK
 checkrun-allocsld-as-cmd:
