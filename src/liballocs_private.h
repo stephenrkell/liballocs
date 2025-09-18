@@ -125,19 +125,26 @@ extern _Bool __thread __private_realloc_active;
 extern _Bool __thread __private_memalign_active;
 extern _Bool __thread __private_posix_memalign_active;
 extern _Bool __thread __private_malloc_usable_size_active;
+#define PRIVATE_MALLOC_ALIGN 16
+#define LOG_PRIVATE_MALLOC_ALIGN 4
+
+extern struct allocator __private_malloc_allocator;
 void *__private_malloc(size_t);
 void *__private_realloc(void*, size_t);
 void __private_free(void *);
+
 char *__private_strndup(const char *, size_t);
-void __private_malloc_init(void) __attribute__((constructor(101)));
-extern void *__private_malloc_heap_base;
-extern void *__private_malloc_heap_limit;
-extern struct big_allocation *__liballocs_private_malloc_bigalloc;
-extern struct allocator __private_malloc_allocator;
-#define PRIVATE_MALLOC_ALIGN 16
-#define LOG_PRIVATE_MALLOC_ALIGN 4
-void __private_malloc_set_metadata(void *ptr, size_t size, const void *allocsite);
-struct big_allocation *create_private_malloc_heap(void);
+
+void __private_nommap_malloc_set_metadata(void *ptr, size_t size, const void *allocsite);
+struct big_allocation *create_private_nommap_malloc_heap(void);
+extern void *__private_nommap_malloc_heap_base;
+extern void *__private_nommap_malloc_heap_limit;
+extern struct big_allocation *__liballocs_private_nommap_malloc_bigalloc;
+
+void *__private_nommap_malloc(size_t);
+void *__private_nommap_realloc(void*, size_t);
+void __private_nommap_free(void *);
+extern struct allocator __private_nommap_malloc_allocator;
 
 extern FILE *stream_err;
 FILE *get_stream_err(void);

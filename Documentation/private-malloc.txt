@@ -1,0 +1,51 @@
+liballocs has its own malloc, provided by dlmalloc.c (snarfed from
+libsystrap/contrib). In fact, it has *two* copies of dlmalloc,
+differently configured: a "no-mmap" allocator that guarantees never to
+call mmap() but must be used sparingly if liballocs is not to run out of
+heap space (nommap-dlmalloc{,-ext}.o), and a more normal dlmalloc that may call
+mmap() but is used in most cases (dlmalloc{,-ext}.o).
+
+Some kind of differentiated malloc handling is essential to prevent
+reentrancy. For example, our do_mmap() handler is called whenever the
+guest program does mmap(). That handler sometimes needs to allocate
+memory some data structures, e.g. a mapping_sequence record for the
+mmap'd region. If we did this using an ordinary malloc that relied on
+mmap(), we would get infinite regress. A similar problem applies in the
+brk() handler if we rely on a malloc that only uses brk().
+
+We could keep the malloc the same but try simply to handle those mmaps
+differently, e.g. somehow never allocating data structures when they
+occur. I tried this for a long time. However, uniformity and
+meta-completeness motivate against it... remember that these mmaps are
+coming from the guest program's malloc, which we want to index (e.g.
+using a bitmap). It pushes a lot of complexity onto the indexing code to
+have two kinds of underlying mmap, only some of which have the
+corresponding bookkeeping structures (e.g. bitmap). In fact I think it
+was at the switch to per-mmap'd-arena bitmaps (away from a single giant
+memtable) that I also switched to the current private-malloc approach.
+
+That explains why we have a private malloc. But how does our private
+malloc get its memory? For a long time there was a single private malloc
+and I just allocated a large MAP_NORESERVE region for it to allocate
+from, via a sbrk() emulation. However, sizing that region is tricky.
+XXX: paste the rest from GitHub issue.
+
+This split exploits the fact that there are only a few
+reentrancy-triggering code paths that want to call malloc(), and in
+other places it is fine to call a malloc that calls mmap.
+
+Note that our mmap handling also behaves differently for "self-call"
+mmaps, i.e. calls coming from us, than it does for calls from the guest
+program. In particular, the "nudging" is different. With plain liballocs
+(as opposed to libcrunch) we mostly don't nudge -- we don't vet
+MAP_FIXED address bindings and we don't attempt to control placement by
+turning non-fixed mappings into fixed ones. We are fairly relaxed about
+the address space layout and we retain whatever randomization is done by
+the kernel. However, we are really not relaxed about "holey DSOs" --
+DSOs must not have a hole in the middle. (See allocsld.txt for a long
+explanation.) So, see local_liballocs_nudge_mmap() in systrap.c for the
+handling of our own mmaps... in short, we nudge these into a carefully
+selected area of the address space that is not likely to cause holeyness
+problems. FIXME: we could skip this entirely and simply require the use
+of allocsld to load us, aborting if mere LD_PRELOAD isu sed... either
+always, or perhaps on detecting a holey ld.so. Would that be better?

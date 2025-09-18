@@ -85,12 +85,12 @@ static struct big_allocation *add_mapping_sequence_bigalloc_nocopy(struct mappin
 }
 static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
 {
-	struct mapping_sequence *copy = __private_malloc(sizeof (struct mapping_sequence));
+	struct mapping_sequence *copy = __private_nommap_malloc(sizeof (struct mapping_sequence));
 	if (!copy) abort();
 	memcpy(copy, seq, sizeof (struct mapping_sequence));
-	struct big_allocation *b = add_mapping_sequence_bigalloc_nocopy(seq, __private_free);
+	struct big_allocation *b = add_mapping_sequence_bigalloc_nocopy(seq, __private_nommap_free);
 	b->allocator_private = copy;
-	b->allocator_private_free = __private_free;
+	b->allocator_private_free = __private_nommap_free;
 	return b;
 }
 /* This function is used only for the single statically-allocated mapping sequence
@@ -586,7 +586,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				if (!second_half) abort();
 				__liballocs_truncate_bigalloc_at_end(b, addr);
 				/* Now the bigallocs are in the right place, but their metadata is wrong. */
-				struct mapping_sequence *new_seq = __private_malloc(sizeof (struct mapping_sequence));
+				struct mapping_sequence *new_seq = __private_nommap_malloc(sizeof (struct mapping_sequence));
 				struct mapping_sequence *orig_seq = b->allocator_private;
 				memcpy(new_seq, orig_seq, sizeof (struct mapping_sequence));
 				/* From the first, delete from the hole all the way. */

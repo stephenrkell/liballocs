@@ -1,7 +1,7 @@
 Why does liballocs have its own dynamic linker, allocsld?
 
 - to work around uncooperative behaviours of the kernel or ld.so
-that cause corner-case problems for liballocs
+that cause corner-case problems for liballocs (e.g. 'holey DSOs')
 
 - to allow "early introspection" even with an uncooperative
 ld.so and libc

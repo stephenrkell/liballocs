@@ -70,7 +70,7 @@ static int bigalloc_compare_toplevel(struct big_allocation *b1, struct big_alloc
 }
 static void sanity_check_bigallocs_toplevel(void)
 {
-	struct big_allocation *b = __liballocs_private_malloc_bigalloc;
+	struct big_allocation *b = __liballocs_private_nommap_malloc_bigalloc;
 	if (!b) return;
 	bitmap_word_t bitmap[NBIGALLOCS / 8*sizeof(bitmap_word_t)];
 	memset(bitmap, 0, sizeof bitmap);
@@ -368,7 +368,7 @@ void __pageindex_init(void)
 			install_lazy_pageindex_handler();
 			debug_printf(3, "pageindex at %p (to be mapped lazily)\n", pageindex);
 		}
-		create_private_malloc_heap();
+		create_private_nommap_malloc_heap();
 	}
 }
 
@@ -741,7 +741,7 @@ static void bigalloc_init(struct big_allocation *b, const void *ptr, size_t size
 	SANITY_CHECK_BIGALLOC(b);
 }
 
-#define START __liballocs_private_malloc_bigalloc
+#define START __liballocs_private_nommap_malloc_bigalloc
 #define search_xwards_until_p(dir, p) \
     prev = NULL; \
 	for (cur = START; \

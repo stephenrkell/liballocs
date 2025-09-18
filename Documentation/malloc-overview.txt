@@ -1,7 +1,7 @@
 There can be many malloc implementations in a process. For example, there
 may be the libc's malloc in a shared library, a custom malloc in the
-executable, and (in our case) liballocs's private malloc. Each of these
-malloc implementations has its own entry points which need to be
+executable, and (in our case) liballocs's *two* private mallocs. Each of
+these malloc implementations has its own entry points which need to be
 interposed on separately. Each also has its own 'struct allocator',
 giving it its own identity at run time.
 

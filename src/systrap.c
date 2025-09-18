@@ -445,7 +445,7 @@ void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p
 __attribute__((alias("local_liballocs_nudge_mmap")));
 
 extern struct allocator __static_file_allocator;
-extern void *__private_malloc_heap_base;
+extern void *__private_nommap_malloc_heap_base;
 __attribute__((visibility("hidden")))
 void local_liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller)
@@ -456,7 +456,7 @@ void local_liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, in
 		*p_flags |= 0x1 /* MAP_SHARED */;
 	}
 #define IS_SELF_CALL(caller) ( \
-	(__private_malloc_heap_base) && \
+	(__private_nommap_malloc_heap_base) && \
 	__lookup_bigalloc_from_root(caller, &__static_file_allocator, NULL) == \
 	__lookup_bigalloc_from_root(local_liballocs_nudge_mmap, &__static_file_allocator, NULL) \
 	)
