@@ -260,6 +260,10 @@ static struct sigaction oldaction; /* We will restore this... */
  * needs its own handler, and the guest program may too. */
 static void handle_signal(int n, siginfo_t *info, void *ucontext)
 {
+	/* We must NOT trigger a nested SIGBUS here. In general, any memory allocation
+	 * may do this, if it needs to grab more pages and therefore touch the pageindex.
+	 * So be very conservative about library calls. We do not use debug_printf(). */
+
 	/* If the fault falls within the pageindex area, we map something there.
 	 * Otherwise, don't. */
 	if ((uintptr_t) info->si_addr >= PAGEINDEX_ADDRESS &&
@@ -277,9 +281,20 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
 		uintptr_t range_idx = (range_base - PAGEINDEX_ADDRESS) >> LOG_COMMON_HUGEPAGE_SIZE;
 		void *ret = raw_mmap((void*) range_base, COMMON_HUGEPAGE_SIZE,
 			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
-		if (ret != (void*) range_base) abort();
-		debug_printf(0, "lazily mapped a piece of pageindex at %p (idx 0x%lx)\n",
-			ret, (unsigned long) range_idx);
+		if (ret != (void*) range_base)
+		{
+			write_string("failed to map lazily a piece of pageindex at ");
+			write_string(fmt_hex_num((uintptr_t) range_base));
+			write_string(" (ret ");
+			write_string(fmt_hex_num((uintptr_t) ret));
+			write_string(")\n");
+			abort();
+		}
+		write_string("lazily mapped a piece of pageindex at ");
+		write_string(fmt_hex_num((uintptr_t) ret));
+		write_string(" (idx 0x");
+		write_string(fmt_hex_num((unsigned long) range_idx));
+		write_string(")\n");
 		return; // we explicitly resume from the segfault
 	}
 	/* FIXME: be more compositional, w.r.t. other possible handlers (installed
@@ -304,7 +319,11 @@ static void install_lazy_pageindex_handler(void)
 		.sa_flags = SA_NODEFER | SA_SIGINFO
 	};
 	int ret = sigaction(the_signal, &action, &oldaction);
-	if (ret != 0) abort();
+	if (ret != 0)
+	{
+		debug_printf(0, "failed to install signal handler for lazy pageindex mapping");
+		abort();
+	}
 }
 
 __attribute__((constructor(101),visibility("hidden")))
