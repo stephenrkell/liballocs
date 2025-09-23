@@ -266,8 +266,11 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 	if (ret < 0) { close(fd); return 0; }
 	assert(ret > 0); // printing zero characters, but succeeding with allocation, should never happen
 	assert(strlen(symlink_path) > 0);
-	/* We need the realpath across a few more liballocs calls, so strdup it. */
 	const char *libfile_name_quick = realpath_quick(symlink_path);
+	/* We just opened this file, so it should have a realpath. But if we are racing
+	 * with some cleanup code that deletes the meta-DSO, we might not. */
+	if (!libfile_name_quick) { free(symlink_path); close(fd); return 0; }
+	/* We need the realpath across a few more liballocs calls, so strdup it. */
 	char *libfile_name = __private_strndup(libfile_name_quick, strlen(libfile_name_quick));
 	debug_printf(1, "meta-DSO at `%s' is really `%s'\n", symlink_path, libfile_name);
 	if (!libfile_name) { free(symlink_path); __private_free(libfile_name); close(fd); return 0; }
