@@ -49,7 +49,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 # allocfns are "(.*)\((.*)\)(.?)
                 # subfreefns are "(.*)\((.*)\)(->[a-zA-Z0-9_]+)"
                 # l1freefns are "(.*)\((.*)\)"
-                m = re.match("(.*)\((.*)\)(->[a-zA-Z0-9_]+|.)?", fn)
+                m = re.match("(.*)\\((.*)\\)(->[a-zA-Z0-9_]+|.)?", fn)
                 fnName = m.groups()[0]
                 syms += [fnName]
         return syms
@@ -357,7 +357,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
 
                 # generate caller-side alloc stubs
                 for allocFn in self.allAllocFns():
-                    m = re.match("(.*)\((.*)\)(.?)", allocFn)
+                    m = re.match("(.*)\\((.*)\\)(.?)", allocFn)
                     fnName = m.groups()[0]
                     fnSig = m.groups()[1]
                     def tupify(s):
@@ -405,7 +405,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     stubsfile.flush()
                 # also do caller-side subfree wrappers
                 for freeFn in self.allSubFreeFns():
-                    m = re.match("(.*)\((.*)\)(->([a-zA-Z0-9_]+))", freeFn)
+                    m = re.match("(.*)\\((.*)\\)(->([a-zA-Z0-9_]+))", freeFn)
                     fnName = m.groups()[0]
                     fnSig = m.groups()[1]
                     allocFnName = m.groups()[3]
@@ -421,7 +421,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                         #stubsfile.write("make_void_callee_wrapper(%s)\n" % (fnName))
                 # also do caller-side free (non-sub) -wrappers
                 for freeFn in self.allL1OrWrapperFreeFns():
-                    m = re.match("(.*)\((.*)\)", freeFn)
+                    m = re.match("(.*)\\((.*)\\)", freeFn)
                     fnName = m.groups()[0]
                     fnSig = m.groups()[1]
                     ptrndx = fnSig.find('P')
