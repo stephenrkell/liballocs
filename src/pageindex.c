@@ -292,7 +292,7 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
 		}
 		write_string("lazily mapped a piece of pageindex at ");
 		write_string(fmt_hex_num((uintptr_t) ret));
-		write_string(" (idx 0x");
+		write_string(" (idx ");
 		write_string(fmt_hex_num((unsigned long) range_idx));
 		write_string(")\n");
 		return; // we explicitly resume from the segfault

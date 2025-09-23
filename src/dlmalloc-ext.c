@@ -109,8 +109,15 @@ mmap_return_site:
 		void *bitmap_base_addr;
 	};
 	*/
-	/* we use the real dlmalloc just this once, because we can't set the bit
-	 * before the bitmap is created */
+	/* We use the real dlmalloc just this once, because we can't set the bit
+	 * before the bitmap is created. Note that we are *not* in a nommap context
+	 * right now. However... if the real dlmalloc does a mmap -- it didn't use to,
+	 * but now in the nommap-vs-vanilla world, the vanilla dlmalloc may mmap --
+	 * we need a bigalloc to be created if the vanilla dlmalloc creates a new
+	 * memory mapping. Since it's an intra-DSO mmap, it is not trapped... we rely
+	 * on the preload.c mmap override, which calls __mmap_allocator_notify_mmap().
+	 * This should be enough to create the bigalloc for the underlying mapping.
+	 */
 	// FIXME: this is an interesting case of an unclassifiable allocation site,
 	// by our current 'dumpallocs.ml' classifier. It is sized (syntactically)
 	// in bytes but allocated (semantically) in bitmap_word_t units, and rests

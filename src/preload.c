@@ -252,10 +252,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	if (!MMAP_RETURN_IS_ERROR(ret))
 	{
 		if (!__liballocs_systrap_is_initialized) return ret; // HACK
-		(__liballocs_systrap_is_initialized
-			? __mmap_allocator_notify_mmap
-			: __mmap_allocator_notify_mmap/*_no_private_malloc*/)
-		(ret, addr, length, prot, flags, fd, offset, __builtin_return_address(0));
+		__mmap_allocator_notify_mmap(ret, addr, length, prot, flags, fd, offset, __builtin_return_address(0));
 	}
 	else
 	{
