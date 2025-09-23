@@ -476,7 +476,7 @@ void local_liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, in
 		 * we let that case proceed normally. This is relying on the private malloc heap
 		 * being too large an area to fit inside any hole. That is likely true but is
 		 * definitely not guaranteed (FIXME). */
-		static uintptr_t unhinted_self_call_mmap_area = 0x5000000000; /* FIXME: sysdep */
+		static uintptr_t unhinted_self_call_mmap_area = 0x70fffffff000; /* FIXME: sysdep */
 		*p_addr = (void*) unhinted_self_call_mmap_area;
 		unhinted_self_call_mmap_area += *p_length;
 	}
