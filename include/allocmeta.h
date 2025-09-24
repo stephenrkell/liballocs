@@ -460,9 +460,7 @@ void __mmap_allocator_init(void) __attribute__((constructor(101)));
 void __mmap_allocator_notify_brk(void *new_curbrk);
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, 
 	int prot, int flags, int fd, off_t offset, void *caller);
-void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, 
-	size_t new_size, int flags, void *new_address, void *caller);
-void __mmap_allocator_notify_mremap_after(void *ret_addr, void *old_addr, size_t old_size, 
+void __mmap_allocator_notify_mremap(void *ret_addr, void *old_addr, size_t old_size,
 	size_t new_size, int flags, void *new_address, void *caller);
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller);
 

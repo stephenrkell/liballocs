@@ -631,46 +631,48 @@ static __thread const char *remembered_filename;
 static __thread off_t remembered_offset;
 static __thread void *remembered_old_addr;
 
-void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address, void *caller)
+/* For mremap, our task is complicated. We want the effect on our metadata
+ * to be like unmapping and then mapping again. */
+void __mmap_allocator_notify_mremap(void *ret_addr, void *old_addr, size_t old_size,
+	size_t new_size, int mremap_flags, void *new_address, void *caller)
 {
-	/* HACK: Is it actually a stack or sbrk area? We can abort if so; remapping a
-	 * stack is a weird enough thing to do that it's not urgent to support it. */
-	// FIXME
-	remembered_old_addr = old_addr;
+	/* called after a successful mremap call */
+	assert(!MMAP_RETURN_IS_ERROR(ret_addr)); // don't call us with MAP_FAILED
 	struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root(old_addr,
 		&__mmap_allocator, NULL);
 	if (!bigalloc_before) abort();
 	struct mapping_sequence *seq = bigalloc_before->allocator_private;
-	if (!seq)
-	{
-		/* It's a chunk malloc'd by our own dlmalloc. HMM. */
-		abort();
-	}
+	if (!seq) abort();
 	struct mapping_entry *maybe_ent = __mmap_allocator_find_entry(old_addr, seq);
 	if (!maybe_ent) abort();
-	remembered_prot = maybe_ent->prot;
-	remembered_offset = maybe_ent->offset;
-	remembered_filename = seq->filename;
-}
-void __mmap_allocator_notify_mremap_after(void *ret_addr, void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address, void *caller)
-{
-	if (ret_addr != MAP_FAILED)
+	/* What is being remapped? It must fall into a single filename/prot/flags mapping. */
+	assert((uintptr_t) old_addr >= (uintptr_t) maybe_ent->begin);
+	if (!((uintptr_t) old_addr + old_size <= (uintptr_t) maybe_ent->end))
 	{
-		/* Does the address match the remembered one? This is a HACK, i.e. 
-		 * we should really thread these through from mremap_replacement. */
-		if (remembered_old_addr == old_addr)
-		{
-			do_munmap(old_addr, old_size, caller);
-			do_mmap(ret_addr, 
-					(flags & MREMAP_FIXED) ? new_address : NULL,
-					new_size, remembered_prot, flags,
-					remembered_filename, 
-					/* What has happened to the offset? I think it is unchanged. */
-					remembered_offset,
-					caller);
-		}
-		else abort(); // FIXME: could do something best-effort
+		/* not contained within a single mapping... */
+		write_string("Unhandled mremap case (crossed multiple mappings)\n");
+		abort();
 	}
+	off_t new_offset = maybe_ent->offset + ((uintptr_t) old_addr - (uintptr_t) maybe_ent->begin);
+	int prot = maybe_ent->prot;
+	int orig_mmap_flags = maybe_ent->flags;
+	const char *filename = seq->filename;
+	if (old_size != 0)
+	{
+		do_munmap(old_addr, old_size, caller);
+#if defined(MREMAP_DONTUNMAP)
+		if (mremap_flags & MREMAP_DONTUNMAP)
+		{
+			/* FIXME: the old region now has different semantics but is somehow left behind. */
+			write_string("Unhandled mremap case (MREMAP_DONTUNMAP)\n");
+			abort();
+		}
+#endif
+	}
+	do_mmap(ret_addr,
+		/* requested_addr */ (mremap_flags & MREMAP_FIXED) ? new_address : NULL,
+		new_size, prot, orig_mmap_flags, filename, new_offset,
+		caller);
 }
 
 static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_length, int prot, int flags,

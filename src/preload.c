@@ -323,9 +323,9 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 	else
 	{
 		void *ret = DO_ORIG_CALL;
-		if (ret != MAP_FAILED)
+		if (!MMAP_RETURN_IS_ERROR(ret))
 		{
-			__mmap_allocator_notify_mremap_after(ret, old_addr, old_size, 
+			__mmap_allocator_notify_mremap(ret, old_addr, old_size,
 					new_size, flags, new_address, __builtin_return_address(0));
 		}
 		return ret;

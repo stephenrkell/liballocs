@@ -28,9 +28,7 @@ void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p
 void __liballocs_nudge_open(const char **p_pathname, int *p_flags, mode_t *p_mode, const void *caller);
 void __liballocs_nudge_openat(int *p_dirfd, const char **p_pathname, int *p_flags, mode_t *p_mode, const void *caller);
 void __mmap_allocator_notify_munmap(void *addr, size_t length, void *caller) __attribute__((weak));
-void __mmap_allocator_notify_mremap_before(void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address, void *caller)
-			__attribute__((weak));
-void __mmap_allocator_notify_mremap_after(void *ret, void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address, void *caller)
+void __mmap_allocator_notify_mremap(void *ret, void *old_addr, size_t old_size, size_t new_size, int flags, void *new_address, void *caller)
 			__attribute__((weak));
 void __mmap_allocator_notify_mmap(void *ret, void *requested_addr, size_t length, int prot, int flags,
                   int fd, off_t offset, void *caller)
@@ -130,22 +128,14 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	size_t new_length = s->args[2];
 	int flags = s->args[3];
 	void *maybe_new_address = (void*) s->args[4];
-	
-	/* Pre-notify the allocator. This is so it can grab the "prot". */
-	if (&__mmap_allocator_notify_mremap_before)
-	{
-		__mmap_allocator_notify_mremap_before(old_addr, old_length, new_length, flags,
-			maybe_new_address, GUESS_CALLER(s));
-	}
-	
+
 	/* Do the call. */
 	void *ret = raw_mremap(old_addr, old_length, new_length, flags, maybe_new_address);
 	// FIXME: also nudge mremaps
 	
-	/* Whether or not it did something, notify the allocator. */
-	if (&__mmap_allocator_notify_mremap_after)
+	if (!MMAP_RETURN_IS_ERROR(ret))
 	{
-		__mmap_allocator_notify_mremap_after(ret, old_addr, old_length, new_length, flags, 
+		__mmap_allocator_notify_mremap(ret, old_addr, old_length, new_length, flags,
 			maybe_new_address, GUESS_CALLER(s));
 	}
 	
