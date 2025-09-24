@@ -685,20 +685,30 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		
 		/* Do we *overlap* any existing mapping? If so, we must discard
 		 * that part -- but only if MAP_FIXED was specified, else it's an error. */
-		_Bool saw_overlap = 0;
+		bigalloc_num_t saw_overlap = 0;
 		for (unsigned i = 0; i < mapped_length >> LOG_PAGE_SIZE; ++i)
 		{
-			if (pageindex[((uintptr_t) mapped_addr >> LOG_PAGE_SIZE) + i] != 0)
+			bigalloc_num_t num;
+			if (0 != (num = pageindex[((uintptr_t) mapped_addr >> LOG_PAGE_SIZE) + i]))
 			{
 				/* We found an overlap. Do nothing for now, except remember
 				 * that overlaps exist. */
-				saw_overlap = 1;
+				saw_overlap = num;
+				break;
 			}
 		}
-		if (saw_overlap && !(flags & MAP_FIXED)) abort();
+		if (saw_overlap && !(flags & MAP_FIXED))
+		{
+			debug_printf(0, "Error: address %p requested mmapping overlapping existing bigalloc %d"
+				" (begin %p, end %p, allocator %s) without MAP_FIXED\n",
+				caller, (int) saw_overlap,
+				big_allocations[saw_overlap].begin, big_allocations[saw_overlap].end,
+				big_allocations[saw_overlap].allocated_by->name);
+			abort();
+		}
 		/* We can now handle overlap in mmap(), but it should only happen
 		 * when the caller really wants to map something over the top, 
-		 * not when asking for a free addr. */
+		 * not when asking for a free addr -- hence the MAP_FIXED check. */
 		
 		/* Do we abut any existing mapping? Just do the 'before' case. */
 		struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root((char*) mapped_addr - 1,
