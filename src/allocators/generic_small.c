@@ -13,23 +13,14 @@
 #include "relf.h"
 #include "maps.h"
 #include "liballocs_private.h"
-#include "generic_malloc_index.h"
 
 #ifndef NO_PTHREADS
-#define BIG_LOCK \
-	lock_ret = pthread_mutex_lock(&mutex); \
-	assert(lock_ret == 0);
-#define BIG_UNLOCK \
-	lock_ret = pthread_mutex_unlock(&mutex); \
-	assert(lock_ret == 0);
+#define THE_MUTEX &mutex
 /* We're recursive only because assertion failures sometimes want to do 
  * asprintf, so try to re-acquire our mutex. */
 static pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
-
-#else
-#define BIG_LOCK
-#define BIG_UNLOCK
 #endif
+#include "generic_malloc_index.h"
 
 /* All new, new plan for sub-allocators. 
  * 

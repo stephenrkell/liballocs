@@ -222,12 +222,16 @@ static inline struct arena_bitmap_info *ensure_arena_info_for_userptr(
 
 /* We use a big lock to protect access to our bitmap. Ideally we would
  * just do lock-free CAS for bitmap updates. */
+// FIXME: hoist this {generic_small,generic_malloc} commonality up somewhere
 #ifndef NO_PTHREADS
+#ifndef THE_MUTEX /* generic_small has a different definition of this */
+#define THE_MUTEX &info->mutex
+#endif
 #define BIG_LOCK \
-	lock_ret = pthread_mutex_lock(&info->mutex); \
+	lock_ret = pthread_mutex_lock(THE_MUTEX); \
 	assert(lock_ret == 0);
 #define BIG_UNLOCK \
-	lock_ret = pthread_mutex_unlock(&info->mutex); \
+	lock_ret = pthread_mutex_unlock(THE_MUTEX); \
 	assert(lock_ret == 0);
 #else
 #define BIG_LOCK
