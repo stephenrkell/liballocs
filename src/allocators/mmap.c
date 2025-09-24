@@ -846,9 +846,10 @@ void ( __attribute__((constructor(101))) __mmap_allocator_init)(void)
 		/* Delay start-up here if the user asked for it. We do this here
 		 * because we should run earlier than the startup code in
 		 * liballocs.c. */
-		if (getenv("LIBALLOCS_DELAY_STARTUP"))
+		const char *env_val = NULL;
+		if (NULL != (env_val = getenv("LIBALLOCS_DELAY_STARTUP")))
 		{
-			sleep(10);
+			sleep(atoi(env_val));
 		}
 
 		/* Grab the executable's end address
