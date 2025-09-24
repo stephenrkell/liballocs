@@ -263,7 +263,8 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
 	/* We must NOT trigger a nested SIGBUS here. In general, any memory allocation
 	 * may do this, if it needs to grab more pages and therefore touch the pageindex.
 	 * So be very conservative about library calls. We do not use debug_printf(). */
-
+#define     PAGEINDEX_MAPPING_UNIT     COMMON_HUGEPAGE_SIZE
+#define LOG_PAGEINDEX_MAPPING_UNIT LOG_COMMON_HUGEPAGE_SIZE
 	/* If the fault falls within the pageindex area, we map something there.
 	 * Otherwise, don't. */
 	if ((uintptr_t) info->si_addr >= PAGEINDEX_ADDRESS &&
@@ -277,9 +278,9 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
 		/* NOTE that we use hugepages only as a convenient unit, i.e. a coarse-
 		 * -grained division of memory -- nothing about our logic depends on matching
 		 * the underlying architecture's hugepage size. */
-		uintptr_t range_base = RELF_ROUND_DOWN_((uintptr_t) info->si_addr, COMMON_HUGEPAGE_SIZE);
-		uintptr_t range_idx = (range_base - PAGEINDEX_ADDRESS) >> LOG_COMMON_HUGEPAGE_SIZE;
-		void *ret = raw_mmap((void*) range_base, COMMON_HUGEPAGE_SIZE,
+		uintptr_t range_base = RELF_ROUND_DOWN_((uintptr_t) info->si_addr, PAGEINDEX_MAPPING_UNIT);
+		uintptr_t range_idx = (range_base - PAGEINDEX_ADDRESS) >> LOG_PAGEINDEX_MAPPING_UNIT;
+		void *ret = raw_mmap((void*) range_base, PAGEINDEX_MAPPING_UNIT,
 			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
 		if (ret != (void*) range_base)
 		{
