@@ -520,13 +520,14 @@ static void delete_mapping_sequence_span(struct mapping_sequence *seq,
 	check_mapping_sequence_sanity(seq);
 }
 
-static void do_munmap(void *addr, size_t length, void *caller)
+static void do_munmap(void *addr, size_t requested_length, void *caller)
 {
 	char *cur = (char*) addr;
 	/* Linux lets us munmap *less* than a full page, with the effect of 
 	 * unmapping the whole page. Sigh. */
-	size_t remaining_length = ROUND_UP(length, PAGE_SIZE);
-	while (cur < (char*) addr + length)
+	size_t effective_length = ROUND_UP(requested_length, PAGE_SIZE);
+	size_t remaining_length = effective_length;
+	while (cur < (char*) addr + effective_length)
 	{
 		/* We're always working at level 0 */
 		struct big_allocation *b = __lookup_bigalloc_from_root(cur, &__mmap_allocator, NULL);
@@ -582,7 +583,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				
 				void *old_end = b->end;
 				struct big_allocation *second_half = 
-					__liballocs_split_bigalloc_at_page_boundary(b, (char*) addr + length);
+					__liballocs_split_bigalloc_at_page_boundary(b, (char*) addr + effective_length);
 				if (!second_half) abort();
 				__liballocs_truncate_bigalloc_at_end(b, addr);
 				/* Now the bigallocs are in the right place, but their metadata is wrong. */
@@ -593,7 +594,7 @@ static void do_munmap(void *addr, size_t length, void *caller)
 				delete_mapping_sequence_span(orig_seq, addr, (char*) old_end - (char*) addr);
 				/* From the second, delete from the old begin to the end of the hole. */
 				delete_mapping_sequence_span(new_seq, b->begin, 
-						((char*) addr + length) - (char*) b->begin);
+						((char*) addr + effective_length) - (char*) b->begin);
 				second_half->allocator_private = new_seq;
 				/* same free function as before */
 			}
@@ -707,10 +708,10 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		}
 		if (saw_overlap && !(flags & MAP_FIXED))
 		{
-			debug_printf(0, "Error: %s (%p) requested mmapping (%p-%p) overlapping existing bigalloc %d"
+			debug_printf(0, "Error: %s (%p) created mmapping (%p-%p) overlapping existing bigalloc %d"
 				" (begin %p, end %p, allocator %s) without MAP_FIXED\n",
 				format_symbolic_address(caller - CALL_INSTR_LENGTH), caller - CALL_INSTR_LENGTH,
-				requested_addr, (char*)requested_addr + requested_length,
+				mapped_addr, (char*)mapped_addr + requested_length,
 				(int) saw_overlap,
 				big_allocations[saw_overlap].begin, big_allocations[saw_overlap].end,
 				big_allocations[saw_overlap].allocated_by->name);
