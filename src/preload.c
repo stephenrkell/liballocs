@@ -220,22 +220,18 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		return ret;
 	}
 
-	/* We want to hook our own mmaps. However,
+	/* We want to hook our own mmaps. However, the mmap allocator code does
+	 * want to call malloc itself, for its metadata, so we might
+	 * become reentrant, which we *don't* want. Current approach: the mmap
+	 * allocator uses a special "nommap_" private malloc, allocating from a
+	 * fixed pool.
 	 *
-	 * - The mmap allocator does call malloc itself, for its metadata, so we might
-	 * become reentrant at this point, which we *don't* want. E.g. since
-	 * right now we haven't yet returned the mapping we just made
-	 * to the malloc that is calling us, doing another private malloc
-	 * will reentrantly do another mmap.
-	 *
-	 * Current approach: mmap allocator tests for private malloc active, and 
-	 * just does a more minimalist metadata-free bigalloc creation in such cases.
-	 * FIXME: whatever we decide to do here, also do it for mremap and munmap
-	 *
-	 * Note that we're
-	 * not in a signal handler here; this path is only for LD_PRELOAD-based hooking,
-	 * and we don't trap our own mmap syscalls, so things are slightly less hairy than
-	 * they otherwise might be.
+	 * Note that we're not in a signal handler here; this path is only for
+	 * LD_PRELOAD-based hooking. We don't trap our own mmap syscalls, so
+	 * things are slightly less hairy than they otherwise might be. Instead,
+	 * calls to mmap() made from within liballocs will hit mmap() in this file.
+	 * On the rare occasions when we want a plain mmap without notifying the
+	 * mmap allocator, we can do raw_mmap().
 	 *
 	 * However, what about early calls? When !__liballocs_systrap_is_initialized,
 	 * we will have to later do a /proc/.../maps pass to fill in bigallocs. If we
@@ -245,13 +241,13 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	 * anonymous mappings even though one of ours will have 'caller' set so will
 	 * not be mergeable by the mapping_sequence code.
 	 *
-	 * We want to trap the early mmap self-calls because we need to see the bigalloc
-	 * that our private malloc
+	 * We want to hook the early mmap self-calls because we need to see the bigalloc
+	 * that our private mallocs are using.
 	 */
 
 	if (!MMAP_RETURN_IS_ERROR(ret))
 	{
-		if (!__liballocs_systrap_is_initialized) return ret; // HACK
+		if (!__liballocs_systrap_is_initialized) return ret; // HACK XXX: see above for why "systrapping not init'd" here is "too early"
 		__mmap_allocator_notify_mmap(ret, addr, length, prot, flags, fd, offset, __builtin_return_address(0));
 	}
 	else
@@ -279,7 +275,7 @@ int munmap(void *addr, size_t length)
 		assert(orig_munmap);
 	}
 	
-	if (!__liballocs_systrap_is_initialized)
+	if (!__liballocs_systrap_is_initialized)  // XXX: see above for why "systrapping not init'd" here means "too early"
 	{
 		return orig_munmap(addr, length);
 	}
@@ -316,7 +312,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 			? orig_mremap(old_addr, old_size, new_size, flags, new_address) \
 			: orig_mremap(old_addr, old_size, new_size, flags))
 	
-	if (!__liballocs_systrap_is_initialized)
+	if (!__liballocs_systrap_is_initialized) // XXX: see above for why "systrapping not init'd" here is "too early"
 	{
 		return DO_ORIG_CALL;
 	}
@@ -362,8 +358,6 @@ static void write_decint(int val)
 	a = '0' + (val % 10); raw_write(2, &a, 1);
 }
 
-/* HACK to avoid misattributing a call to <abort> to the next function in .text...*/
-#define CALL_INSTR_LENGTH 5 /* FIXME: sysdep */
 void abort(void) __attribute__((visibility("protected")));
 void abort(void)
 {

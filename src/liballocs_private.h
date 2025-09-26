@@ -238,6 +238,10 @@ static struct uniqtype *get_type(void *obj) \
 #define MAX(a, b) ((a)>(b)?(a):(b))
 #endif
 
+/* HACK used in diagnostics that use __builtin_return_address(), e.g.
+ * to avoid misattributing a call to <abort> to the next function in .text...*/
+#define CALL_INSTR_LENGTH 5 /* FIXME: sysdep */
+
 extern void *__liballocs_rt_uniqtypes_obj;
 extern ElfW(Sym) *__liballocs_rt_uniqtypes_dynsym;
 extern ElfW(Word) *__liballocs_rt_uniqtypes_gnu_hash;

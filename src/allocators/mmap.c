@@ -659,6 +659,11 @@ void __mmap_allocator_notify_mremap(void *ret_addr, void *old_addr, size_t old_s
 	const char *filename = seq->filename;
 	if (old_size != 0)
 	{
+		/* FIXME: if this is a resize in place, then unmap+remap is not right.
+		 * It will delete any child bigallocs. If the remap really does move
+		 * the allocation, then this is plausibly correct (any previously issued
+		 * pointers will no longer be valid) but for a resize in place, it is
+		 * not. */
 		do_munmap(old_addr, old_size, caller);
 #if defined(MREMAP_DONTUNMAP)
 		if (mremap_flags & MREMAP_DONTUNMAP)
@@ -688,7 +693,8 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		/* Do we *overlap* any existing mapping? If so, we must discard
 		 * that part -- but only if MAP_FIXED was specified, else it's an error. */
 		bigalloc_num_t saw_overlap = 0;
-		for (unsigned i = 0; i < mapped_length >> LOG_PAGE_SIZE; ++i)
+		unsigned int i = 0;
+		for (; i < mapped_length >> LOG_PAGE_SIZE; ++i)
 		{
 			bigalloc_num_t num;
 			if (0 != (num = pageindex[((uintptr_t) mapped_addr >> LOG_PAGE_SIZE) + i]))
@@ -701,11 +707,26 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 		}
 		if (saw_overlap && !(flags & MAP_FIXED))
 		{
-			debug_printf(0, "Error: address %p requested mmapping overlapping existing bigalloc %d"
+			debug_printf(0, "Error: %s (%p) requested mmapping (%p-%p) overlapping existing bigalloc %d"
 				" (begin %p, end %p, allocator %s) without MAP_FIXED\n",
-				caller, (int) saw_overlap,
+				format_symbolic_address(caller - CALL_INSTR_LENGTH), caller - CALL_INSTR_LENGTH,
+				requested_addr, (char*)requested_addr + requested_length,
+				(int) saw_overlap,
 				big_allocations[saw_overlap].begin, big_allocations[saw_overlap].end,
 				big_allocations[saw_overlap].allocated_by->name);
+			if (big_allocations[saw_overlap].allocated_by == &__mmap_allocator)
+			{
+				/* Tell us more. */
+				struct mapping_sequence *seq = big_allocations[saw_overlap].allocator_private;
+				assert(seq);
+				struct mapping_entry *maybe_ent = __mmap_allocator_find_entry(
+					(void*)((uintptr_t) mapped_addr + (i << LOG_PAGE_SIZE)),
+					seq);
+				assert(maybe_ent);
+				debug_printf(0, "Previous mapping was created by %s (%p)\n",
+					format_symbolic_address((char*)caller - CALL_INSTR_LENGTH),
+					(char*)caller - CALL_INSTR_LENGTH);
+			}
 			abort();
 		}
 		/* We can now handle overlap in mmap(), but it should only happen
