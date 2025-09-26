@@ -7,7 +7,7 @@
 const char *format_symbolic_address(const void *addr) __attribute__((visibility("hidden")));
 const char *format_symbolic_address(const void *addr)
 {
-	Dl_info info = dladdr_with_cache(addr);
+	Dl_info info = fake_dladdr_with_cache(addr);
 	
 	static __thread char buf[8192];
 	

@@ -362,6 +362,8 @@ static void write_decint(int val)
 	a = '0' + (val % 10); raw_write(2, &a, 1);
 }
 
+/* HACK to avoid misattributing a call to <abort> to the next function in .text...*/
+#define CALL_INSTR_LENGTH 5 /* FIXME: sysdep */
 void abort(void) __attribute__((visibility("protected")));
 void abort(void)
 {
@@ -372,8 +374,11 @@ void abort(void)
 	int pid = raw_getpid();
 	write_decint(pid);
 	write_string(", from address ");
-	write_ulong((unsigned long) __builtin_return_address(0));
-	write_string(", in 10 seconds\n");
+	const char *formatted = format_symbolic_address((char*) __builtin_return_address(0) - CALL_INSTR_LENGTH);
+	raw_write(2, formatted, strlen(formatted));
+	write_string(" (");
+	write_ulong((unsigned long) ((char*) __builtin_return_address(0) - CALL_INSTR_LENGTH));
+	write_string("), in 10 seconds\n");
 
 	sleep(10);
 	raw_kill(pid, 6);
