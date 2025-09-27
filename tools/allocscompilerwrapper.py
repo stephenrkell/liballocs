@@ -462,7 +462,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 extraFlags += ["-fPIC"]
                 # WHERE do we get relf.h, in the librunt era?
                 # Bit of a hack: in the contrib. FIXME FIXME.
-                stubs_pp_cmd = self.getPlainCCompilerCommand() + ["-std=c11", "-E", "-Wp,-dD", "-Wp,-P"] \
+                stubs_pp_cmd = self.getPlainCCompilerCommand() + ["-gdwarf-4", "-std=c11", "-E", "-Wp,-dD", "-Wp,-P"] \
                     + extraFlags + ["-o", stubs_pp, \
                     "-I" + self.getLibAllocsBaseDir() + "/tools", \
                     "-I" + self.getLibAllocsBaseDir() + "/include", \
@@ -494,7 +494,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 #    self.debugMsg("Could not sed stubs file %s: sed returned %d\n" \
                 #        % (stubs_pp, ret_stubs_sed))
                 #    exit(1)
-                stubs_cc_cmd = self.getPlainCCompilerCommand() + ["-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
+                stubs_cc_cmd = self.getPlainCCompilerCommand() + ["-gdwarf-4", "-std=c11", "-g"] + extraFlags + ["-c", "-o", stubs_bin, \
                     "-I" + self.getLibAllocsBaseDir() + "/tools", \
                     stubs_pp]
                 self.debugMsg("Compiling stubs file %s to %s with command %s\n" \
@@ -689,7 +689,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     % (usedTypesFileName, e.returncode, str(e.output)))
             usedTypesObjFileName = self.getOutputFilename(Phase.LINK) + ".usedtypes.o"
             usedTypesCcCmd = self.getPlainCCompilerCommand() + self.getUsedtypesCompileArgs() + \
-                ["-std=c11"] + [usedTypesFileName] + ["-c", "-o", usedTypesObjFileName]
+                ["-gdwarf-4", "-std=c11"] + [usedTypesFileName] + ["-c", "-o", usedTypesObjFileName]
             self.debugMsg("Calling " + " ".join(usedTypesCcCmd) + "\n")
             try:
                 outp = subprocess.check_output(usedTypesCcCmd)
