@@ -300,16 +300,16 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 		assert(orig_mremap);
 	}
 	
-	void *new_address = MAP_FAILED;
+	void *requested_new_addr = MAP_FAILED;
 	if (flags & MREMAP_FIXED)
 	{
 		va_start(ap, flags);
-		new_address = va_arg(ap, void *);
+		requested_new_addr = va_arg(ap, void *);
 		va_end(ap);
 	}
 	
 #define DO_ORIG_CALL ((flags & MREMAP_FIXED)  \
-			? orig_mremap(old_addr, old_size, new_size, flags, new_address) \
+			? orig_mremap(old_addr, old_size, new_size, flags, requested_new_addr) \
 			: orig_mremap(old_addr, old_size, new_size, flags))
 	
 	if (!__liballocs_systrap_is_initialized) // XXX: see above for why "systrapping not init'd" here is "too early"
@@ -321,8 +321,9 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 		void *ret = DO_ORIG_CALL;
 		if (!MMAP_RETURN_IS_ERROR(ret))
 		{
-			__mmap_allocator_notify_mremap(ret, old_addr, old_size,
-					new_size, flags, new_address, __builtin_return_address(0));
+			void *new_addr = ret;
+			__mmap_allocator_notify_mremap(new_addr, old_addr, old_size,
+					new_size, flags, requested_new_addr, __builtin_return_address(0));
 		}
 		return ret;
 	}

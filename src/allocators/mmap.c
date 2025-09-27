@@ -631,12 +631,15 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename, void *caller);
 
 /* For mremap, our task is complicated. We want the effect on our metadata
- * to be like unmapping and then mapping again. */
+ * to be like unmapping and then mapping again. As with any mapping, it may
+ * (if MAP_FIXED/MREMAP_FIXED is set) replace something at the mapped address. */
 void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t old_size,
-	size_t new_size, int mremap_flags, void *new_address, void *caller)
+	size_t new_size, int mremap_flags, void *requested_new_addr, void *caller)
 {
 	/* called after a successful mremap call */
 	assert(!MMAP_RETURN_IS_ERROR(mapped_addr)); // don't call us with MAP_FAILED
+	/* If no specific new addr was requested, we should be called with
+	 * requested_new_addr == MAP_FAILED */
 	struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root(old_addr,
 		&__mmap_allocator, NULL);
 	if (!bigalloc_before) abort();
@@ -647,56 +650,115 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 		write_string("Unhandled mremap case (not contained within one bigalloc)\n");
 		abort();
 	}
-	struct mapping_entry *maybe_ent_begin = __mmap_allocator_find_entry(old_addr, seq);
-	if (!maybe_ent_begin) abort();
-	assert((uintptr_t) old_addr >= (uintptr_t) maybe_ent_begin->begin);
-	struct mapping_entry *maybe_ent_end = __mmap_allocator_find_entry(
-		(char*) old_addr - 1 + old_size, seq);
-	if (!maybe_ent_end) abort();
-	assert(maybe_ent_end >= maybe_ent_begin);
-	/* What is being remapped? It must fall into a single filename/prot/flags mapping
-	 * but perhaps multiple entries. We know that only one filename is involved, but
-	 * what about prot/flags? We need these in order to set up the metadata for the
-	 * new mapping entry we create. FIXME: we *could* generalise this, simply by
-	 * transferring the metadata from the original mapping */
-	for (struct mapping_entry *cur = maybe_ent_begin + 1; cur != maybe_ent_end; ++cur)
+	if (mapped_addr == old_addr && new_size == old_size) return; // nothing to do
+	assert(new_size != 0); // should have given EINVAL
+	if (mapped_addr == old_addr && new_size < old_size)
 	{
-		if (cur->prot != maybe_ent_begin->prot)
+		// shrink in place... it is like unmapping the end
+		struct mapping_entry *ent = __mmap_allocator_find_entry(old_addr, seq);
+		if (!ent)
 		{
-			write_string("Unhandled mremap case (differing prot across mapping)\n");
+			write_string("Impossible mremap case (shrink from unknown source)\n");
 			abort();
 		}
-		if (cur->flags != maybe_ent_begin->flags)
-		{
-			write_string("Unhandled mremap case (differing flags across mapping)\n");
-			abort();
-		}
+		do_munmap((void*)((uintptr_t) old_addr + new_size),
+			old_size - new_size, caller);
 	}
-	off_t new_offset = maybe_ent_begin->offset + ((uintptr_t) old_addr - (uintptr_t) maybe_ent_begin->begin);
-	int prot = maybe_ent_begin->prot;
-	int orig_mmap_flags = maybe_ent_begin->flags;
-	const char *filename = seq->filename;
-	if (old_size != 0)
+	else if (mapped_addr == old_addr && old_size > 0 && new_size > old_size)
 	{
-		/* FIXME: if this is a resize in place, then unmap+remap is not right.
-		 * It will delete any child bigallocs. If the remap really does move
-		 * the allocation, then this is plausibly correct (any previously issued
-		 * pointers will no longer be valid) but for a resize in place, it is
-		 * not. */
-		do_munmap(old_addr, old_size, caller);
-#if defined(MREMAP_DONTUNMAP)
-		if (mremap_flags & MREMAP_DONTUNMAP)
+		// grow in place... it is like adding a new mapping at the end
+		struct mapping_entry *ent = __mmap_allocator_find_entry(old_addr, seq);
+		if (!ent)
 		{
-			/* FIXME: the old region now has different semantics but is somehow left behind. */
-			write_string("Unhandled mremap case (MREMAP_DONTUNMAP)\n");
+			write_string("Impossible mremap case (grow from unknown source)\n");
 			abort();
 		}
-#endif
+		do_mmap(/* mapped */ (void*)(old_addr + old_size), /* requested */ (void*)(old_addr + old_size),
+			new_size - old_size,
+			ent->prot, ent->flags, seq->filename,
+			ent->offset + ((uintptr_t) old_addr - (uintptr_t) ent->begin) + old_size,
+			caller);
 	}
-	do_mmap(mapped_addr,
-		/* requested_addr */ (mremap_flags & MREMAP_FIXED) ? new_address : NULL,
-		new_size, prot, orig_mmap_flags, filename, new_offset,
-		caller);
+	else if (mapped_addr == old_addr && old_size == 0)
+	{
+		write_string("Impossible mremap case (mapped_addr == old_addr && old_size == 0)\n");
+		abort();
+	}
+	/* In the cases below ee are moving -- possibly shrinking or growing too -- and
+	 * possibly keeping the old mapping around, if mremap_flags has MREMAP_DONTUNMAP.
+	 * If the old mapping is kept, it has weird semantics -- always faults, and is
+	 * either handed to userfaultfd or maps fresh zeroes on access. However,
+	 * we don't need to concern ourselves with the semantics of the old mapping.
+	 * We just create a new one. */
+	else if (mapped_addr != old_addr && old_size != 0)
+	{
+		/* Move, possibly growing or shrinking.
+		 * What about nested allocations within the moved region? We
+		 * can't in general replicate these in the moved-to location, so we assume
+		 * they are nuked. Since their addresses will have changed, existing pointers
+		 * won't be valid, so this is not totally unreasonable. */
+		/* To keep things simple, we walk all existing mapping entries and calculate
+		 * the overlap with the remapped region. If it's non-empty, we create a new
+		 * mapping just as if doing mmap. This means that if the new mapping abuts
+		 * some existing mapping of the same file, we may coalesce as we usually do. */
+		struct mapping_entry *ent = &seq->mappings[0];
+		for (; ent != &seq->mappings[seq->nused];
+			++ent)
+		{
+			uintptr_t overlap_begin = MAX((uintptr_t) ent->begin, (uintptr_t) old_addr);
+			uintptr_t overlap_end   = MIN((uintptr_t) ent->end,   (uintptr_t) old_addr + old_size);
+			if (overlap_begin < overlap_end)
+			{
+				/* "overlap" is the *old* mapping. */
+				uintptr_t new_begin = overlap_begin + (mapped_addr - old_addr);
+				uintptr_t new_end   = overlap_end   + (mapped_addr - old_addr);
+				do_mmap(/* mapped */ (void*) new_begin, /* requested */ (void*) new_begin,
+					new_end - new_begin,
+					ent->prot, ent->flags, seq->filename,
+					ent->offset + (overlap_begin - (uintptr_t) ent->begin),
+					caller);
+			}
+		}
+		if (new_size > old_size)
+		{
+			assert(seq->nused > 0); // we must have *some* previous mapping, since old_size != 0
+			uintptr_t new_begin = (uintptr_t) mapped_addr + old_size;
+			uintptr_t new_end   = (uintptr_t) mapped_addr + new_size;
+			do_mmap(/* mapped */ (void*) new_begin, /* requested */ (void*) new_begin,
+					new_end - new_begin,
+					/* re-use the last-used 'ent' for flags and offset */
+					ent->prot, ent->flags,
+					seq->filename,
+					/* We cannot assume our new mapping ends at ent->end... we may be
+					 * remapping a smaller piece. */
+					ent->offset + ( (uintptr_t) old_addr + old_size - (uintptr_t) ent->begin ),
+					caller);
+		}
+		if (!(mremap_flags & MREMAP_DONTUNMAP)) do_munmap(old_addr, old_size, caller);
+	}
+	else if (old_size == 0)
+	{
+		/* "remap these MAP_SHARED pages elsewhere" -- the old mapping remains */
+		struct mapping_entry *ent = __mmap_allocator_find_entry(old_addr, seq);
+		if (!ent)
+		{
+			write_string("Impossible mremap case (remap MAP_SHARED from unknown source)\n");
+			abort();
+		}
+		uintptr_t new_begin = (uintptr_t) mapped_addr;
+		uintptr_t new_end   = (uintptr_t) mapped_addr + new_size;
+		do_mmap(/* mapped */ (void*) new_begin, /* requested */ (void*) new_begin,
+				new_end - new_begin,
+				ent->prot, ent->flags,
+				seq->filename,
+				ent->offset + ((uintptr_t) old_addr - (uintptr_t) ent->begin),
+				caller);
+	}
+	else
+	{
+		write_string("Impossible mremap case (should be unreachable default case)\n");
+		abort();
+	}
 }
 
 static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_length, int prot, int flags,
@@ -768,7 +830,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 	}
 	if (bigalloc_before)
 	{
-		/* See if we can extend it. */
+		/* See if we can extend the preceding sequence. */
 		struct mapping_sequence *seq = (struct mapping_sequence *) 
 			bigalloc_before->allocator_private;
 		_Bool success = augment_sequence(seq, mapped_addr, (char*) mapped_addr + mapped_length, 

@@ -136,7 +136,7 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	if (!MMAP_RETURN_IS_ERROR(ret))
 	{
 		__mmap_allocator_notify_mremap(ret, old_addr, old_length, new_length, flags,
-			maybe_new_address, GUESS_CALLER(s));
+			(flags & /*MREMAP_FIXED*/2) ? maybe_new_address : /*MAP_FAILED*/(void*)-1, GUESS_CALLER(s));
 	}
 	
 	/* Do the post-handling and resume. */
