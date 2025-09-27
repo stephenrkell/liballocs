@@ -644,19 +644,38 @@ void __mmap_allocator_notify_mremap(void *ret_addr, void *old_addr, size_t old_s
 	if (!bigalloc_before) abort();
 	struct mapping_sequence *seq = bigalloc_before->allocator_private;
 	if (!seq) abort();
-	struct mapping_entry *maybe_ent = __mmap_allocator_find_entry(old_addr, seq);
-	if (!maybe_ent) abort();
-	/* What is being remapped? It must fall into a single filename/prot/flags mapping. */
-	assert((uintptr_t) old_addr >= (uintptr_t) maybe_ent->begin);
-	if (!((uintptr_t) old_addr + old_size <= (uintptr_t) maybe_ent->end))
+	if ((uintptr_t) seq->end < (uintptr_t) old_addr + old_size)
 	{
-		/* not contained within a single mapping... */
-		write_string("Unhandled mremap case (crossed multiple mappings)\n");
+		write_string("Unhandled mremap case (not contained within one bigalloc)\n");
 		abort();
 	}
-	off_t new_offset = maybe_ent->offset + ((uintptr_t) old_addr - (uintptr_t) maybe_ent->begin);
-	int prot = maybe_ent->prot;
-	int orig_mmap_flags = maybe_ent->flags;
+	struct mapping_entry *maybe_ent_begin = __mmap_allocator_find_entry(old_addr, seq);
+	if (!maybe_ent_begin) abort();
+	assert((uintptr_t) old_addr >= (uintptr_t) maybe_ent_begin->begin);
+	struct mapping_entry *maybe_ent_end = __mmap_allocator_find_entry(
+		(char*) old_addr - 1 + old_size, seq);
+	if (!maybe_ent_end) abort();
+	assert(maybe_ent_end >= maybe_ent_begin);
+	/* What is being remapped? It must fall into a single filename/prot/flags mapping
+	 * but perhaps multiple entries. We know that only one filename is involved, but
+	 * what about prot/flags? We need these in order to set up the metadata for the
+	 * new mapping entry we create. */
+	for (struct mapping_entry *cur = maybe_ent_begin + 1; cur != maybe_ent_end; ++cur)
+	{
+		if (cur->prot != maybe_ent_begin->prot)
+		{
+			write_string("Unhandled mremap case (differing prot across mapping)\n");
+			abort();
+		}
+		if (cur->flags != maybe_ent_begin->flags)
+		{
+			write_string("Unhandled mremap case (differing flags across mapping)\n");
+			abort();
+		}
+	}
+	off_t new_offset = maybe_ent_begin->offset + ((uintptr_t) old_addr - (uintptr_t) maybe_ent_begin->begin);
+	int prot = maybe_ent_begin->prot;
+	int orig_mmap_flags = maybe_ent_begin->flags;
 	const char *filename = seq->filename;
 	if (old_size != 0)
 	{
