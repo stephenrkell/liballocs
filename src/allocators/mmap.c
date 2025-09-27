@@ -74,7 +74,7 @@ static struct big_allocation *add_bigalloc(void *begin, size_t size)
 	return b;
 }
 
-static struct big_allocation *add_mapping_sequence_bigalloc_nocopy(struct mapping_sequence *seq,
+static struct big_allocation *add_mapping_sequence_bigalloc_with_seq(struct mapping_sequence *seq,
 	void(*free_fn)(void*))
 {
 	struct big_allocation *b = add_bigalloc(seq->begin, (char*) seq->end - (char*) seq->begin);
@@ -83,24 +83,29 @@ static struct big_allocation *add_mapping_sequence_bigalloc_nocopy(struct mappin
 	b->allocator_private_free = free_fn;
 	return b;
 }
-static struct big_allocation *add_mapping_sequence_bigalloc(struct mapping_sequence *seq)
+/* We copy the seq passed by the caller... useful during add_mapping_sequence_if_absent()
+ * since we may or may not create one. Instead of signalling back to the caller whether it
+ * can free a heap-allocated sequence or that we have taken ownership, we just take a copy
+ * of its (usually stack-allocated) sequence. */
+static struct big_allocation *add_mapping_sequence_bigalloc_copying_seq(struct mapping_sequence *seq_to_copy)
 {
-	struct mapping_sequence *copy = __private_nommap_malloc(sizeof (struct mapping_sequence));
-	if (!copy) abort();
-	memcpy(copy, seq, sizeof (struct mapping_sequence));
-	struct big_allocation *b = add_mapping_sequence_bigalloc_nocopy(seq, __private_nommap_free);
-	b->allocator_private = copy;
+	struct big_allocation *b = add_bigalloc(seq_to_copy->begin,
+		(uintptr_t) seq_to_copy->end - (uintptr_t) seq_to_copy->begin);
+	struct mapping_sequence *seq = __private_nommap_malloc(sizeof (struct mapping_sequence));
+	assert(seq);
+	memcpy(seq, seq_to_copy, sizeof (struct mapping_sequence));
+	b->allocator_private = seq;
 	b->allocator_private_free = __private_nommap_free;
 	return b;
 }
-/* This function is used only for the single statically-allocated mapping sequence
- * representing the private malloc heap, that we create during pageindex init. */
+/* Version exported to the remainder of liballocs... used only for the single statically
+ * allocated mapping_sequence of the private nommap malloc heap, created at pageindex init. */
 __attribute__((visibility("hidden")))
-struct big_allocation *__add_mapping_sequence_bigalloc_nocopy(struct mapping_sequence *seq)
+struct big_allocation *__add_mapping_sequence_bigalloc_with_seq(struct mapping_sequence *seq,
+	void(*free_fn)(void*))
 {
-	return add_mapping_sequence_bigalloc_nocopy(seq, NULL);
+	return add_mapping_sequence_bigalloc_with_seq(seq, free_fn);
 }
-
 static _Bool mapping_entry_equal(struct mapping_entry *e1,
 		struct mapping_entry *e2)
 {
@@ -170,9 +175,7 @@ static _Bool mem_range_suffix(struct mapping_sequence *s1,
 {
 	return s1->end == s2->end && s1->begin > s2->begin;
 }
-// FIXME: temporarily hidden to prevent annoying abort() collapsing after inlining
-void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq) __attribute__((visibility("hidden")));
-void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
+static void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 {
 	/* Test 1. Find the top-level parent of both the beginning
 	 * and end addresses. It should be the same, perhaps zero.
@@ -358,7 +361,7 @@ void add_mapping_sequence_bigalloc_if_absent(struct mapping_sequence *seq)
 
 go_ahead: ;
 	/* Extra test: is this the stack sequence? */
-	struct big_allocation *b = add_mapping_sequence_bigalloc(seq);
+	struct big_allocation *b = add_mapping_sequence_bigalloc_copying_seq(seq);
 	if (seq->filename && 0 == strncmp(seq->filename, "[stack", 6))
 	{
 		__auxv_allocator_notify_init_stack_mapping_sequence(b);
@@ -627,18 +630,13 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t length, int 
 static _Bool augment_sequence(struct mapping_sequence *cur, 
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename, void *caller);
 
-static __thread int remembered_prot;
-static __thread const char *remembered_filename;
-static __thread off_t remembered_offset;
-static __thread void *remembered_old_addr;
-
 /* For mremap, our task is complicated. We want the effect on our metadata
  * to be like unmapping and then mapping again. */
-void __mmap_allocator_notify_mremap(void *ret_addr, void *old_addr, size_t old_size,
+void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t old_size,
 	size_t new_size, int mremap_flags, void *new_address, void *caller)
 {
 	/* called after a successful mremap call */
-	assert(!MMAP_RETURN_IS_ERROR(ret_addr)); // don't call us with MAP_FAILED
+	assert(!MMAP_RETURN_IS_ERROR(mapped_addr)); // don't call us with MAP_FAILED
 	struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root(old_addr,
 		&__mmap_allocator, NULL);
 	if (!bigalloc_before) abort();
@@ -659,7 +657,8 @@ void __mmap_allocator_notify_mremap(void *ret_addr, void *old_addr, size_t old_s
 	/* What is being remapped? It must fall into a single filename/prot/flags mapping
 	 * but perhaps multiple entries. We know that only one filename is involved, but
 	 * what about prot/flags? We need these in order to set up the metadata for the
-	 * new mapping entry we create. */
+	 * new mapping entry we create. FIXME: we *could* generalise this, simply by
+	 * transferring the metadata from the original mapping */
 	for (struct mapping_entry *cur = maybe_ent_begin + 1; cur != maybe_ent_end; ++cur)
 	{
 		if (cur->prot != maybe_ent_begin->prot)
@@ -694,7 +693,7 @@ void __mmap_allocator_notify_mremap(void *ret_addr, void *old_addr, size_t old_s
 		}
 #endif
 	}
-	do_mmap(ret_addr,
+	do_mmap(mapped_addr,
 		/* requested_addr */ (mremap_flags & MREMAP_FIXED) ? new_address : NULL,
 		new_size, prot, orig_mmap_flags, filename, new_offset,
 		caller);
@@ -703,113 +702,108 @@ void __mmap_allocator_notify_mremap(void *ret_addr, void *old_addr, size_t old_s
 static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_length, int prot, int flags,
                   const char *filename, off_t offset, void *caller)
 {
-	if (mapped_addr != MAP_FAILED)
-	{
-		if (mapped_addr == NULL) abort();
-		
-		/* The actual length is rounded up to page size. */
-		size_t mapped_length = ROUND_UP(requested_length, PAGE_SIZE);
-		
-		/* Do we *overlap* any existing mapping? If so, we must discard
-		 * that part -- but only if MAP_FIXED was specified, else it's an error. */
-		bigalloc_num_t saw_overlap = 0;
-		unsigned int i = 0;
-		for (; i < mapped_length >> LOG_PAGE_SIZE; ++i)
-		{
-			bigalloc_num_t num;
-			if (0 != (num = pageindex[((uintptr_t) mapped_addr >> LOG_PAGE_SIZE) + i]))
-			{
-				/* We found an overlap. Do nothing for now, except remember
-				 * that overlaps exist. */
-				saw_overlap = num;
-				break;
-			}
-		}
-		if (saw_overlap && !(flags & MAP_FIXED))
-		{
-			debug_printf(0, "Error: %s (%p) created mmapping (%p-%p) overlapping existing bigalloc %d"
-				" (begin %p, end %p, allocator %s) without MAP_FIXED\n",
-				format_symbolic_address(caller - CALL_INSTR_LENGTH), caller - CALL_INSTR_LENGTH,
-				mapped_addr, (char*)mapped_addr + requested_length,
-				(int) saw_overlap,
-				big_allocations[saw_overlap].begin, big_allocations[saw_overlap].end,
-				big_allocations[saw_overlap].allocated_by->name);
-			if (big_allocations[saw_overlap].allocated_by == &__mmap_allocator)
-			{
-				/* Tell us more. */
-				struct mapping_sequence *seq = big_allocations[saw_overlap].allocator_private;
-				assert(seq);
-				struct mapping_entry *maybe_ent = __mmap_allocator_find_entry(
-					(void*)((uintptr_t) mapped_addr + (i << LOG_PAGE_SIZE)),
-					seq);
-				assert(maybe_ent);
-				debug_printf(0, "Previous mapping was created by %s (%p)\n",
-					format_symbolic_address((char*)caller - CALL_INSTR_LENGTH),
-					(char*)caller - CALL_INSTR_LENGTH);
-			}
-			abort();
-		}
-		/* We can now handle overlap in mmap(), but it should only happen
-		 * when the caller really wants to map something over the top, 
-		 * not when asking for a free addr -- hence the MAP_FIXED check. */
-		
-		/* Do we abut any existing mapping? Just do the 'before' case. */
-		struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root((char*) mapped_addr - 1,
-			&__mmap_allocator, NULL);
-		if (!bigalloc_before)
-		{
-			struct big_allocation *overlap_begin = __lookup_bigalloc_from_root((char*) mapped_addr,
-				&__mmap_allocator, NULL);
-			struct big_allocation *overlap_end = __lookup_bigalloc_from_root((char*) mapped_addr + mapped_length - 1,
-				&__mmap_allocator, NULL);
-			if (overlap_begin && (!overlap_end || overlap_begin == overlap_end))
-			{
-				/* okay, try extending this one */
-				bigalloc_before = overlap_begin;
-			}
-		}
-		if (bigalloc_before)
-		{
-			/* See if we can extend it. */
-			struct mapping_sequence *seq = (struct mapping_sequence *) 
-				bigalloc_before->allocator_private;
-			_Bool success = augment_sequence(seq, mapped_addr, (char*) mapped_addr + mapped_length, 
-				prot, flags, offset, filename, caller);
-			char *requested_new_end = (char*) mapped_addr + mapped_length;
-			if (success && requested_new_end > (char*) bigalloc_before->end)
-			{
-				/* Okay, now the bigalloc is bigger. */
-				_Bool success = __liballocs_extend_bigalloc(bigalloc_before, 
-					(char*) requested_new_end);
-				if (!success) abort();
-				assert(seq->begin == bigalloc_before->begin);
-				assert(seq->end == bigalloc_before->end);
-			}
-			if (success) return;
-			debug_printf(0, "Warning: mapping of %s could not extend preceding bigalloc\n", filename);
-		}
+	assert(!MMAP_RETURN_IS_ERROR(mapped_addr)); // don't call us with MAP_FAILED
+	if (mapped_addr == NULL) abort();
 
-		/* If we got here, we have to create a new bigalloc. */
-		struct mapping_sequence new_seq;
-		memset(&new_seq, 0, sizeof new_seq);
-		/* "Extend" the empty sequence. */
-		_Bool success = augment_sequence(&new_seq, mapped_addr, (char*) mapped_addr + mapped_length, 
-				prot, flags, offset, filename, caller);
-		if (!success) abort();
-		add_mapping_sequence_bigalloc(&new_seq);
+	/* The actual length is rounded up to page size. */
+	size_t mapped_length = ROUND_UP(requested_length, PAGE_SIZE);
+
+	/* Do we *overlap* any existing mapping? If so, we must discard
+	 * that part -- but only if MAP_FIXED was specified, else it's an error. */
+	bigalloc_num_t saw_overlap = 0;
+	unsigned int i = 0;
+	for (; i < mapped_length >> LOG_PAGE_SIZE; ++i)
+	{
+		bigalloc_num_t num;
+		if (0 != (num = pageindex[((uintptr_t) mapped_addr >> LOG_PAGE_SIZE) + i]))
+		{
+			/* We found an overlap. Do nothing for now, except remember
+			 * that overlaps exist. */
+			saw_overlap = num;
+			break;
+		}
 	}
+	if (saw_overlap && !(flags & MAP_FIXED))
+	{
+		debug_printf(0, "Error: %s (%p) created mmapping (%p-%p) overlapping existing bigalloc %d"
+			" (begin %p, end %p, allocator %s) without MAP_FIXED\n",
+			format_symbolic_address(caller - CALL_INSTR_LENGTH), caller - CALL_INSTR_LENGTH,
+			mapped_addr, (char*)mapped_addr + requested_length,
+			(int) saw_overlap,
+			big_allocations[saw_overlap].begin, big_allocations[saw_overlap].end,
+			big_allocations[saw_overlap].allocated_by->name);
+		if (big_allocations[saw_overlap].allocated_by == &__mmap_allocator)
+		{
+			/* Tell us more. */
+			struct mapping_sequence *seq = big_allocations[saw_overlap].allocator_private;
+			assert(seq);
+			struct mapping_entry *maybe_ent = __mmap_allocator_find_entry(
+				(void*)((uintptr_t) mapped_addr + (i << LOG_PAGE_SIZE)),
+				seq);
+			assert(maybe_ent);
+			debug_printf(0, "Previous mapping was created by %s (%p)\n",
+				format_symbolic_address((char*)caller - CALL_INSTR_LENGTH),
+				(char*)caller - CALL_INSTR_LENGTH);
+		}
+		abort();
+	}
+	/* We can now handle overlap in mmap(), but it should only happen
+	 * when the caller really wants to map something over the top, 
+	 * not when asking for a free addr -- hence the MAP_FIXED check. */
+
+	/* Do we abut any existing mapping? Just do the 'before' case. */
+	struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root((char*) mapped_addr - 1,
+		&__mmap_allocator, NULL);
+	if (!bigalloc_before)
+	{
+		struct big_allocation *overlap_begin = __lookup_bigalloc_from_root((char*) mapped_addr,
+			&__mmap_allocator, NULL);
+		struct big_allocation *overlap_end = __lookup_bigalloc_from_root((char*) mapped_addr + mapped_length - 1,
+			&__mmap_allocator, NULL);
+		if (overlap_begin && (!overlap_end || overlap_begin == overlap_end))
+		{
+			/* okay, try extending this one */
+			bigalloc_before = overlap_begin;
+		}
+	}
+	if (bigalloc_before)
+	{
+		/* See if we can extend it. */
+		struct mapping_sequence *seq = (struct mapping_sequence *) 
+			bigalloc_before->allocator_private;
+		_Bool success = augment_sequence(seq, mapped_addr, (char*) mapped_addr + mapped_length, 
+			prot, flags, offset, filename, caller);
+		char *requested_new_end = (char*) mapped_addr + mapped_length;
+		if (success && requested_new_end > (char*) bigalloc_before->end)
+		{
+			/* Okay, now the bigalloc is bigger. */
+			_Bool success = __liballocs_extend_bigalloc(bigalloc_before, 
+				(char*) requested_new_end);
+			if (!success) abort();
+			assert(seq->begin == bigalloc_before->begin);
+			assert(seq->end == bigalloc_before->end);
+		}
+		if (success) return;
+		debug_printf(0, "Warning: mapping of %s could not extend preceding bigalloc\n", filename);
+	}
+
+	/* If we got here, we have to create a new bigalloc. */
+	struct mapping_sequence *p_new_seq = __private_nommap_calloc(1, sizeof (struct mapping_sequence));
+	/* "Extend" the empty sequence. */
+	_Bool success = augment_sequence(p_new_seq, mapped_addr, (char*) mapped_addr + mapped_length, 
+			prot, flags, offset, filename, caller);
+	if (!success) abort();
+	add_mapping_sequence_bigalloc_with_seq(p_new_seq, __private_nommap_free);
 }
 void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_t length, 
 		int prot, int flags, int fd, off_t offset, void *caller)
 {
-	/* HACK: Is it actually a stack or sbrk area? Branch out if so. */
-	// FIXME
 	do_mmap(mapped_addr, requested_addr, length, prot, flags, filename_for_fd(fd), offset, caller);
 }
 
 void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)
 {
-	
+	// FIXME: update prot
 }
 
 static int add_missing_cb(struct maps_entry *ent, char *linebuf, void *arg);
@@ -1469,6 +1463,7 @@ void __mmap_allocator_notify_brk(void *new_curbrk)
 				new_end);
 			struct mapping_sequence *seq
 			 = brk_mapping_bigalloc->allocator_private;
+			assert(seq);
 			seq->end = new_end;
 			void *prev_mapping_end = seq->mappings[seq->nused - 1].end;
 			if (!seq->mappings[seq->nused - 1].is_anon)

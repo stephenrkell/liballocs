@@ -92,7 +92,7 @@ mmap_return_site:
 		} }
 	};
 	struct big_allocation *b = __liballocs_private_nommap_malloc_bigalloc =
-		__add_mapping_sequence_bigalloc_nocopy(&seq);
+		__add_mapping_sequence_bigalloc_with_seq(&seq, /* no free function */ NULL);
 	/* What about the bitmap? 1GB in 16B units needs 64M bits or 8Mbytes.
 	 * We don't want to spend that much up-front. But we don't have to!
 	 * We allocate the bitmap in our own heap, which is MAP_NORESERVE. */
