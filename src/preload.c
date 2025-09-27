@@ -290,7 +290,7 @@ int munmap(void *addr, size_t length)
 	}
 }
 
-void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /* void *new_address */)
+void *mremap(void *old_addr, size_t old_size, size_t new_size, int mremap_flags, ... /* void *new_address */)
 {
 	static void *(*orig_mremap)(void *, size_t, size_t, int, ...);
 	va_list ap;
@@ -301,17 +301,31 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 	}
 	
 	void *requested_new_addr = MAP_FAILED;
-	if (flags & MREMAP_FIXED)
+	if (mremap_flags & MREMAP_FIXED)
 	{
-		va_start(ap, flags);
+		va_start(ap, mremap_flags);
 		requested_new_addr = va_arg(ap, void *);
 		va_end(ap);
 	}
-	
-#define DO_ORIG_CALL ((flags & MREMAP_FIXED)  \
-			? orig_mremap(old_addr, old_size, new_size, flags, requested_new_addr) \
-			: orig_mremap(old_addr, old_size, new_size, flags))
-	
+
+	if (&__liballocs_nudge_mmap)
+	{
+		/* We don't have a prot, flags, fd or offset... or possibly even an addr.
+		 * Just fake them. */
+		int prot = 0;
+		int flags = 0;
+		void *addr;
+		if (requested_new_addr == MAP_FAILED) addr = NULL; else addr = requested_new_addr;
+		off_t offset = 0;
+		int fd = -1;
+		__liballocs_nudge_mmap(&addr, &/*length*/new_size, &prot, &flags, &fd, &offset, __builtin_return_address(0));
+		/* If our nudger wants to force the address, we accommodate it mremapwise. */
+		if (addr != NULL) { requested_new_addr = addr; mremap_flags |= MREMAP_FIXED; }
+		/* FIXME: the nudger might have changed fd or prot or flags... what to do then? */
+	}
+#define DO_ORIG_CALL ((mremap_flags & MREMAP_FIXED)  \
+			? orig_mremap(old_addr, old_size, new_size, mremap_flags, requested_new_addr) \
+			: orig_mremap(old_addr, old_size, new_size, mremap_flags))
 	if (!__liballocs_systrap_is_initialized) // XXX: see above for why "systrapping not init'd" here is "too early"
 	{
 		return DO_ORIG_CALL;
@@ -323,7 +337,7 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int flags, ... /*
 		{
 			void *new_addr = ret;
 			__mmap_allocator_notify_mremap(new_addr, old_addr, old_size,
-					new_size, flags, requested_new_addr, __builtin_return_address(0));
+					new_size, mremap_flags, requested_new_addr, __builtin_return_address(0));
 		}
 		return ret;
 	}

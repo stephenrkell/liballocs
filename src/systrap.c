@@ -88,8 +88,8 @@ void mmap_replacement(struct generic_syscall *s, post_handler *post)
 	
 	void *ret = raw_mmap(addr, length, prot, flags, fd, offset);
 	/* If it did something, notify the allocator.
-	 * HACK: not sure if/where this is documented, but I've seen mmap() return
-	 * a "negative" number that is not -1. So we consider any return value that
+	 * The kernel's mmap() encodes the error code by returning a small
+	 * negative number that is not -1. So we consider any return value that
 	 * is less than PAGE_SIZE below (void*)-1 to be an error value. */
 	if (!MMAP_RETURN_IS_ERROR(ret) && &__mmap_allocator_notify_mmap)
 	{
@@ -126,17 +126,37 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	void *old_addr = (void*) s->args[0];
 	size_t old_length = s->args[1];
 	size_t new_length = s->args[2];
-	int flags = s->args[3];
+	int mremap_flags = s->args[3];
 	void *maybe_new_address = (void*) s->args[4];
 
+	/* FIXME: share with preload.c */
+	/* We don't have a prot, flags, fd or offset... or possibly even an addr.
+	 * Just fake them. */
+	int prot = 0;
+	int flags = 0;
+	void *addr;
+	void *requested_new_addr = (mremap_flags & /*MREMAP_FIXED*/2) ? maybe_new_address
+		: /*MAP_FAILED*/(void*)-1;
+	if (requested_new_addr == /*MAP_FAILED*/(void*)-1) addr = NULL; else addr = requested_new_addr;
+	off_t offset = 0;
+	int fd = -1;
+	__liballocs_nudge_mmap(&addr, &/*length*/new_length, &prot, &flags, &fd, &offset, __builtin_return_address(0));
+	/* If our nudger wants to force the address, we accommodate it mremapwise. */
+	if (addr != NULL)
+	{
+		maybe_new_address = requested_new_addr = addr;
+		mremap_flags |= /*MREMAP_FIXED*/ 2;
+	}
+	/* FIXME: the nudger might have changed fd or prot or flags... what to do then? */
+
 	/* Do the call. */
-	void *ret = raw_mremap(old_addr, old_length, new_length, flags, maybe_new_address);
+	void *ret = raw_mremap(old_addr, old_length, new_length, mremap_flags, maybe_new_address);
 	// FIXME: also nudge mremaps
 	
 	if (!MMAP_RETURN_IS_ERROR(ret))
 	{
-		__mmap_allocator_notify_mremap(ret, old_addr, old_length, new_length, flags,
-			(flags & /*MREMAP_FIXED*/2) ? maybe_new_address : /*MAP_FAILED*/(void*)-1, GUESS_CALLER(s));
+		__mmap_allocator_notify_mremap(ret, old_addr, old_length, new_length, mremap_flags,
+			(mremap_flags & /*MREMAP_FIXED*/2) ? maybe_new_address : /*MAP_FAILED*/(void*)-1, GUESS_CALLER(s));
 	}
 	
 	/* Do the post-handling and resume. */
@@ -310,7 +330,8 @@ void __liballocs_systrap_init(void)
 	if (!(ret > 0)) abort();
 	int fd = open(proc_buf, O_RDONLY);
 	if (fd == -1) abort();
-	/* Copy the whole file into a buffer. */
+	/* Copy the whole file into a buffer.
+	 * FIXME: librunt has its own utility code for this now; use it. */
 	const size_t filebuf_sz = 64 * 8192;
 	char *filebuf = alloca(64 * 8192); // HACK: guessing maximum /proc/pid/maps file size
 	char *filebuf_pos = filebuf;
@@ -334,7 +355,7 @@ void __liballocs_systrap_init(void)
  * function's address, so be defensive about overrides. */
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller)
-__attribute__((alias("local_liballocs_nudge_mmap")));
+__attribute__((weak,alias("local_liballocs_nudge_mmap")));
 
 extern struct allocator __static_file_allocator;
 extern void *__private_nommap_malloc_heap_base;
@@ -367,7 +388,12 @@ void local_liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, in
 		 * init of the pageindex. That's too soon to do our test for a self call, so
 		 * we let that case proceed normally. This is relying on the private malloc heap
 		 * being too large an area to fit inside any hole. That is likely true but is
-		 * definitely not guaranteed (FIXME). */
+		 * definitely not guaranteed (FIXME).
+		 *
+		 * FIXME: gate this on whether we've done our gap-plugging? I'm not 100% sure
+		 * that's good value... when debugging I have found it useful to be able to
+		 * identify quickly our own mmaps. So maybe heed NDEBUG? That's a bit gross
+		 * but possibly the best thing despite that. */
 		static uintptr_t unhinted_self_call_mmap_area = 0x70fffffff000; /* FIXME: sysdep */
 		*p_addr = (void*) unhinted_self_call_mmap_area;
 		unhinted_self_call_mmap_area += *p_length;
