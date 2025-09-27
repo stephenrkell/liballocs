@@ -642,9 +642,17 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 	 * requested_new_addr == MAP_FAILED */
 	struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root(old_addr,
 		&__mmap_allocator, NULL);
-	if (!bigalloc_before) abort();
+	if (!bigalloc_before)
+	{
+		write_string("Impossible mremap case (no bigalloc for prior mapping)\n");
+		abort();
+	}
 	struct mapping_sequence *seq = bigalloc_before->allocator_private;
-	if (!seq) abort();
+	if (!seq)
+	{
+		write_string("Impossible mremap case (no mapping record for prior mapping)\n");
+		abort();
+	}
 	if ((uintptr_t) seq->end < (uintptr_t) old_addr + old_size)
 	{
 		write_string("Unhandled mremap case (not contained within one bigalloc)\n");

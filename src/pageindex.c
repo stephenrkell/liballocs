@@ -282,19 +282,19 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
 		uintptr_t range_idx = (range_base - PAGEINDEX_ADDRESS) >> LOG_PAGEINDEX_MAPPING_UNIT;
 		void *ret = raw_mmap((void*) range_base, PAGEINDEX_MAPPING_UNIT,
 			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
-		if (ret != (void*) range_base)
+		if ((uintptr_t) ret != range_base)
 		{
 			write_string("failed to map lazily a piece of pageindex at ");
-			write_string(fmt_hex_num((uintptr_t) range_base));
+			write_ulong((uintptr_t) range_base);
 			write_string(" (ret ");
-			write_string(fmt_hex_num((uintptr_t) ret));
+			write_ulong((uintptr_t) ret);
 			write_string(")\n");
 			abort();
 		}
 		write_string("lazily mapped a piece of pageindex at ");
-		write_string(fmt_hex_num((uintptr_t) ret));
+		write_ulong((uintptr_t) ret);
 		write_string(" (idx ");
-		write_string(fmt_hex_num((unsigned long) range_idx));
+		write_ulong((unsigned long) range_idx);
 		write_string(")\n");
 		return; // we explicitly resume from the segfault
 	}
