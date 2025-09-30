@@ -34,11 +34,10 @@ jobs:
         run: |
           dpkg -l | grep ocaml
       
-      - name: Checkout code
+      - name: Checkout code with submodules
         uses: actions/checkout@v4
-      
-      - name: Update submodules
-        run: git submodule update --init --recursive
+        with:
+          submodules: recursive
       
       - name: Build submodules
         run: make -C contrib -j 2
@@ -48,7 +47,7 @@ jobs:
           . contrib/env.sh
           ./autogen.sh
           ./configure
-          make -j 2
+          make -j $(nproc)
       
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
