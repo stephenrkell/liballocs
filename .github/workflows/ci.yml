@@ -6,7 +6,7 @@ on:
     branches: [ master ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-24.04
     container:
       image: ubuntu:24.04
@@ -26,7 +26,9 @@ jobs:
             libunwind-dev libunwind-dev:i386 linux-libc-dev-i386-cross libc6-dev-i386 \
             libboost-iostreams-dev libboost-regex-dev \
             libboost-serialization-dev libboost-filesystem-dev libffi-dev \
-            gettext-base
+            gettext-base \
+            ca-certificates clang \
+            pkg-config libglib2.0-dev
           cd /usr/bin && ln -sf gcc-10 gcc
           cd /usr/bin && ln -sf g++-10 g++
       
@@ -48,43 +50,6 @@ jobs:
           ./autogen.sh
           ./configure
           make -j $(nproc)
-      
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: |
-            .
-            !.git
-          retention-days: 1
-
-  test:
-    needs: build
-    runs-on: ubuntu-24.04
-    container:
-      image: ubuntu:24.04
-    
-    steps:
-      - name: Install dependencies
-        run: |
-          apt update
-          DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
-            ca-certificates make build-essential g++-10 autoconf automake libtool \
-            libelf-dev python3 git gawk libunwind-dev \
-            ocaml ocamlbuild ocaml-findlib \
-            clang \
-            libdw-dev binutils-dev libffi-dev \
-            libboost-iostreams-dev libboost-regex-dev \
-            libboost-serialization-dev libboost-filesystem-dev \
-            pkg-config libglib2.0-dev
-          cd /usr/bin && ln -sf gcc-10 gcc
-          cd /usr/bin && ln -sf g++-10 g++
-      
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifacts
-          path: .
       
       - name: Run tests
         run: make -C tests -k
