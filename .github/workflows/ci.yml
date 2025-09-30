@@ -40,7 +40,7 @@ jobs:
           submodules: recursive
       
       - name: Build submodules
-        run: make -C contrib -j 2
+        run: make -C contrib -j $(nproc)
       
       - name: Build project
         run: |
