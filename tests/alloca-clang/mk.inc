@@ -1,24 +1,20 @@
 LIBALLOCS ?= $(realpath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
-export LIBALLOCS        # the linker plugin needs this
-export META_CC := cc    # ... and this? FIXME: no, gold-plugin.cpp is fine, so where is this needed?
+#CC := $(LIBALLOCS_LIB)/contrib/llvm/build/bin/clang -fsanitize=allocs
 
 # HACK: srk's system has ancient clang-13 installed currently
 CLANG ?= $(shell which clang || echo clang-13)
 
-# To use clang, we need to use allocs-wrap, which is slow because it
-# uses the new compiler wrapper scripts (recent revisions of toolsub/wrapper)
-# which are a big pile of awk/bash and need to be rewritten in C
-CC := $(LIBALLOCS)/tools/allocs-wrap $(shell which $(CLANG))
+# To use clang, we need to use the wrapper
+# XXX: FIXME: this still doesn't work. We need 'wrapper' to support
+# the full clang -cc1 command line, which is not interchangeable
+# with the driver version. -cc1 has to be the first argument it seems.
+# A quick hack might be to prepend "-Xclang" to everything.
+export CC_DRIVER := $(shell which $(CLANG))
+CC := $(LIBALLOCS)/tools/allocs-wrap $(CC_DRIVER) -std=gnu99 -gdwarf-4 \
+  `$(LIBALLOCS)/tools/allocs-ldflags` -Wp,-dD -Wp,-save-temps \
+  -fno-addrsig # HACK but by itself doesn't work... hacked toolsub 'wrapper' to undo -faddrsig that creeps in earlier
+export LIBALLOCS # the linker plugin needs this
 
-# FIXME: why does allocs-wrap not sort this by itself? The allocs-*flags
-# scripts are supposed to be an alternative to allocs-wrap.
-# It doesn't sort it, perhaps because it does not want to give ldflags to
-# every cc invocation. It could though, harmlessly, presumably? What happened
-# to our wrapper's notion of "single-function commands"? How should the
-# one-shot "allocs-wrap" share logic with allocs-ldflags or even allocs-cflags?
-LDFLAGS += `$(LIBALLOCS)/tools/allocs-ldflags`
+export META_CC := cc
 
-# debugging
-CPPFLAGS += -Wp,-dD -Wp,-save-temps
-
-CPPFLAGS += -fno-addrsig # HACK but by itself doesn't work... hacked toolsub 'wrapper' to undo -faddrsig that creeps in earlier
+LDLIBS += -lallocs -ldl
