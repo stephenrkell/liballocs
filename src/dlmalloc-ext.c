@@ -10,6 +10,7 @@
 #include "malloc-meta.h"
 #include "pageindex.h"
 #include "vas.h"
+#include "raw-syscalls-defs.h"
 
 #ifdef TRACE_PRIVATE_MALLOC
 #include "librunt.h"
@@ -69,7 +70,7 @@ struct big_allocation *create_private_nommap_malloc_heap(void)
 	size_t heapsz = ROUND_UP(NBIGALLOCS * 4 * sizeof (struct mapping_sequence) / 3, PAGE_SIZE);
 	int prot = PROT_READ|PROT_WRITE;
 	int flags = MAP_ANONYMOUS|MAP_NORESERVE|MAP_PRIVATE;
-	__private_nommap_malloc_heap_base = mmap(NULL, heapsz, prot, flags, -1, 0);
+	__private_nommap_malloc_heap_base = raw_mmap(NULL, heapsz, prot, flags, -1, 0);
 mmap_return_site:
 	if (MMAP_RETURN_IS_ERROR(__private_nommap_malloc_heap_base)) abort();
 	__private_nommap_malloc_heap_limit = (void*)((uintptr_t) __private_nommap_malloc_heap_base

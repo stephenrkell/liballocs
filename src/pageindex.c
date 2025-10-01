@@ -378,7 +378,7 @@ void __pageindex_init(void)
 		{
 			int fd = memfd_create("pageindex-lazy-region", 0);
 			if (fd == -1) abort();
-			pageindex = (bigalloc_num_t *) mmap((void*) PAGEINDEX_ADDRESS,
+			pageindex = (bigalloc_num_t *) raw_mmap((void*) PAGEINDEX_ADDRESS,
 				sizeof (bigalloc_num_t) * ((uintptr_t)(MAXIMUM_USER_ADDRESS + 1) >> LOG_PAGE_SIZE),
 				PROT_READ|PROT_WRITE,
 				MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE,

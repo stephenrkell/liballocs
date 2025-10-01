@@ -217,6 +217,11 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		__liballocs_nudge_mmap(&addr, &length, &prot, &flags, &fd, &offset, __builtin_return_address(0));
 	}
 
+	if (!__liballocs_systrap_is_initialized)
+	{
+		//write_string("Too early for us to call mmap!\n");
+		//abort();
+	}
 	void *ret = raw_mmap(addr, length, prot, flags, fd, offset);
 	if (MMAP_RETURN_IS_ERROR(ret))
 	{
@@ -225,7 +230,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	}
 	if (length > BIGGEST_BIGALLOC)
 	{
-		// skip hooking logic
+		// skip hooking logic -- this is the pageindex
 		return ret;
 	}
 
@@ -296,6 +301,8 @@ int munmap(void *addr, size_t length)
 	
 	if (!__liballocs_systrap_is_initialized)  // XXX: see above for why "systrapping not init'd" here means "too early"
 	{
+		//write_string("Too early for us to call munmap!\n");
+		//abort();
 		return orig_munmap(addr, length);
 	}
 	else
@@ -317,6 +324,12 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int mremap_flags,
 	{
 		orig_mremap = dlsym(RTLD_NEXT, "mremap");
 		assert(orig_mremap);
+	}
+
+	if (!__liballocs_systrap_is_initialized) // XXX: see above for why "systrapping not init'd" here is "too early"
+	{
+		//write_string("Too early for us to call mremap()!\n");
+		//abort();
 	}
 	
 	void *requested_new_addr = MAP_FAILED;

@@ -644,8 +644,20 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 		&__mmap_allocator, NULL);
 	if (!bigalloc_before)
 	{
-		write_string("Impossible mremap case (no bigalloc for prior mapping)\n");
-		abort();
+		/* This could be the case, if the prior mapping happened very pre-systrapping. */
+		write_string("Warning: 'impossible' mremap case (no bigalloc for prior mapping)\n");
+		//abort();
+		/* Let's try to fake it up, by adding a bigalloc that matches old_addr
+		 * and old_size. */
+		__mmap_allocator_notify_mmap(old_addr, old_addr, old_size,
+			/* prot and flags? */ 0, 0, -1, 0, NULL);
+		bigalloc_before = __lookup_bigalloc_from_root(old_addr,
+			&__mmap_allocator, NULL);
+		if (!bigalloc_before)
+		{
+			write_string("Warning: REALLY impossible mremap case (no bigalloc for prior mapping)\n");
+			abort();
+		}
 	}
 	struct mapping_sequence *seq = bigalloc_before->allocator_private;
 	if (!seq)
@@ -1204,7 +1216,17 @@ static _Bool augment_sequence(struct mapping_sequence *cur,
 			
 			if (!cur->begin) cur->begin = begin;
 			cur->end = end;
-			if (!cur->filename) cur->filename = filename ? __liballocs_private_strdup(filename) : NULL;
+			if (!cur->filename)
+			{
+				/* FIXME: Who frees this? */
+				if (!filename) cur->filename = NULL;
+				else
+				{
+					char *buf = __private_nommap_malloc(1 + strlen(filename));
+					if (buf) strcpy(buf, filename);
+					cur->filename = buf;
+				}
+			}
 			cur->mappings[cur->nused] = (struct mapping_entry) {
 				.begin = begin,
 				.end = end,
