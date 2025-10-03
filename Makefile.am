@@ -49,7 +49,7 @@ include/uniqtype.h include/uniqtype-defs.h:
 bin_PROGRAMS = tools/dwarftypes tools/alloctypes tools/frametypes \
   tools/frametypes2 tools/extrasyms tools/metavector tools/dumpptrs \
   tools/allocsites tools/usedtypes tools/ifacetypes tools/find-allocated-type-size \
-  tools/cufiles tools/pervasive-types tools/noopgen
+  tools/cufiles tools/pervasive-types tools/noopgen tools/dumpsyscalls
 #tools/objdumpallocs-llvm
 
 LIBELF ?= -lelf
@@ -59,7 +59,7 @@ TOOLS_LDADD = $(LIBALLOCSTOOL_LIBS) \
  $(LIBSRK31CXX_LIBS) $(LIBCXXFILENO_LIBS) $(LIBDWARFPP_LIBS) $(LIBCXXGEN_LIBS) $(LIBANTLR3CXX_LIBS) $(DWARFIDL_LIBS) \
 -lantlr3c $(LIBELF) -lz
 
-TOOLS_CXXFLAGS := $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)/include -I$(elftin)/include
+TOOLS_CXXFLAGS := $(AM_CXXFLAGS) -I$(libsystrap)/include -I$(librunt)/include -I$(elftin)/include
 
 tools_dwarftypes_SOURCES = tools/dwarftypes.cpp
 tools_dwarftypes_LDADD = $(TOOLS_LDADD)
@@ -98,7 +98,7 @@ tools_noopgen_SOURCES = tools/noopgen.cpp $(HELPERS)
 tools_noopgen_LDADD = $(TOOLS_LDADD)
 tools_noopgen_CXXFLAGS = $(TOOLS_CXXFLAGS)
 # massive HACKs for ifacetypes
-tools_ifacetypes_CXXFLAGS = $(AM_CXXFLAGS) -I$(libsystrap) -I$(librunt)
+tools_ifacetypes_CXXFLAGS = $(AM_CXXFLAGS) $(TOOLS_CXXFLAGS)
 tools_ifacetypes_SOURCES = tools/ifacetypes.cpp $(HELPERS)
 vpath %.c $(libsystrap)/../contrib/x86_emulate
 x86_emulate.o: CFLAGS += -include $(libsystrap)/x86_defs.h
@@ -115,6 +115,15 @@ tools_ifacetypes_LDADD = $(TOOLS_LDADD) #x86_emulate.o
 tools_find_allocated_type_size_SOURCES = tools/find-allocated-type-size.cpp $(HELPERS)
 tools_find_allocated_type_size_LDADD = $(TOOLS_LDADD)
 tools_find_allocated_type_size_CXXFLAGS = $(TOOLS_CXXFLAGS)
+
+vpath %.c $(donald)/src
+tools_dumpsyscalls_SOURCES = tools/dumpsyscalls.cpp $(HELPERS) load.c
+tools_dumpsyscalls_CXXFLAGS = $(AM_CXXFLAGS) $(TOOLS_CXXFLAGS) -I$(DONALD)/src
+libsystrap_libdir := $(libsystrap)/build/$(shell uname -m)
+librunt_libdir := $(librunt)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
+tools_dumpsyscalls_LDFLAGS = -L$(libsystrap_libdir) -lsystrap \
+ -Wl,--defsym,__wrap___runt_files_notify_load=__runt_files_notify_load \
+ -L$(librunt_libdir) -lrunt
 
 pkglib_LTLIBRARIES = tools/gold-plugin.la
 tools_gold_plugin_la_SOURCES = tools/gold-plugin.cpp

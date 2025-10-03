@@ -237,7 +237,8 @@ static int maybe_trap_map_cb(struct maps_entry *ent, char *linebuf, void *interp
 	{
 		/* It's an executable mapping we want to blanket-trap, so trap it. */
 		trap_one_executable_region((unsigned char *) ent->first, (unsigned char *) ent->second,
-			ent->rest, ent->w == 'w', ent->r == 'r');
+			ent->rest, ent->w == 'w', ent->r == 'r', addr_is_in_ld_so((void*) ent->first),
+			set_default_trap, NULL);
 	}
 	
 	return 0;
@@ -253,7 +254,7 @@ static _Bool trap_syscalls_in_symbol_named(const char *name, struct link_map *l,
 	{
 		trap_one_instruction_range((unsigned char *)(l->l_addr + found->st_value),
 			(unsigned char *)(l->l_addr + found->st_value + found->st_size),
-			0, 1);
+			0, 1, 0, set_default_trap, NULL);
 		return 1;
 	} else return 0;
 }
