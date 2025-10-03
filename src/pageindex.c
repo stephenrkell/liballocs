@@ -425,17 +425,10 @@ _Bool __pages_unused(void *begin, void *end)
 	return is_unindexed(begin, end);
 }
 
-
 __attribute__((constructor))
 static void check_page_size(void)
 {
 	if (PAGE_SIZE != sysconf(_SC_PAGE_SIZE)) abort();
-}
-
-static _Bool path_is_realpath(const char *path)
-{
-	const char *rp = realpath_quick(path);
-	return 0 == strcmp(path, rp);
 }
 
 static void clear_bigalloc_nomemset(struct big_allocation *b)
