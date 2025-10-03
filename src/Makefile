@@ -117,7 +117,9 @@ endif
 # owing to GCC bug 88643 and/or binutils (gold) bug 24415 (breakage of --wrap)
 #LDFLAGS += -Wl,-O2 -flto
 LDFLAGS += -fno-lto
-LDFLAGS += -fPIC 
+LDFLAGS += -fPIC
+# Try to cut down size of the .so file, given some of the libraries we link in (xed...)
+LDFLAGS += -Wl,--gc-sections
 # until binutils bug 13600 is fixed, gold is the linker we need
 # (FIXME: why? where was the bogus relocation causing problems?)
 LDFLAGS += -fuse-ld=gold
