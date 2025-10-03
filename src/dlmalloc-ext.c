@@ -71,6 +71,9 @@ struct big_allocation *create_private_nommap_malloc_heap(void)
 	int prot = PROT_READ|PROT_WRITE;
 	int flags = MAP_ANONYMOUS|MAP_NORESERVE|MAP_PRIVATE;
 	__private_nommap_malloc_heap_base = raw_mmap(NULL, heapsz, prot, flags, -1, 0);
+	/* Here we are doing a raw mmap and create a bigalloc by hand. We can't do
+	 * our usual __mmap_allocator_notify_mmap, because it will try to nommap_calloc space
+	 * for the mapping sequence. Our mapping sequence is static. */
 mmap_return_site:
 	if (MMAP_RETURN_IS_ERROR(__private_nommap_malloc_heap_base)) abort();
 	__private_nommap_malloc_heap_limit = (void*)((uintptr_t) __private_nommap_malloc_heap_base
@@ -94,9 +97,20 @@ mmap_return_site:
 	};
 	struct big_allocation *b = __liballocs_private_nommap_malloc_bigalloc =
 		__add_mapping_sequence_bigalloc_with_seq(&seq, /* no free function */ NULL);
-	/* What about the bitmap? 1GB in 16B units needs 64M bits or 8Mbytes.
-	 * We don't want to spend that much up-front. But we don't have to!
-	 * We allocate the bitmap in our own heap, which is MAP_NORESERVE. */
+	/* We're wrapping/indexing this malloc, for our own meta-completeness.
+	 * Therefore we need a bitmap. Note that we are *not* in a nommap context
+	 * right now.
+	 *
+	 * Therefore this bitmap is fair game to create with the mmap-based dlmalloc.
+	 * BUT for now we use the same nommap allocator that we are currently initializing.
+	 * This is because when the heap was large, the bitmap was also large, but
+	 * we could mitigate this by allocating the bitmap in our own heap, which is
+	 * MAP_NORESERVE. FIXME: ... so why not now switch over?
+	 *
+	 * This is a bit head-twisting. It means that the heap contains the
+	 * bitmap that is used for indexing the heap itself. If we free this
+	 * bitmap, that had better be the last time we use this heap.
+	 */
 	b->suballocator = &__private_nommap_malloc_allocator;
 	size_t range_size_bytes = (uintptr_t) b->end - (uintptr_t) b->begin;
 	size_t bitmap_alloc_size_bytes = DIVIDE_ROUNDING_UP(
@@ -110,15 +124,6 @@ mmap_return_site:
 		void *bitmap_base_addr;
 	};
 	*/
-	/* We use the real dlmalloc just this once, because we can't set the bit
-	 * before the bitmap is created. Note that we are *not* in a nommap context
-	 * right now. However... if the real dlmalloc does a mmap -- it didn't use to,
-	 * but now in the nommap-vs-vanilla world, the vanilla dlmalloc may mmap --
-	 * we need a bigalloc to be created if the vanilla dlmalloc creates a new
-	 * memory mapping. Since it's an intra-DSO mmap, it is not trapped... we rely
-	 * on the preload.c mmap override, which calls __mmap_allocator_notify_mmap().
-	 * This should be enough to create the bigalloc for the underlying mapping.
-	 */
 	// FIXME: this is an interesting case of an unclassifiable allocation site,
 	// by our current 'dumpallocs.ml' classifier. It is sized (syntactically)
 	// in bytes but allocated (semantically) in bitmap_word_t units, and rests
@@ -126,17 +131,16 @@ mmap_return_site:
 	// we get some whole number of bitmap_word_ts, but we don't care about
 	// the actual number... we care only that we have one bit per
 	// PRIVATE_MALLOC_ALIGN bytes.
-	void *__real_dlmalloc(size_t size); /* this is *not* the nommap version */
+	void *__real_nommap_dlmalloc(size_t size);
 	b->suballocator_private = __real_nommap_dlmalloc(bitmap_alloc_size_bytes);
-	/* Although this bitmap is technically fair game for the mmap-based dlmalloc,
-	 * we use the same nommap allocator that we are currently initializing.
-	 * it is not really an O(mem)-sized bitmap (it is O(heapsize) which is O(nbigalloc))
-	 * and the assertions below are a useful sanity check which would not hold
-	 * if we used the other private dlmalloc. */
 dlmalloc_return_site:
+	assert(b->suballocator_private);
 	assert((uintptr_t) b->suballocator_private >= (uintptr_t) __private_nommap_malloc_heap_base);
 	assert((uintptr_t) b->suballocator_private + bitmap_alloc_size_bytes
 		< (uintptr_t) __private_nommap_malloc_heap_limit);
+	/* it is not really an O(mem)-sized bitmap (it is O(heapsize) which is O(nbigalloc))
+	 * and the assertions above are a useful sanity check which would not hold
+	 * if we used the other private dlmalloc. */
 	__private_nommap_malloc_set_metadata(b->suballocator_private, bitmap_alloc_size_bytes,
 		&&dlmalloc_return_site);
 

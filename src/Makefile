@@ -14,6 +14,8 @@ CFLAGS += -flto -ffat-lto-objects
 endif
 LDFLAGS += -L$(LIBDLBIND)/lib
 
+OBJCOPY ?= objcopy
+
 # for debugging private malloc, try these
 # ... remember that dlmalloc needs -DDEBUG for assertions to be enabled
 # CFLAGS += -DTRACE_PRIVATE_MALLOC
@@ -236,35 +238,16 @@ $(ALL_OBJS): CFLAGS += -no-integrated-cpp \
 vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: actually in trap-syscalls but should be in libsystrap
 dlmalloc.a: dlmalloc.o nommap-dlmalloc.o
 dlmalloc.o:        CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=1 -DHAVE_MORECORE=0 -DMSPACES=0                          -DUSE_DL_PREFIX -fPIC
-nommap-dlmalloc.o: CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=0 -DHAVE_MORECORE=1 -DMSPACES=1 -DMORECORE=emulated_sbrk -DUSE_DL_PREFIX -fPIC \
-	-Ddlcalloc=nommap_dlcalloc \
-	-Ddlfree=nommap_dlfree \
-	-Ddlmalloc=nommap_dlmalloc \
-	-Ddlmemalign=nommap_dlmemalign \
-	-Ddlposix_memalign=nommap_dlposix_memalign \
-	-Ddlrealloc=nommap_dlrealloc \
-	-Ddlrealloc_in_place=nommap_dlrealloc_in_place \
-	-Ddlvalloc=nommap_dlvalloc \
-	-Ddlpvalloc=nommap_dlpvalloc \
-	-Ddlmallinfo=nommap_dlmallinfo \
-	-Ddlmallopt=nommap_dlmallopt \
-	-Ddlmalloc_trim=nommap_dlmalloc_trim \
-	-Ddlmalloc_stats=nommap_dlmalloc_stats \
-	-Ddlmalloc_usable_size=nommap_dlmalloc_usable_size \
-	-Ddlmalloc_footprint=nommap_dlmalloc_footprint \
-	-Ddlmalloc_max_footprint=nommap_dlmalloc_max_footprint \
-	-Ddlmalloc_footprint_limit=nommap_dlmalloc_footprint_limit \
-	-Ddlmalloc_set_footprint_limit=nommap_dlmalloc_set_footprint_limit \
-	-Ddlmalloc_inspect_all=nommap_dlmalloc_inspect_all \
-	-Ddlindependent_calloc=nommap_dlindependent_calloc \
-	-Ddlindependent_comalloc=nommap_dlindependent_comalloc \
-	-Ddlbulk_free=nommap_dlbulk_free
-# FIXME: the above list of symbols is snarfed from dlmalloc.c and may be prone to change.
-# We manually added `dlbulk_free'
+nommap-dlmalloc.o: CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=0 -DHAVE_MORECORE=1 -DMSPACES=1 -DMORECORE=emulated_sbrk -DUSE_DL_PREFIX -fPIC
 nommap-dlmalloc-ext.o dlmalloc-ext.o: CFLAGS += -fPIC
 nommap-dlmalloc-ext.o: CFLAGS += -DNOMMAP
+# do the symbol renaming with objcopy, because the dl-prefixed symbols are not the only ones
 nommap-dlmalloc.o: dlmalloc.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+	tmpo="$$(mktemp --suffix=.o)"; $(CC) $(CPPFLAGS) $(CFLAGS) -c -o "$$tmpo" $< && \
+	tmpsymlist="$$(mktemp)" && nm -fposix --defined-only "$$tmpo" | tee /dev/stderr | sed -n '/^\([a-zA-Z0-9_\.]\+\).*/ {s//\1 nommap_\1/;p}' > "$$tmpsymlist" && \
+	$(OBJCOPY) --redefine-syms "$$tmpsymlist" -R '.gnu.*lto_.*' "$$tmpo" "$@"; status=$$?; echo rm -f "$$tmpo" "$$tmpsymlist"; exit $$status
+# ... we also strip LTO sections, i.e. don't risk that LTO will regenerate the old symbol names
+# from IR definitions of the stuff we just renamed
 nommap-dlmalloc-ext.o: dlmalloc-ext.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 comma := ,
