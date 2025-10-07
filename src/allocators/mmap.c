@@ -626,18 +626,21 @@ struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mappi
 }
 
 static void do_mmap(void *mapped_addr, void *requested_addr, size_t length, int prot, int flags,
-                  const char *filename, off_t offset, void *caller);
+                  const char *filename, int fd, off_t offset, void *caller);
 static _Bool augment_sequence(struct mapping_sequence *cur, 
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename, void *caller);
 
 /* For mremap, our task is complicated. We want the effect on our metadata
  * to be like unmapping and then mapping again. As with any mapping, it may
  * (if MAP_FIXED/MREMAP_FIXED is set) replace something at the mapped address. */
-void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t old_size,
+void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t old_size_as_passed,
 	size_t new_size, int mremap_flags, void *requested_new_addr, void *caller)
 {
 	/* called after a successful mremap call */
 	assert(!MMAP_RETURN_IS_ERROR(mapped_addr)); // don't call us with MAP_FAILED
+	/* 'old_size' is the caller's take on the old size... the kernel
+	 * will have rounded it up if it was not a multiple of the page size */
+	size_t old_size = ROUND_UP(old_size_as_passed, PAGE_SIZE);
 	/* If no specific new addr was requested, we should be called with
 	 * requested_new_addr == MAP_FAILED */
 	struct big_allocation *bigalloc_before = __lookup_bigalloc_from_root(old_addr,
@@ -645,29 +648,31 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 	if (!bigalloc_before)
 	{
 		/* This could be the case, if the prior mapping happened very pre-systrapping. */
-		write_string("Warning: 'impossible' mremap case (no bigalloc for prior mapping)\n");
-		//abort();
+		debug_printf(0, "Warning: 'impossible' mremap case (no bigalloc for apparent prior mapping %p-%p\n",
+			old_addr, (void*)((uintptr_t) old_addr + old_size));
 		/* Let's try to fake it up, by adding a bigalloc that matches old_addr
 		 * and old_size. */
 		__mmap_allocator_notify_mmap(old_addr, old_addr, old_size,
 			/* prot and flags? */ 0, 0, -1, 0, NULL);
-		bigalloc_before = __lookup_bigalloc_from_root(old_addr,
-			&__mmap_allocator, NULL);
+		bigalloc_before = __lookup_bigalloc_from_root(old_addr, &__mmap_allocator, NULL);
 		if (!bigalloc_before)
 		{
-			write_string("Warning: REALLY impossible mremap case (no bigalloc for prior mapping)\n");
+			debug_printf(0, "Warning: REALLY impossible mremap case (*still* no bigalloc for prior mapping)\n");
 			abort();
 		}
+		debug_printf(0, "After 'impossible' mremap case, created bigalloc %d for apparent prior mapping %p-%p\n",
+			(int)(bigalloc_before - &big_allocations[0]),
+			old_addr, (void*)((uintptr_t) old_addr + old_size));
 	}
 	struct mapping_sequence *seq = bigalloc_before->allocator_private;
 	if (!seq)
 	{
-		write_string("Impossible mremap case (no mapping record for prior mapping)\n");
+		debug_printf(0, "Impossible mremap case (no mapping record for prior mapping)\n");
 		abort();
 	}
 	if ((uintptr_t) seq->end < (uintptr_t) old_addr + old_size)
 	{
-		write_string("Unhandled mremap case (not contained within one bigalloc)\n");
+		debug_printf(0, "Unhandled mremap case (not contained within one bigalloc)\n");
 		abort();
 	}
 	if (mapped_addr == old_addr && new_size == old_size) return; // nothing to do
@@ -678,7 +683,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 		struct mapping_entry *ent = __mmap_allocator_find_entry(old_addr, seq);
 		if (!ent)
 		{
-			write_string("Impossible mremap case (shrink from unknown source)\n");
+			debug_printf(0, "Impossible mremap case (shrink from unknown source)\n");
 			abort();
 		}
 		do_munmap((void*)((uintptr_t) old_addr + new_size),
@@ -690,18 +695,18 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 		struct mapping_entry *ent = __mmap_allocator_find_entry(old_addr, seq);
 		if (!ent)
 		{
-			write_string("Impossible mremap case (grow from unknown source)\n");
+			debug_printf(0, "Impossible mremap case (grow from unknown source)\n");
 			abort();
 		}
 		do_mmap(/* mapped */ (void*)(old_addr + old_size), /* requested */ (void*)(old_addr + old_size),
 			new_size - old_size,
-			ent->prot, ent->flags, seq->filename,
+			ent->prot, ent->flags, seq->filename, -1,
 			ent->offset + ((uintptr_t) old_addr - (uintptr_t) ent->begin) + old_size,
 			caller);
 	}
 	else if (mapped_addr == old_addr && old_size == 0)
 	{
-		write_string("Impossible mremap case (mapped_addr == old_addr && old_size == 0)\n");
+		debug_printf(0, "Impossible mremap case (mapped_addr == old_addr && old_size == 0)\n");
 		abort();
 	}
 	/* In the cases below ee are moving -- possibly shrinking or growing too -- and
@@ -734,7 +739,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 				uintptr_t new_end   = overlap_end   + (mapped_addr - old_addr);
 				do_mmap(/* mapped */ (void*) new_begin, /* requested */ (void*) new_begin,
 					new_end - new_begin,
-					ent->prot, ent->flags, seq->filename,
+					ent->prot, ent->flags, seq->filename, -1,
 					ent->offset + (overlap_begin - (uintptr_t) ent->begin),
 					caller);
 			}
@@ -748,7 +753,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 					new_end - new_begin,
 					/* re-use the last-used 'ent' for flags and offset */
 					ent->prot, ent->flags,
-					seq->filename,
+					seq->filename, -1,
 					/* We cannot assume our new mapping ends at ent->end... we may be
 					 * remapping a smaller piece. */
 					ent->offset + ( (uintptr_t) old_addr + old_size - (uintptr_t) ent->begin ),
@@ -762,7 +767,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 		struct mapping_entry *ent = __mmap_allocator_find_entry(old_addr, seq);
 		if (!ent)
 		{
-			write_string("Impossible mremap case (remap MAP_SHARED from unknown source)\n");
+			debug_printf(0, "Impossible mremap case (remap MAP_SHARED from unknown source)\n");
 			abort();
 		}
 		uintptr_t new_begin = (uintptr_t) mapped_addr;
@@ -770,19 +775,19 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 		do_mmap(/* mapped */ (void*) new_begin, /* requested */ (void*) new_begin,
 				new_end - new_begin,
 				ent->prot, ent->flags,
-				seq->filename,
+				seq->filename, -1,
 				ent->offset + ((uintptr_t) old_addr - (uintptr_t) ent->begin),
 				caller);
 	}
 	else
 	{
-		write_string("Impossible mremap case (should be unreachable default case)\n");
+		debug_printf(0, "Impossible mremap case (should be unreachable default case)\n");
 		abort();
 	}
 }
 
 static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_length, int prot, int flags,
-                  const char *filename, off_t offset, void *caller)
+                  const char *filename, int fd, off_t offset, void *caller)
 {
 	assert(!MMAP_RETURN_IS_ERROR(mapped_addr)); // don't call us with MAP_FAILED
 	if (mapped_addr == NULL) abort();
@@ -880,7 +885,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_t length, 
 		int prot, int flags, int fd, off_t offset, void *caller)
 {
-	do_mmap(mapped_addr, requested_addr, length, prot, flags, filename_for_fd(fd), offset, caller);
+	do_mmap(mapped_addr, requested_addr, length, prot, flags, filename_for_fd(fd), fd, offset, caller);
 }
 
 void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)

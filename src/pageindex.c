@@ -255,10 +255,50 @@ report_failure_and_abort:
 const int the_signal = SIGBUS;
 static struct sigaction oldaction; /* We will restore this... */
 
+struct deferred_mapping
+{
+	void *begin;
+	size_t size;
+	int prot;
+	int flags;
+	off_t offset;
+	int fd; /* we always dup the originally mapped fd */
+	void *caller;
+};
+#define MAX_DEFERRED_MAPPINGS 256
+/* HACK: for now, we just use one entry in the array and never change it. */
+struct deferred_mapping deferred_mappings[MAX_DEFERRED_MAPPINGS] = {
+	[0] = {
+		.begin = (void*)PAGEINDEX_ADDRESS,
+		.size = sizeof (bigalloc_num_t) * ((uintptr_t)(MAXIMUM_USER_ADDRESS + 1) >> LOG_PAGE_SIZE),
+		.prot = PROT_READ|PROT_WRITE,
+		.flags = MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE,
+		.offset = 0,
+		.fd = -1,
+		.caller = NULL
+	}
+};
+unsigned deferred_mapping_free_hint = 1;    /* would be 0 initially, but we populate one entry statically */
+unsigned highest_used_deferred_mapping = 1; /* would be 0 initially, but we populate one entry statically */
+
+struct deferred_mapping *find_deferred_mapping(void *addr)
+{
+	for (unsigned i = 0; i < highest_used_deferred_mapping; ++i)
+	{
+		struct deferred_mapping *m = &deferred_mappings[i];
+		if ((uintptr_t) addr >= (uintptr_t) m->begin
+		 && (uintptr_t) addr <  (uintptr_t) m->begin + m->size)
+		{
+			return m;
+		}
+	}
+	return NULL;
+}
+
 /* FIXME: we should really use some handler chaining, not
  * just clobbering whatever handler pre-exists. libcrunch
  * needs its own handler, and the guest program may too. */
-static void handle_signal(int n, siginfo_t *info, void *ucontext)
+static void deferred_mapping_handle_signal(int n, siginfo_t *info, void *ucontext)
 {
 	/* We must NOT trigger a nested SIGBUS here. In general, any memory allocation
 	 * may do this, if it needs to grab more pages and therefore touch the pageindex.
@@ -266,21 +306,34 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
 	/* We use hugepages as a convenient coarse-grained division of memory, as our
 	 * unit of mapping chunks of the pageindex. Nothing about our logic depends on
 	 * matching the underlying architecture's hugepage size. */
-#define     PAGEINDEX_MAPPING_UNIT     COMMON_HUGEPAGE_SIZE
-#define LOG_PAGEINDEX_MAPPING_UNIT LOG_COMMON_HUGEPAGE_SIZE
+#define     DEFERRED_MAPPING_UNIT     COMMON_HUGEPAGE_SIZE
+#define LOG_DEFERRED_MAPPING_UNIT LOG_COMMON_HUGEPAGE_SIZE
 	/* If the fault falls within the pageindex area, we map something there.
-	 * Otherwise, don't. */
-	if ((uintptr_t) info->si_addr >= PAGEINDEX_ADDRESS &&
-	    (uintptr_t) info->si_addr <  PAGEINDEX_ADDRESS + PAGEINDEX_SIZE_BYTES)
+	 * Otherwise, don't.
+	 *
+	 * XXX: we are starting to duplicate bigalloc and mapping_sequence logic,
+	 * with our splitting of ranges etc. What was the reason for not making
+	 * deferral a feature of mapping_sequence?
+	 *
+	 * I think we already have the logic for splitting mapping_sequence
+	 * entries? Hmm.
+	 *
+	 * We could make deferral a feature of the mmap allocator. That is
+	 * architecturally cleanest.
+	 */
+	struct deferred_mapping *found = find_deferred_mapping(info->si_addr);
+	if (found)
 	{
-		/* FIXME: check whether we have already mapped something here. */
-		/* Do we want to keep a bitmap of which hugepages of pageindex are
-		 * already mapped? If the pageindex is 2^37 bytes, and a hugepage
-		 * is 2^21 bytes, then there are 2^16 bits in this bitmap, or 2^13
-		 * bytes, which is very manageable for mapping locally. */
-		uintptr_t range_base = RELF_ROUND_DOWN_((uintptr_t) info->si_addr, PAGEINDEX_MAPPING_UNIT);
-		uintptr_t range_idx = (range_base - PAGEINDEX_ADDRESS) >> LOG_PAGEINDEX_MAPPING_UNIT;
-		void *ret = raw_mmap((void*) range_base, PAGEINDEX_MAPPING_UNIT,
+		uintptr_t range_base = MAX(
+			(uintptr_t) found->begin,
+			RELF_ROUND_DOWN_((uintptr_t) info->si_addr, DEFERRED_MAPPING_UNIT)
+		);
+		uintptr_t range_end = MAX(
+			(uintptr_t) found->begin + found->size,
+			RELF_ROUND_UP_((uintptr_t) info->si_addr, DEFERRED_MAPPING_UNIT)
+		);
+		uintptr_t range_size = range_end - range_base;
+		void *ret = raw_mmap((void*) range_base, DEFERRED_MAPPING_UNIT,
 			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0);
 		if ((uintptr_t) ret != range_base)
 		{
@@ -293,9 +346,7 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
 		}
 		write_string("lazily mapped a piece of pageindex at ");
 		write_ulong((uintptr_t) ret);
-		write_string(" (idx ");
-		write_ulong((unsigned long) range_idx);
-		write_string(")\n");
+		write_string("\n");
 		return; // we explicitly resume from the segfault
 	}
 	/* FIXME: be more compositional, w.r.t. other possible handlers (installed
@@ -316,7 +367,7 @@ static void handle_signal(int n, siginfo_t *info, void *ucontext)
 static void install_lazy_pageindex_handler(void)
 {
 	struct sigaction action = {
-		.sa_handler = (void*) &handle_signal,
+		.sa_handler = (void*) &deferred_mapping_handle_signal,
 		.sa_flags = SA_NODEFER | SA_SIGINFO
 	};
 	int ret = sigaction(the_signal, &action, &oldaction);

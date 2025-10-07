@@ -74,7 +74,7 @@ const char *format_symbolic_address(const void *addr);
 
 #include "pageindex.h"
 
-/* FIXME: this should probably be a flexible array member. */
+/* FIXME: 'mappings' should probably be a flexible array member. */
 #define MAPPING_SEQUENCE_MAX_LEN 8
 struct mapping_sequence
 {
@@ -82,6 +82,9 @@ struct mapping_sequence
 	void *end;
 	const char *filename;
 	unsigned nused;
+#if 0 /* sketch for what we might do if tracking fds for deferred mapping */
+	int fd_plus_one_if_part_deferred; /* i.e. zero is still the null value, for the fd -1 */
+#endif
 	struct mapping_entry mappings[MAPPING_SEQUENCE_MAX_LEN];
 };
 _Bool __augment_mapping_sequence(struct mapping_sequence *cur, 
