@@ -21,4 +21,5 @@ LDFLAGS += `$(LIBALLOCS)/tools/allocs-ldflags`
 # debugging
 CPPFLAGS += -Wp,-dD -Wp,-save-temps
 
-CPPFLAGS += -fno-addrsig # HACK but by itself doesn't work... hacked toolsub 'wrapper' to undo -faddrsig that creeps in earlier
+CFLAGS += -fno-addrsig # HACK but by itself doesn't work... hacked toolsub 'wrapper' to undo -faddrsig that creeps in earlier
+CFLAGS += -gdwarf-4
