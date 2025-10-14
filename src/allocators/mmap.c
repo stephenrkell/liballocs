@@ -626,7 +626,7 @@ struct mapping_entry *__mmap_allocator_find_entry(const void *addr, struct mappi
 }
 
 static void do_mmap(void *mapped_addr, void *requested_addr, size_t length, int prot, int flags,
-                  const char *filename, int fd, off_t offset, void *caller);
+                  const char *filename, int fd, off_t offset, void *caller, const char *reason);
 static _Bool augment_sequence(struct mapping_sequence *cur, 
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename, void *caller);
 
@@ -707,7 +707,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 			new_size - old_size,
 			ent->prot, ent->flags, seq->filename, -1,
 			ent->offset + ((uintptr_t) old_addr - (uintptr_t) ent->begin) + old_size,
-			caller);
+			caller, "grow in place");
 	}
 	else if (mapped_addr == old_addr && old_size == 0)
 	{
@@ -727,6 +727,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 		 * can't in general replicate these in the moved-to location, so we assume
 		 * they are nuked. Since their addresses will have changed, existing pointers
 		 * won't be valid, so this is not totally unreasonable. */
+
 		/* To keep things simple, we walk all existing mapping entries and calculate
 		 * the overlap with the remapped region. If it's non-empty, we create a new
 		 * mapping just as if doing mmap. This means that if the new mapping abuts
@@ -746,7 +747,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 					new_end - new_begin,
 					ent->prot, ent->flags, seq->filename, -1,
 					ent->offset + (overlap_begin - (uintptr_t) ent->begin),
-					caller);
+					caller, "remap overlap");
 			}
 		}
 		if (new_size > old_size)
@@ -762,11 +763,11 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 					/* We cannot assume our new mapping ends at ent->end... we may be
 					 * remapping a smaller piece. */
 					ent->offset + ( (uintptr_t) old_addr + old_size - (uintptr_t) ent->begin ),
-					caller);
+					caller, "remap excess");
 		}
 		if (!(mremap_flags & MREMAP_DONTUNMAP)) do_munmap(old_addr, old_size, caller);
 	}
-	else if (old_size == 0)
+	else if (old_size == 0) // we have mapped_addr != old_addr 
 	{
 		/* "remap these MAP_SHARED pages elsewhere" -- the old mapping remains */
 		struct mapping_entry *ent = __mmap_allocator_find_entry(old_addr, seq);
@@ -782,7 +783,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 				ent->prot, ent->flags,
 				seq->filename, -1,
 				ent->offset + ((uintptr_t) old_addr - (uintptr_t) ent->begin),
-				caller);
+				caller, "remap elsewhere");
 	}
 	else
 	{
@@ -792,7 +793,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 }
 
 static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_length, int prot, int flags,
-                  const char *filename, int fd, off_t offset, void *caller)
+                  const char *filename, int fd, off_t offset, void *caller, const char *reason)
 {
 	assert(!MMAP_RETURN_IS_ERROR(mapped_addr)); // don't call us with MAP_FAILED
 	if (mapped_addr == NULL) abort();
@@ -817,13 +818,14 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 	}
 	if (saw_overlap && !(flags & MAP_FIXED))
 	{
-		debug_printf(0, "Error: %s (%p) created mmapping (%p-%p, requested %p-%p) overlapping existing bigalloc %d"
+		debug_printf(0, "Error: %s (%p) created mmapping (%p-%p, requested %p-%p, reason %s) overlapping existing bigalloc %d"
 			" (begin %p, end %p, allocator %s) without MAP_FIXED\n",
 			format_symbolic_address(caller - CALL_INSTR_LENGTH), caller - CALL_INSTR_LENGTH,
 			mapped_addr,
 			(char*)mapped_addr + mapped_length,
 			requested_addr,
 			(char*)requested_addr + requested_length,
+			reason,
 			(int) saw_overlap,
 			big_allocations[saw_overlap].begin, big_allocations[saw_overlap].end,
 			big_allocations[saw_overlap].allocated_by->name);
@@ -893,7 +895,7 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 void __mmap_allocator_notify_mmap(void *mapped_addr, void *requested_addr, size_t length, 
 		int prot, int flags, int fd, off_t offset, void *caller)
 {
-	do_mmap(mapped_addr, requested_addr, length, prot, flags, filename_for_fd(fd), fd, offset, caller);
+	do_mmap(mapped_addr, requested_addr, length, prot, flags, filename_for_fd(fd), fd, offset, caller, "mmap");
 }
 
 void __mmap_allocator_notify_mprotect(void *addr, size_t len, int prot)
