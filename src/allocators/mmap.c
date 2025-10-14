@@ -812,10 +812,13 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 	}
 	if (saw_overlap && !(flags & MAP_FIXED))
 	{
-		debug_printf(0, "Error: %s (%p) created mmapping (%p-%p) overlapping existing bigalloc %d"
+		debug_printf(0, "Error: %s (%p) created mmapping (%p-%p, requested %p-%p) overlapping existing bigalloc %d"
 			" (begin %p, end %p, allocator %s) without MAP_FIXED\n",
 			format_symbolic_address(caller - CALL_INSTR_LENGTH), caller - CALL_INSTR_LENGTH,
-			mapped_addr, (char*)mapped_addr + requested_length,
+			mapped_addr,
+			(char*)mapped_addr + mapped_length,
+			requested_addr,
+			(char*)requested_addr + requested_length,
 			(int) saw_overlap,
 			big_allocations[saw_overlap].begin, big_allocations[saw_overlap].end,
 			big_allocations[saw_overlap].allocated_by->name);
