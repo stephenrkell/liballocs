@@ -797,6 +797,13 @@ static void do_mmap(void *mapped_addr, void *requested_addr, size_t requested_le
 {
 	assert(!MMAP_RETURN_IS_ERROR(mapped_addr)); // don't call us with MAP_FAILED
 	if (mapped_addr == NULL) abort();
+#define TRACE_MMAP_DEBUG_LEVEL 0 /* FIXME: move this up top, default to >0 */
+
+	debug_printf(TRACE_MMAP_DEBUG_LEVEL, 
+		"MMAP: %p, %p, 0x%llx, %d, %d, %s, %d, 0x%llx, %s, %s\n",
+		mapped_addr, requested_addr, (unsigned long long) requested_length,
+		prot, flags, filename, fd, (unsigned long long) offset, format_symbolic_address(caller),
+		reason);
 
 	/* The actual length is rounded up to page size. */
 	size_t mapped_length = ROUND_UP(requested_length, PAGE_SIZE);
