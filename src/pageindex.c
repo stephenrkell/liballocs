@@ -8,6 +8,7 @@
 #include <wchar.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/mman.h>
 #include "raw-syscalls-defs.h"
 #include "librunt.h"
 #include "relf.h"
@@ -429,12 +430,15 @@ void __pageindex_init(void)
 		{
 			int fd = memfd_create("pageindex-lazy-region", 0);
 			if (fd == -1) abort();
+			size_t map_size = sizeof (bigalloc_num_t) * ((uintptr_t)(MAXIMUM_USER_ADDRESS + 1) >> LOG_PAGE_SIZE);
 			pageindex = (bigalloc_num_t *) raw_mmap((void*) PAGEINDEX_ADDRESS,
-				sizeof (bigalloc_num_t) * ((uintptr_t)(MAXIMUM_USER_ADDRESS + 1) >> LOG_PAGE_SIZE),
+				map_size,
 				PROT_READ|PROT_WRITE,
 				MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE,
 				fd, 0);
 			if (pageindex == MAP_FAILED) { debug_printf(0, "Failed to map memfd fd %d (%s)\n", fd, strerror(errno)); abort(); }
+			if (madvise(pageindex, map_size, MADV_DONTDUMP) < 0) { debug_printf(0, "Failed to madvise MADV_DONTDUMP (%s)\n", strerror(errno)); }
+
 			close(fd);
 			install_lazy_pageindex_handler();
 			debug_printf(3, "pageindex at %p (to be mapped lazily)\n", pageindex);
