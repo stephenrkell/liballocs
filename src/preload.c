@@ -358,7 +358,11 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int mremap_flags,
 #define DO_ORIG_CALL ((mremap_flags & MREMAP_FIXED)  \
 			? orig_mremap(old_addr, old_size, new_size, mremap_flags, requested_new_addr) \
 			: orig_mremap(old_addr, old_size, new_size, mremap_flags))
-	if (!__liballocs_systrap_is_initialized) // XXX: see above for why "systrapping not init'd" here is "too early"
+	/* XXX: our orig call will call libc! We are not doing raw_mremap.
+	 * We should either do raw_mremap or we simply simply not have
+	 * this preload wrapper. At the moment we are double-notifying.
+	 * So, as a quick hack, disable our hooking! */
+	if (/*!__liballocs_systrap_is_initialized*/ 1) // XXX: see above for why "systrapping not init'd" here is "too early"
 	{
 		return DO_ORIG_CALL;
 	}
