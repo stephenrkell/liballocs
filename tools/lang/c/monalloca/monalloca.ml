@@ -91,7 +91,7 @@ let ensureCleanupLocal (fn : fundec) =
         (* trying to initialize this right here, by adding to fn.sbody.bstmts, doesn't work -- 
            likely because it gets clobbered by the visitor code. So we do it when visiting the function
            instead. *)
-        fn.sbody.bstmts <- (mkStmtOneInstr (Set((Var(v), NoOffset), zero, v.vdecl)))
+        fn.sbody.bstmts <- (mkStmtOneInstr (Set((Var(v), NoOffset), zero, v.vdecl, v.vdecl)))
                            :: fn.sbody.bstmts; 
         v
 
@@ -114,7 +114,7 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
       | _ -> false
     in
     match i with 
-        Call(tgt, funExpr, [sizeArg], l) when isAllocaFun funExpr -> begin
+        Call(tgt, funExpr, [sizeArg], l, _) when isAllocaFun funExpr -> begin
             (* We need to
              * - ensure we have a local in the function for recording 
                  the fact that this frame does alloca
@@ -156,7 +156,7 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
              ChangeTo([
                 Call(Some(Var(fixedSizeVar), NoOffset),
                      Lval(Var(liballocsAllocaSizeFun.svar), NoOffset),
-                     [sizeArg], l);
+                     [sizeArg], l, l);
                 Asm([(* attrs *)],
                            [(* template strings *)
                                 "   call "^ labelString1 ^"_%=\n\
@@ -170,14 +170,14 @@ class monAllocaExprVisitor = fun (fl: Cil.file)
                            [(* clobbers *)],
                            (* location *) l );
                 Call(Some(Var(tempPtrVar), NoOffset), Lval(Var(builtinAllocaFunVar), NoOffset),
-                    [Lval(Var(fixedSizeVar), NoOffset)], l);
+                    [Lval(Var(fixedSizeVar), NoOffset)], l, l);
                 Call(tgt, Lval(Var(liballocsNotifyAndAdjustAllocaFun.svar), NoOffset),
                     [Lval(Var(tempPtrVar), NoOffset);
                      sizeArg;
                      Lval(Var(fixedSizeVar), NoOffset);
                      mkAddrOf (Var(counterVar), NoOffset);
                      Lval(Var(callSiteVar), NoOffset)
-                    ], l)
+                    ], l, l)
             ])
         end
     | _ -> SkipChildren 
@@ -236,7 +236,7 @@ class monAllocaFunVisitor = fun (fl: Cil.file) -> object(self)
             None -> ChangeTo(modifiedFunDec)
           | Some(v) -> 
                 modifiedFunDec.sbody.bstmts <- 
-                    (mkStmtOneInstr (Set((Var(v), NoOffset), zero, v.vdecl))) :: modifiedFunDec.sbody.bstmts;
+                    (mkStmtOneInstr (Set((Var(v), NoOffset), zero, v.vdecl, v.vdecl))) :: modifiedFunDec.sbody.bstmts;
                 ChangeTo(modifiedFunDec)
                 
 end (* class monAllocaFunVisitor *)

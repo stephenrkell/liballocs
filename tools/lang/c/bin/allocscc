@@ -12,14 +12,15 @@ import os, sys, re, subprocess, tempfile
 REAL_FILE = os.path.realpath(__file__)
 REAL_DIR = os.path.realpath(os.path.dirname(REAL_FILE))
 liballocs_base = os.path.realpath(REAL_DIR + "/../../../..")
+cil_base = os.environ.get("CIL_ROOT", liballocs_base + "/contrib/cil/")
 sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
 existing_cil_install = os.environ.get("CIL_INSTALL")
-if existing_cil_install == None:
-    cilly_cmd = liballocs_base + "/contrib/cil/bin/cilly"
-    existing_cil_install = liballocs_base + "/contrib/cil/lib"
+if cil_base == None:
+    cilly_cmd = liballocs_base + "/_build/install/default/bin/cilly"
+    existing_cil_install = liballocs_base + "/contrib/cil/_build/install/default/lib/goblint-cil/"
 else:
-    cilly_cmd = existing_cil_install + "/../bin/cilly"
+    cilly_cmd = cil_base + "/_build/install/default/bin/cilly"
 existing_elftin = os.environ.get("ELFTIN")
 if existing_elftin == None:
     os.putenv("ELFTIN", liballocs_base + "/contrib/elftin")
@@ -96,7 +97,7 @@ class AllocsCC(AllocsCompilerWrapper):
         return [
             "--save-temps",
             "--decil",
-            "--native",
+            #"--native",
             "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/cilallocs/cilallocs.cmxs"),
             "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/dumpallocs/dumpallocs.cmxs"),
             "--dodumpallocs",
