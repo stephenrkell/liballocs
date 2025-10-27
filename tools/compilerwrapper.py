@@ -374,7 +374,7 @@ class CompilerWrapper:
             elif args[num].startswith("-mllvm"):
                 if "=" not in args[num]:  # Val can be separated by either a space or '='.
                     skipNext = True
-                self.argOption({Phase.LINK, Phase.PREPROCESS, Phase.COMPILE, Phase.ASSEMBLE}, num, argToAdd, None if "=" in args[num] else args[num+1])
+                self.argOption({Phase.LINK, Phase.PREPROCESS, Phase.COMPILE, Phase.ASSEMBLE}, num, args[num], None if "=" in args[num] else args[num+1])
             elif args[num].startswith('-'):
                 # looks like an option; pass it to all phases
                 self.debugMsg("Default treatment for options %s\n" % args[num])
