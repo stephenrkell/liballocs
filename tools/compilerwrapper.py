@@ -112,6 +112,53 @@ def phasesForInputLanguage(inputLanguage):
     sys.stderr.write("Could not enumerate phases for input filename %s\n" % inputFilename)
     return {}
 
+class TempFileManager:
+    def __init__(self):
+        self.tempfile_map = {}
+        self.tempdir_map = {}
+        pass
+
+    def createTempFile(self, filename):
+        t = tempfile.NamedTemporaryFile(suffix="." + filename.split('.')[-1])
+        self.tempfile_map[filename] = t
+        return t.name
+
+    def getTempFile(self, filename, default=None):
+        file = self.tempfile_map.get(filename)
+        if file:
+            return file.name
+        else:
+            return default
+
+    def getOrCreateCillyTempDirForFileList(self, filenames):
+        key = frozenset(filenames)
+        if key not in self.tempdir_map:
+            self.tempdir_map[key] = tempfile.TemporaryDirectory()
+        return self.tempdir_map[key].name
+
+    def getCillyTempDirForSingleFile(self, name):
+        for (key, td) in self.tempdir_map.items():
+            if name in key:
+                return td.name
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        for tf in self.tempfile_map.values():
+            try:
+                tf.close()
+            except OSError:
+                pass
+        self.tempfile_map.clear()
+
+        for td in self.tempdir_map.values():
+            try:
+                td.cleanup()
+            except OSError:
+                pass
+        self.tempdir_map.clear()
+
 class CompilerWrapper:
     __metaclass__ = abc.ABCMeta
 
@@ -241,7 +288,7 @@ class CompilerWrapper:
         # Also, substitute the name appropriate for the *earliest* phase
         # we're doing.
         prevPhase = min(phases) - 1
-        return [s if not isinstance(s, SourceFile) else s.nameAfterPhase(prevPhase) \
+        return [s if not isinstance(s, SourceFile) else self.tempFileManager.getTempFile(s.nameAfterPhase(prevPhase), s.nameAfterPhase(prevPhase)) \
             for (idx, s) in self.allArgs.items() \
             if idx in self.allItems and self.argPhases[idx].intersection(phases)]
     
@@ -451,6 +498,7 @@ class CompilerWrapper:
 #        sourceInputFilenamesAndLanguages = filenamesAndLanguagesFromInput)
     
     def __init__(self):
+        self.tempFileManager = TempFileManager()
         self.parseInputAndOutputFiles()
     
     # HACK: regrettably, in at least one case we need to probe the compiler
@@ -559,24 +607,47 @@ class CompilerWrapper:
         #   output file, we pass it
         options = self.specialOptionsForPhases(phases, ["-o"])
         # the -o we want to give is that of the last of our pre-link phases
+        compileEachSourceIndividually = False
         if "-o" in self.optionsForPhases({max(phases)}):
             options["-o"] = self.optionsForPhases({max(phases)})["-o"]
+            # we have a unique output file for the last phase
+        elif Phase.LINK in self.enabledPhases:
+            # we need to generate temporary output files for each source file
+            # for consumption by the link phase. We can't litter them in the
+            # source directory as it might be read-only or there are parallel
+            # compilations on the same source file.
+            compileEachSourceIndividually = True
+            pass
         else:
             # this means our last phase doesn't specify an output file;
             # we let the preprocessor, compiler and/or assembler choose it for us
             pass
-        # we remove this driver option, but other driver options *can* be present
-        ret = self.runCompiler(self.flatOptions(options) + \
-            self.flatItems(self.itemsForPhases(phases)) + \
-            [self.optionToStopAfterPhase(max(phases))], \
-            self.enabledPhases)
-        if ret != 0 or not Phase.ASSEMBLE in self.enabledPhases:
-            return ret
-        # if we just assembled any objects, do the postprocessing
+
+        if not compileEachSourceIndividually:
+            ret = self.runCompiler(self.flatOptions(options) + \
+                self.flatItems(self.itemsForPhases(phases)) + \
+                [self.optionToStopAfterPhase(max(phases))], \
+                self.enabledPhases)
+
         for sourceFile in sourceInputFiles:
-            outputFilename = sourceFile.nameAfterPhase(Phase.ASSEMBLE) \
-               if len(sourceInputFiles) > 1 or not "-o" in self.optionsForPhases({Phase.ASSEMBLE}).keys() \
-               else self.optionsForPhases({Phase.ASSEMBLE})["-o"]
+            if compileEachSourceIndividually:
+                assert "-o" not in options
+                outputFilename = self.tempFileManager.createTempFile(sourceFile.nameAfterPhase(Phase.ASSEMBLE))
+                ret = self.runCompiler(self.flatOptions(options) + \
+                    [sourceFile] + \
+                    self.flatItems(
+                        [x for x in self.itemsForPhases(phases) if not isinstance(x, SourceFile)]
+                    ) + \
+                    [self.optionToStopAfterPhase(max(phases))] + \
+                    ["-o", outputFilename], \
+                    self.enabledPhases)
+                if ret != 0 or not Phase.ASSEMBLE in self.enabledPhases:
+                    return ret
+            else:
+                # if we just assembled any objects, do the postprocessing
+                outputFilename = sourceFile.nameAfterPhase(Phase.ASSEMBLE) \
+                    if len(sourceInputFiles) > 1 or not "-o" in self.optionsForPhases({Phase.ASSEMBLE}).keys() \
+                    else self.optionsForPhases({Phase.ASSEMBLE})["-o"]
             ret = self.fixupPostAssemblyDotO(outputFilename, None)
             if ret != 0:
                 # we didn't succeed, so quit now
