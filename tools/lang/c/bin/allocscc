@@ -94,7 +94,7 @@ class AllocsCC(AllocsCompilerWrapper):
         if self.onlyPreprocessing():
             return []
         return [
-            "--save-temps",
+            "--save-temps=%s" % (self.tempFileManager.getOrCreateCillyTempDirForFileList(sourceFiles)),
             "--decil",
             "--native",
             "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/cilallocs/cilallocs.cmxs"),
