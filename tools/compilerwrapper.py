@@ -156,7 +156,7 @@ class CompilerWrapper:
     
     def makeErrFile(self, name, mode):
         if "ALLOCSCC_MAKE_ERR_FILE" not in os.environ:
-            return open("/dev/null", mode)
+            return tempfile.TemporaryFile(mode)
 
         # we get an exception in the case where the dir already exists
         # AND in the case where it can't be created, so...
