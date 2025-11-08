@@ -609,6 +609,8 @@ class CompilerWrapper:
                 self.flatItems(self.itemsForPhases(phases)) + \
                 [self.optionToStopAfterPhase(max(phases))], \
                 self.enabledPhases)
+            if ret != 0 or not Phase.ASSEMBLE in self.enabledPhases:
+                return ret
 
         for sourceFile in sourceInputFiles:
             if compileEachSourceIndividually:
