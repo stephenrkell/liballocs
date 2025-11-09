@@ -115,7 +115,6 @@ def phasesForInputLanguage(inputLanguage):
 class TempFileManager:
     def __init__(self):
         self.tempfile_map = {}
-        self.tempdir_map = {}
         pass
 
     def createTempFile(self, filename):
@@ -130,17 +129,6 @@ class TempFileManager:
         else:
             return default
 
-    def getOrCreateCillyTempDirForFileList(self, filenames):
-        key = frozenset(filenames)
-        if key not in self.tempdir_map:
-            self.tempdir_map[key] = tempfile.TemporaryDirectory()
-        return self.tempdir_map[key].name
-
-    def getCillyTempDirForSingleFile(self, name):
-        for (key, td) in self.tempdir_map.items():
-            if name in key:
-                return td.name
-
     def __enter__(self):
         return self
 
@@ -151,13 +139,6 @@ class TempFileManager:
             except OSError:
                 pass
         self.tempfile_map.clear()
-
-        for td in self.tempdir_map.values():
-            try:
-                td.cleanup()
-            except OSError:
-                pass
-        self.tempdir_map.clear()
 
 class CompilerWrapper:
     __metaclass__ = abc.ABCMeta
@@ -175,7 +156,7 @@ class CompilerWrapper:
     
     def makeErrFile(self, name, mode):
         if "ALLOCSCC_MAKE_ERR_FILE" not in os.environ:
-            return open("/dev/null", mode)
+            return tempfile.TemporaryFile(mode)
 
         # we get an exception in the case where the dir already exists
         # AND in the case where it can't be created, so...
@@ -628,6 +609,8 @@ class CompilerWrapper:
                 self.flatItems(self.itemsForPhases(phases)) + \
                 [self.optionToStopAfterPhase(max(phases))], \
                 self.enabledPhases)
+            if ret != 0 or not Phase.ASSEMBLE in self.enabledPhases:
+                return ret
 
         for sourceFile in sourceInputFiles:
             if compileEachSourceIndividually:
