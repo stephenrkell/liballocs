@@ -222,7 +222,7 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 	if (fd_meta == -1) goto out_notloaded;
 	struct loadee_info ld_so_meta = load_from_fd(fd_meta, "metadata object for " SYSTEM_LDSO_PATH,
 		/* loadee_base_addr_hint */ (uintptr_t) 0, NULL, NULL);
-	if (!ld_so_meta.dynamic_vaddr) goto out_notloaded; // harsh but go with it for now
+	if (!ld_so_meta.dynamic_vaddr) goto out; // harsh but go with it for now
 	ElfW(Dyn) *meta_dyn = (ElfW(Dyn) *) (ld_so_meta.dynamic_vaddr + ld_so_meta.base_addr);
 	// also look for  'extrasyms' and walk those
 	ElfW(Sym) *extrasyms_sym = symbol_lookup_in_dyn(meta_dyn,
@@ -239,7 +239,8 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 
 	// FIXME: we should really close/unload the meta file we just loaded
 	// munmap(ld_so_meta.
-
+out:
+	close(fd_meta);
 out_notloaded:
 	return 1;
 }

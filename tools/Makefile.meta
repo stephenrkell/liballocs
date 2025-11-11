@@ -20,6 +20,7 @@ ALLOCSITES_BLOOM ?= $(dir $(THIS_MAKEFILE))/allocsites-bloom
 ALLOCTYPES ?= $(dir $(THIS_MAKEFILE))/alloctypes
 METAVECTOR ?= $(dir $(THIS_MAKEFILE))/metavector
 EXTRASYMS ?= $(dir $(THIS_MAKEFILE))/extrasyms
+DUMPSYSCALLS ?= $(dir $(THIS_MAKEFILE))/dumpsyscalls
 
 LDD_FUNCS ?= $(dir $(THIS_MAKEFILE))/ldd-funcs.sh
 OBJDUMPALLOCS ?= $(dir $(THIS_MAKEFILE))/objdumpallocs
@@ -101,7 +102,7 @@ $(META_BASE)/%.memacc: $(META_BASE)/%.objmemacc $(META_BASE)/%.srcmemacc
 	test -e "$@"
 
 METADATA_KINDS ?= roottypes dwarftypes alloctypes frametypes allocsites extrasyms metavector \
-  # starts-bitmaps allocsites-bloom 
+ syscalls # starts-bitmaps allocsites-bloom 
 # can't use builtin .o rule in case CC is not gcc (section flags injection attack
 # using "... comdat# ..." doesn't work except on gcc). (FIXME: use configure-time
 # adaptation found in glibc's libc-symbols.h?)
@@ -137,6 +138,10 @@ endif
 ifneq ($(filter frametypes,$(METADATA_KINDS)),)
 $(info Generating frametypes)
 meta_sources += $(META_BASE)/$(1)-frametypes.c
+endif
+ifneq ($(filter syscalls,$(METADATA_KINDS)),)
+$(info Generating syscall sites)
+meta_sources += $(META_BASE)/$(1)-syscalls.c
 endif
 
 # When we build a meta .so, we now link it until the build ID.
@@ -226,6 +231,11 @@ $(META_BASE)/%-extrasyms.c: /%
 $(META_BASE)/%-metavector.c: /%
 	$(call ensure_mirror_dir_for_target)
 	errs=$$( ( $(METAVECTOR) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
+	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
+.PRECIOUS: $(META_BASE)/%-syscalls.c
+$(META_BASE)/%-syscalls.c: /%
+	$(call ensure_mirror_dir_for_target)
+	errs=$$( ( $(DUMPSYSCALLS) $< $(SWAP_STDOUT_STDERR) ) 2>$@ ); \
 	status=$$?; echo "$$errs" | gzip >$@.log.gz; [ $$status -eq 0 ] || (mv $@ $@.err; false)
 # Given this complexity, perhaps we should
 # 1. never output struct definitions in-line. always include them from a header.

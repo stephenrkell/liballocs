@@ -190,12 +190,21 @@ is_self_call(const void *caller)
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller) __attribute__((weak));
 
-/* For most of the process we rely on symbol overriding to observe mmap calls. 
- * However, we have another trick for ld.so and libc mmap syscalls.
- * We *never* delegate to the underlying (RTLD_NEXT) mmap; we always do it
+/* We *never* delegate to the underlying (RTLD_NEXT) mmap; we always do it
  * ourselves. This ensures that the handling is an either-or; exactly one of these
  * paths (preload or systrap) should be hit. We must take care to do the
  * (logically) same things in both. */
+// FIXME: it seems pointless to preload a mmap et al, given that we systrap
+// all other DSOs' calls to these functions. The "preload" definitions are
+// really just our own private definitions, useful from library code like
+// dlmalloc that wants to link against the standard names rather than whatever
+// else we might like to call these, like __private_mmap or whatever. So why
+// not give them protected/hidden visibility and move them out of this file? They are
+// more like something that belongs in private-libc.c.
+// We should only need to preload library calls that are not system calls. So
+// abort(), memcpy(), memmove(), malloc_usable_size(). The wisdom of preloading even these
+// is questionable, because the guest code may not hit the preloaded versions
+// anyway, depending on how it is linked.
 #undef mmap
 void *mmap(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset)
@@ -208,6 +217,11 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 		__liballocs_nudge_mmap(&addr, &length, &prot, &flags, &fd, &offset, __builtin_return_address(0));
 	}
 
+	if (!__liballocs_systrap_is_initialized)
+	{
+		//write_string("Too early for us to call mmap!\n");
+		//abort();
+	}
 	void *ret = raw_mmap(addr, length, prot, flags, fd, offset);
 	if (MMAP_RETURN_IS_ERROR(ret))
 	{
@@ -216,7 +230,7 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	}
 	if (length > BIGGEST_BIGALLOC)
 	{
-		// skip hooking logic
+		// skip hooking logic -- this is the pageindex
 		return ret;
 	}
 
@@ -243,6 +257,16 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 	 *
 	 * We want to hook the early mmap self-calls because we need to see the bigalloc
 	 * that our private mallocs are using.
+	 *
+	 * One drastic solution would be to ditch the maps-walking entirely, and rely on
+	 * trapping all mmaps, even our own, taking a "deferred approach" to initialization.
+	 * In short, for any call that is "too early" for us to handle, we write it to
+	 * a static buffer and process the buffer when we become fully initialized.
+	 * Do we really have to trap our own syscalls, though? That seems drastic and runs
+	 * counter to our approach thus far, where we are allowed to make syscalls unimpeded.
+	 * Perhaps even without that, we can catch mmap calls made by musl or dlmalloc code?
+	 * PROBLEM: if we just define 'mmap', say, we can't use RTLD_NEXT to get 'the mmap
+	 * from musl libc.a', etc.
 	 */
 
 	if (!MMAP_RETURN_IS_ERROR(ret))
@@ -277,6 +301,8 @@ int munmap(void *addr, size_t length)
 	
 	if (!__liballocs_systrap_is_initialized)  // XXX: see above for why "systrapping not init'd" here means "too early"
 	{
+		//write_string("Too early for us to call munmap!\n");
+		//abort();
 		return orig_munmap(addr, length);
 	}
 	else
@@ -298,6 +324,12 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int mremap_flags,
 	{
 		orig_mremap = dlsym(RTLD_NEXT, "mremap");
 		assert(orig_mremap);
+	}
+
+	if (!__liballocs_systrap_is_initialized) // XXX: see above for why "systrapping not init'd" here is "too early"
+	{
+		//write_string("Too early for us to call mremap()!\n");
+		//abort();
 	}
 	
 	void *requested_new_addr = MAP_FAILED;
@@ -326,7 +358,11 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int mremap_flags,
 #define DO_ORIG_CALL ((mremap_flags & MREMAP_FIXED)  \
 			? orig_mremap(old_addr, old_size, new_size, mremap_flags, requested_new_addr) \
 			: orig_mremap(old_addr, old_size, new_size, mremap_flags))
-	if (!__liballocs_systrap_is_initialized) // XXX: see above for why "systrapping not init'd" here is "too early"
+	/* XXX: our orig call will call libc! We are not doing raw_mremap.
+	 * We should either do raw_mremap or we simply simply not have
+	 * this preload wrapper. At the moment we are double-notifying.
+	 * So, as a quick hack, disable our hooking! */
+	if (/*!__liballocs_systrap_is_initialized*/ 1) // XXX: see above for why "systrapping not init'd" here is "too early"
 	{
 		return DO_ORIG_CALL;
 	}
@@ -342,18 +378,6 @@ void *mremap(void *old_addr, size_t old_size, size_t new_size, int mremap_flags,
 		return ret;
 	}
 #undef orig_call
-}
-
-static void init(void) __attribute__((constructor));
-static void init(void)
-{
-	/* We have to initialize these in a constructor, because if we 
-	 * do it lazily we might find that the first call is in an 
-	 * "avoid libdl" context. HMM, but then we just use fake_dlsym
-	 * to get the original pointer and call that. so doing it lazily
-	 * is okay, it seems. */
-	// write_string("Hello from preload init!\n");
-	
 }
 
 #ifndef NDEBUG

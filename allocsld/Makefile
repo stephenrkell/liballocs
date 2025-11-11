@@ -1,5 +1,5 @@
 .PHONY: default
-default: allocsld.so
+default: allocsld.so allocsld.os
 
 .PHONY: all
 all: default
@@ -59,12 +59,12 @@ DYNAPPEND ?= $(ELFTIN)/dynappend/dynappend
 # We must use the BFD-based linker (ld.bfd) -- gold doesn't work
 # (it won't generate the donald.lds linker script, though I'm not yet sure why).
 # FIXME: what happened to our flags for ensuring this?
-allocsld.so: LDFLAGS += -fuse-ld=bfd \
+allocsld.so allocsld.os: LDFLAGS += -fuse-ld=bfd \
             -nostdlib -nostartfiles \
             -Wl,--spare-dynamic-tags,2 \
             -Wl,-soname=allocsld.so -Wl,-Bsymbolic \
             -L$(LIBSYSTRAP)/build/$(shell uname -m) -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
-allocsld.so: LDLIBS += -Wl,--exclude-libs=libsystrap.a:librunt_preload.a -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
+allocsld.so allocsld.os: LDLIBS += -Wl,--exclude-libs=libsystrap.a:librunt_preload.a -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
 
 # FIXME: localize all global symbols except maybe _start?
 allocsld.so: allocsld.lds $(OBJS)
@@ -73,6 +73,10 @@ allocsld.so: allocsld.lds $(OBJS)
             -Wl,-Bstatic $(LIBC_ARCHIVE) -Wl,-Bsymbolic $(LDLIBS) \
             -T $(filter %.lds,$+)
 	$(DYNAPPEND) $@ 21 # add DT_DEBUG
+allocsld.os: $(OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,-r -no-pie -fno-lto -Wl,--gc-sections -Wl,--gc-keep-exported -o "$@" \
+            $+ \
+            -Wl,-Bstatic $(LIBC_ARCHIVE) -Wl,-Bsymbolic $(LDLIBS)
 
 # FIXME: including code here is not nice. Why not just call a function?
 # I think it's because we can't anticipate what locals our function will
