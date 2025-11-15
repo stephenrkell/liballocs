@@ -664,7 +664,7 @@ void __mmap_allocator_notify_mremap(void *mapped_addr, void *old_addr, size_t ol
 			(int)(bigalloc_before - &big_allocations[0]),
 			old_addr, (void*)((uintptr_t) old_addr + old_size));
 	}
-	debug_printf(0, "Doing mremap: %p, %p, 0x%llx, 0x%llx, %d, %p, %s\n",
+	debug_printf(0, "Doing mremap: to %p, was %p, old size 0x%llx, new size 0x%llx, %d, %p, %s\n",
 		mapped_addr, old_addr, (unsigned long long) old_size_as_passed,
 		(unsigned long long) new_size, mremap_flags, requested_new_addr,
 		format_symbolic_address((char*) caller - CALL_INSTR_LENGTH));
