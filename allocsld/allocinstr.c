@@ -72,7 +72,7 @@ static void *prologue_get_first_non_displaced(const void *func, const void *func
 	while (nbytes_decoded < NBYTES_TO_CLOBBER)
 	{
 		// decode one, check we can 
-		struct decoded_insn_info info = instr_len_extended(insbyte, func_limit);
+		struct decoded_insn_info info = (struct decoded_insn_info) { }; //instr_len_extended(insbyte, func_limit);
 		if (info.len == 0) /* error */ return NULL;
 		if (info.relocatable_fields[0].reloc_type != 0) MAYBE_APPEND_ONE_FIELD(info.relocatable_fields[0]);
 		if (info.relocatable_fields[1].reloc_type != 0) MAYBE_APPEND_ONE_FIELD(info.relocatable_fields[1]);

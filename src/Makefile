@@ -46,6 +46,7 @@ else
 # the rest
 vpath %.c $(srcdir)
 vpath %.lds $(srcdir)
+vpath %.lds.cpp $(srcdir)
 vpath %.c $(srcdir)/allocators
 vpath dlmalloc.c $(LIBSYSTRAP)/contrib
 
@@ -120,15 +121,20 @@ LDFLAGS += -fno-lto
 LDFLAGS += -fPIC
 # Try to cut down size of the .so file, given some of the libraries we link in (xed...)
 LDFLAGS += -Wl,--gc-sections
-# until binutils bug 13600 is fixed, gold is the linker we need
-# (FIXME: why? where was the bogus relocation causing problems?)
+# We need to use gold for now...
 LDFLAGS += -fuse-ld=gold
+# ... but why?
+# XXX: I think one-DSO is going to need BFD?
+#LDFLAGS += -fuse-ld=bfd
 # NOTE that our use of __private_malloc, a defsym'd symbol,
 # used to provoke a gold bug when we were generating protected-visibility
-# undefineds that were bound to it. That bug has been reported (#24286) and
+# undefineds that were bound to it. That gold bug has been reported (#24286) and
 # I've removed the protected undefineds (which came from libmallochooks
-# template code). So we are still committed to using gold to link liballocs
-# owing to binutils issue 13600 is fixed.
+# template code) so we can use gold regardless of whether that bug is fixed.
+# At one time we ran into binutils bug 13600, forcing use of gold, but no longer?
+# Our use of symbols defined in linker scripts (private-malloc-{plain,wrapped}.lds)
+# requires that they generate global symbols. Gold does this but BFD doesn't!
+# BFD can be forced to, using a --dynamic-list option... sigh.
 
 # FIXME: if/when LTO is fixed, we can revert to using ld -r
 # to create __next_hook_* aliases when composing malloc wrappers. For now we
@@ -282,7 +288,31 @@ LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(CORE_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJ
 LIBSYSTRAP_A := $(LIBSYSTRAP)/build/$(shell uname -m)/libsystrap.a
 liballocs_preload.so: LDFLAGS += $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
 liballocs_preload.so: private-malloc-wrapped.lds
+# XXX: see above: for BFD linker to work, we need --dynamic-list for these lds
+# vpath allocsld.os $(srcdir)/../allocsld
+ifneq ($(LIBALLOCS_ONE_DSO),)
+allocsld.os: $(srcdir)/../allocsld/allocsld.os
+	cp -p "$<" "$@"
+liballocs_preload.so: allocsld.os
+# XXX: can we be sure allocsld was built before we were? Yes,
+# because SUBDIRS in Makefile.am puts us in this order.
+allocsld.lds: CPPFLAGS += -include $(srcdir)/../allocsld/allocsld.h
+allocsld.lds: allocsld.lds.cpp
+	$(CC) -E -o $@ $< $(CPPFLAGS)
+liballocs_preload.so: allocsld.lds
+# we need to
+# - rename the relocs section(s)  -- do this in allocsld Makefile
+# - define a new symbol for each  -- in a linker script? there are *lots* of sections (.rela.*)
+#       -- how do we prevent use of the PLT? PLT needs bootstrap relocation.
+#          can we prevent use of the PLT? should be possible but tricky
+# - put a new tag in .dynamic for each
+# - put the DT_DEBUG in .dynamic as well
+liballocs_preload.so: LDFLAGS += -Wl,-e,_start -Wl,--defsym,_begin=0
+liballocs_preload.so: LDFLAGS += -Wl,--spare-dynamic-tags=4  # one for DT_DEBUG, three for bootstrap rela
+# ------ end allocsld
+endif
 liballocs_preload.so: LDFLAGS += -Wl,-Map,liballocs_preload.so.map
+
 liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP_A)
 liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 # also set the dependencies, for make purposes
@@ -323,12 +353,36 @@ liballocs_preload.so: LDLIBS += $(RUNT_LDLIBS)
 # dependency for make
 liballocs_preload.so: $(LIBRUNT_A)
 
+DYNAPPEND ?= $(ELFTIN)/dynappend/dynappend
+OBJCOPY ?= objcopy
 # liballocs_preload.so build rule is funky because dlmalloc.a is in LDFLAGS.
 # It needs to be there because it goes inside --whole-archive (and these options
 # are not files, so can't be prerequisites expanded by $+)
+# It is even more funky with allocsld.os, because we need to fill in the
+# custom .dynamic entries.
+ifneq ($(LIBALLOCS_ONE_DSO),)
+define liballocs_so_post_build_commands
+$(DYNAPPEND) $@ $$( printf "%d\n" $(DT_ALLOCS_BOOTSTRAP_RELA) ) "$$( $(OBJCOPY) -Obinary \
+	  -j.bootstrap_dynamic "$@" /dev/stdout | \
+	  tail -c+9 | head -c8 | od -td8 | tr -s '[:blank:]' '\t' | cut -f2 | head -n1 )" && \
+	$(DYNAPPEND) $@ $$( printf "%d\n" $(DT_ALLOCS_BOOTSTRAP_RELASZ) ) "$$( $(OBJCOPY) -Obinary \
+	  -j.bootstrap_dynamic "$@" /dev/stdout | \
+	  tail -c+25 | head -c8 | od -td8 | tr -s '[:blank:]' '\t' | cut -f2 | head -n1 )" && \
+	$(DYNAPPEND) $@ $$( printf "%d\n" $(DT_ALLOCS_BOOTSTRAP_RELAENT) ) "$$( $(OBJCOPY) -Obinary \
+	  -j.bootstrap_dynamic "$@" /dev/stdout | \
+	  tail -c+41 | head -c8 | od -td8 | tr -s '[:blank:]' '\t' | cut -f2 | head -n1 )" && \
+	$(DYNAPPEND) "$@" 21 0 `echo this is DT_DEBUG >/dev/null` \
+	  || (rm -f "$@"; false)
+endef
+else
+define liballocs_so_post_build_commands
+true
+endef
+endif
 liballocs_preload.so: $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
-	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out $(LDLIBS) dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS) -Wl,--exclude-libs="$(EXCLUDE_LIBS)"
-
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out $(LDLIBS) dlmalloc.a,$+) \
+                $(LDFLAGS) $(LDLIBS) -Wl,--exclude-libs="$(EXCLUDE_LIBS)" && \
+        $(liballocs_so_post_build_commands)
 %.a:
 	$(AR) r "$@" $+
 liballocs_preload.a: $(LIBALLOCS_PRELOAD_A_OBJS)
@@ -363,6 +417,7 @@ liballocs_dummyweaks.o: dummyweaks.o
 # in libcrunch's _stubs.so.
 vpath librunt_%.o $(LIBRUNT_BUILD_DIR)
 liballocs_dummyweaks.so: private-malloc-plain.lds
+# XXX: see above: for BFD linker to work, we need --dynamic-list for these lds
 liballocs_dummyweaks.so: LDLIBS += $(PRIVATE_MALLOC_LDLIBS)
 liballocs_dummyweaks.so: dummyweaks.o librunt_dummyweaks.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)  -Wl,--exclude-libs="$(EXCLUDE_LIBS)"
