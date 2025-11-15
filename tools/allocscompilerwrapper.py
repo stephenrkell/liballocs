@@ -585,158 +585,159 @@ class AllocsCompilerWrapper(CompilerWrapper):
         return liballocsLeftishLinkArgs, liballocsRightishLinkArgs
     
     def main(self):
-        # un-export CC from the env if it's set to allocscc, because 
-        # we don't want to recursively crunchcc the -uniqtypes.c files
-        # that this make invocation will be compiling for us.
-        # NOTE that we really do mean CC and not CXX or FC here, because
-        # all the stuff we build ourselves is built from C.
-        #if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
-        if "CC" in os.environ:# and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
-           del os.environ["CC"]
-        self.debugMsg(sys.argv[0] + " called with args  " + " ".join(sys.argv) + "\n")
+        with self.tempFileManager:
+            # un-export CC from the env if it's set to allocscc, because
+            # we don't want to recursively crunchcc the -uniqtypes.c files
+            # that this make invocation will be compiling for us.
+            # NOTE that we really do mean CC and not CXX or FC here, because
+            # all the stuff we build ourselves is built from C.
+            #if "CC" in os.environ and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
+            if "CC" in os.environ:# and os.environ["CC"].endswith(os.path.basename(sys.argv[0])):
+                del os.environ["CC"]
+            self.debugMsg(sys.argv[0] + " called with args  " + " ".join(sys.argv) + "\n")
 
-        if self.onlyPreprocessing():
-            self.debugMsg("We are only preprocessing, so we won't do anything liballocs-related.")
+            if self.onlyPreprocessing():
+                self.debugMsg("We are only preprocessing, so we won't do anything liballocs-related.")
 
-        if Phase.LINK in self.enabledPhases:
-            self.debugMsg("We are a link command\n")
-        else:
-            self.debugMsg("We are not a link command\n")
-        
-        ret = self.runPhasesBeforeLink()
-        if ret != 0:
-            return ret
-        if not Phase.LINK in self.enabledPhases:
-            return ret
-
-        # HMM. What are the semantics of linking everything reloc?
-        # The only way to do it is to pass -Wl,-r, i.e. invisibly to the compiler.
-        # I think that it will link in the crt*.o stuff, say, so
-        # we really do get one big object.
-        # But it follows that we shouldn't use the compiler for the final link;
-        # we must use the linker directly. Or, hmm, maybe we can use -nostdlibs etc.
-        # Remind me:  why did we want to do this? It's just so that we can do
-        # the callee-side allocator stuff that we were doing badly in the
-        # liballocs.so linker script. In there, what we wanted was
-        # for any defined allocator function `malloc', we append
-        # -Wl,--defsym,malloc=__wrap___real_malloc
-        # -Wl,--wrap,__real_malloc
-        # ... and generate the corresponding __wrap___real_malloc (callee stub, i.e. hook/event stuff).
-        # So in here we want three steps:
-        # - reloc link
-        # - CHECK for defined allocators and generate/link callee stubs (+ allocator obj!)
-        # - CHECK for used allocators and generate/link caller stubs (currently we generate them unconditionally)
-
-        finalLinkArgs = []
-        finalLinkArgsSavedForEnd = []
-        # if we're building an executable, append the magic objects
-        # -- and link with the noop *shared* library, to be interposable.
-        # Recall that if we're building a shared object, we don't need to
-        # link in the alloc stubs, because we will use symbol interposition
-        # to get control into our stubs. OH, but wait. We still have custom
-        # allocation functions, and we want them to set the alloc site.
-        # So we do want to link in the wrappers. Do we need to rewrite
-        # references to __real_X after this?
-        if self.doingFinalLink():
-            # we need to export-dynamic, s.t. __is_a is linked from liballocs
-            # FIXME: I no longer understand this. Try deleting it / see what happens
-            finalLinkArgs += ["-Wl,--export-dynamic"]
-            # ANSWER: it breaks uniqtype uniquing, because in-exe uniqtypes
-            # (put into .o files by usedtypes) really need to be export-dynamic'd.
-            # We should really do all this at link time,
-            # allowing us to be selective about what gets export-dynamic'd.
-            leftishLinkArgs, rightishLinkArgs = self.getLiballocsLinkArgs()
-            finalLinkArgs += leftishLinkArgs
-            finalLinkArgsSavedForEnd += rightishLinkArgs
-
-        # HACK: if we're linking, always link to a .o and then separately to whatever output file
-        allLinkOutputOptions = {"-pie", "-shared", "--pic-executable", \
-                       "-Wl,-pie", "-Wl,-shared", "-Wl,--pic-executable", \
-                       "-Wl,-r", "-Wl,--relocatable"}
-        # we will delete any options in the above set when we do the link to ".linked.o"
-        thisLinkOutputOptions = set(self.phaseOptions[Phase.LINK].keys()).intersection(allLinkOutputOptions)
-        finalLinkOutput = self.getOutputFilename(Phase.LINK)
-        finalItemsAndOpts = []
-        stripRelocsAfterMetadataBuild = False
-        if self.doingFinalLink():
-            # okay, first do a via-big-.o link
-            # NOTE that we can't link in any shared libraries at this stage -- ld
-            # will look only for archives once you pass it -Wl,-r.
-            # So we ask not to link in any standard libs etc., and we also remove
-            # any libraries which might be shared libraries -- anything "-l".
-            # If a .so file is specified directly, it'll fail, so we want to filter these out.
-            # Archives specified directly are okay -- SEMANTICS though?
-            # What we want is "user code that is going into this link".
-            opts = self.specialOptionsForPhases(set({Phase.LINK}), deletions=thisLinkOutputOptions.union(set(["-o"])))
-            assert ("-o" not in self.flatOptions(opts))
-            relocFilename = finalLinkOutput + ".linked.o"
-            extraFirstOpts = ["-Wl,-r", "-o", relocFilename, "-nostartfiles", "-nodefaultlibs", "-nostdlib"]
-            if self.recognisesOption("-no-pie"):
-                extraFirstOpts += ["-no-pie"]
-            allLinkItems = self.flatItems(self.itemsForPhases({Phase.LINK}))
-            linkItemsIncluded = []
-            linkItemsDeferred = []
-            for item in allLinkItems:
-                if item.startswith("-L") or item.startswith("-l") or item.endswith(".so"):
-                    linkItemsDeferred += [item]
-                else:
-                    linkItemsIncluded += [item]
-            if "-Wl,-q" not in self.flatOptions(opts) and \
-               "-Wl,--emit-relocs" not in self.flatOptions(opts):
-                # we want the relocs, so we will add this
-                extraFirstOpts += ["-Wl,-q"]
-                finalLinkArgs += ["-Wl,-q"]
-                stripRelocsAfterMetadataBuild = True
+            if Phase.LINK in self.enabledPhases:
+                self.debugMsg("We are a link command\n")
             else:
-                stripRelocsAfterMetadataBuild = False
-            allArgs = self.flatOptions(opts) + extraFirstOpts + linkItemsIncluded
-            assert("-o" not in self.flatItems(self.itemsForPhases({Phase.LINK})))
-            self.debugMsg("running underlying compiler once to link with reloc output, with args: " + \
-                " ".join(allArgs) + "\n")
-            ret = self.runCompiler(allArgs, {FAKE_RELOC_LINK})
-            if ret != 0:
-                return ret
-            # also link the file with the uniqtypes it references
-            usedTypesFileName = self.getOutputFilename(Phase.LINK) + ".usedtypes.c"
-            usedTypesFile = open(usedTypesFileName, "w")
-            usedTypesCmd = [self.getLibAllocsBaseDir() + "/tools/usedtypes", relocFilename]
-            self.debugMsg("Calling " + " ".join(usedTypesCmd) + "\n")
-            try:
-                outp = subprocess.call(usedTypesCmd, stdout=usedTypesFile)
-            except subprocess.CalledProcessError as e:
-                self.debugMsg("Could not generate usedtypes file %s: usedtypes returned %d and said %s\n" \
-                    % (usedTypesFileName, e.returncode, str(e.output)))
-            usedTypesObjFileName = self.getOutputFilename(Phase.LINK) + ".usedtypes.o"
-            usedTypesCcCmd = self.getPlainCCompilerCommand() + self.getUsedtypesCompileArgs() + \
-                ["-gdwarf-4", "-std=c11"] + [usedTypesFileName] + ["-c", "-o", usedTypesObjFileName]
-            self.debugMsg("Calling " + " ".join(usedTypesCcCmd) + "\n")
-            try:
-                outp = subprocess.check_output(usedTypesCcCmd)
-            except subprocess.CalledProcessError as e:
-                self.debugMsg("Could not generate usedtypes object file %s: compiler returned %d and said %s\n" \
-                    % (usedTypesObjFileName, e.returncode, str(e.output)))
-            libroottypesAFileName = self.getLibAllocsBaseDir() + "/tools/libroottypes.a"
-            finalLinkArgsSavedForEnd += [usedTypesObjFileName, libroottypesAFileName]
+                self.debugMsg("We are not a link command\n")
 
-            # Q. what did this fixup step do? A. For any defined allocator function `malloc', append
-            #  -Wl,--defsym,malloc=__wrap___real_malloc
-            #  -Wl,--wrap,__real_malloc
-            extraFile, extraFinalLinkArgs = self.generateAllocatorMods(relocFilename, None)
-            self.debugMsg("generated allocator mods; got %s, %s\n" % (extraFile, str(extraFinalLinkArgs)))
+            ret = self.runPhasesBeforeLink()
             if ret != 0:
                 return ret
-            finalItemsAndOpts = self.flatOptions(opts) + [x for x in thisLinkOutputOptions] \
-              + [extraFile] + [relocFilename] + finalLinkArgs + extraFinalLinkArgs \
-              + ["-o", finalLinkOutput] \
-              + linkItemsDeferred + finalLinkArgsSavedForEnd
-        else: # not doing final link, i.e. our invoker was doing link-to-reloc
-            finalItemsAndOpts = self.flatOptions(self.phaseOptions[Phase.LINK]) + \
-                self.flatItems(self.itemsForPhases({Phase.LINK}))
-        
-        self.debugMsg(("running underlying compiler for %s link, with args: " + \
-            " ".join(finalItemsAndOpts) + "\n") % ("final" if self.doingFinalLink() else "relocatable"))
-        ret = self.runCompiler(finalItemsAndOpts, {Phase.LINK})
-        if ret != 0 or not self.doingFinalLink():
-            return ret
-        return self.doPostLinkMetadataBuild(finalLinkOutput, stripRelocsAfterMetadataBuild)
+            if not Phase.LINK in self.enabledPhases:
+                return ret
+
+            # HMM. What are the semantics of linking everything reloc?
+            # The only way to do it is to pass -Wl,-r, i.e. invisibly to the compiler.
+            # I think that it will link in the crt*.o stuff, say, so
+            # we really do get one big object.
+            # But it follows that we shouldn't use the compiler for the final link;
+            # we must use the linker directly. Or, hmm, maybe we can use -nostdlibs etc.
+            # Remind me:  why did we want to do this? It's just so that we can do
+            # the callee-side allocator stuff that we were doing badly in the
+            # liballocs.so linker script. In there, what we wanted was
+            # for any defined allocator function `malloc', we append
+            # -Wl,--defsym,malloc=__wrap___real_malloc
+            # -Wl,--wrap,__real_malloc
+            # ... and generate the corresponding __wrap___real_malloc (callee stub, i.e. hook/event stuff).
+            # So in here we want three steps:
+            # - reloc link
+            # - CHECK for defined allocators and generate/link callee stubs (+ allocator obj!)
+            # - CHECK for used allocators and generate/link caller stubs (currently we generate them unconditionally)
+
+            finalLinkArgs = []
+            finalLinkArgsSavedForEnd = []
+            # if we're building an executable, append the magic objects
+            # -- and link with the noop *shared* library, to be interposable.
+            # Recall that if we're building a shared object, we don't need to
+            # link in the alloc stubs, because we will use symbol interposition
+            # to get control into our stubs. OH, but wait. We still have custom
+            # allocation functions, and we want them to set the alloc site.
+            # So we do want to link in the wrappers. Do we need to rewrite
+            # references to __real_X after this?
+            if self.doingFinalLink():
+                # we need to export-dynamic, s.t. __is_a is linked from liballocs
+                # FIXME: I no longer understand this. Try deleting it / see what happens
+                finalLinkArgs += ["-Wl,--export-dynamic"]
+                # ANSWER: it breaks uniqtype uniquing, because in-exe uniqtypes
+                # (put into .o files by usedtypes) really need to be export-dynamic'd.
+                # We should really do all this at link time,
+                # allowing us to be selective about what gets export-dynamic'd.
+                leftishLinkArgs, rightishLinkArgs = self.getLiballocsLinkArgs()
+                finalLinkArgs += leftishLinkArgs
+                finalLinkArgsSavedForEnd += rightishLinkArgs
+
+            # HACK: if we're linking, always link to a .o and then separately to whatever output file
+            allLinkOutputOptions = {"-pie", "-shared", "--pic-executable", \
+                        "-Wl,-pie", "-Wl,-shared", "-Wl,--pic-executable", \
+                        "-Wl,-r", "-Wl,--relocatable"}
+            # we will delete any options in the above set when we do the link to ".linked.o"
+            thisLinkOutputOptions = set(self.phaseOptions[Phase.LINK].keys()).intersection(allLinkOutputOptions)
+            finalLinkOutput = self.getOutputFilename(Phase.LINK)
+            finalItemsAndOpts = []
+            stripRelocsAfterMetadataBuild = False
+            if self.doingFinalLink():
+                # okay, first do a via-big-.o link
+                # NOTE that we can't link in any shared libraries at this stage -- ld
+                # will look only for archives once you pass it -Wl,-r.
+                # So we ask not to link in any standard libs etc., and we also remove
+                # any libraries which might be shared libraries -- anything "-l".
+                # If a .so file is specified directly, it'll fail, so we want to filter these out.
+                # Archives specified directly are okay -- SEMANTICS though?
+                # What we want is "user code that is going into this link".
+                opts = self.specialOptionsForPhases(set({Phase.LINK}), deletions=thisLinkOutputOptions.union(set(["-o"])))
+                assert ("-o" not in self.flatOptions(opts))
+                relocFilename = finalLinkOutput + ".linked.o"
+                extraFirstOpts = ["-Wl,-r", "-o", relocFilename, "-nostartfiles", "-nodefaultlibs", "-nostdlib"]
+                if self.recognisesOption("-no-pie"):
+                    extraFirstOpts += ["-no-pie"]
+                allLinkItems = self.flatItems(self.itemsForPhases({Phase.LINK}))
+                linkItemsIncluded = []
+                linkItemsDeferred = []
+                for item in allLinkItems:
+                    if item.startswith("-L") or item.startswith("-l") or item.endswith(".so"):
+                        linkItemsDeferred += [item]
+                    else:
+                        linkItemsIncluded += [item]
+                if "-Wl,-q" not in self.flatOptions(opts) and \
+                "-Wl,--emit-relocs" not in self.flatOptions(opts):
+                    # we want the relocs, so we will add this
+                    extraFirstOpts += ["-Wl,-q"]
+                    finalLinkArgs += ["-Wl,-q"]
+                    stripRelocsAfterMetadataBuild = True
+                else:
+                    stripRelocsAfterMetadataBuild = False
+                allArgs = self.flatOptions(opts) + extraFirstOpts + linkItemsIncluded
+                assert("-o" not in self.flatItems(self.itemsForPhases({Phase.LINK})))
+                self.debugMsg("running underlying compiler once to link with reloc output, with args: " + \
+                    " ".join(allArgs) + "\n")
+                ret = self.runCompiler(allArgs, {FAKE_RELOC_LINK})
+                if ret != 0:
+                    return ret
+                # also link the file with the uniqtypes it references
+                usedTypesFileName = self.getOutputFilename(Phase.LINK) + ".usedtypes.c"
+                usedTypesFile = open(usedTypesFileName, "w")
+                usedTypesCmd = [self.getLibAllocsBaseDir() + "/tools/usedtypes", relocFilename]
+                self.debugMsg("Calling " + " ".join(usedTypesCmd) + "\n")
+                try:
+                    outp = subprocess.call(usedTypesCmd, stdout=usedTypesFile)
+                except subprocess.CalledProcessError as e:
+                    self.debugMsg("Could not generate usedtypes file %s: usedtypes returned %d and said %s\n" \
+                        % (usedTypesFileName, e.returncode, str(e.output)))
+                usedTypesObjFileName = self.getOutputFilename(Phase.LINK) + ".usedtypes.o"
+                usedTypesCcCmd = self.getPlainCCompilerCommand() + self.getUsedtypesCompileArgs() + \
+                    ["-gdwarf-4", "-std=c11"] + [usedTypesFileName] + ["-c", "-o", usedTypesObjFileName]
+                self.debugMsg("Calling " + " ".join(usedTypesCcCmd) + "\n")
+                try:
+                    outp = subprocess.check_output(usedTypesCcCmd)
+                except subprocess.CalledProcessError as e:
+                    self.debugMsg("Could not generate usedtypes object file %s: compiler returned %d and said %s\n" \
+                        % (usedTypesObjFileName, e.returncode, str(e.output)))
+                libroottypesAFileName = self.getLibAllocsBaseDir() + "/tools/libroottypes.a"
+                finalLinkArgsSavedForEnd += [usedTypesObjFileName, libroottypesAFileName]
+
+                # Q. what did this fixup step do? A. For any defined allocator function `malloc', append
+                #  -Wl,--defsym,malloc=__wrap___real_malloc
+                #  -Wl,--wrap,__real_malloc
+                extraFile, extraFinalLinkArgs = self.generateAllocatorMods(relocFilename, None)
+                self.debugMsg("generated allocator mods; got %s, %s\n" % (extraFile, str(extraFinalLinkArgs)))
+                if ret != 0:
+                    return ret
+                finalItemsAndOpts = self.flatOptions(opts) + [x for x in thisLinkOutputOptions] \
+                + [extraFile] + [relocFilename] + finalLinkArgs + extraFinalLinkArgs \
+                + ["-o", finalLinkOutput] \
+                + linkItemsDeferred + finalLinkArgsSavedForEnd
+            else: # not doing final link, i.e. our invoker was doing link-to-reloc
+                finalItemsAndOpts = self.flatOptions(self.phaseOptions[Phase.LINK]) + \
+                    self.flatItems(self.itemsForPhases({Phase.LINK}))
+
+            self.debugMsg(("running underlying compiler for %s link, with args: " + \
+                " ".join(finalItemsAndOpts) + "\n") % ("final" if self.doingFinalLink() else "relocatable"))
+            ret = self.runCompiler(finalItemsAndOpts, {Phase.LINK})
+            if ret != 0 or not self.doingFinalLink():
+                return ret
+            return self.doPostLinkMetadataBuild(finalLinkOutput, stripRelocsAfterMetadataBuild)
 
