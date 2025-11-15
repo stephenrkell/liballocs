@@ -148,31 +148,6 @@ size_t malloc_or_alloca_usable_size(void *ptr)
 }
 #pragma GCC pop_options
 
-/* Cross-DSO calls to malloc_usable_size() land here.
- * FIXME: libmallochooks should really hook this. We need a way
- * to handle the case where the exe includes its own malloc
- * defining malloc_usable_size. */
-size_t malloc_usable_size(void *ptr)
-{
-	/* How do we get the allocator? We can't ask for the deepest
-	 * allocator because malloc chunks can be suballocated.
-	 * Instead we query the address *one before*. This should
-	 * get us the parent allocator -- we assume that a malloc
-	 * cannot allocate the very first address in its arena.
-	 *
-	 * How do we know the allocator we get is a malloc? Since
-	 * the 'struct allocator's functions are generated wrappers
-	 * around the inlines (which have a wider argument signature)
-	 * this is non-trivial. So let's not do it. Just call a size
-	 * function if one exists.
-	 */
-	struct big_allocation *b = __lookup_deepest_bigalloc((void*)(((uintptr_t) ptr) - 1));
-	if (!b) return (size_t) -1;
-	if (!b->suballocator) return (size_t) -1;
-	if (!b->suballocator->get_size) return (size_t) -1;
-	return b->suballocator->get_size(ptr);
-}
-
 extern int _etext;
 static 
 _Bool
