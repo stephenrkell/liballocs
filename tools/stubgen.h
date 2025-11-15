@@ -330,7 +330,7 @@ void __unindex_small_alloc(void *ptr, int level);
 
 /* We also used to have some macros for generating callee wrappers. These
  * are now in allocstubs.c, for malloc-like callees (LIBALLOCS_MALLOC_CALLEE_WRAPPERS),
- * and are generated directly from libmallochooks.
+ * and are generated directly from libmallochooks. */
 
 /* Protos for our hook functions. The mallocapi-to-hookapi glue comes
  * from a copy of alloc_events.c. */

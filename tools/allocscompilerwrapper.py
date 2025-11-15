@@ -313,13 +313,28 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     # What comes out of this:
                     # __wrap_malloc calls __wrap___real_malloc which calls event hooks and real malloc
                     # output DSO's global 'malloc' becomes __wrap_malloc (thanks to xwrap semantics)
-                    # terminal hooks look for "__real_malloc" -- in WHAT object?
+                    # Terminal hooks look for "__real_malloc" in their own DSO.
+                    # These are created by the xwrap plugin.
+                    # We set these #defines so that stubgen.h, which generates the caller-side
+                    # hooks, will actually generate refernces to __wrap___real_*, not __real_,
+                    # and thereby call our indexing implementation of malloc etc..
                     stubsfile.write('#define __real_malloc __wrap___real_malloc\n')
                     stubsfile.write('#define __real_free __wrap___real_free\n')
                     stubsfile.write('#define __real_calloc __wrap___real_calloc\n')
                     stubsfile.write('#define __real_realloc __wrap___real_realloc\n')
                     stubsfile.write('#define __real_free __wrap___real_free\n')
                     stubsfile.write('#define __real_memalign __wrap___real_memalign\n')
+                    # PROBLEM: 'malloc_usable_size' is neither an allocation function
+                    # nor a free function. So we don't xwrap it. So no __real_malloc_usable_size
+                    # is created. So __terminal_hook_malloc_usable_size cannot look it up.
+                    # Our variously prefixed wrappers are created (hook_malloc_usable_size,
+                    # __terminal_hook_malloc_usable_size) but the global 'malloc_usable_size'
+                    # remains the original one, i.e. no __real_ alias and no __wrap_ top-level
+                    # alias (cf. malloc which has a caller wrapper, __wrap_malloc).
+                    # The __wrap___real_malloc_usable_size wrapper only gets called as sizefn!
+                    # It never gets called by common-or-garden callers, owing to lack of --wrap.
+                    stubsfile.write('#define __real_malloc_usable_size __wrap___real_malloc_usable_size\n')
+                    stubsLinkArgs += ["-Wl,--defsym,__real_malloc_usable_size=malloc_usable_size"]
                 else:
                     stubsfile.write('#define RELF_DEFINE_STRUCTURES\n')
                 stubsfile.write("#include \"" + self.getStubGenHeaderPath() + "\"\n")
@@ -434,7 +449,11 @@ class AllocsCompilerWrapper(CompilerWrapper):
                     stubsfile.flush()
                 if "malloc" in definedMatches:
                     stubsfile.write('#include "generic_malloc_index.h"\n')
-                    stubsfile.write('\nALLOC_EVENT_INDEXING_DEFS(__global_malloc, malloc_usable_size)\n')
+                    # See above: our hook path for malloc_usable_size never becomes the
+                    # global definition of 'malloc_usable_size', unlike the other malloc/free
+                    # functions. But we call through our own hook path, to be good citizens
+                    # e.g. if there are other hooks linked in after ours (hmm).
+                    stubsfile.write('\nALLOC_EVENT_INDEXING_DEFS(__global_malloc, hook_malloc_usable_size)\n')
                     stubsfile.flush()
                     (dynamicListFd, dynamicListFilename) = tempfile.mkstemp()
                     os.unlink(dynamicListFilename)

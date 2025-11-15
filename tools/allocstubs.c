@@ -48,7 +48,7 @@ LIBALLOCS_ALLOCSITE_OVERRIDE="S_more_sv,Perl_safesys_malloc,char,sv"
 /* Our caller-side stubgen logic (below) will generate
   __wrap_malloc functions (et al), that want to call __real_malloc (et al).
   But we want them to call the caller-side stuff we just generated, so....
-  (+ note that the output DSO's global 'malloc' will point to out __wrap_malloc (thanks to xwrap)
+  (+ note that the output DSO's global 'malloc' will alias our __wrap_malloc, thanks to xwrap)
  */
 #define __real_malloc __wrap___real_malloc
 #define __real_free __wrap___real_free
@@ -56,6 +56,7 @@ LIBALLOCS_ALLOCSITE_OVERRIDE="S_more_sv,Perl_safesys_malloc,char,sv"
 #define __real_realloc __wrap___real_realloc
 #define __real_free __wrap___real_free
 #define __real_memalign __wrap___real_memalign
+#define __real_malloc_usable_size __wrap___real_malloc_usable_size
 
 #endif /* LIBALLOCS_MALLOC_CALLEE_WRAPPERS */
 
