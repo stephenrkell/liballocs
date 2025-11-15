@@ -81,8 +81,10 @@ int ( __attribute__((constructor(103))) __liballocs_global_init)(void)
 	{
 		orig_dlopen = fake_dlsym(RTLD_NEXT, "dlopen");
 		assert(orig_dlopen);
+#if 0 /* preload.c simplification/elimination */
 		orig_memmove = fake_dlsym(RTLD_NEXT, "memmove");
 		assert(orig_memmove);
+#endif
 	}
 
 	/* NOTE that we get called during allocation. So we should avoid 

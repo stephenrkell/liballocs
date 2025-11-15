@@ -290,32 +290,6 @@ void *mmap(void *addr, size_t length, int prot, int flags,
 void *mmap64(void *addr, size_t length, int prot, int flags,
                   int fd, off_t offset) __attribute__((alias("mmap")));
 
-int munmap(void *addr, size_t length)
-{
-	static int (*orig_munmap)(void *, size_t);
-	if (!orig_munmap)
-	{
-		orig_munmap = dlsym(RTLD_NEXT, "munmap");
-		assert(orig_munmap);
-	}
-	
-	if (!__liballocs_systrap_is_initialized)  // XXX: see above for why "systrapping not init'd" here means "too early"
-	{
-		//write_string("Too early for us to call munmap!\n");
-		//abort();
-		return orig_munmap(addr, length);
-	}
-	else
-	{
-		int ret = orig_munmap(addr, length);
-		if (ret == 0)
-		{
-			__mmap_allocator_notify_munmap(addr, length, __builtin_return_address(0));
-		}
-		return ret;
-	}
-}
-
 void *mremap(void *old_addr, size_t old_size, size_t new_size, int mremap_flags, ... /* void *new_address */)
 {
 	static void *(*orig_mremap)(void *, size_t, size_t, int, ...);
@@ -493,6 +467,7 @@ out:
 	return ret;
 }
 
+#if 0
 void *memcpy(void *dest, const void *src, size_t n)
 {
 	static void *(*orig_memcpy)(void *, const void *, size_t);
@@ -522,3 +497,4 @@ void *memmove(void *dest, const void *src, size_t n)
 
 	return orig_memmove(dest, src, n);
 }
+#endif
