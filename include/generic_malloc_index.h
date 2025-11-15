@@ -53,6 +53,10 @@ extern int __currently_allocating;
 //void __free_arena_bitmap_and_info(void *info);
 #define __liballocs_free_arena_bitmap_and_info __free_arena_bitmap_and_info
 #define __liballocs_extract_and_output_alloc_site_and_type extract_and_output_alloc_site_and_type
+#else
+/* When building stubs for execution outside the liballocs DSO, e.g.
+ * for an in-exe malloc, the stubs will call out cross-DSO to the "public"
+ * symbol of the liballocs private malloc. */
 #endif
 
 static inline
