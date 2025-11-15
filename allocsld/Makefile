@@ -23,14 +23,25 @@ CFLAGS += $(LIBALLOCSTOOL_CFLAGS)  # for allocmeta-defs.h
 CFLAGS += -DDONALD_NAME=\"allocsld\"
 CFLAGS += -DCHAIN_LOADER
 
+# attempt to encourage binding early... this doesn't work yet
+# because it only applies to defined symbols. We want to make
+# undefines protected, so that the linker can bind them early,
+# in our relocatable link step.
+CFLAGS += -fvisibility=protected
+
 # for debugging build problems
 # CFLAGS += -save-temps
 # for debugging link problems
 LDFLAGS += -fno-lto -Wl,-Map=$@.map
 
-# HACK: we use a thread-local buffer in some places, but that doesn't work
-# in donald which lacks a TLS implementation
-meta-dso.o: CFLAGS += -DNO_TLS
+## HACK: we use a thread-local buffer in some places, but that doesn't work
+## in donald which lacks a TLS implementation
+#meta-dso.o: CFLAGS += -DNO_TLS
+#OBJCOPY ?= objcopy
+## and another HACK: we prefix  find_and_open_meta_libfile() to avoid conflict
+#meta-dso.o: meta-dso.c
+#	obj=$$(mktemp); $(CC) $(CPPFLAGS) $(CFLAGS) -c -o "$$obj" "$<" && \
+#$(OBJCOPY) --redefine-sym find_and_open_meta_libfile=allocsld_find_and_open_meta_libfile "$$obj" "$@"; status=$$?; rm -f "$$obj"; test $$status -eq 0 || (rm -f "$@"; false)
 
 # Thanks to Dan Williams for the recipes that my link commands were based on.
 # http://www.cs.virginia.edu/~dww4s/articles/ld_linux.html
@@ -38,7 +49,9 @@ meta-dso.o: CFLAGS += -DNO_TLS
 LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/build-$(shell uname -m)/lib/libc.a
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-OBJS := start.o premain.o main.o entry.o load.o chain.o debug.o allocinstr.o meta-dso.o err.o
+OBJS := start.o premain.o main.o entry.o load.o chain.o debug.o allocinstr.o
+OBJS += meta-dso.o err.o  # these come from liballocs proper XXX one-DSO does not like this
+
 C_DEPS := $(filter-out start.o,$(patsubst %.o,.%.d,$(OBJS)))
 DEPS := $(C_DEPS)
 

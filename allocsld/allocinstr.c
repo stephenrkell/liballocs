@@ -211,14 +211,16 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 	/* Now see if we can get the extrasyms. PROBLEM: we want to
 	 * call dlopen, but we don't yet have a functioning dlopen.
 	 * Instead we map the meta.so ourselves, using routines from
-	 * donald. We also use one liballocs routine. We have to
+	 * donald. We also use one liballocs routine, which we rename
+	 * to avoid conflicting with the "main" copy once allocsld and
+	 * liballocs_preload are unified into the same library. We have to
 	 * fake up the allocs_file_metadata structure. */
 	struct allocs_file_metadata fake_meta;
 	bzero(&fake_meta, sizeof fake_meta);
-	int find_and_open_meta_libfile(struct allocs_file_metadata *meta);
+	//int allocsld_find_and_open_meta_libfile(struct allocs_file_metadata *meta);
 	fake_meta.m.l = ld_so_link_map;
 	fake_meta.m.filename = fake_meta.m.l->l_name;
-	int fd_meta = find_and_open_meta_libfile(&fake_meta);
+	int fd_meta = /*allocsld_*/find_and_open_meta_libfile(&fake_meta);
 	if (fd_meta == -1) goto out_notloaded;
 	struct loadee_info ld_so_meta = load_from_fd(fd_meta, "metadata object for " SYSTEM_LDSO_PATH,
 		/* loadee_base_addr_hint */ (uintptr_t) 0, NULL, NULL);
@@ -331,7 +333,7 @@ void instrument_ld_so_allocators(uintptr_t ld_so_load_addr)
 		.p_orig_free = &orig_free
 	};
 
-	/* We need a writable, exxecutable buffer for trampolines. AND
+	/* We need a writable, executable buffer for trampolines. AND
 	 * it needs to be within a 32-bit PC-relative branch range of
 	 * the original ld.so. So ask for the next earlier frame */
 	void *rwx_buf = mmap((void*) (ld_so_load_addr - 8192), 4096,
