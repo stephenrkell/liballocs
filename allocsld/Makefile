@@ -103,8 +103,8 @@ allocsld-plain.os: LDLIBS += -Wl,--exclude-libs=libsystrap.a:librunt_preload.a:$
 OBJCOPY ?= objcopy
 READELF ?= readelf
 # FIXME: find this more sensibly
-REL2DATA ?= /home/stephen/work/devel/elftin.hg/rel2data/rel2data
-UNDPROT ?= /home/stephen/work/devel/elftin.hg/undprot/undprot
+REL2DATA ?= $(ELFTIN)/rel2data/rel2data
+UNDPROT ?= $(ELFTIN)/undprot/undprot
 %-undprot.o: %.o
 	cp $< $@ && $(UNDPROT) $@ || (rm -f "$@"; false)
 allocsld-plain.os: $(patsubst %.o,%-undprot.o,$(filter-out premain.o,$(OBJS)) allocsld.os-premain.o)
