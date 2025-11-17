@@ -217,10 +217,10 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 	 * fake up the allocs_file_metadata structure. */
 	struct allocs_file_metadata fake_meta;
 	bzero(&fake_meta, sizeof fake_meta);
-	//int allocsld_find_and_open_meta_libfile(struct allocs_file_metadata *meta);
+	int find_and_open_meta_libfile(struct allocs_file_metadata *meta);
 	fake_meta.m.l = ld_so_link_map;
 	fake_meta.m.filename = fake_meta.m.l->l_name;
-	int fd_meta = /*allocsld_*/find_and_open_meta_libfile(&fake_meta);
+	int fd_meta = find_and_open_meta_libfile(&fake_meta);
 	if (fd_meta == -1) goto out_notloaded;
 	struct loadee_info ld_so_meta = load_from_fd(fd_meta, "metadata object for " SYSTEM_LDSO_PATH,
 		/* loadee_base_addr_hint */ (uintptr_t) 0, NULL, NULL);
