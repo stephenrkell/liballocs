@@ -445,7 +445,7 @@ static void linear_malloc_index_insert(
 	size_t real_caller_usable_size = real_requested_size - sizeof (INSERT_TYPE);
 	struct insert *insert = insert_for_chunk_and_caller_usable_size(allocptr,
 		real_caller_usable_size);
-	insert->alloc_site = (uintptr_t) caller;
+	insert->initial.alloc_site = (uintptr_t) caller;
 	linear_malloc->recs[linear_malloc->nrecs_used++] = (struct linear_malloc_rec) {
 		.addr = allocptr,
 		.caller_requested_size = caller_requested_size,

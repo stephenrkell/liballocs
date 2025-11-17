@@ -330,7 +330,7 @@ void __unindex_small_alloc(void *ptr, int level);
 
 /* We also used to have some macros for generating callee wrappers. These
  * are now in allocstubs.c, for malloc-like callees (LIBALLOCS_MALLOC_CALLEE_WRAPPERS),
- * and are generated directly from libmallochooks. */
+ * and are generated directly from libmallochooks.
 
 /* Protos for our hook functions. The mallocapi-to-hookapi glue comes
  * from a copy of alloc_events.c. */
@@ -355,7 +355,7 @@ ALLOC_EVENT(post_successful_alloc)(void *allocptr, size_t modified_size, size_t 
 	if (initial_lifetime_policies) /* always statically known but we can't #ifdef here */ \
 	{ \
 		lifetime_insert_t *lti = lifetime_insert_for_chunk(allocptr /* == userptr */, sizefn); \
-		if (lti) *lti |= initial_lifetime_policies; \
+		if (lti) lti->with_type.lifetime_policies |= initial_lifetime_policies; \
 		/* GitHub issue #21: make initial_lifetime_policies caller-sensitive somehow? */ \
 	} \
 } \
@@ -374,10 +374,9 @@ int ALLOC_EVENT(pre_nonnull_free)(void *userptr, size_t freed_usable_size) \
 { \
 	if (initial_lifetime_policies) /* always statically known but we can't #ifdef here */ \
 	{ \
-		lifetime_insert_t *lti = lifetime_insert_for_chunk(userptr, sizefn); \
-		/* GitHub issue #21: are different free functions different policies? not yet... */ \
-		if (lti) *lti &= ~MANUAL_DEALLOCATION_FLAG; \
-		if (lti && *lti) return 1; /* Cancel free if we are still alive */ \
+		INSERT_TYPE *lti = insert_for_chunk(userptr, sizefn); \
+		lti->with_type.lifetime_policies &= ~LIFETIME_POLICY_FLAG(0); /* ZMTODO: This should not be 0 by default, but the one corresponding to this free */ \
+		if (lti->with_type.lifetime_policies != 0) return 1; /* Cancel free if we are still alive */ \
 		__notify_free(userptr); \
 	} \
 	index_namefrag ## _index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \
