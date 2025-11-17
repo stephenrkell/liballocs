@@ -63,7 +63,7 @@ $(C_DEPS): .%.d: %.c
 # exports DT_ALLOCS_BOOTSTRAP_RELA* and defines a rule for baking them into a .h
 # ... we keep this separate in case we want to include it elsewhere e.g. src/Makefile
 include allocsld.h.mk
-allocsld.os-premain.o: premain.c
+allocsld.os-premain.o: premain.c allocsld.h
 	$(CC) -c -o $@ $< $(CFLAGS) $(CPPFLAGS)
 allocsld.os-premain.o: CPPFLAGS += -include allocsld.h \
   -DRELA_DT_VALUE=DT_ALLOCS_BOOTSTRAP_RELA \
