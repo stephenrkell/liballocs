@@ -9,6 +9,7 @@
 #include "donald.h"
 #include <link.h>
 #include "relf.h"
+#include "cover-tracks.h"
 
 #define die(s, ...) do { fprintf(stderr, DONALD_NAME ": " s , ##__VA_ARGS__); exit(-1); } while(0)
 // #define die(s, ...) do { fwrite(DONALD_NAME ": " s , sizeof DONALD_NAME ": " s, 1, stderr); exit(-1); } while(0)
