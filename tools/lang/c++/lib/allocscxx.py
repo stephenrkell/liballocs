@@ -26,9 +26,9 @@ class AllocsCxx(AllocsCompilerWrapper):
                 outputFilename = sourceFile + ".o"
                 self.debugMsg("Making a secret output file (from unknown source) " + outputFilename + "\n")
             return outputFilename
-    
-    def getUnderlyingCompilerCommand(self, sourceFiles):
-        return ["c++"]
+
+    def getBasicCompilerCommand(self):
+        return [os.environ.get("ALLOCSCXX_CXX", "c++")]
 
 if __name__ == '__main__':
     wrapper = AllocsCxx()
