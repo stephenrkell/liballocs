@@ -39,34 +39,38 @@
 #define CHUNK_SIZE_WITH_TRAILER(sz, trailer_t, trailer_align_t) \
     PAD_TO_ALIGN(sz + sizeof (trailer_t), ALIGNOF(trailer_align_t))
 
-/* Inserts describing objects have user addresses. They may have the flag set or unset. */
+/* Inserts describing objects have user addresses */
 #define INSERT_DESCRIBES_OBJECT(ins) \
-	(!((ins)->alloc_site) || (char*)((uintptr_t)((unsigned long long)((ins)->alloc_site))) >= MINIMUM_USER_ADDRESS)
-#define INSERT_IS_NULL(p_ins) (!(p_ins)->alloc_site && !(p_ins)->alloc_site_flag)
+	(ins->with_type.alloc_site_id || (char*)((uintptr_t)((unsigned long long)(ins->initial.alloc_site))) >= MINIMUM_USER_ADDRESS)
+#define INSERT_IS_NULL(p_ins) (!INSERT_IS_WITH_TYPE(p_ins) && p_ins->initial.alloc_site == 0)
 
 /* What's the most space that a malloc insert will use?
  * We use this figure to guess when an alloc has been satisfied with mmap().
  * Making it too big hurts performance but not correctness. */
 #define MAXIMUM_MALLOC_HEADER_OVERHEAD 16
 
-struct insert
-{
-	unsigned alloc_site_flag:1;
-	unsigned long alloc_site:47;
-#if 0
-	union __attribute__((packed))
-	{
-		unsigned lowbits:3; /* FIXME: do these really coincide with low-order of allocsite? */
+
+#if LIFETIME_POLICIES > 4
+#error "Variable size lifetime policies not fully supported yet"
+#endif
+
+struct insert {
+	union {
+		struct insert_initial {
+			unsigned unused:16; /* Always Zero, branch union on this */
+			unsigned long alloc_site:48;
+		} initial;
+		struct insert_with_type {
+			unsigned alloc_site_id:15; /* may be zero; -1 means "no/unknown alloc site" */
+			unsigned always_1:1;
+			unsigned long uniqtype_shifted:44;  /* uniqtype ptrs are 8-byte aligned => and have top bit 0 => this field is ((unsigned long) u)>>3 */
+			unsigned lifetime_policies:4; // should never be zero 0000 should be that it is freed when and only when parent is freed.
+		} with_type;
 	};
-#endif
-	union __attribute__((packed))
-	{
-		unsigned bits:16; /* used to store alloc site in compact form */
-	} un;
-#ifdef USE_LIFETIME_POLICIES
-	unsigned long unused;
-#endif
-} __attribute__((packed));
+} __attribute((packed));
+
+#define UNIQTYPE_SHIFT_FOR_INSERT(u)       (((unsigned long) (u)) >> 3)
+#define UNIQTYPE_UNSHIFT_FROM_INSERT(bits) ((struct uniqtype *)(((unsigned long) (bits)) << 3))
 
 static inline /*size_t*/ unsigned long caller_usable_size_for_chunk_and_usable_size(void *userptr,
 	/*size_t*/ unsigned long alloc_usable_size)
@@ -95,34 +99,18 @@ static inline struct insert *insert_for_chunk(void *userptr, sizefn_t *sizefn)
 }
 
 
-/* Chunks can also have lifetime policies attached, if we are built
- * with support for this.
- *
- * Ideally we could pack all this into 64 bits:
- * -uniqtype        (44 bits)
- * -allocsite idx   (~14 bits? not sure how many bona-fide allocation sites large programs may have)
- *      -- one trick might be to bin the allocation sites by uniqtype, so that
- *         when the uniqtype is present, only a per-uniqtype idx is needed.
- *         Currently allocsites are sorted by address, so we can bsearch them,
- *         so we'd need a separate set of indexes grouping by type. Maybe the uniqtype
- *         can even point to its allocsites?
- * -one bit per lifetime policy (~6 bits?).
- *
- * When we get rid of the memtable in favour of the bitmap,
- * we should be able to fit this in.
- * For now, strip out the lifetime policies support.
- */
-typedef /*LIFETIME_INSERT_TYPE*/ unsigned char lifetime_insert_t;
 #define LIFETIME_POLICY_FLAG(id) (0x1 << (id))
+#define INSERT_IS_WITH_TYPE(ins) (ins->initial.unused != 0)
+
 /* By convention lifetime policy 0 is the manual deallocation policy */
 #define MANUAL_DEALLOCATION_POLICY 0
 #define MANUAL_DEALLOCATION_FLAG LIFETIME_POLICY_FLAG(MANUAL_DEALLOCATION_POLICY)
 /* Manual deallocation is not an "attached" policy */
 #define HAS_LIFETIME_POLICIES_ATTACHED(lti) ((lti) & ~(MANUAL_DEALLOCATION_FLAG))
-
+typedef struct insert lifetime_insert_t;
 static inline lifetime_insert_t *lifetime_insert_for_chunk(void *userptr, sizefn_t *sizefn)
 {
-	return (void*)0; /* FIXME: restore this */ /* &extended_insert_for_chunk(userptr, sizefn)->lifetime; */
+	return insert_for_chunk(userptr,sizefn);
 }
 #define INSERT_TYPE struct insert
 

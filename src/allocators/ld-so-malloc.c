@@ -102,8 +102,8 @@ static struct liballocs_err *linear_malloc_get_info(
 			found->addr, found->caller_requested_size + found->padding_to_caller_usable_size); // FIXME: wrong size here?
 		if (out_base) *out_base = found->addr;
 		if (out_size) *out_size = found->caller_requested_size;
-		if (out_type && heap_info->alloc_site_flag) *out_type = (struct uniqtype *) (void*) (uintptr_t) heap_info->alloc_site;
-		if (out_site && !heap_info->alloc_site_flag) *out_site = (void*) (uintptr_t) heap_info->alloc_site;
+		if (out_type && INSERT_IS_WITH_TYPE(heap_info)) *out_type = (struct uniqtype *) UNIQTYPE_UNSHIFT_FROM_INSERT(heap_info);
+		if (out_site && !INSERT_IS_WITH_TYPE(heap_info)) *out_site = (void*) (uintptr_t) heap_info->initial.alloc_site;
 		return NULL;
 	}
 	return &__liballocs_err_unindexed_heap_object;
