@@ -812,9 +812,10 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		if (p_ins)
 		{
 	#ifdef NDEBUG
-			*p_ins = (struct insert) { .initial = {
-				.alloc_site = 0U,
-				.unused = 0U
+			*p_ins = (struct insert) { .with_type = {
+				.uniqtype_shifted = 0,
+				.alloc_site_id = (allocsite_id_t) -1,
+				.always_1 = 1,
 			} };
 	#endif
 			assert(INSERT_DESCRIBES_OBJECT(p_ins));
