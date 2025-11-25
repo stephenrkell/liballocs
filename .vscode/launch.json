@@ -1,0 +1,52 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug liballocs test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/usr/bin/env",
+            "args": [
+                "LD_PRELOAD=/home/zoltan/Develop/liballocs/lib/liballocs_preload.so",
+                "/home/zoltan/Develop/liballocs/tests/${input:testCase}/${input:testCase}",
+                "/home/zoltan/Develop/liballocs/tests/${input:testCase}/${input:testCase}"
+            ],
+            "stopAtEntry": false,
+            "cwd": "/home/zoltan/Develop/liballocs/tests/${input:testCase}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Ignore SIGILL",
+                    "text": "handle SIGILL nostop noprint pass",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Ignore SIGBUS",
+                    "text": "handle SIGBUS nostop noprint pass",
+                    "ignoreFailures": true
+                }
+            ],
+            "miDebuggerPath": "/usr/bin/gdb"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testCase",
+            "type": "promptString",
+            "description": "Test case name",
+            "default": "addrtaken-allocator"
+        }
+    ]
+}
