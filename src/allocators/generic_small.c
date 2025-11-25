@@ -556,7 +556,7 @@ check_bucket_sanity(struct entry *p_bucket, struct chunk_rec *p_chunk_rec, struc
 
 		if (ENTRY_IS_CONTINUATION(i_layer))
 		{
-			assert(i_layer->continuation.thisbucket_size != 0);
+			// assert(i_layer->continuation.thisbucket_size != 0); // FIXME: size 0 means 256, this assert won't work. But there could be a better one here
 			/* Check that the *previous* bucket contains the object start */
 			assert(get_start_from_continuation(i_layer, p_bucket, p_chunk_rec, container,
 					NULL, NULL, NULL));
