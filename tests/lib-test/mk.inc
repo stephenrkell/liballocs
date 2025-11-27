@@ -2,7 +2,7 @@ THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 # lib-test is a plain old C program, not allocscc'd, and it
 # dlopens liballocs (test build) to run its self-test constructors.
 export CC := cc
-export CFLAGS := -fPIC -O0 -g3 -DTEST
+export CFLAGS := -fPIC -O0 -g3 -DTEST -gdwarf-4 # HACK: Force DWARF 4 until v5 is not supported (https://github.com/stephenrkell/liballocs/issues/77)
 srcroot := $(realpath $(dir $(realpath $(THIS_MAKEFILE)))../..)
 # One exception: we must avoid the ld.so  hole, so use allocsld for that.
 export LDFLAGS := -Wl,--dynamic-linker,$(srcroot)/allocsld/allocsld.so
