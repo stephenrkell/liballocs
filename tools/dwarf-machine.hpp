@@ -656,11 +656,11 @@ int main(int argc, char **argv)
 	{
 		{
 			typedef program< DW_OP_dup, 0l, 0l, 1u, 
-			        	program< DW_OP_lit2, 0l, 0l, 1u, 
-				        	program< DW_OP_mod, 0l, 0l, 1u, 
-					        	program< DW_OP_bra, 2l /* skip two "one-byte" instrs */, 0l, 1u, 
-						        	program< DW_OP_lit2, 0l, 0l, 1u, 
-							        	program< DW_OP_mul, 0l, 0l, 1u, 
+						program< DW_OP_lit2, 0l, 0l, 1u, 
+							program< DW_OP_mod, 0l, 0l, 1u, 
+								program< DW_OP_bra, 2l /* skip two "one-byte" instrs */, 0l, 1u, 
+									program< DW_OP_lit2, 0l, 0l, 1u, 
+										program< DW_OP_mul, 0l, 0l, 1u, 
 			void > > > > > > prog;
 			typedef state<
 				prog,
@@ -681,8 +681,8 @@ int main(int argc, char **argv)
 			typedef program< DW_OP_lit2, 0l, 0l, 1u,
 						program< DW_OP_lit2, 0l, 0l, 1u,
 							program< DW_OP_bra, 1l, 0l, 1u,
-			        			program< DW_OP_nop, 0l, 0l, 1u, 
-				        			program< DW_OP_lit2, 0l, 0l, 1u,
+								program< DW_OP_nop, 0l, 0l, 1u, 
+									program< DW_OP_lit2, 0l, 0l, 1u,
 			void > > > > > prog;
 			typedef state<
 				prog,

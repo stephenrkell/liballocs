@@ -4,7 +4,7 @@ SRCROOT := $(realpath $(dir $(THIS_MAKEFILE))/..)
 default: all
 
 SYMLINKS := liballocs_preload.a liballocs_preload.so \
-    liballocs_dummyweaks.o liballocs_dummyweaks.so liballocs.a \
+    liballocs_dummyweaks.so liballocs.a \
     liballocs.so allocsld.so
 
 # Now that we build in '$(SRCROOT)/build/<outdir>', where <outdir> might

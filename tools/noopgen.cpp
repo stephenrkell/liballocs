@@ -196,8 +196,8 @@ int main(int argc, char **argv)
 	}
 
 	// static const members are too much faff
-#define preload_prefix "__yesop_"
-#define nopreload_prefix "__noop_"
+//#define preload_prefix "__yesop_"
+//#define nopreload_prefix "__noop_"
 	/* TODO: instead of "__yesop_" polluting our symtabs, ideally we would like
 	 * the .dynsym to include only the ifuncs and noops, and the .symtab to
 	 * include only the yesops (or those plus noops) but with their unprefixed name.
@@ -264,8 +264,10 @@ int main(int argc, char **argv)
 				if (mode == IFUNCGEN && d.is_a<subprogram_die>())
 				{
 					// we need to declare the __yesop_ and __noop_ functions
-					o << decl_of_die(d, true, true, string(nopreload_prefix) + *d.name_here());
-					o << decl_of_die(d, true, true, string(preload_prefix) + *d.name_here());
+					// XXX: no, do that in the macro. But we do need to macro-generate
+					// a declaration somehow
+					//o << decl_of_die(d, true, true, string(nopreload_prefix) + *d.name_here());
+					//o << decl_of_die(d, true, true, string(preload_prefix) + *d.name_here());
 					auto with_loc = d.as_a<with_static_location_die>();
 					auto maybe_symname = with_loc->get_linkage_name();
 					// if the name matches one of our symbols...
@@ -302,11 +304,21 @@ int main(int argc, char **argv)
 			{
 				return this->dependency_ordering_cxx_target::body_of_subprogram_die(d);
 			}
+			// mode is IFUNCGEN
 			assert(maybe_symname);
 			return [=](indenting_ostream& o) -> indenting_ostream& {
-				o << "if (check_head_preload_position()) return (func_ptr_t) "
-					<< preload_prefix << *maybe_symname << ";" << endl;
-				o << "return (func_ptr_t) " << nopreload_prefix << *maybe_symname << ";";
+				/* Output a macro invocation for the body. Clients will
+				 * define this macro. XXX: can we use a simple macro approach
+				 * in place of this whole tool? Why not? I think in general,
+				 * a noop implementation that respects the calling convention
+				 * will need to know its signature at least up to its C-ABI-encoded
+				 * arg/return types. So we would have to generate the noop declarator...
+				 * true that we could start from a macroised version of it. */
+				o << "IFUNC_BODY_FOR(" << *maybe_symname << ")";
+			
+				//o << "if (check_head_preload_position()) return (func_ptr_t) "
+				//	<< preload_prefix << *maybe_symname << ";" << endl;
+				//o << "return (func_ptr_t) " << nopreload_prefix << *maybe_symname << ";";
 				return o;
 			};
 		}

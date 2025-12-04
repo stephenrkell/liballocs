@@ -800,8 +800,7 @@ void write_traditional_output(
 
 struct triple : public pair<string, pair< codeful_name, pair<unsigned,unsigned> > >
 {                    // element name, codeful name, piece pair (see below)
-	using pair::pair;
-	triple(const frame_element& el)
+	explicit triple(const frame_element& el)
 	{
 		string name_to_use;
 		codeful_name type;
@@ -828,17 +827,24 @@ struct triple : public pair<string, pair< codeful_name, pair<unsigned,unsigned> 
 			auto save_location = el.effective_expr_piece.copy_as_if_whole();
 			// we make up a name
 			ostringstream name;
-			name << "__saved_caller_reg" << *el.m_caller_regnum;
-			assert(*el.m_caller_regnum != DW_FRAME_CFA_COL3);
+			name << "__saved_caller_reg" << caller_regnum;
+			assert(caller_regnum != DW_FRAME_CFA_COL3);
 			/* NOTE: __saved_caller_reg_1436 is the CFA column.
 			 * Hmm. And the CFA is computed. What is the right logic for this?
 			 * We could pretend that every arch has an additional register,
 			 * number 1436, whose value is always computable and when we compute
-			 * it for a given caller, we get the *callee*'s CFA. This duplicates
-			 * our "frame offset" map, if we are still generating that, but
-			 * I guess we don't need it any more because there is no overall
-			 * frame layout. So keep the assertion and filter it out on the
-			 * caller side. */
+			 * it for a given caller, we get the *callee*'s CFA, or equivalently
+			 * (*usually* equivalently) the "end" of the caller's stack frame.
+			 * Note that it lives in the callee's DWARF so this requires an
+			 * explicit re-homing.
+			 *
+			 * This duplicates our "frame offset" map, if we are still generating
+			 * that, but I guess we don't need it any more because there is no
+			 * overall frame layout.
+			 *
+			 * Let's keep the assertion and filter it out on the caller side, i.e.
+			 * do consider the CFA a frame element, but
+			 * don't create triples for it. Hence the assertion above! */
 			name_to_use = name.str();
 			type = make_pair("", "__opaque_word");
 		}
@@ -884,6 +890,421 @@ void write_triples(ostream& s,
 		s << "\t(" << i_map_pair->second.size() << " elements)";
 		s << endl;
 		out_idx_map[i_map_pair->first] = i++;
+	}
+}
+
+typedef pair< Dwarf_Signed, triple > quad;
+/* this generalises to stack quads, regfile quads, computed quads, ... more?
+ * Recall: a triple is <var, type, piece-spec>
+ * and a quad is <location, triple>
+ *
+ * Quads have many micro-intervals and one mega-interval *per subprogram*.
+ * (Initially I collected mega-intervals across the whole text segment but
+ * it just created enormous mega-intervals which could be mostly empty,
+ * i.e. one same-name/type variable in two distant functions.)
+ *
+ * Quads appear and disappear over the code address space;
+ * the micro intervals are the PC ranges over which that quad is in the layout.
+ * The mega-interval is the lowest-addressed appearance
+ * and the highest-addressed disappearance.
+ *
+ * If we record quads by their micro-intervals only, we get a lot of
+ * intervals.
+ * If we record them by their mega-intervals only, we get a lot of
+ * *simultaneous quads* of which not all are valid, so we need a
+ * longer, sparser bitmap which also wastes space.
+ *
+ * So we want to pick the practical "macro-intervals" that balance
+ * this trade-off.
+ *
+ * We can create the macro intervals by finding ranges with >NBITS
+ * spanning intervals and splitting a macro interval which spans that range
+ * but has no micro-interval intersecting that range.
+ *
+ * We need to split this until no bitmap requires more than NBITS.
+ * NBITS cannot be lower than the maximum number of simultaneously live
+ * micro-intervals.
+ *
+ * After this splitting, we know we have a representable result but it may
+ * not be space-optimal, i.e. more splitting might yield a more compact
+ * result. TODO: understand how to optimise this. We probably want to
+ * minimise the number of *bitmap changes*, since the bitmap only needs
+ * re-emitting when it changes.
+ *
+ * We can write about this as a sliding window scheme.
+ * The window slides over a sorted sequence of quad intervals.
+ * The window has a fixed maximum size N.
+ * If there are ever more than N live micro-intervals, we mark
+ * that range as special and fall back on a slower structure
+ * (One possible: if we have M bits, N = M-1 and so we know an all-1s bitmap
+ * signifies "use slower structure".)
+ *
+ * The excess bits in our bitmap give us latitude to use bigger
+ * intervals than the micro-intervals.
+ *
+ * Now we know our limit N, our job is to pick a minimal set of splittings
+ * of the mega-intervals s.t. 
+ * the number of included intervals is always <=N.
+ * Over some interval I where we have >N, which is the best one to split?
+ * Obviously, we'd like to pick one interval that is not live over all of I.
+ * There might not be such an interval. We need to pick some set whose
+ * non-live parts collectively cover I.
+ * Or put differently, we pick one that will narrow I to some I' < I,
+ * then iterate this approach until we always have <=N included intervals.
+ * Do we just pick the biggest-non-live-extent and keep doing that? Sounds good.
+ *
+ * (If we split everything, we'd degenerate into the classic struct-style
+ * approach where each quad's micro-interval gets its own entry in the
+ * list. This minimises the window size, at the cost of multiplying up
+ * the number of records. By contrast, we can allow quads to recur across
+ * multiple micro-intervals at small cost, because it's only a bit in a
+ * bitmap.)
+ *
+ * XXX: check we don't get screwed up by functions that are discontiguous
+ * (Bolt/Propeller might split / reorder -- talk from EuroLLVM 2025
+ *   HMM... liballocs generally cares about this. One function may be
+ *   many allocations. That is conceptually OK but our practice of
+ *   declaring that a function's entry point is an allocation
+ *   "of" a zero-sized __FUN_* type may or may not be? Actually it's OK.
+ *   If a function is split over many sections, its instructions are split
+ *   over many allocations, but it still has single entry point.)
+ */
+void collect_quad_stats(
+	frame_intervals_t const& elements_by_interval,
+	subprogram_vaddr_interval_map_t const& subprograms_by_vaddr,
+	std::function<optional<Dwarf_Signed>(frame_element const&)> maybe_get_key,
+	map<quad, boost::icl::interval_set<Dwarf_Addr> >& micro_intervals_by_quad,
+	vector< pair< boost::icl::discrete_interval<Dwarf_Addr>, pair<quad, subprogram_key> > >&
+	   quad_mega_intervals,
+	boost::icl::interval_map<Dwarf_Addr, set< quad > >& quads_by_mega_interval_address
+)
+{
+	map< pair<quad, subprogram_key>, set< boost::icl::discrete_interval<Dwarf_Off> > >
+	  micro_intervals_by_quad_and_subprogram;
+	for (auto i_int = elements_by_interval.begin(); i_int != elements_by_interval.end();
+		 ++i_int)
+	{
+		auto i_found_subp = subprograms_by_vaddr.find(i_int->first.lower());
+		/* collect the relevant (either CFA-offset or register),
+		 * sort them by offset/regnum,
+		 * output them as a mergeable sequence,
+		 * then point to that list (including a length) */
+		vector< pair< Dwarf_Signed, frame_element > > elements;
+		map< pair< Dwarf_Signed, triple >, frame_element > elements_map; // for sanity checking
+		for (auto i_el = i_int->second.begin(); i_el != i_int->second.end(); ++i_el)
+		{
+			optional<Dwarf_Signed> maybe_offset;
+			if (optional<Dwarf_Signed>() != (maybe_offset = maybe_get_key(*i_el)))
+			{
+				quad quad = make_pair(*maybe_offset, triple(*i_el));
+				micro_intervals_by_quad[quad].insert(i_int->first);
+				if (i_found_subp != subprograms_by_vaddr.end())
+				{
+					micro_intervals_by_quad_and_subprogram[
+						make_pair(quad, i_found_subp->second.begin()->first)
+						].insert(i_int->first);
+				}
+				else
+				{
+					// FIXME: use a null subprogram key
+				}
+			}
+		}
+	}
+	/* Now for each quad, get its highest and lowest addr.
+	 * We do this once per subprogram, i.e. we calculate one
+	 * mega-interval per quad-subprogram pair. */
+	for (auto i_quad_pair = micro_intervals_by_quad_and_subprogram.begin();
+	          i_quad_pair != micro_intervals_by_quad_and_subprogram.end();
+		++i_quad_pair)
+	{
+		auto& quad_subp_pair = i_quad_pair->first;
+		auto& q = i_quad_pair->first.first;
+		auto& subp_k = i_quad_pair->first.second;
+
+		// these are the whole-DSO mega-mega-interval that we must break down by subprogram
+		// XXX: are we just clamping this to the subprogram boundaries? That's not what
+		// we want. Walk subprograms and then walk all micro intervals filtered by subprogram.
+		// This also works if the subprogram is discontiguous!
+		// 
+		Dwarf_Addr lowest_micro_lower = i_quad_pair->second.begin()->lower();
+		Dwarf_Addr highest_micro_upper = i_quad_pair->second.rbegin()->upper();
+
+		// XXX: want to print these sorted by ...?
+		auto the_int = boost::icl::discrete_interval<Dwarf_Addr>::right_open(
+			lowest_micro_lower, highest_micro_upper);
+		quad_mega_intervals.push_back(make_pair(the_int, quad_subp_pair));
+		set<quad> singleton; singleton.insert(q);
+		unsigned set_size_previously_at_lower =
+		    (quads_by_mega_interval_address.find(highest_micro_upper)
+		  == quads_by_mega_interval_address.end()) ? 0 : 
+		       quads_by_mega_interval_address.find(highest_micro_upper)->second.size();
+		quads_by_mega_interval_address += make_pair(
+			the_int,
+			singleton
+		);
+		unsigned set_size_now_at_lower =
+		    (quads_by_mega_interval_address.find(highest_micro_upper)
+		  == quads_by_mega_interval_address.end()) ? 0 : 
+		       quads_by_mega_interval_address.find(highest_micro_upper)->second.size();
+		assert(set_size_now_at_lower >= set_size_previously_at_lower);
+		assert(set_size_now_at_lower <= set_size_previously_at_lower + 1);
+	}
+	std::sort(quad_mega_intervals.begin(), quad_mega_intervals.end());
+	for (auto i_mega = quad_mega_intervals.begin();
+			i_mega != quad_mega_intervals.end(); ++i_mega)
+	{
+		auto& q_subp_pair = i_mega->second;
+		auto& q = q_subp_pair.first;
+		auto& subp_k = q_subp_pair.second;
+		auto& the_int = i_mega->first;
+		cerr << "quad "
+			<< "<" << std::hex << q.second
+			<< ", " << std::dec << q.first
+			<< "> in subprogram "
+			<< subp_k.subprogram_name()
+			<< " (idx " << quad_mega_intervals.size() << ")"
+			<< " has mega-interval 0x" << std::hex << the_int.lower()
+			<< ", 0x" << std::hex << the_int.upper()
+			<< std::endl;
+	}
+	/* Now we want to print a visual map, by subprogram.
+	 * We calculate the subprogram's columns
+	 * as the set of all quads active during any part of the subprogram
+	 * ... each may have >=1 micro-interval.
+	 * We group them horizontally by their triple, then sort by key within the triple group
+	 * We output one row per byte (!) of instruction space.
+	 * We output an 'x' in a quad's column
+	 * iff some micro-interval, of the quad, includes this byte address
+	 */
+	optional<subprogram_key> current_subp;
+	Dwarf_Addr current_subp_begin;
+	Dwarf_Addr current_subp_end;
+	auto compare_quads = [](quad const& q1, quad const& q2) -> bool {
+		// we are operator<
+		return q1.second < q2.second
+		|| (q1.second == q2.second && q1.first < q2.first);
+	};
+	set< quad, __typeof(compare_quads) > columns(compare_quads);
+	for (unsigned long vaddr = quad_mega_intervals.begin()->first.lower();
+		vaddr != quad_mega_intervals.rbegin()->first.upper();
+		++vaddr)
+	{
+		/* Has our subprogram changed? If so, recalculate columns. */
+		if (!current_subp || vaddr == current_subp_end)
+		{
+			// current subp is...
+			auto i_found_subp = subprograms_by_vaddr.find(vaddr);
+			if (i_found_subp == subprograms_by_vaddr.end())
+			{
+				// no current subp
+				current_subp = optional<subprogram_key>();
+				current_subp_begin = (Dwarf_Addr) -1;
+				current_subp_end = (Dwarf_Addr) -1;
+				continue;
+			}
+			current_subp = i_found_subp->second.begin()->first;
+			current_subp_begin = vaddr;
+			current_subp_end = //end_of_contiguous_range(vaddr, current_subp);
+				i_found_subp->first.upper();
+			
+			/* Our columns are the triple and the key, i.e. the quad!
+			 * We have one per quad that is *active at any PC in the current
+			 * subprogram [nitpick: contiguous fragment thereof].  */
+			//columns = quads_over(current_subp_begin, current_subp_end);
+			columns.clear();
+			vector<quad> spanning_quads;
+			assert(current_subp_end != (Dwarf_Addr) -1);
+			assert(current_subp_end >= vaddr);
+			for (auto i_mega_intersecting = quads_by_mega_interval_address.find(vaddr);
+				i_mega_intersecting != quads_by_mega_interval_address.end()
+				&& i_mega_intersecting != quads_by_mega_interval_address.find(current_subp_end);
+				++i_mega_intersecting)
+			{
+				auto& s = i_mega_intersecting->second;
+				for (auto i_quad = s.begin(); i_quad != s.end(); ++i_quad)
+				{
+					spanning_quads.push_back(*i_quad);
+				}
+			}
+			for (auto i_spanning = spanning_quads.begin(); i_spanning != spanning_quads.end();
+				++i_spanning)
+			{
+				auto& q = *i_spanning;
+				for (auto i_micro = micro_intervals_by_quad[q].find(current_subp_begin);
+					i_micro != micro_intervals_by_quad[q].find(current_subp_end);
+					++i_micro)
+				{
+					// if this loop body runs once per quad, that's enough
+					columns.insert(q);
+					break;
+				}
+			}
+			/* Output a header for this subprogram. */
+			cerr << "Subprogram " << current_subp->subprogram_name() << " over range ["
+				<< std::hex << vaddr << ", " << current_subp_end << ") has " << columns.size()
+				<< " quads:" << endl;
+			cerr << "          ";
+			for (auto i_col = columns.begin(); i_col != columns.end(); ++i_col)
+			{
+				if (i_col != columns.begin() &&
+					({ auto i_prev_col = i_col; --i_prev_col; })->first != i_col->first )
+				{
+					cerr << '|';
+				}
+				cerr << ' ';
+			}
+			cerr << endl;
+		}
+		/* Has our row changed from the last one we output? If not, just remember
+		 * this and go to the next. */
+
+		cerr << std::setw(9) << std::hex << vaddr << ' ';
+		/* For each column, output an 'x' if and only if that quad is active, else ' ' */
+		for (auto i_col = columns.begin(); i_col != columns.end(); ++i_col)
+		{
+			if (i_col != columns.begin() &&
+				({ auto i_prev_col = i_col; --i_prev_col; })->first != i_col->first )
+			{
+				cerr << '.';
+			}
+			/* Have we switched to a new triple? If so output '|' (header line)
+			 * or ' ' (otherwise).
+			 * -- XXX- our quads are the wrong way around! want triple first, key
+			 * second. BUT in other places we want the key first.
+			 * So we need a reversed comparator.
+			 */
+			if (micro_intervals_by_quad[*i_col].find(vaddr)
+				!= micro_intervals_by_quad[*i_col].end())
+			{
+				cerr << 'x';
+			}
+			else cerr << ' ';
+		}
+		cerr << endl;
+	}
+#if 0
+	/* Since quads are pairs <offset, triple>
+	 * and quad intervals are pairs <interval, quad>
+	 * if we sort the quad intervals we are sorting by the start address. */
+	std::sort(quad_mega_intervals.begin(), quad_mega_intervals.end());
+	for (auto i_mega_int = quad_mega_intervals.begin(); i_mega_int != quad_mega_intervals.end();
+		++i_mega_int)
+	{
+		/* Intersect this interval with the intervals in the
+		 * subprogram_vaddr_interval_map. We want to iterate
+		 * over all intersecting intervals. Since the subprograms are
+		 * sorted by vaddr, it is not expensive to zoom in on the right range. */
+		for (auto i_found_subp = subprograms_by_vaddr.find(
+			i_mega_int->first.lower());
+			i_found_subp != subprograms_by_vaddr.end() &&
+			   i_found_subp->first.lower() < i_mega_int->first.upper();
+			++i_found_subp)
+		{
+//			if (i_mega_int->first.upper() - i_mega_int->first.lower() > 8192)
+//			{
+//				cerr << " SUSPICIOUS"; // i.e. we should break by function
+//			}
+
+
+			set<quad> singleton; singleton.insert(i_mega_int->second.first);
+			quads_by_mega_interval_address += make_pair(
+				boost::icl::discrete_interval<Dwarf_Addr>::right_open(
+					lower, //i_mega_int->first.first,
+					upper //i_mega_int->first.second
+				),
+				singleton
+			);
+		}
+	}
+#endif
+	// how many live at each PC?
+	for (auto i_int = quads_by_mega_interval_address.begin(); i_int != quads_by_mega_interval_address.end();
+		++i_int)
+	{
+		/* Find the linear index of the lowest-mega-interval-addressed and
+		 * highest-mega-interval-addressed quad spanning this interval.
+		 * We should only find quad mega-intervals for the current
+		 * subprogram. How do we ensure this? By not adding to
+		 * quads_by_mega_interval_address any mega-interval that spans
+		 * subprograms. This does mean, however, that one quad has
+		 * many mega-intervals.
+		 * 
+		 * This is how many entries, in quad index space,
+		 * our bitmap has to be able to address. If there are too many
+		 * we will split a quad whose mega-interval spans here but
+		 * that does not have any micro-interval intersecting here.
+		 */
+
+		auto subprogram_at = [subprograms_by_vaddr](Dwarf_Addr addr) {
+			return subprograms_by_vaddr.find(addr);
+		};
+		auto i_current_subp = subprogram_at(i_int->first.lower());
+		assert(i_current_subp != subprograms_by_vaddr.end());
+		assert(i_current_subp->second.size() == 1);
+		auto current_subp_k = i_current_subp->second.begin()->first;
+
+		/* There is a set of quad mega-intervals spanning this PC range.
+		 * Of those, what is the lowest mega-interval bottom
+		 * and the highest mega-interval top?
+		 * We don't know! We would have to search backwards and forwards.
+		 * We haven't kept the right data structures to answer this efficiently.
+		 * OK, added subprogram to mega_intervals. That might be enough?
+		 * AH NO. We still can't get the mega-interval of this quad,
+		 * except by searching.
+		 *
+		 * WHY do we want to know this? To get the width in idx-space
+		 * that a bitmap covering this address range would have to span.
+		 * If it's more than our bitmap max width, we do some splitting.
+		 *
+		 * (To accommodate occasional over-width bitmaps, maybe we can do a
+		 * "continuation record" thing? i.e. a rare case of multiple words
+		 * of bitmap squished together.)
+		 */
+#if 0
+		auto i_lowest_quad = i_int->second.begin();
+		__typeof(i_lowest_quad) i_highest_quad;
+
+		if (i_int->second.size() == 0) i_highest_quad = i_lowest_quad;
+		else { i_highest_quad = i_int->second.end(); --i_highest_quad; }
+		assert(i_highest_quad != i_lowest_quad);
+		quad lowest_q = *i_lowest_quad;
+		quad highest_q = *i_highest_quad;
+#endif
+		auto& quad_set_here = i_int->second;
+		// FIXME: these find_if are doing linear search, but we can do binary search
+		// We want to find the linear index of the lowest-star-addressed
+		// mega-interval that intersects this interval,
+		// and similar for the highest.
+#define CONTAINS(s, el) \
+  ((s).find(el) != (s).end())
+
+#define COND (qpp.second.second == current_subp_k && \
+				qpp.first.upper() >= i_int->first.lower() \
+				&& qpp.first.lower() <= i_int->first.upper())
+
+		auto i_vecpos_lowest = std::find_if(quad_mega_intervals.begin(),
+			quad_mega_intervals.end(), [/*lowest_q,*/ current_subp_k, quad_set_here, i_int](
+				pair< boost::icl::discrete_interval<Dwarf_Addr>, pair< quad, subprogram_key > > const& qpp
+			) { return COND; });
+				/* This is wrong. It is checking whether the *micro* intervals
+				 * active here contain our quad.  We want to find the lowest
+				 * mega-*/
+				//CONTAINS(quad_set_here, qpp.second.first)
+				//&& qpp.second.second == current_subp_k; /* <-- should alwyas be true? */});
+		auto i_vecpos_highest_plus_one = std::find_if(i_vecpos_lowest,
+			quad_mega_intervals.end(), [/*highest_q,*/ current_subp_k, quad_set_here, i_int](
+				pair<boost::icl::discrete_interval<Dwarf_Addr>, pair< quad, subprogram_key> > const& qpp
+			) { return !COND; });
+		unsigned vecidx_low = i_vecpos_lowest - quad_mega_intervals.begin();
+		unsigned vecidx_high = i_vecpos_highest_plus_one - quad_mega_intervals.begin();
+		cerr << std::hex << i_int->first << ": " << std::dec
+			<< i_int->second.size() << " quad mega-intervals spanning; "
+			<< "addr-sorted mega-interval indices lowest " << vecidx_low
+			<< ", highest-plus-one " << vecidx_high
+			<< ", range " << (vecidx_high - vecidx_low)
+			<< endl;
+		
 	}
 }
 
@@ -964,7 +1385,7 @@ void write_compact_output(
 	map< triple, vector< frame_element > > m;
 	map< frame_element, triple > reverse_m;
 	/* We need to make getting a 'triple idx' easy. */
-	map< triple, unsigned > idx_map;
+	map< triple, unsigned > triple_idx_map;
 	for (auto i_int = elements_by_interval.begin(); i_int != elements_by_interval.end();
 		++i_int)
 	{
@@ -974,6 +1395,8 @@ void write_compact_output(
 			 * for the current CFA. */
 			if (!i_el->is_current_cfa())
 			{
+				assert(!i_el->m_caller_regnum ||
+					!(*i_el->m_caller_regnum == DW_FRAME_CFA_COL3));
 				auto t = triple(*i_el);
 				m[t].push_back(*i_el);
 				auto inserted = reverse_m.insert(make_pair(*i_el, t));
@@ -995,7 +1418,7 @@ void write_compact_output(
 		}
 	}
 	cerr << "Finished calculating name--type--piece triples" << endl;
-	write_triples(cout, m, idx_map);
+	write_triples(cout, m, triple_idx_map);
 
 	/* After the triples, what's next? It's the location descriptions.
 	 * A description is always a *piece* of an "effective expression"
@@ -1015,65 +1438,320 @@ void write_compact_output(
 	 *           (XXX: can functions handle the "implicit value" case?)
 	 *      -- then emit the computed as a final mergeable sequence,
 	 *           sorted by idx of the name--type triple
+	 *      (all ASSUMING that merging of these sequences will really happen,
+	 *       to an appreciable degee. See below.)
 	 * - MEASURE the merge gain
 	 * - label with symbols -- how are we going to consume this?
 	 *       -- liballocs querying a stack address will use table (1)
 	 *       -- liballocs may gain an "explain this mcontext" API? for regs
 	 *       -- .. and a "resolve source identifier" API? for computed/implicit-values
 	 */
-	auto i_prev_int = elements_by_interval.end();
-	vector< pair< Dwarf_Signed, frame_element > > prev_cfa_offset_elements;
-	for (auto i_int = elements_by_interval.begin(); i_int != elements_by_interval.end();
-		i_prev_int = i_int, ++i_int)
-	{
-		/* collect the CFA-relative locations,
-		 * sort them by offset,
-		 * output them as a mergeable sequence,
-		 * then point to that list (including a length) */
-		vector< pair< Dwarf_Signed, frame_element > > cfa_offset_elements;
-		for (auto i_el = i_int->second.begin(); i_el != i_int->second.end(); ++i_el)
-		{
-			optional<Dwarf_Signed> offset;
-			if (optional<Dwarf_Signed>() !=
-				(offset = i_el->has_fixed_offset_from_frame_base()))
-			{
-				cfa_offset_elements.push_back(make_pair(*offset, *i_el));
-			}
-		}
-		std::sort(cfa_offset_elements.begin(), cfa_offset_elements.end());
-		/* Skip output if we're contiguous with the last lot and identical. We will just
-		 * implicitly extend. */
-		if (i_prev_int != elements_by_interval.end()
-		 && i_prev_int->first.upper() == i_int->first.lower()
-		 && cfa_offset_elements == prev_cfa_offset_elements)
-		{
-			cout << "/* continuing: 0x" << std::hex << i_int->first.lower()
-				<< " to 0x" << std::hex << i_int->first.upper() << " */" << endl;
-			continue; // OK to skip "next" here
-		}
-		/* FIXME: if we're *not* contiguous with the last interval,
-		 * output an empty frame layout spanning the gap.
-		 * FIXME: clean up these macros... the address needs to go in the
-		 * invocation that defines the frame. Use #undef to avoid the FRAME_LAYOUT_0xnnn
-		 * definitions and SET_LOCATION, instead juts repeatedly defining FRAME_LAYOUT
-		 * and then invoking it, passing the address as one argument. */
-		cout << endl << "SET_LOCATION(0x" << std::hex << i_int->first.lower() << ")"
-			<< " /* to 0x" << std::hex << i_int->first.upper() << " */" << endl;
-		cout << "#define FRAME_LAYOUT_0x" << i_int->first.lower() << "(v) \\" << endl;
-		for (auto i_el_pair = cfa_offset_elements.begin();
-			i_el_pair != cfa_offset_elements.end(); ++i_el_pair)
-		{
-			cout << "\tv(0x" << std::hex << idx_map[triple(i_el_pair->second)] << ", "
-				<< std::dec << (Dwarf_Signed) i_el_pair->first << " ) \\" << endl;
-		}
-		cout << "\t/* (no more) */" << endl;
-		cout << "FRAME_LAYOUT_0x" << std::hex << i_int->first.lower()
-			<< "(define_layout)" << std::dec << endl;
+	/* This code "works" but I'm suspicious, because
+	 * - too often we get multiple distinct vars with the same triple and stack slot -- why?
+	 *   - can be legit: e.g. multiple lexical blocks declaring the same name/type get commoned
+	 * - we never get callee-save registers -- why? are they always saved in a register?
+	 * - we never get non-zero piece specs -- why?
+	 *
+	 * We also have a compactness crisis: it'll be far more compact to group the frames
+	 * by subprogram, then compute a "super-vector", then for each interval
+	 * record which subset of the vector is valid. Only layouts with >63 elements
+	 * need to be represented explicitly. Maybe we can do that by generating a
+	 * synthetic struct type?
+	 *
+	 * Maybe we can do a scan for PCs having >64 simultaneous elements?
+	 * Need not even pick 64; e.g. maybe 32 would be optimal.
+	 * If we emit the layout in order of last-valid PC, then we get a sliding window
+	 * in PC-space.
+	 *
+	 * Let's make a list of the optimizations we want to apply, then measure the effect
+	 * of each?
+	 *
+	 * 1. Naive approach: distinct layout vectors for each layout-distinct interval,
+	 *   table of pairs <base-addr, layout vector>
+	 * 2. Turn on mergeability of layout vectors; table is
+	 *   <base-addr, layout vector begin, layout vector end>
+	 * 3. Simple bitmap approach: N=32- or N=64-bit bitmap (do profiling to pick which),
+	 *   pool all layouts of a given frame,
 
-	next:
-	// store for next time around
-		prev_cfa_offset_elements = cfa_offset_elements;
-	}
+	 *   GAGHAGHAGH. The bitmap approach doesn't work unless we also encode
+	 *   the offset of each element, since this currently isn't represented.
+	 *   We need a "Super-layout vector" and calculate bitmaps over that.
+	 *    i.e. all the <triple, offset> pairs across the whole function -- "quads", not triples.
+	 *
+	 *    Then we can represent the function by a sequence of words that is
+	 *    run-length encoded: <ninstrs, superlayout bitmap> ?
+	 *
+	 *       PROBLEM: the superlayout might be fairly big.
+	 *       We can't expect one bitmap to cover all quads for the whole function, say.
+	 *       BUT we can do something clever: sort the superlayout by vaddr,
+	 *       meaning each RLE entry has an "earliest superlayout vaddr".
+	 *       The bitmap is indexed relative to this offset.
+	 *           How do we record this earliest vaddr?
+	 *           We are basically trying to achieve "one word per change in layout",
+	 *           and we borrow some bits from each word to represent how far in PC-space the layout lasts,
+	 *           but we now *also* need some bits to represent hte delta in sorted-quad-space.
+	 *           We could reserve 0 bits and say the delta is always 1?
+	 *           Oh, no because if an element goes away but we still need the same earliest-span-start
+	 *             element, we don't want to advance in span-space at all. So, 1 bit is the minimum.
+	 *             If we want to advance multiple places in span-space, we need to write multiple words
+	 *                 with the 'advance span space' bit set.
+	 *             Their bitmaps would just be shifted by 1, while nothing changes in the layout
+	 *                 (but something will! specifically,
+	 *                 some new element will be entering the layout;
+	 *                 otherwise we wouldn't need to advance in the span space)
+	 *
+	 *           i.e. the idea of this design is to emit one word per "elementary change in layout"
+	 *
+	 *               PROBLEM? How do we binary-search by offset in this design?
+	 *               The bitmap gives us a bunch of elements but we have to
+	 *               traverse these linearly because they are not sorted by offset.
+	 *               Clever caching perhaps? We could build an offset-sorted vector from the bitmap
+	 *                    and try to cache these for frequently queried layouts?
+	 *               More generally, to evaluate this we need a workload, even if highly synthetic.
+	 *               We could say "randomly query the leaf type" i.e. for a random stack address.
+	 *               That would give us sampling-based coverage measurement of the stack,
+	 *               weighted by program time spent at each layout.
+	 *               We would have to measure the cost of the lookup carefully, since interrupting
+	 *               the main program is already expensive but is not a cost we want to measure...
+	 *               I think we could use SIGPROF but then just use perf counters / rdtsc to measure
+	 *                    time spent in metadata routines, i.e. ignoring time spent in signal handling
+	 *               "Zero-cost reflection on unmodified native stacks [and register files]"
+	 *                 -- want to say we subsume eh_frame (like eh-elfs),
+	 *                       offer a better space/time trade-off than eh-elfs,
+	 *                       and encode more information / support more+new applications / ...
+	 *                       Demos are libunwind (perf?), ltrace (has stack-walking option!),
+	 *                           some liballocs(libcrunch?) workload
+	 *
+	 *       For cases where the "span-space span" is too large,
+	 *       i.e. the earliest-span-starting active element is more than 56 spans away from the
+	 *                latest-span-starting element,
+	 *       Then we repeat the elements as necessary by splitting spans.
+	 *       E.g. if we have
+	 *       24 bits to play with (8 bits for the run length &c, 24 for the bitmap)
+	 *       we ensure that we repeat any element in a timely way, e.g. if a superelement
+	 *       it's still alive 24 elements later (however many bytes of vaddr-space
+	 *       that proves to be), we re-emit it.
+	 *       INSTABILITY: this will bump some other superlayout elements outside the 24?
+	 *       EXPERIMENT: let's visualise the distribution. I am imagining a
+	 *         "piano roll"-style plot for a function, where vaddrs are along the bottom
+	 *         and superlayout elements going up, bracketed by their triple;
+	 *         also plot the number of simultaneously active elements, so we can get a
+	 *         feel for the right size of bitmap.
+	 *       Can we view outputting the superlayout elements as a scheduling problem,
+	 *         a bit like instruction scheduling? We have a queue of obligations,
+	 *         i.e. long-lived old superelements create such obligations and
+	 *         we have a deadline for emitting them, in preference to a new superelement.
+	 *         This is also a lot like range-splitting: re-emitting the old element
+	 *         could be viewed as breaking its lifetime in two. HMM yes, that is better.
+	 *         As long as there are not more live items than bits,
+	 *         we can always represent a layout simply by advancing its base address
+	 *         for every instruction -- and splitting every element so that
+	 *         it begins a fresh range at that base address. So our bitmap begins with
+	 *         is all 1s and our superlayout contains all those 
+	 *
+	 * LET's PRINT: "function <foo> has N distinct triples (maximum M live simultaneously)
+	 *       and Q superelements". Need a better name for "superelement" first.
+	 *       "elplace"? "elslots"? "expanded slots"? "slot product"?
+	 *
+	 *   Initially our super-layouts are sorted by offset and may not have >N
+	 *   elements.
+	 *
+	 *   use frame-splitting to handle frames of >64 elements
+	 *   use structs to handle any simultaneously-more-than-N-element intervals.
+	 *   Table is <base_addr, frame-range-begin, Nhighest, bitmap> <-- Nhighest encodes frame range end; it's the highest idx of any set bit
+	 * 4. "Sliding window": same but we compute a craftier frame-range-begin
+	 *   table is <base_addr, frame-range-begin/end, bitmap>
+	 *   i.e. unlike the simple bitmap approach, frame-range-begin is not the same
+	 *   for every entry within the same frame (modulo splitting)
+	 *      -- maybe we'd find there's no longer a need for splitting? well,
+	 *      sometimes they probably will be, if there's >N elements
+	 * 5.
+	 */
+	auto output_layout = [](Dwarf_Addr lower, Dwarf_Addr upper, unsigned nquads,
+		vector< pair< Dwarf_Signed, frame_element > > const& elements,
+		const string& comment,
+		const string& layout_macro_prefix,
+		std::function<void(pair< Dwarf_Signed, frame_element > const&)> output_element_pair) {
+		/* TODO: For profiling the possible bitmap-based approach,
+		 * output in a comment how many quads are spanning this
+		 * start vaddr. */
+		cout << "#undef " << layout_macro_prefix << "_LAYOUT" << endl;
+		cout << "#define " << layout_macro_prefix << "_LAYOUT(start_vaddr, element_at_key) /* " << comment << " from 0x"
+			<< std::hex << lower
+			<< " to 0x" << std::hex << upper
+			<< " (at start there are " << std::dec << nquads << " quads spanning)"
+			<< " */ \\" << endl
+			<< "\tBEGIN_" << layout_macro_prefix << "_LAYOUT(start_vaddr) \\" << endl;
+		for (auto i_el_pair = elements.begin();
+			i_el_pair != elements.end(); ++i_el_pair)
+		{
+			output_element_pair(*i_el_pair);
+		}
+		cout << "\tEND_" << layout_macro_prefix << "_LAYOUT(start_vaddr)" << endl;
+		cout << layout_macro_prefix << "_LAYOUT(0x" << std::hex << lower
+			<< ", emit_" << layout_macro_prefix << "_element)" << std::dec << endl;
+	};
+	auto output_element = [triple_idx_map](pair< Dwarf_Signed, frame_element > const& el_pair ) {
+		triple t(el_pair.second);
+		cout << "\telement_at_key("
+			<< std::dec << (Dwarf_Signed) el_pair.first
+			<< ", 0x" << std::hex << triple_idx_map[t] << ") "
+			<< "/* " << t;
+		if (el_pair.second.m_local) cout << " (local at 0x" << std::hex
+			<< el_pair.second.m_local.offset_here() << std::dec << ")";
+		cout << " */ \\"<< endl;
+	};
+	auto get_cfa_offset = [](frame_element const& el) -> optional<Dwarf_Signed> {
+		return (el.is_stored() && el.has_fixed_offset_from_frame_base()) ?
+			*el.has_fixed_offset_from_frame_base() : optional<Dwarf_Signed>();
+	};
+	auto get_register = [](frame_element const& el) -> optional<Dwarf_Signed> {
+		optional<Dwarf_Signed> ret = el.has_fixed_register();
+		if (ret)
+		{
+			if (el.m_caller_regnum)
+			{
+				assert(*el.m_caller_regnum != DW_FRAME_CFA_COL3); // the CFA is not itself stored
+			}
+			assert(*ret != DW_FRAME_CFA_COL3); // the CFA is not a register in which anything is stored
+		}
+		return ret;
+	};
+	auto output_all_layouts_by_key = [elements_by_interval, subprograms_by_vaddr](
+		const string& layout_macro_prefix,
+		std::function<optional<Dwarf_Signed>(frame_element const&)> maybe_get_key,
+		std::function<void(Dwarf_Addr /* lower */, Dwarf_Addr /* upper */, unsigned /* nquads */,
+			vector< pair< Dwarf_Signed, frame_element > > const& /* elements */,
+			const string& /* comment */,
+			const string& /* layout macro prefix */,
+			std::function<void(pair< Dwarf_Signed, frame_element > const&)> /*output_element_pair */)
+		> output_one_layout /* used also for padding => MUST be parameterised by element outputter... */,
+		std::function<void(pair< Dwarf_Signed, frame_element > const&)> output_one_element
+		)
+	{
+
+		/* Want a rolling picture of quads.
+		 * Within a given function,
+		 * track when a quad first appears and when it last appears.
+		 * (Why by function? We should be able to cope with longer ranges than that,
+		 * although doubtful.)
+		 */
+		map<quad, boost::icl::interval_set<Dwarf_Addr> > micro_intervals_by_quad;
+		vector< pair< boost::icl::discrete_interval<Dwarf_Addr>, pair<quad, subprogram_key> > > quad_mega_intervals;
+		boost::icl::interval_map<Dwarf_Addr, set< quad > > quads_by_mega_interval_address;
+		
+		/* We need a way to get the ordinal of a given quad.
+		 */
+		collect_quad_stats(
+			elements_by_interval, // is an element just a quad for us? only keyed ones, ofc
+			subprograms_by_vaddr,
+			maybe_get_key,        // may return nothing i.e. "ignore for this table", e.g. we are doing frame offsets and it's a reg-located element
+			micro_intervals_by_quad, // map from quad to set of its micro-intervals
+			quad_mega_intervals,  // sorted vector of mega-intervals, quad+subprogram
+			quads_by_mega_interval_address // quads whose mega-interval spans addr
+		);
+
+		auto i_prev_int = elements_by_interval.end();
+		vector< pair< Dwarf_Signed, frame_element > > prev_elements;
+		for (auto i_int = elements_by_interval.begin(); i_int != elements_by_interval.end();
+			i_prev_int = i_int, ++i_int)
+		{
+			/* collect the relevant (either CFA-offset or register),
+			 * sort them by offset/regnum,
+			 * output them as a mergeable sequence,
+			 * then point to that list (including a length) */
+			vector< pair< Dwarf_Signed, frame_element > > elements;
+			map< pair< Dwarf_Signed, triple >, frame_element > elements_map; // for sanity checking
+			for (auto i_el = i_int->second.begin(); i_el != i_int->second.end(); ++i_el)
+			{
+				optional<Dwarf_Signed> key;
+				if (optional<Dwarf_Signed>() != (key = maybe_get_key(*i_el)))
+				{
+					/* NOTE: it is possible to get duplicates here: same triple,
+					 * same CFA offset or reg, same interval, ... different frame element!
+					 * This is because two variables might have the same name, across
+					 * distinct scopes / lexical blocks. If the compiler transforms
+					 * the code so their lifetimes are interleaved, they might be
+					 * "commoned" and result in this state of affairs. I have seen
+					 * this happen for va_list instances, which makes a lot of sense.
+					 * 
+					 * What this really tells us is that "name" is not enough: really
+					 * we want "source-level identity", which should be defined to
+					 * account for scope. We had some approaches to dealing with this
+					 * in the context of "effective names" and line number variation
+					 * falsely deduplicating uniqtypes; see GitHub issue #71. */
+					elements.push_back(make_pair(*key, *i_el));
+					/* maybe_get_key should not have let us get a CFA frame element.
+					 * Rationale: the CFA is always computed, never stored directly on
+					 * the stack or in a register. NOTE that despite 'm_caller_regnum',
+					 * when the regnum = DW_FRAME_CFA_COL3 it refers to *our* CFA, not
+					 * the caller's. */
+					if (i_el->m_caller_regnum && *i_el->m_caller_regnum == DW_FRAME_CFA_COL3)
+					{
+						std::clog << "Over " << std::hex << i_int->first
+							<< " found a frame (" << layout_macro_prefix
+							<< ") element describing the CFA, which"
+							" should not have passed get_register() but did: reg is "
+							<< *key << std::endl << std::dec;
+					}
+					assert(!i_el->m_caller_regnum || *i_el->m_caller_regnum != DW_FRAME_CFA_COL3);
+					auto pair = elements_map.insert(make_pair(
+						make_pair(*key, triple(*i_el)),
+						*i_el
+					));
+					// assert(pair.second);
+					if (!pair.second)
+					{
+						if (debug_out > 1) cerr << "Warning: distinct frame elements for the same triple: "
+							<< "existing " << &pair.first->second << ", new "
+							<< &*i_el << endl; // the printed addresses are useful in a debugger
+					}
+				}
+			}
+			std::sort(elements.begin(), elements.end());
+			/* Skip output if we're contiguous with the last lot and identical. We will just
+			 * implicitly extend. */
+			if (i_prev_int != elements_by_interval.end()
+			 && i_prev_int->first.upper() == i_int->first.lower()
+			 && elements == prev_elements)
+			{
+				cout << "/* same layout continuing: 0x" << std::hex << i_int->first.lower()
+					<< " to 0x" << std::hex << i_int->first.upper() << " */" << endl;
+				continue; // OK to skip "next" here
+			}
+
+			/* If we're *not* contiguous with the last interval,
+			 * output an empty frame layout spanning the gap. */
+			auto output_no_element = [](pair< Dwarf_Signed, frame_element > const& ignored) {};
+			if (i_prev_int != elements_by_interval.end()
+			 && i_prev_int->first.upper() != i_int->first.lower())
+			{
+#define GET_QUADS_COUNT(addr) \
+	( (quads_by_mega_interval_address.find(addr) == quads_by_mega_interval_address.end()) ? 0 : quads_by_mega_interval_address.find(addr)->second.size() )
+				output_one_layout(i_prev_int->first.upper(), i_int->first.lower(),
+					//quads_by_mega_interval_address.find(i_prev_int->first.upper())->second.size(),
+					GET_QUADS_COUNT( i_prev_int->first.upper() ),
+					vector< pair< Dwarf_Signed, frame_element > >(),
+					"empty layout (padding)", layout_macro_prefix,
+					output_no_element
+				);
+			}
+			output_one_layout(i_int->first.lower(), i_int->first.upper(),
+				GET_QUADS_COUNT( i_int->first.upper() ),
+				elements, "bona fide layout (not padding)", layout_macro_prefix, output_one_element);
+
+		next:
+		// store for next time around
+			prev_elements = elements;
+		}
+	};
+	output_all_layouts_by_key("FRAME", get_cfa_offset,
+		output_layout,
+		output_element);
+	output_all_layouts_by_key("REGFILE", get_register,
+		output_layout,
+		output_element);
+
 } /* end write_compact_output */
 
 enum flags_t
@@ -1258,8 +1936,6 @@ void add_local_elements(frame_intervals_t& out, sticky_root_die& root,
 void add_cfi_elements(frame_intervals_t& out, sticky_root_die& root,
 	subprogram_vaddr_interval_map_t const& subprograms, flags_t flags)
 {
-	/* FIXME: handle the missing forms like VALUE_IS !!!111 */
-
 	if (!(flags & INCLUDE_CFI)) return;
 
 	auto process_frame_section = [subprograms, &out](core::FrameSection& fs) {

@@ -78,11 +78,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         return "dummyweaks"
     
     def getDummyWeakLinkArgs(self, outputIsDynamic, outputIsExecutable):
-        if outputIsDynamic and outputIsExecutable:
-            return [ "-Wl,--push-state", "-Wl,--no-as-needed", \
-                     "-l" + self.getLibNameStem() + "_" + self.getDummyWeakObjectNameStem(), \
-                    "-Wl,--pop-state" ]
-        elif outputIsDynamic and not outputIsExecutable:
+        if outputIsDynamic:
             return [ "-Wl,--push-state", "-Wl,--no-as-needed", \
                      "-l" + self.getLibNameStem() + "_" + self.getDummyWeakObjectNameStem(), \
                     "-Wl,--pop-state" ]

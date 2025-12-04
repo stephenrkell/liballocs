@@ -78,8 +78,6 @@ TARGETS += liballocs.so            # nasty linker script for clients, working ar
                                    # be repurposed as futzing with ld.so->allocsld.so (etc) if sane
 TARGETS += liballocs.a             # the main binary usable for statically-linked client exes -- no uniqueness problem
 TARGETS += liballocs_dummyweaks.so # non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
-TARGETS += liballocs_dummyweaks.o  # non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
-                                   # (what do client solibs get? easiest is just to treat them like exes, modulo non-overrideyness)
 
 # Keep a list of all the linked binaries we produce
 SOLIB_TARGETS := $(filter-out liballocs.so,$(filter %.so,$(TARGETS)))
@@ -410,8 +408,6 @@ endif
 # HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option
 # or if we could statically link-in our stubs without making them non-overridable.
 # Perhaps the custom ld.so will make this feasible.
-liballocs_dummyweaks.o: dummyweaks.o
-	$(LD) -r -o "$@" $+
 # Because our dummyweaks also includes private_strdup, it brings in a whole private malloc.
 # FIXME: it shouldn't. But unclear how else to satisfy the dependency on __private_strdup
 # in libcrunch's _stubs.so.
@@ -437,7 +433,7 @@ clean:
 .PHONY: install
 install: all
 	${INSTALL} liballocs_preload.so $(srcdir)/liballocs.so liballocs_dummyweaks.so ${libdir}
-	${INSTALL_DATA} liballocs_preload.a liballocs.a liballocs_dummyweaks.o ${libdir}
+	${INSTALL_DATA} liballocs_preload.a liballocs.a ${libdir}
 
 vpath %.h $(srcdir)/%.h
 
