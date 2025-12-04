@@ -48,7 +48,15 @@ _Bool __liballocs_is_initialized;
 
 struct big_allocation;
 
-uint16_t *pageindex __attribute__((visibility("protected")));
+//uint16_t *pageindex __attribute__((visibility("protected")));
+/* We don't declare 'pageindex' because it's an error to link externally
+ * to this symbol; use __liballocs_pageindex. Copy relocations against
+ * either symbol are problematic, though. Can we prevent them?
+ * Let's try protected visibility. It does (sometimes?) cause the
+ * linker to error out, which is "good", but then how should the
+ * client code make use of the symbol? It needs to use the large
+ * code model, at least in respect of this symbol. */
+uint16_t *__liballocs_pageindex __attribute__((visibility("protected")));//; //__attribute__((alias("pageindex")));
 
 __attribute__((visibility("protected")))
 struct big_allocation big_allocations[/*NBIGALLOCS*/1];

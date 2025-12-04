@@ -75,9 +75,13 @@ typedef uint16_t bigalloc_num_t;
 
 // FIXME: protected stuff should be in private header only. This is now a public header.
 // If I didn't want that (good arguments for a single <allocs.h>), then some refactoring to do.
+#ifdef IN_LIBALLOCS_DSO
 extern bigalloc_num_t *pageindex __attribute__((weak));
+#endif
+/* See comment in liballocs.h. Copy relocations against __liballocs_pageindex are bad. */
+#if defined(__PIC__) || defined(__code_model_large__)
 extern bigalloc_num_t *__liballocs_pageindex __attribute__((weak));
-
+#endif
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
 void __liballocs_print_l0_to_stream_err(void);
@@ -127,6 +131,7 @@ void __adjust_bigalloc_end(struct big_allocation *b, void *new_curbrk) __attribu
  * by calling into the pageindex, or we can be crude,
  * using the stack-pointer and sbrk heuristics. Opt initially 
  * to be precise. */
+#if defined(__PIC__) || defined(__code_model_large__) /* see __liballocs_pageindex above */
 inline struct big_allocation *__liballocs_get_bigalloc_containing(const void *obj)
 {
 	// if (__builtin_expect(obj == 0, 0)) return NULL;
@@ -137,6 +142,9 @@ inline struct big_allocation *__liballocs_get_bigalloc_containing(const void *ob
 	struct big_allocation *b = &__liballocs_big_allocations[bigalloc_num];
 	return b;
 }
+#else
+struct big_allocation *__liballocs_get_bigalloc_containing(const void *obj);
+#endif
 
 /* If we know enough about the bigallocs, we can infer what the allocator
  * is. */
