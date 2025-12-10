@@ -30,7 +30,7 @@ jobs:
             . contrib/env.sh
             ./autogen.sh
             ./configure
-            make -j $(nproc)
+            make -j 2
       - persist_to_workspace:
           root: /
           paths: root/project usr/lib/meta
@@ -41,14 +41,14 @@ jobs:
       - image: ubuntu:24.04
     steps:
       - checkout
+      - attach_workspace:
+          at: /
       - run:
           name: Install dependencies
           command: |
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               $(cat .circleci/test-dependencies.txt)
-      - attach_workspace:
-          at: /
       - run:
           name: Run tests
           command: make -C /root/project/tests -k
