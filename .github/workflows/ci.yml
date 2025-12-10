@@ -1,14 +1,14 @@
 name: CI
 
+
 on:
   pull_request:
     branches: [ master ]
 
+
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
-    container:
-      image: ubuntu:24.04
     
     steps:
       - name: Install dependencies
@@ -18,7 +18,6 @@ jobs:
           DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
             build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
             autoconf automake libtool pkg-config autoconf-archive \
-            g++-10 gcc-10 lib32gcc-10-dev \
             ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
             default-jdk-headless python3 \
             make git gawk gdb wget libc6-dbg \
@@ -28,8 +27,6 @@ jobs:
             gettext-base \
             ca-certificates clang \
             pkg-config libglib2.0-dev
-          cd /usr/bin && ln -sf gcc-10 gcc
-          cd /usr/bin && ln -sf g++-10 g++
       
       - name: Report OCaml version for debugging
         run: |
@@ -52,3 +49,51 @@ jobs:
       
       - name: Run tests
         run: make -C tests -k
+  
+  build-latest-gcc-ocaml414:
+    runs-on: ubuntu-24.04
+    needs: build-and-test
+    continue-on-error: true
+    container:
+      image: gcc:latest
+    
+    steps:
+      - name: Install opam and dependencies
+        run: |
+          apt-get update
+          apt-get install -y opam build-essential libbsd-dev libelf-dev libdw-dev \
+            binutils-dev zlib1g-dev autoconf automake libtool pkg-config autoconf-archive \
+            default-jdk-headless python3 make git gawk gdb wget \
+            libunwind-dev libboost-iostreams-dev libboost-regex-dev \
+            libboost-serialization-dev libboost-filesystem-dev libffi-dev \
+            gettext-base ca-certificates clang pkg-config libglib2.0-dev
+      
+      - name: Initialize opam and install OCaml 4.14
+        run: |
+          opam init --disable-sandboxing -y
+          opam switch create 4.14 4.14.2
+          eval $(opam env)
+          opam install -y ocamlbuild ocamlfind num
+      
+      - name: Checkout code with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Build submodules
+        run: |
+          eval $(opam env)
+          make -C contrib -j $(nproc)
+      
+      - name: Build project
+        run: |
+          eval $(opam env)
+          . contrib/env.sh
+          ./autogen.sh
+          ./configure
+          make -j $(nproc)
+      
+      - name: Run tests
+        run: |
+          eval $(opam env)
+          make -C tests -k
