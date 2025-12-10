@@ -4,29 +4,20 @@ jobs:
     docker:
       - image: ubuntu:24.04
     steps:
+      - checkout
       - run:
           name: Install dependencies
           command: |
             dpkg --add-architecture i386
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
-              build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
-              autoconf automake libtool pkg-config autoconf-archive \
-              g++-10 gcc-10 lib32gcc-10-dev \
-              ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
-              default-jdk-headless python3 \
-              make git gawk gdb wget libc6-dbg \
-              libunwind-dev libunwind-dev:i386 linux-libc-dev-i386-cross libc6-dev-i386 \
-              libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev libffi-dev \
-              gettext-base # for envsubst
-            cd /usr/bin && ln -sf gcc-10 gcc
-            cd /usr/bin && ln -sf g++-10 g++
+              $(cat .circleci/build-dependencies.txt)
       - run:
-          name: Report OCaml version for debugging
+          name: Report compiler versions
           command: |
+            gcc --version
+            g++ --version
             dpkg -l | grep ocaml
-      - checkout
       - run:
           name: Update submodules
           command: git submodule update --init --recursive
@@ -40,13 +31,6 @@ jobs:
             ./autogen.sh
             ./configure
             make -j 2
-      #- run: # now our glibc is built with DWARF 5, so don't do this
-      #    name: Create liballocs metadata
-      #    no_output_timeout: 25m
-      #    command: |
-      #      mkdir -p /usr/lib/meta && \
-      #      make -f tools/Makefile.meta \
-      #          $(for libname in `ldd /bin/true | sed -En '/[[:blank:]]*([^[:blank:]]* => )?(.*) \(0x[0-9a-f]+\)/ {s//\2/;p}' | egrep 'libc\.so\.6|ld-linux.*\.so' | xargs readlink -f`; do echo "/usr/lib/meta${libname}-meta.so"; done)
       - persist_to_workspace:
           root: /
           paths: root/project usr/lib/meta
@@ -56,24 +40,14 @@ jobs:
     docker:
       - image: ubuntu:24.04
     steps:
+      - attach_workspace:
+          at: /
       - run:
           name: Install dependencies
-          # We use 'clang' for some tests, so need that
           command: |
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
-              ca-certificates make build-essential g++-10 autoconf automake libtool \
-              libelf-dev python3 git gawk libunwind-dev \
-              ocaml ocamlbuild ocaml-findlib \
-              clang \
-              libdw-dev binutils-dev libffi-dev \
-              libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev \
-              pkg-config libglib2.0-dev # <-- for 'simple-multi-alloc' test case only
-            cd /usr/bin && ln -sf gcc-10 gcc
-            cd /usr/bin && ln -sf g++-10 g++
-      - attach_workspace:
-          at: /
+              $(cat /root/project/.circleci/test-dependencies.txt)
       - run:
           name: Run tests
           command: make -C /root/project/tests -k
