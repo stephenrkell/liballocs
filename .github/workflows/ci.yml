@@ -9,7 +9,8 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
-    
+    container:
+      image: ubuntu:24.04
     steps:
       - name: Install dependencies
         run: |

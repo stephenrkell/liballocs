@@ -7,12 +7,12 @@
             "request": "launch",
             "program": "/usr/bin/env",
             "args": [
-                "LD_PRELOAD=/home/zoltan/Develop/liballocs/lib/liballocs_preload.so",
-                "/home/zoltan/Develop/liballocs/tests/${input:testCase}/${input:testCase}",
-                "/home/zoltan/Develop/liballocs/tests/${input:testCase}/${input:testCase}"
+                "LD_PRELOAD=${workspaceFolder}/lib/liballocs_preload.so",
+                "${workspaceFolder}/tests/${input:testCase}/${input:testCase}",
+                "${workspaceFolder}/tests/${input:testCase}/${input:testCase}"
             ],
             "stopAtEntry": false,
-            "cwd": "/home/zoltan/Develop/liballocs/tests/${input:testCase}",
+            "cwd": "${workspaceFolder}/tests/${input:testCase}",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
