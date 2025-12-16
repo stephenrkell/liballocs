@@ -13,14 +13,10 @@ REAL_FILE = os.path.realpath(__file__)
 REAL_DIR = os.path.realpath(os.path.dirname(REAL_FILE))
 liballocs_base = os.path.realpath(REAL_DIR + "/../../../..")
 cil_base = os.environ.get("CIL_ROOT", liballocs_base + "/contrib/cil/")
+cilly_cmd = cil_base + "/_build/install/default/bin/cilly"
 sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
-existing_cil_install = os.environ.get("CIL_INSTALL")
-if cil_base == None:
-    cilly_cmd = liballocs_base + "/_build/install/default/bin/cilly"
-    existing_cil_install = liballocs_base + "/contrib/cil/_build/install/default/lib/goblint-cil/"
-else:
-    cilly_cmd = cil_base + "/_build/install/default/bin/cilly"
+existing_cil_install = os.environ.get("CIL_INSTALL", cil_base + "_build/install/default/lib/goblint-cil")
 existing_elftin = os.environ.get("ELFTIN")
 if existing_elftin == None:
     os.putenv("ELFTIN", liballocs_base + "/contrib/elftin")

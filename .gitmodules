@@ -19,3 +19,18 @@
 [submodule "contrib/elftin"]
 	path = contrib/elftin
 	url = https://github.com/stephenrkell/elftin.git
+[submodule "contrib/yojson"]
+	path = contrib/yojson
+	url = https://github.com/ocaml-community/yojson.git
+[submodule "contrib/dune"]
+	path = contrib/dune
+	url = https:/github.com/ocaml/dune
+[submodule "contrib/cppo"]
+	path = contrib/cppo
+	url = https://github.com/ocaml-community/cppo.git
+[submodule "contrib/csexp"]
+	path = contrib/csexp
+	url = https://github.com/ocaml-dune/csexp.git
+[submodule "contrib/cil"]
+	path = contrib/cil
+	url = https://github.com/probablytom/cil.git

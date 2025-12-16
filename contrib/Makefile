@@ -1,6 +1,12 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
+export OCAMLLIB := /usr/lib/ocaml/
+export PATH := ${PATH}:${OCAMLLIB}bin/
+
+export CIL_CC=clang-18
+export CC=${CIL_CC}
+
 # NOTE all this env.sh amounts to just a different way to do
 # ./configure --with-blah=/path/to/blah ?
 # ... but we prefer it because it's more compositional:
@@ -121,21 +127,52 @@ clean::
 # ----------------------------cil
 
 .PHONY: build-cil
-build-cil: cil.stamp
+build-cil: cil.stamp mainFeature.cmx
+
+.PHONY: yojson
+yojson:
+	cd yojson && dune build -p yojson && dune install -p yojson --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
+
+.PHONY: csexp
+csexp:
+	cd csexp && dune build -p csexp && dune install -p csexp --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
+
+.PHONY: cppo
+cppo:
+	cd cppo && dune build -p cppo && dune install -p cppo --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
+
+.PHONY: dune-configurator
+dune-configurator: csexp
+	cd dune && dune build -p dune-configurator && dune install -p dune-configurator --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
 
 # PROBLEM: cil's ocamlbuild takes a significant time to re-run even in the
 # case where nothing's changed. So use a stamp to run around that.
-cil.stamp: cil/Makefile $(shell find cil -name '*.c' -o -name '*.ml' -o -name '*.mli' -o -name '*.in' -o -name '*.mly' )
-	$(MAKE) -C cil all install-local && touch $@
-cil/Makefile: cil/configure
-	cd cil && CC=$${ALLOCSCC_CC:-$${CC:-cc}} ./configure INSTALL="`which install` -p"
+cil.stamp: goblint-cil
+goblint-cil: yojson cppo dune-configurator
+	cd cil && dune build && dune build @install && dune install --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
+	touch cil.stamp
 
-CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/cil/lib\n
+CONFIG_MK += \nCIL_ROOT ?= $(CONTRIB)/cil/\n
+varlist += CIL_ROOT
+export CIL_ROOT
+
+CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/cil/_build/install/default/lib/goblint-cil/\n
 varlist += CIL_INSTALL
 export CIL_INSTALL
 
+.PHONY: mainFeature.cmx
+mainFeature.cmx:
+	cd cil && cp ${CIL_ROOT}/src/mainFeature.ml ${CIL_ROOT}/src/mainFeature.mli ${CIL_INSTALL} && ocamlfind ocamlopt -c ${CIL_INSTALL}/mainFeature.mli && ocamlfind ocamlopt -linkpkg -package dynlink -package findlib -package str -package zarith -I ${CIL_INSTALL} ${CIL_INSTALL}goblintCil.cmxa ${CIL_INSTALL}mainFeature.ml
+
+.PHONY: goblint-cil-deps
+goblint-cil-deps: cppo csexp dune-configurator yojson
+
 clean::
-	$(MAKE) -C cil clean
+	cd cil && dune clean
+	cd yojson && dune uninstall -p yojson --prefix=/usr/lib/ocaml/
+	cd csexp  && dune uninstall -p csexp --prefix=/usr/lib/ocaml/
+	cd cppo   && dune uninstall -p cppo --prefix=/usr/lib/ocaml/
+	cd dune   && dune uninstall -p dune-configurator --prefix=/usr/lib/ocaml/
 	rm -f cil.stamp
 
 # ----------------------------toolsub
@@ -143,7 +180,7 @@ clean::
 .PHONY: build-toolsub
 build-toolsub: build-cil
 	$(MAKE) -C toolsub wrapper-recursive cilpp-recursive  # don't build clang-based cccppp
-	$(MAKE) -C toolsub/wrapper/example/constructor-priority-checker dumpconstr
+	#$(MAKE) -C toolsub/wrapper/example/constructor-priority-checker dumpconstr
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB
 
