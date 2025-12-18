@@ -1,8 +1,8 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
-export OCAMLLIB := /usr/lib/ocaml/
-export PATH := ${PATH}:${OCAMLLIB}bin/
+export OCAML_LIBDEST := ${CONTRIB}/../lib/ocaml/
+export PATH := ${PATH}:${OCAML_LIBDEST}bin/
 
 export CIL_CC=clang-18
 export CC=${CIL_CC}
@@ -129,34 +129,22 @@ clean::
 .PHONY: build-cil
 build-cil: cil.stamp mainFeature.cmx
 
-.PHONY: yojson
-yojson:
-	cd yojson && dune build -p yojson && dune install -p yojson --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
-
-.PHONY: csexp
-csexp:
-	cd csexp && dune build -p csexp && dune install -p csexp --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
-
-.PHONY: cppo
-cppo:
-	cd cppo && dune build -p cppo && dune install -p cppo --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
-
 .PHONY: dune-configurator
-dune-configurator: csexp
-	cd dune && dune build -p dune-configurator && dune install -p dune-configurator --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
+dune-configurator:
+	cd dune && dune build -p dune-configurator && dune install -p dune-configurator --prefix=${OCAML_LIBDEST} --libdir=${OCAML_LIBDEST}
 
 # PROBLEM: cil's ocamlbuild takes a significant time to re-run even in the
 # case where nothing's changed. So use a stamp to run around that.
 cil.stamp: goblint-cil
-goblint-cil: yojson cppo dune-configurator
-	cd cil && dune build && dune build @install && dune install --prefix=${OCAMLLIB} --libdir=${OCAMLLIB}
+goblint-cil: dune-configurator
+	cd cil && dune build && dune build @install && dune install --prefix=${OCAML_LIBDEST} --libdir=${OCAML_LIBDEST}
 	touch cil.stamp
 
 CONFIG_MK += \nCIL_ROOT ?= $(CONTRIB)/cil/\n
 varlist += CIL_ROOT
 export CIL_ROOT
 
-CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/cil/_build/install/default/lib/goblint-cil/\n
+CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/../lib/ocaml/goblint-cil/\n
 varlist += CIL_INSTALL
 export CIL_INSTALL
 
