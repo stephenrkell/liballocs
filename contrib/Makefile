@@ -186,6 +186,10 @@ build-elftin:
 	$(MAKE) -C elftin/normrelocs normrelocs
 	$(MAKE) -C elftin/abs2und abs2und sym2und
 	$(MAKE) -C elftin/dynappend dynappend
+	$(MAKE) -C elftin/undprot undprot
+	$(MAKE) -C elftin/abs2sectsym abs2sectsym
+	$(MAKE) -C elftin/pie2rel pie2rel
+	$(MAKE) -C elftin/rel2data rel2data
 	LIBRUNT="$(LIBRUNT)" CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }${LIBSRK31CXX_CXXFLAGS}" $(MAKE) -C elftin/base-ldplugin
 	LIBRUNT="$(LIBRUNT)" CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }${LIBSRK31CXX_CXXFLAGS}" $(MAKE) -C elftin/xwrap-ldplugin xwrap-ldplugin.so
 CONFIG_MK += \nELFTIN ?= $(CONTRIB)/elftin\n

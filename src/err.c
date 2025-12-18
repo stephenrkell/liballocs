@@ -1,11 +1,6 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 
-/* HACK to avoid too much librunt dependency in this allocsld-borrowed code. */
-#ifndef IN_LIBALLOCS_DSO
-#define get_exe_command_basename(...) "(no name)"
-#endif
-
 /* If we are linking librunt, as we usually are, we will get this from there.
  * But otherwise don't! E.g. from allocsld, don't pull in librunt. */
 FILE *stream_err __attribute__((weak));

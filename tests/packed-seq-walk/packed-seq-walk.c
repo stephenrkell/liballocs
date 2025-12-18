@@ -23,7 +23,7 @@ int main(void)
 	// - clearing its type info (?)
 	// - setting it as suballocated by the relevant packed seq
 	void *chunk = calloc(1, 131072);
-	assert(pageindex[PAGENUM(chunk)]);
+	assert(__liballocs_pageindex[PAGENUM(chunk)]);
 
 	struct big_allocation *seq_b = __lookup_bigalloc_from_root(chunk,
 		&__default_lib_malloc_allocator, NULL);

@@ -53,6 +53,13 @@ extern int __currently_allocating;
 //void __free_arena_bitmap_and_info(void *info);
 #define __liballocs_free_arena_bitmap_and_info __free_arena_bitmap_and_info
 #define __liballocs_extract_and_output_alloc_site_and_type extract_and_output_alloc_site_and_type
+#else
+/* When building stubs for execution outside the liballocs DSO, e.g.
+ * for an in-exe malloc, the stubs will call out cross-DSO to the "public"
+ * symbol of the liballocs private malloc. */
+liballocs_err_t __liballocs_extract_and_output_alloc_site_and_type(struct insert *p_ins, 
+	struct uniqtype **out_type,
+	void **out_site);
 #endif
 
 static inline
@@ -364,9 +371,8 @@ static inline struct insert *__generic_malloc_index_insert(
 	p_insert = insert_for_chunk_and_caller_usable_size(allocptr,
 		caller_usable_size);
 	/* Populate our extra in-chunk fields */
-	p_insert->alloc_site_flag = 0U;
-	p_insert->alloc_site = (uintptr_t) caller;
-
+	p_insert->initial.unused = 0U;
+	p_insert->initial.alloc_site = (uintptr_t) caller;
 #if 0 // def PRECISE_REQUESTED_ALLOCSIZE
 	/* FIXME: this isn't really the insert size. It's the insert plus padding.
 	 * I'm not sure why/whether we need this. */
@@ -580,7 +586,8 @@ struct insert *lookup_object_info_via_bitmap(struct arena_bitmap_info *info,
 	unsigned start_idx;
 	unsigned long found_bitidx;
 
-	if (!info) goto out;
+	if (!info) return NULL;
+
 	start_idx = ((uintptr_t) mem - (uintptr_t) info->bitmap_base_addr) / MALLOC_ALIGN;
 	/* OPTIMISATION: exploit the maximum object size,
 	 * to set a "fake" bitmap base address that serves as the maximum
@@ -616,7 +623,6 @@ struct insert *lookup_object_info_via_bitmap(struct arena_bitmap_info *info,
 		if (out_object_start) *out_object_start = object_start;
 		if (out_object_size) *out_object_size = usersize(object_start, sizefn);
 	}
-out:
 	assert(!found_ins || INSERT_DESCRIBES_OBJECT(found_ins));
 	return found_ins;
 }
@@ -712,8 +718,14 @@ liballocs_err_t __generic_malloc_set_type(struct allocator *a,
 	struct insert *ins = lookup_object_info(arena_for_userptr(a, obj), obj,
 		NULL, NULL, NULL, sizefn);
 	if (!ins) return &__liballocs_err_unindexed_heap_object;
-	ins->alloc_site = (uintptr_t) new_type;
-	ins->alloc_site_flag = 1; // meaning it's a type, not a site
+	unsigned existing_alloc_site_id = INSERT_IS_WITH_TYPE(ins)
+		? ins->with_type.alloc_site_id
+		: __liballocs_allocsite_id((void*)(unsigned long) ins->initial.alloc_site);
+	*ins = (struct insert) { .with_type = {
+		.uniqtype_shifted = UNIQTYPE_SHIFT_FOR_INSERT(new_type),
+		.always_1 = 1,
+		.alloc_site_id = existing_alloc_site_id
+	} };
 	return NULL;
 }
 
@@ -729,15 +741,14 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		++__liballocs_aborted_unindexed_heap;
 		return &__liballocs_err_unindexed_heap_object;
 	}
-	void *alloc_site_addr = (void *) ((uintptr_t) p_ins->alloc_site);
 
 	/* Now we have a uniqtype or an allocsite. For long-lived objects 
 	 * the uniqtype will have been installed in the heap header already.
 	 * This is the expected case.
 	 */
 	struct uniqtype *alloc_uniqtype;
-	if (__builtin_expect(p_ins->alloc_site_flag, 1))
-	{
+	if (__builtin_expect(INSERT_IS_WITH_TYPE(p_ins), 1)){
+		
 		if (out_site)
 		{
 			//unsigned short id = (unsigned short) p_ins->un.bits;
@@ -749,19 +760,18 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 			//else 
 			*out_site = NULL;
 		}
-		/* Clear the low-order bit, which is available as an extra flag 
-		 * bit. libcrunch uses this to track whether an object is "loose"
-		 * or not. Loose objects have approximate type info that might be 
-		 * "refined" later, typically e.g. from __PTR_void to __PTR_T.
-		 * FIXME: this should just be determined by abstractness of the type. */
-		alloc_uniqtype = (struct uniqtype *)((uintptr_t)(p_ins->alloc_site) & ~0x1ul);
-	}
-	else
-	{
+		
+		/* NOTE: we used to clear the low-order bit, which is available as an extra flag
+		 * bit. libcrunch wants to uses this to track whether an object is "loose"
+		 * or not. We have broken this with the switch to uniqtype_shifted since we really
+		 * want all four spare bits. Instead, looseness should be captured in existentially
+		 * erased uniqtypes like __uniqtype____EXISTS1___PTR__1 and so on. */
+		alloc_uniqtype = UNIQTYPE_UNSHIFT_FROM_INSERT(p_ins->with_type.uniqtype_shifted);
+
+	} else {
 		/* Look up the allocsite's uniqtype, and install it in the heap info 
 		 * (on NDEBUG builds only, because it reduces debuggability a bit). */
-		uintptr_t alloc_site_addr = p_ins->alloc_site;
-		void *alloc_site = (void*) alloc_site_addr;
+		void *alloc_site = (void*)(unsigned long) p_ins->initial.alloc_site;
 		if (out_site) *out_site = alloc_site;
 		struct allocsite_entry *entry = __liballocs_find_allocsite_entry_at(alloc_site);
 		alloc_uniqtype = entry ? entry->uniqtype : NULL;
@@ -779,23 +789,19 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		// it a dynamically-sized alloc with a uniqtype.
 		// This means we're the first query to rewrite the alloc site,
 		// and is the client's queue to go poking in the insert.
-		p_ins->alloc_site_flag = 1;
-		p_ins->alloc_site = (uintptr_t) alloc_uniqtype /* | 0x0ul */;
 		/* How do we get the id? Doing a binary search on the by-id spine is
 		 * okay because there will be very few of them. We don't want to do
 		 * a binary search on the table proper. But that's okay. We get
 		 * everything we need. */
-		allocsite_id_t allocsite_id = __liballocs_allocsite_id((const void *) alloc_site_addr);
-		if (allocsite_id != (allocsite_id_t) -1)
-		{
-			// what to do with the id?? We have no spare bits...
-			// we could scrounge a few but certainly not 16 of them.
-			// When we're using a bitmap, we will have the space.
-		}
-		
+		allocsite_id_t allocsite_id = __liballocs_allocsite_id(alloc_site);
+		*p_ins = (struct insert) { .with_type = {
+			.uniqtype_shifted = UNIQTYPE_SHIFT_FOR_INSERT(alloc_uniqtype),
+			.alloc_site_id = allocsite_id, /* note: zero is a valid ID; -1 means unknown */
+			.always_1 = 1,
+			/* lifetime policies are implicitly zeroed */
+		} };
 #endif
 	}
-
 	// if we didn't get an alloc uniqtype, we abort
 	if (!alloc_uniqtype) 
 	{
@@ -809,14 +815,15 @@ liballocs_err_t extract_and_output_alloc_site_and_type(
 		 * In cases where heap classification failed, we null out the allocsite 
 		 * to avoid repeated searching. We only do this for non-debug
 		 * builds because it makes debugging a bit harder.
-		 * NOTE that we don't want the insert to look like a deep-index
-		 * terminator, so we set the flag.
 		 */
 		if (p_ins)
 		{
 	#ifdef NDEBUG
-			p_ins->alloc_site_flag = 1;
-			p_ins->alloc_site = 0;
+			*p_ins = (struct insert) { .with_type = {
+				.uniqtype_shifted = 0,
+				.alloc_site_id = (allocsite_id_t) -1,
+				.always_1 = 1,
+			} };
 	#endif
 			assert(INSERT_DESCRIBES_OBJECT(p_ins));
 			assert(!INSERT_IS_NULL(p_ins));

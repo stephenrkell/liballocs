@@ -19,6 +19,25 @@ size_t strlcat(char *dst, const char *src, size_t size);
 #include "elf-refs.h"
 #include "emit-asm.h"
 
+/* Instead of these elf_reference structures,
+ * maybe we can represent a reference as a source alloc-tree position
+ * and a target alloc-tree position? That's nice and generic.
+ * What does elf_reference have that this does not?
+ * The main thing is 'interp_how'. This should instead be
+ * a pointer to the interpreter that decoded the reference.
+ * Except it's really an 'interp-rep-reter' ('interpresenter')
+ * because we can ask it to go the other way, i.e. to encode
+ * a new target using the same encoding as we got before.
+ * How do we formalise "the same encoding"? I think it means
+ * we capture the 'closure' just before supplying it the target
+ * object (referent) -- all the other context has been given to it
+ * earlier, curried-style, and we want a closure taken at that point,
+ * so that only the referent remains. So 'interp-how' becomes a kind of
+ * "curried reference generator" -- it's the function that recomputes
+ * the reference, using the interpreter combined with the context
+ * that was gathered in order to decode the reference.
+ */
+
 int compare_reference_source_address(const void *refent1_as_void, const void *refent2_as_void)
 {
 	struct elf_reference *r1 = (struct elf_reference *) refent1_as_void;

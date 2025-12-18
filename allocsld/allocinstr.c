@@ -72,7 +72,7 @@ static void *prologue_get_first_non_displaced(const void *func, const void *func
 	while (nbytes_decoded < NBYTES_TO_CLOBBER)
 	{
 		// decode one, check we can 
-		struct decoded_insn_info info = instr_len_extended(insbyte, func_limit);
+		struct decoded_insn_info info = (struct decoded_insn_info) { }; //instr_len_extended(insbyte, func_limit);
 		if (info.len == 0) /* error */ return NULL;
 		if (info.relocatable_fields[0].reloc_type != 0) MAYBE_APPEND_ONE_FIELD(info.relocatable_fields[0]);
 		if (info.relocatable_fields[1].reloc_type != 0) MAYBE_APPEND_ONE_FIELD(info.relocatable_fields[1]);
@@ -211,7 +211,9 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 	/* Now see if we can get the extrasyms. PROBLEM: we want to
 	 * call dlopen, but we don't yet have a functioning dlopen.
 	 * Instead we map the meta.so ourselves, using routines from
-	 * donald. We also use one liballocs routine. We have to
+	 * donald. We also use one liballocs routine, which we rename
+	 * to avoid conflicting with the "main" copy once allocsld and
+	 * liballocs_preload are unified into the same library. We have to
 	 * fake up the allocs_file_metadata structure. */
 	struct allocs_file_metadata fake_meta;
 	bzero(&fake_meta, sizeof fake_meta);
@@ -222,7 +224,7 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 	if (fd_meta == -1) goto out_notloaded;
 	struct loadee_info ld_so_meta = load_from_fd(fd_meta, "metadata object for " SYSTEM_LDSO_PATH,
 		/* loadee_base_addr_hint */ (uintptr_t) 0, NULL, NULL);
-	if (!ld_so_meta.dynamic_vaddr) goto out_notloaded; // harsh but go with it for now
+	if (!ld_so_meta.dynamic_vaddr) goto out; // harsh but go with it for now
 	ElfW(Dyn) *meta_dyn = (ElfW(Dyn) *) (ld_so_meta.dynamic_vaddr + ld_so_meta.base_addr);
 	// also look for  'extrasyms' and walk those
 	ElfW(Sym) *extrasyms_sym = symbol_lookup_in_dyn(meta_dyn,
@@ -239,7 +241,8 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 
 	// FIXME: we should really close/unload the meta file we just loaded
 	// munmap(ld_so_meta.
-
+out:
+	close(fd_meta);
 out_notloaded:
 	return 1;
 }
@@ -330,7 +333,7 @@ void instrument_ld_so_allocators(uintptr_t ld_so_load_addr)
 		.p_orig_free = &orig_free
 	};
 
-	/* We need a writable, exxecutable buffer for trampolines. AND
+	/* We need a writable, executable buffer for trampolines. AND
 	 * it needs to be within a 32-bit PC-relative branch range of
 	 * the original ld.so. So ask for the next earlier frame */
 	void *rwx_buf = mmap((void*) (ld_so_load_addr - 8192), 4096,
@@ -348,26 +351,34 @@ void instrument_ld_so_allocators(uintptr_t ld_so_load_addr)
 
 /* We generate a bespoke set of malloc hooks here. */
 #define MALLOC_PREFIX(s) allocsld_detour_##s
-#define HOOK_PREFIX(s) hook_##s
+#define HOOK_PREFIX(s) __ld_so_hook_##s
 // declare hook_malloc etc. -- defaults to hidden visibility on the prototypes
 #include "mallochooks/hookapi.h"
 #include "../src/user2hook.c"
 /* Now we have generated "allocsld_detour_*" calling "hook_"*. */
-
 #undef HOOK_PREFIX
-#define HOOK_PREFIX(s) __terminal_hook_##s
+#undef MALLOC_PREFIX
+
+/* never undefine this... there is only one version of it in this file */
 #define ALLOC_EVENT(s) __ld_so_malloc_##s
+
+#define OUR_HOOK(s)  __ld_so_hook_##s
+#define NEXT_HOOK(s) __ld_so_terminal_hook_##s
 #include "../src/hook2event.c"
-/* Now we have generated hook_malloc etc.,
+#undef OUR_HOOK
+#undef NEXT_HOOK
+
+/* Now we have generated __ld_so_hook_malloc etc.,
  * calling __ld_so_malloc_post_successful_alloc and so on,
  * (but those are not yet generated -- instead by ALLOC_EVENT_INDEXING_DEFS4 below)
  * intermingled with
  * calling __terminal_hook_*.
  * To terminate things we also need...
  */
+#undef HOOK_PREFIX /* terminal-direct will define this itself */
 #undef MALLOC_PREFIX
 #define MALLOC_PREFIX(s) (*orig_##s)
-#undef HOOK_PREFIX /* terminal-direct will define this itself */
+#define OUR_HOOK(s) __ld_so_terminal_hook_##s
 #undef MALLOC_LINKAGE
 #define MALLOC_LINKAGE static
 #include "../src/terminal-direct.c"
@@ -434,7 +445,7 @@ static void linear_malloc_index_insert(
 	size_t real_caller_usable_size = real_requested_size - sizeof (INSERT_TYPE);
 	struct insert *insert = insert_for_chunk_and_caller_usable_size(allocptr,
 		real_caller_usable_size);
-	insert->alloc_site = (uintptr_t) caller;
+	insert->initial.alloc_site = (uintptr_t) caller;
 	linear_malloc->recs[linear_malloc->nrecs_used++] = (struct linear_malloc_rec) {
 		.addr = allocptr,
 		.caller_requested_size = caller_requested_size,

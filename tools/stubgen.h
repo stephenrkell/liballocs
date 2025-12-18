@@ -2,9 +2,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <sys/types.h>
-#if 0
-#include "relf.h" /* for fake_dlsym, used by callee wrappers (below), but they are also ifdef'd out just now */
-#endif
 
 #ifndef CURRENT_ALLOC_VARS_QUALIFIERS
 #define CURRENT_ALLOC_VARS_QUALIFIERS extern __thread
@@ -331,71 +328,9 @@ void __unindex_small_alloc(void *ptr, int level);
 		/* HACK: assume void */ __real_ ## sym( make_argnames(argtup) ); \
 	}
 
-/* We also have some macros for generating callee wrappers. These are what 
- * do the indexing, at least logically. Being "callee" wrapper, we only 
- * generate them for objects that really do define the given allocator.
- * 
- * Logically, indexing operations belong here: we should actually invoke
- * the indexing hooks from this wrapper. Currently this isn't what happens.
- * Instead:
- * 
- * - "deep" allocators get the indexing done on the caller side (see above);
- *
- * - wrappers around the system malloc get hte indexing done in the preload 
- *   malloc;
- *
- * - objects which define their own malloc get the callee wrappers from
- *   liballocs_nonshared.a, which is using a mashup of this style of __wrap_*
- *   and the mallochooks stuff (in nonshared_hook_wrappers.c).
- *
- * So there is a gap to close off here: we should do the indexing here,
- * and only rely on the preload as a "special case" albeit the common case,
- * where libc supplies the malloc but is not itself built via us. We should
- * generate the "struct allocator" instance here. And we should dogfood these
- * macros to generate the actual preload stuff.
- *
- * Note that to do this properly, we need to distinguish actual alloc
- * functions from wrappers. Currently LIBALLOCS_ALLOC_FNS really refers
- * to wrappers; for your own actual allocators, they need to be a suballoc.
- *
- * See below for the alloc event stuff which is a step towards clearing this
- * mess up.
- *
- * I thought these were unused. But they're not.
-       # for genuine allocators (not wrapper fns), also make a callee wrapper
-       if allocFn in self.allSubAllocFns(): # FIXME: cover non-sub clases
-           stubsfile.write("make_callee_wrapper(%s, %s)\n" % (fnName, retSig))
- * What do __wrap___real_ functions do in the suballocator (non-malloc) case?
- * They seem simply to dlsym the real symbol and call it. So why are they needed?
- * Because we link with --wrap X and also --wrap __real_X
- * so our reference to __real_x actually goes to __wrap___real_X
- * but we can't write __real___real_X -- it doesn't work. Hence the dlsym.
- * Isn't the answer simply not to link with --wrap __real_X for suballoc funcs?
- * Let's try that.
- */
-#if 0
-#define make_callee_wrapper(name, retchar) \
-	type_for_argchar_ ## retchar __wrap___real_ ## name ( arglist_ ## name (make_argdecl) ) \
-	{ \
-		static type_for_argchar_ ## retchar (*real_ ## name)( arglist_ ## name (make_argtype) ); \
-		if (!real_ ## name) real_ ## name = fake_dlsym(RTLD_DEFAULT, "__real_" #name); \
-		if (!real_ ## name) real_ ## name = fake_dlsym(RTLD_DEFAULT, #name); /* probably infinite regress... */ \
-		if (!real_ ## name) abort(); \
-		type_for_argchar_ ## retchar real_retval; \
-		real_retval = real_ ## name( arglist_ ## name (make_argname) ); \
-		return real_retval; \
-	}
-#define make_void_callee_wrapper(name) \
-	void __wrap___real_ ## name( arglist_ ## name (make_argdecl) ) \
-	{ \
-		void (*real_ ## name)( arglist_ ## name (make_argtype) ); \
-		if (!real_ ## name) real_ ## name = fake_dlsym(RTLD_DEFAULT, "__real_" #name); \
-		if (!real_ ## name) real_ ## name = fake_dlsym(RTLD_DEFAULT, #name); /* probably infinite regress... */ \
-		if (!real_ ## name) abort(); \
-		real_ ## name( arglist_ ## name (make_argname) ); \
-		return; \
-	}
-#endif
+/* We also used to have some macros for generating callee wrappers. These
+ * are now in allocstubs.c, for malloc-like callees (LIBALLOCS_MALLOC_CALLEE_WRAPPERS),
+ * and are generated directly from libmallochooks.
 
 /* Protos for our hook functions. The mallocapi-to-hookapi glue comes
  * from a copy of alloc_events.c. */
@@ -420,7 +355,7 @@ ALLOC_EVENT(post_successful_alloc)(void *allocptr, size_t modified_size, size_t 
 	if (initial_lifetime_policies) /* always statically known but we can't #ifdef here */ \
 	{ \
 		lifetime_insert_t *lti = lifetime_insert_for_chunk(allocptr /* == userptr */, sizefn); \
-		if (lti) *lti |= initial_lifetime_policies; \
+		if (lti) lti->with_type.lifetime_policies |= initial_lifetime_policies; \
 		/* GitHub issue #21: make initial_lifetime_policies caller-sensitive somehow? */ \
 	} \
 } \
@@ -439,10 +374,9 @@ int ALLOC_EVENT(pre_nonnull_free)(void *userptr, size_t freed_usable_size) \
 { \
 	if (initial_lifetime_policies) /* always statically known but we can't #ifdef here */ \
 	{ \
-		lifetime_insert_t *lti = lifetime_insert_for_chunk(userptr, sizefn); \
-		/* GitHub issue #21: are different free functions different policies? not yet... */ \
-		if (lti) *lti &= ~MANUAL_DEALLOCATION_FLAG; \
-		if (lti && *lti) return 1; /* Cancel free if we are still alive */ \
+		INSERT_TYPE *lti = insert_for_chunk(userptr, sizefn); \
+		lti->with_type.lifetime_policies &= ~LIFETIME_POLICY_FLAG(0); /* ZMTODO: This should not be 0 by default, but the one corresponding to this free */ \
+		if (lti->with_type.lifetime_policies != 0) return 1; /* Cancel free if we are still alive */ \
 		__notify_free(userptr); \
 	} \
 	index_namefrag ## _index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \

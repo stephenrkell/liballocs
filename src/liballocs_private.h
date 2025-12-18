@@ -74,8 +74,7 @@ const char *format_symbolic_address(const void *addr);
 
 #include "pageindex.h"
 
-/* FIXME: this should probably be a flexible array member, to
- * allow for DSOs that have tons of segments.*/
+/* FIXME: 'mappings' should probably be a flexible array member. */
 #define MAPPING_SEQUENCE_MAX_LEN 8
 struct mapping_sequence
 {
@@ -83,24 +82,28 @@ struct mapping_sequence
 	void *end;
 	const char *filename;
 	unsigned nused;
+#if 0 /* sketch for what we might do if tracking fds for deferred mapping */
+	int fd_plus_one_if_part_deferred; /* i.e. zero is still the null value, for the fd -1 */
+#endif
 	struct mapping_entry mappings[MAPPING_SEQUENCE_MAX_LEN];
 };
 _Bool __augment_mapping_sequence(struct mapping_sequence *cur, 
 	void *begin, void *end, int prot, int flags, off_t offset, const char *filename,
 	void *caller);
-struct big_allocation *__add_mapping_sequence_bigalloc_nocopy(struct mapping_sequence *seq);
+struct big_allocation *__add_mapping_sequence_bigalloc_with_seq(struct mapping_sequence *seq,
+	void (*free_fn)(void*));
 
+extern void *executable_end_addr;
+extern struct big_allocation *executable_file_bigalloc;
+extern struct big_allocation *executable_data_segment_bigalloc;
+extern uintptr_t executable_data_segment_start_addr;
 /* Normally, the mapping that contiguously precedes the program break
  * is the executable's mapping. However, in some cases where allocsld
  * is 'the program' from the kernel's p.o.v., the program break is above
  * the dynamic linker but 'the executable' (from our p.o.v.) is the binary
  * loaded by the dynamic linker. So this may or may not alias
  * executable_mapping_bigalloc. */
-extern void *executable_end_addr;
 extern struct big_allocation *brk_mapping_bigalloc;
-extern struct big_allocation *executable_file_bigalloc;
-extern struct big_allocation *executable_data_segment_bigalloc;
-extern uintptr_t executable_data_segment_start_addr;
 
 struct dl_phdr_info; /* for include contexts that lack this */
 void mmap_replacement(struct generic_syscall *s, post_handler *post);
@@ -142,6 +145,7 @@ extern void *__private_nommap_malloc_heap_limit;
 extern struct big_allocation *__liballocs_private_nommap_malloc_bigalloc;
 
 void *__private_nommap_malloc(size_t);
+void *__private_nommap_calloc(size_t, size_t);
 void *__private_nommap_realloc(void*, size_t);
 void __private_nommap_free(void *);
 extern struct allocator __private_nommap_malloc_allocator;

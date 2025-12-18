@@ -1,6 +1,6 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
-SRCROOT := $(dir $(THIS_MAKEFILE))../
+SRCROOT := $(dir $(THIS_MAKEFILE))..
 srcdir := $(SRCROOT)/src
 include $(SRCROOT)/config.mk
 
@@ -13,6 +13,8 @@ ifeq ($(DEBUG),)
 CFLAGS += -flto -ffat-lto-objects
 endif
 LDFLAGS += -L$(LIBDLBIND)/lib
+
+OBJCOPY ?= objcopy
 
 # for debugging private malloc, try these
 # ... remember that dlmalloc needs -DDEBUG for assertions to be enabled
@@ -44,6 +46,7 @@ else
 # the rest
 vpath %.c $(srcdir)
 vpath %.lds $(srcdir)
+vpath %.lds.cpp $(srcdir)
 vpath %.c $(srcdir)/allocators
 vpath dlmalloc.c $(LIBSYSTRAP)/contrib
 
@@ -75,8 +78,6 @@ TARGETS += liballocs.so            # nasty linker script for clients, working ar
                                    # be repurposed as futzing with ld.so->allocsld.so (etc) if sane
 TARGETS += liballocs.a             # the main binary usable for statically-linked client exes -- no uniqueness problem
 TARGETS += liballocs_dummyweaks.so # non-client exes, that contain instrumented code, get -l this (but ideally would eliminate)
-TARGETS += liballocs_dummyweaks.o  # non-client solibs, that contain instrumented code, get this linked in (i.e. avoiding a .so dependency; this is okay for solibs because LD_PRELOAD overrides them)
-                                   # (what do client solibs get? easiest is just to treat them like exes, modulo non-overrideyness)
 
 # Keep a list of all the linked binaries we produce
 SOLIB_TARGETS := $(filter-out liballocs.so,$(filter %.so,$(TARGETS)))
@@ -115,16 +116,23 @@ endif
 # owing to GCC bug 88643 and/or binutils (gold) bug 24415 (breakage of --wrap)
 #LDFLAGS += -Wl,-O2 -flto
 LDFLAGS += -fno-lto
-LDFLAGS += -fPIC 
-# until binutils bug 13600 is fixed, gold is the linker we need
-# (FIXME: why? where was the bogus relocation causing problems?)
+LDFLAGS += -fPIC
+# Try to cut down size of the .so file, given some of the libraries we link in (xed...)
+LDFLAGS += -Wl,--gc-sections
+# We need to use gold for now...
 LDFLAGS += -fuse-ld=gold
+# ... but why?
+# XXX: I think one-DSO is going to need BFD?
+#LDFLAGS += -fuse-ld=bfd
 # NOTE that our use of __private_malloc, a defsym'd symbol,
 # used to provoke a gold bug when we were generating protected-visibility
-# undefineds that were bound to it. That bug has been reported (#24286) and
+# undefineds that were bound to it. That gold bug has been reported (#24286) and
 # I've removed the protected undefineds (which came from libmallochooks
-# template code). So we are still committed to using gold to link liballocs
-# owing to binutils issue 13600 is fixed.
+# template code) so we can use gold regardless of whether that bug is fixed.
+# At one time we ran into binutils bug 13600, forcing use of gold, but no longer?
+# Our use of symbols defined in linker scripts (private-malloc-{plain,wrapped}.lds)
+# requires that they generate global symbols. Gold does this but BFD doesn't!
+# BFD can be forced to, using a --dynamic-list option... sigh.
 
 # FIXME: if/when LTO is fixed, we can revert to using ld -r
 # to create __next_hook_* aliases when composing malloc wrappers. For now we
@@ -162,10 +170,16 @@ endif
 CFLAGS += -I$(srcdir)
 
 # different outputs involve different subgroups of objects
+ALLOCSLD_OBJS := meta-dso.o err.o  # in one-DSO builds, these will be in allocsld.os already
+# constraints of allocsld objs: must not use TLS, ...
+# constraints of allocsld: must be free of UNDs? free of via-PLT calls?
 CORE_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o \
-  meta-dso.o uniqtype-util.o counters.o rt-uniqtypes.o util.o private-libc.o err.o query.o walk.o \
+  meta-dso-util.o uniqtype-util.o counters.o rt-uniqtypes.o util.o private-libc.o query.o walk.o \
   init.o workarounds.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) \
   $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
+ifeq ($(LIBALLOCS_ONE_DSO),)
+CORE_OBJS += $(ALLOCSLD_OBJS)
+endif
 ifneq ($(USE_REAL_LIBUNWIND),)
 LDLIBS += -lunwind -lunwind-`uname -m`
 CFLAGS += -DUSE_REAL_LIBUNWIND
@@ -236,35 +250,16 @@ $(ALL_OBJS): CFLAGS += -no-integrated-cpp \
 vpath dlmalloc.c $(LIBSYSTRAP)/../src # HACK: actually in trap-syscalls but should be in libsystrap
 dlmalloc.a: dlmalloc.o nommap-dlmalloc.o
 dlmalloc.o:        CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=1 -DHAVE_MORECORE=0 -DMSPACES=0                          -DUSE_DL_PREFIX -fPIC
-nommap-dlmalloc.o: CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=0 -DHAVE_MORECORE=1 -DMSPACES=1 -DMORECORE=emulated_sbrk -DUSE_DL_PREFIX -fPIC \
-	-Ddlcalloc=nommap_dlcalloc \
-	-Ddlfree=nommap_dlfree \
-	-Ddlmalloc=nommap_dlmalloc \
-	-Ddlmemalign=nommap_dlmemalign \
-	-Ddlposix_memalign=nommap_dlposix_memalign \
-	-Ddlrealloc=nommap_dlrealloc \
-	-Ddlrealloc_in_place=nommap_dlrealloc_in_place \
-	-Ddlvalloc=nommap_dlvalloc \
-	-Ddlpvalloc=nommap_dlpvalloc \
-	-Ddlmallinfo=nommap_dlmallinfo \
-	-Ddlmallopt=nommap_dlmallopt \
-	-Ddlmalloc_trim=nommap_dlmalloc_trim \
-	-Ddlmalloc_stats=nommap_dlmalloc_stats \
-	-Ddlmalloc_usable_size=nommap_dlmalloc_usable_size \
-	-Ddlmalloc_footprint=nommap_dlmalloc_footprint \
-	-Ddlmalloc_max_footprint=nommap_dlmalloc_max_footprint \
-	-Ddlmalloc_footprint_limit=nommap_dlmalloc_footprint_limit \
-	-Ddlmalloc_set_footprint_limit=nommap_dlmalloc_set_footprint_limit \
-	-Ddlmalloc_inspect_all=nommap_dlmalloc_inspect_all \
-	-Ddlindependent_calloc=nommap_dlindependent_calloc \
-	-Ddlindependent_comalloc=nommap_dlindependent_comalloc \
-	-Ddlbulk_free=nommap_dlbulk_free
-# FIXME: the above list of symbols is snarfed from dlmalloc.c and may be prone to change.
-# We manually added `dlbulk_free'
+nommap-dlmalloc.o: CFLAGS += -include $(srcdir)/dlmalloc-includes.h -DHAVE_MMAP=0 -DHAVE_MORECORE=1 -DMSPACES=1 -DMORECORE=emulated_sbrk -DUSE_DL_PREFIX -fPIC
 nommap-dlmalloc-ext.o dlmalloc-ext.o: CFLAGS += -fPIC
 nommap-dlmalloc-ext.o: CFLAGS += -DNOMMAP
+# do the symbol renaming with objcopy, because the dl-prefixed symbols are not the only ones
 nommap-dlmalloc.o: dlmalloc.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+	tmpo="$$(mktemp --suffix=.o)"; $(CC) $(CPPFLAGS) $(CFLAGS) -c -o "$$tmpo" $< && \
+	tmpsymlist="$$(mktemp)" && nm -fposix --defined-only "$$tmpo" | tee /dev/stderr | sed -n '/^\([a-zA-Z0-9_\.]\+\).*/ {s//\1 nommap_\1/;p}' > "$$tmpsymlist" && \
+	$(OBJCOPY) --redefine-syms "$$tmpsymlist" -R '.gnu.*lto_.*' "$$tmpo" "$@"; status=$$?; echo rm -f "$$tmpo" "$$tmpsymlist"; exit $$status
+# ... we also strip LTO sections, i.e. don't risk that LTO will regenerate the old symbol names
+# from IR definitions of the stuff we just renamed
 nommap-dlmalloc-ext.o: dlmalloc-ext.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 comma := ,
@@ -291,7 +286,31 @@ LIBALLOCS_A_OBJS := $(SYSTRAP_OBJS) $(CORE_OBJS) $(NOPRELOAD_OBJS) $(PRELOAD_OBJ
 LIBSYSTRAP_A := $(LIBSYSTRAP)/build/$(shell uname -m)/libsystrap.a
 liballocs_preload.so: LDFLAGS += $(PRIVATE_MALLOC_WRAPPED_LDFLAGS)
 liballocs_preload.so: private-malloc-wrapped.lds
+# XXX: see above: for BFD linker to work, we need --dynamic-list for these lds
+# vpath allocsld.os $(srcdir)/../allocsld
+ifneq ($(LIBALLOCS_ONE_DSO),)
+allocsld.os: $(srcdir)/../allocsld/allocsld.os
+	cp -p "$<" "$@"
+liballocs_preload.so: allocsld.os
+# XXX: can we be sure allocsld was built before we were? Yes,
+# because SUBDIRS in Makefile.am puts us in this order.
+allocsld.lds: CPPFLAGS += -include $(srcdir)/../allocsld/allocsld.h
+allocsld.lds: allocsld.lds.cpp
+	$(CC) -E -o $@ $< $(CPPFLAGS)
+liballocs_preload.so: allocsld.lds
+# we need to
+# - rename the relocs section(s)  -- do this in allocsld Makefile
+# - define a new symbol for each  -- in a linker script? there are *lots* of sections (.rela.*)
+#       -- how do we prevent use of the PLT? PLT needs bootstrap relocation.
+#          can we prevent use of the PLT? should be possible but tricky
+# - put a new tag in .dynamic for each
+# - put the DT_DEBUG in .dynamic as well
+liballocs_preload.so: LDFLAGS += -Wl,-e,_start -Wl,--defsym,_begin=0
+liballocs_preload.so: LDFLAGS += -Wl,--spare-dynamic-tags=4  # one for DT_DEBUG, three for bootstrap rela
+# ------ end allocsld
+endif
 liballocs_preload.so: LDFLAGS += -Wl,-Map,liballocs_preload.so.map
+
 liballocs_preload.so: LDLIBS += $(LIBDLBIND)/lib/libdlbind.a $(PRIVATE_MALLOC_LDLIBS) $(LIBSYSTRAP_A)
 liballocs_preload.so liballocs_dummyweaks.so: LDLIBS += -lz -Wl,--no-as-needed -ldl $(LIBUNWIND_LDLIBS)
 # also set the dependencies, for make purposes
@@ -332,12 +351,36 @@ liballocs_preload.so: LDLIBS += $(RUNT_LDLIBS)
 # dependency for make
 liballocs_preload.so: $(LIBRUNT_A)
 
+DYNAPPEND ?= $(ELFTIN)/dynappend/dynappend
+OBJCOPY ?= objcopy
 # liballocs_preload.so build rule is funky because dlmalloc.a is in LDFLAGS.
 # It needs to be there because it goes inside --whole-archive (and these options
 # are not files, so can't be prerequisites expanded by $+)
+# It is even more funky with allocsld.os, because we need to fill in the
+# custom .dynamic entries.
+ifneq ($(LIBALLOCS_ONE_DSO),)
+define liballocs_so_post_build_commands
+$(DYNAPPEND) $@ $$( printf "%d\n" $(DT_ALLOCS_BOOTSTRAP_RELA) ) "$$( $(OBJCOPY) -Obinary \
+	  -j.bootstrap_dynamic "$@" /dev/stdout | \
+	  tail -c+9 | head -c8 | od -td8 | tr -s '[:blank:]' '\t' | cut -f2 | head -n1 )" && \
+	$(DYNAPPEND) $@ $$( printf "%d\n" $(DT_ALLOCS_BOOTSTRAP_RELASZ) ) "$$( $(OBJCOPY) -Obinary \
+	  -j.bootstrap_dynamic "$@" /dev/stdout | \
+	  tail -c+25 | head -c8 | od -td8 | tr -s '[:blank:]' '\t' | cut -f2 | head -n1 )" && \
+	$(DYNAPPEND) $@ $$( printf "%d\n" $(DT_ALLOCS_BOOTSTRAP_RELAENT) ) "$$( $(OBJCOPY) -Obinary \
+	  -j.bootstrap_dynamic "$@" /dev/stdout | \
+	  tail -c+41 | head -c8 | od -td8 | tr -s '[:blank:]' '\t' | cut -f2 | head -n1 )" && \
+	$(DYNAPPEND) "$@" 21 0 `echo this is DT_DEBUG >/dev/null` \
+	  || (rm -f "$@"; false)
+endef
+else
+define liballocs_so_post_build_commands
+true
+endef
+endif
 liballocs_preload.so: $(SYSTRAP_OBJS) $(LIBALLOCS_PRELOAD_A_OBJS) dlmalloc.a
-	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out $(LDLIBS) dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS) -Wl,--exclude-libs="$(EXCLUDE_LIBS)"
-
+	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out $(LDLIBS) dlmalloc.a,$+) \
+                $(LDFLAGS) $(LDLIBS) -Wl,--exclude-libs="$(EXCLUDE_LIBS)" && \
+        $(liballocs_so_post_build_commands)
 %.a:
 	$(AR) r "$@" $+
 liballocs_preload.a: $(LIBALLOCS_PRELOAD_A_OBJS)
@@ -365,13 +408,12 @@ endif
 # HACK: would ideally eliminate "dummyweaks" shared object if ld provided a "--dt-useful" option
 # or if we could statically link-in our stubs without making them non-overridable.
 # Perhaps the custom ld.so will make this feasible.
-liballocs_dummyweaks.o: dummyweaks.o
-	$(LD) -r -o "$@" $+
 # Because our dummyweaks also includes private_strdup, it brings in a whole private malloc.
 # FIXME: it shouldn't. But unclear how else to satisfy the dependency on __private_strdup
 # in libcrunch's _stubs.so.
 vpath librunt_%.o $(LIBRUNT_BUILD_DIR)
 liballocs_dummyweaks.so: private-malloc-plain.lds
+# XXX: see above: for BFD linker to work, we need --dynamic-list for these lds
 liballocs_dummyweaks.so: LDLIBS += $(PRIVATE_MALLOC_LDLIBS)
 liballocs_dummyweaks.so: dummyweaks.o librunt_dummyweaks.o
 	$(CC) $(CFLAGS) -shared -o "$@" $(filter-out dlmalloc.a,$+) $(LDFLAGS) $(LDLIBS)  -Wl,--exclude-libs="$(EXCLUDE_LIBS)"
@@ -391,7 +433,7 @@ clean:
 .PHONY: install
 install: all
 	${INSTALL} liballocs_preload.so $(srcdir)/liballocs.so liballocs_dummyweaks.so ${libdir}
-	${INSTALL_DATA} liballocs_preload.a liballocs.a liballocs_dummyweaks.o ${libdir}
+	${INSTALL_DATA} liballocs_preload.a liballocs.a ${libdir}
 
 vpath %.h $(srcdir)/%.h
 

@@ -1,5 +1,5 @@
 .PHONY: default
-default: allocsld.so
+default: allocsld.so allocsld.os
 
 .PHONY: all
 all: default
@@ -23,14 +23,25 @@ CFLAGS += $(LIBALLOCSTOOL_CFLAGS)  # for allocmeta-defs.h
 CFLAGS += -DDONALD_NAME=\"allocsld\"
 CFLAGS += -DCHAIN_LOADER
 
+# attempt to encourage binding early... this doesn't work yet
+# because it only applies to defined symbols. We want to make
+# undefines protected, so that the linker can bind them early,
+# in our relocatable link step.
+CFLAGS += -fvisibility=protected
+
 # for debugging build problems
 # CFLAGS += -save-temps
 # for debugging link problems
 LDFLAGS += -fno-lto -Wl,-Map=$@.map
 
-# HACK: we use a thread-local buffer in some places, but that doesn't work
-# in donald which lacks a TLS implementation
-meta-dso.o: CFLAGS += -DNO_TLS
+## HACK: we use a thread-local buffer in some places, but that doesn't work
+## in donald which lacks a TLS implementation
+#meta-dso.o: CFLAGS += -DNO_TLS
+#OBJCOPY ?= objcopy
+## and another HACK: we prefix  find_and_open_meta_libfile() to avoid conflict
+#meta-dso.o: meta-dso.c
+#	obj=$$(mktemp); $(CC) $(CPPFLAGS) $(CFLAGS) -c -o "$$obj" "$<" && \
+#$(OBJCOPY) --redefine-sym find_and_open_meta_libfile=allocsld_find_and_open_meta_libfile "$$obj" "$@"; status=$$?; rm -f "$$obj"; test $$status -eq 0 || (rm -f "$@"; false)
 
 # Thanks to Dan Williams for the recipes that my link commands were based on.
 # http://www.cs.virginia.edu/~dww4s/articles/ld_linux.html
@@ -38,7 +49,9 @@ meta-dso.o: CFLAGS += -DNO_TLS
 LIBC_ARCHIVE ?= $(LIBSYSTRAP)/contrib/musl/build-$(shell uname -m)/lib/libc.a
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
-OBJS := start.o premain.o main.o entry.o load.o chain.o debug.o allocinstr.o meta-dso.o err.o
+OBJS := start.o premain.o main.o entry.o load.o chain.o debug.o allocinstr.o
+OBJS += meta-dso.o err.o  # these come from liballocs proper XXX one-DSO does not like this
+
 C_DEPS := $(filter-out start.o,$(patsubst %.o,.%.d,$(OBJS)))
 DEPS := $(C_DEPS)
 
@@ -46,6 +59,28 @@ $(C_DEPS): .%.d: %.c
 	$(CC) -MM $(CFLAGS) "$<" > "$@" || rm -f "$@"
 
 -include $(DEPS)
+
+# exports DT_ALLOCS_BOOTSTRAP_RELA* and defines a rule for baking them into a .h
+# ... we keep this separate in case we want to include it elsewhere e.g. src/Makefile
+include allocsld.h.mk
+allocsld.os-premain.o: premain.c allocsld.h
+	$(CC) -c -o $@ $< $(CFLAGS) $(CPPFLAGS)
+allocsld.os-premain.o: CPPFLAGS += -include allocsld.h \
+  -DRELA_DT_VALUE=DT_ALLOCS_BOOTSTRAP_RELA \
+  -DRELASZ_DT_VALUE=DT_ALLOCS_BOOTSTRAP_RELASZ \
+  -DRELAENT_DT_VALUE=DT_ALLOCS_BOOTSTRAP_RELAENT
+
+# We pull in parts of librunt... its headers should define get_exe_command_basename etc.
+CFLAGS += -DIN_LIBRUNT_DSO
+# We must use the BFD-based linker (ld.bfd) -- gold doesn't work
+# (it won't generate the donald.lds linker script, though I'm not yet sure why).
+allocsld.so allocsld-plain.os: LDFLAGS += -fuse-ld=bfd
+allocsld.so allocsld-plain.os: LDFLAGS += -nostdlib -nostartfiles
+allocsld.so: LDFLAGS += -L$(LIBSYSTRAP)/build/$(shell uname -m) \
+   -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m) \
+   -Wl,--spare-dynamic-tags,2 -Wl,-soname=allocsld.so -Wl,-Bsymbolic
+allocsld.so: LDLIBS += -Wl,--exclude-libs=libsystrap.a:librunt_preload.a \
+   -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
 
 # We use the 'dynappend' tool to add a DT_DEBUG entry to our .dynamic section.
 # Normally only an executable gets these. But we are an executable, in the
@@ -55,17 +90,6 @@ $(C_DEPS): .%.d: %.c
 # 'invoked'? I think it does, but the ld.so lacks a DT_DEBUG, so would be good
 # to understand how it does so.
 DYNAPPEND ?= $(ELFTIN)/dynappend/dynappend
-
-# We must use the BFD-based linker (ld.bfd) -- gold doesn't work
-# (it won't generate the donald.lds linker script, though I'm not yet sure why).
-# FIXME: what happened to our flags for ensuring this?
-allocsld.so: LDFLAGS += -fuse-ld=bfd \
-            -nostdlib -nostartfiles \
-            -Wl,--spare-dynamic-tags,2 \
-            -Wl,-soname=allocsld.so -Wl,-Bsymbolic \
-            -L$(LIBSYSTRAP)/build/$(shell uname -m) -L$(LIBRUNT)/build/$(if $(DEBUG),debug,opt)-$(shell uname -m)
-allocsld.so: LDLIBS += -Wl,--exclude-libs=libsystrap.a:librunt_preload.a -lsystrap -lrunt_preload # HACK: use preload lib as it's more often built
-
 # FIXME: localize all global symbols except maybe _start?
 allocsld.so: allocsld.lds $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -shared -o "$@" \
@@ -73,6 +97,38 @@ allocsld.so: allocsld.lds $(OBJS)
             -Wl,-Bstatic $(LIBC_ARCHIVE) -Wl,-Bsymbolic $(LDLIBS) \
             -T $(filter %.lds,$+)
 	$(DYNAPPEND) $@ 21 # add DT_DEBUG
+# We need to rename the relocation sections in the output. Changing
+# them from RELA to PROGBITS is not enough; let's do both.
+allocsld-plain.os: LDLIBS += -Wl,--exclude-libs=libsystrap.a:librunt_preload.a:$(notdir $(LIBC_ARCHIVE))
+OBJCOPY ?= objcopy
+READELF ?= readelf
+# FIXME: find this more sensibly
+REL2DATA ?= $(ELFTIN)/rel2data/rel2data
+UNDPROT ?= $(ELFTIN)/undprot/undprot
+%-undprot.o: %.o
+	cp $< $@ && $(UNDPROT) $@ || (rm -f "$@"; false)
+allocsld-plain.os: $(patsubst %.o,%-undprot.o,$(filter-out premain.o,$(OBJS)) allocsld.os-premain.o)
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,-r -no-pie -fno-lto \
+        -Wl,--gc-sections -Wl,--gc-keep-exported \
+        -o "$@" -Bstatic $+ $(LIBC_ARCHIVE) $(LDLIBS)
+
+allocsld.os: allocsld-plain.os
+	{ rm -f $@; tmpf=$$(mktemp) && cp "$<" "$$tmpf" && \
+     $(REL2DATA) "$$tmpf" && \
+     $(OBJCOPY) `for s in malloc calloc free malloc_usable_size realloc; do \
+        printf "%s %s " --localize-symbol "$$s" ; done` \
+        `for s in $$( $(READELF) -WS "$$tmpf" | sed -n '/^[[:blank:]]*\[[0-9 ]\+\][[:blank:]]*\.\(rela[a-zA-Z_\.]*\).*/ {s//\1/;p}' | tee /dev/stderr ); do \
+        printf "%s %s " --rename-section ".$$s=.bootstrap_$$s" ; done` \
+        "$$tmpf" "$@"; };  status=$$?; rm -f "$$tmpf"; test $$status -eq 0 || (rm -f "$@"; false)
+# By pulling in $(LIBC_ARCHIVE), we get a load of global symbols.
+# But unlike allocsld.so where they are mostly harmless (the loader does not
+# participate in linking, so its dynsym exports are irrelevant), these really
+# screw things up for us. What do we want? Roughly we want the --exclude-libs
+# treatment to apply when we link into liballocs_preload.so, *except*
+# for the subset of symbols that do appear in allocsld.os that are also exported
+# for dynamic linking. Tentative: there should not be any?
+#
+# I think we want to localize malloc
 
 # FIXME: including code here is not nice. Why not just call a function?
 # I think it's because we can't anticipate what locals our function will

@@ -88,8 +88,8 @@ void mmap_replacement(struct generic_syscall *s, post_handler *post)
 	
 	void *ret = raw_mmap(addr, length, prot, flags, fd, offset);
 	/* If it did something, notify the allocator.
-	 * HACK: not sure if/where this is documented, but I've seen mmap() return
-	 * a "negative" number that is not -1. So we consider any return value that
+	 * The kernel's mmap() encodes the error code by returning a small
+	 * negative number that is not -1. So we consider any return value that
 	 * is less than PAGE_SIZE below (void*)-1 to be an error value. */
 	if (!MMAP_RETURN_IS_ERROR(ret) && &__mmap_allocator_notify_mmap)
 	{
@@ -126,17 +126,37 @@ void mremap_replacement(struct generic_syscall *s, post_handler *post)
 	void *old_addr = (void*) s->args[0];
 	size_t old_length = s->args[1];
 	size_t new_length = s->args[2];
-	int flags = s->args[3];
+	int mremap_flags = s->args[3];
 	void *maybe_new_address = (void*) s->args[4];
 
+	/* FIXME: share with preload.c */
+	/* We don't have a prot, flags, fd or offset... or possibly even an addr.
+	 * Just fake them. */
+	int prot = 0;
+	int flags = 0;
+	void *addr;
+	void *requested_new_addr = (mremap_flags & /*MREMAP_FIXED*/2) ? maybe_new_address
+		: /*MAP_FAILED*/(void*)-1;
+	if (requested_new_addr == /*MAP_FAILED*/(void*)-1) addr = NULL; else addr = requested_new_addr;
+	off_t offset = 0;
+	int fd = -1;
+	__liballocs_nudge_mmap(&addr, &/*length*/new_length, &prot, &flags, &fd, &offset, __builtin_return_address(0));
+	/* If our nudger wants to force the address, we accommodate it mremapwise. */
+	if (addr != NULL)
+	{
+		maybe_new_address = requested_new_addr = addr;
+		mremap_flags |= /*MREMAP_FIXED*/ 2;
+	}
+	/* FIXME: the nudger might have changed fd or prot or flags... what to do then? */
+
 	/* Do the call. */
-	void *ret = raw_mremap(old_addr, old_length, new_length, flags, maybe_new_address);
+	void *ret = raw_mremap(old_addr, old_length, new_length, mremap_flags, maybe_new_address);
 	// FIXME: also nudge mremaps
 	
 	if (!MMAP_RETURN_IS_ERROR(ret))
 	{
-		__mmap_allocator_notify_mremap(ret, old_addr, old_length, new_length, flags,
-			maybe_new_address, GUESS_CALLER(s));
+		__mmap_allocator_notify_mremap(ret, old_addr, old_length, new_length, mremap_flags,
+			(mremap_flags & /*MREMAP_FIXED*/2) ? maybe_new_address : /*MAP_FAILED*/(void*)-1, GUESS_CALLER(s));
 	}
 	
 	/* Do the post-handling and resume. */
@@ -200,42 +220,21 @@ static int maybe_trap_map_cb(struct maps_entry *ent, char *linebuf, void *interp
 {
 	const char *interpreter_fname = (const char *) interpreter_fname_as_void;
 	if (ent->x == 'x'
-#ifdef GUESS_RELEVANT_SYSCALL_SITES
-			&& (
-				0 == strcmp(interpreter_fname, ent->rest)
-				|| 0 == strcmp(basename(ent->rest), "libdl.so.2")
-			)
-#else
 		/* Just don't trap ourselves. Use this function's address to test */
 		// NOTE: yes, this is correct. If the mapping spans us, skip it.
 		&& !(
 			(unsigned char *) ent->first <= (unsigned char *) maybe_trap_map_cb
 			&& (unsigned char *) ent->second > (unsigned char *) maybe_trap_map_cb
 			)
-#endif
 		)
 	{
 		/* It's an executable mapping we want to blanket-trap, so trap it. */
 		trap_one_executable_region((unsigned char *) ent->first, (unsigned char *) ent->second,
-			ent->rest, ent->w == 'w', ent->r == 'r');
+			ent->rest, ent->w == 'w', ent->r == 'r', addr_is_in_ld_so((void*) ent->first),
+			set_default_trap, NULL);
 	}
 	
 	return 0;
-}
-
-static _Bool trap_syscalls_in_symbol_named(const char *name, struct link_map *l,
-	ElfW(Sym) *dynsym, ElfW(Sym) *dynsym_end, const unsigned char *dynstr, const unsigned char *dynstr_end)
-{
-	ElfW(Dyn) *gnu_hash_ent = dynamic_lookup(l->l_ld, DT_GNU_HASH);
-	ElfW(Sym) *found = gnu_hash_ent ? gnu_hash_lookup((uint32_t*) gnu_hash_ent->d_un.d_ptr, 
-		dynsym, dynstr, name) : NULL;
-	if (found && found->st_shndx != STN_UNDEF)
-	{
-		trap_one_instruction_range((unsigned char *)(l->l_addr + found->st_value),
-			(unsigned char *)(l->l_addr + found->st_value + found->st_size),
-			0, 1);
-		return 1;
-	} else return 0;
 }
 
 extern ElfW(Dyn) _DYNAMIC[];
@@ -303,12 +302,6 @@ void __liballocs_systrap_init(void)
 	// we're about to start rewriting syscall instructions, so be ready
 	install_sigill_handler();
 	
-	/* FIXME: instead of reading the maps file, use section headers to
-	 * figure out the instruction ranges. 
-	 * FIXME: trap everything, and use in-fs caching to mitigate the startup
-	 * overhead. Specifically, we cache a bunch of relocation records having
-	 * a vendor-specific reloc kind R_{ARCH}_SYSCALL_2 for a 2-byte call, etc..*/
-
 	struct maps_entry entry;
 	char proc_buf[4096];
 	int ret;
@@ -316,7 +309,8 @@ void __liballocs_systrap_init(void)
 	if (!(ret > 0)) abort();
 	int fd = open(proc_buf, O_RDONLY);
 	if (fd == -1) abort();
-	/* Copy the whole file into a buffer. */
+	/* Copy the whole file into a buffer.
+	 * FIXME: librunt has its own utility code for this now; use it. */
 	const size_t filebuf_sz = 64 * 8192;
 	char *filebuf = alloca(64 * 8192); // HACK: guessing maximum /proc/pid/maps file size
 	char *filebuf_pos = filebuf;
@@ -333,98 +327,6 @@ void __liballocs_systrap_init(void)
 	for_each_maps_entry((intptr_t) &m, get_a_line_from_maps_buf,
 		linebuf, sizeof linebuf, &entry, maybe_trap_map_cb, (void*) interpreter_fname);
 	close(fd);
-#ifdef GUESS_RELEVANT_SYSCALL_SITES
-	/* Also trap the mmap and mmap64 calls in the libc so. Again, we use relf
-	 * routines to look them up. How do we identify libc in the link map?
-	 * We don't! Instead, look for anything called "mmap" in any *other* object
-	 * than ourselves (... HACK/workaround: that doesn't have a weird address
-	 * or absent name -- these are vdso or other abominations). */
-	_Bool found_an_mmap = 0;
-	unsigned char *libc_base = NULL; /* MONSTER HACK */
-	for (struct link_map *l = find_r_debug()->r_map; l; l = l->l_next)
-	{
-		if ((const void *) l->l_ld != &_DYNAMIC && (intptr_t) l->l_addr > 0
-			&& strlen(l->l_name) > 0)
-		{
-			ElfW(Dyn) *dynsym_ent = dynamic_lookup(l->l_ld, DT_SYMTAB);
-			if (!dynsym_ent) continue;
-			ElfW(Sym) *dynsym = (ElfW(Sym) *) dynsym_ent->d_un.d_ptr;
-			if ((intptr_t) dynsym < 0) continue; /* HACK x86-64 vdso bug */
-			if ((char*) dynsym < (char*) get_highest_loaded_object_below((void*) l->l_addr)->l_addr) continue; /* HACK x86-64 vdso bug */
-			/* nasty hack for getting the end of dynsym */
-			ElfW(Dyn) *dynstr_ent = dynamic_lookup(l->l_ld, DT_STRTAB);
-			if (!dynstr_ent) continue;
-			unsigned char *dynstr = (unsigned char *) dynstr_ent->d_un.d_ptr;
-			if ((intptr_t) dynstr < 0) continue; /* HACK x86-64 vdso bug */
-			if ((unsigned char*) dynstr < (unsigned char*) get_highest_loaded_object_below((void*) l->l_addr)->l_addr) continue; /* HACK x86-64 vdso bug */
-			assert((unsigned char *) dynstr > (unsigned char *) dynsym);
-			ElfW(Dyn) *dynstrsz_ent = dynamic_lookup(l->l_ld, DT_STRSZ);
-			if (!dynstrsz_ent) continue;
-			unsigned long dynstrsz = dynstrsz_ent->d_un.d_val;
-			ElfW(Sym) *dynsym_end = dynsym + dynamic_symbol_count(l->l_ld, l);
-			
-			/* GIANT HACK for __mmap64 in ld.so (glibc ~2.27 onwards) */
-			Elf64_Sym *found = symbol_lookup_in_object(l, "__tls_get_addr"); // HACK
-			if (found)
-			{
-				/* It's too soon to use our static object metadata to
-				 * figure out whether  thing is called "__mmap64".
-				 * So just trap the whole range of ld.so's text segment.
-				 * PROBLEM: how to find its text segment?
-				 * for a reasonable approximation, go with
-				 * the min and max addresses
-				 * of its STT_FUNC symbols. */
-				unsigned char *min = (void*) -1;
-				unsigned char *max = NULL;
-				for (ElfW(Sym) *d = dynsym; d != dynsym_end; ++d)
-				{
-					if (ELF64_ST_TYPE(d->st_info) == STT_FUNC)
-					{
-						unsigned char *addr = sym_to_addr(d);
-						if (addr > max) max = addr;
-						if (addr < min) min = addr;
-					}
-				}
-				
-				trap_one_executable_region(
-					min, max, l->l_name, 0, 0);
-			}
-			else // not the ld.so
-			{
-				/* Now we can look up symbols. */
-				found_an_mmap |= trap_syscalls_in_symbol_named("mmap",   l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-				found_an_mmap |= trap_syscalls_in_symbol_named("mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-				found_an_mmap |= trap_syscalls_in_symbol_named("__mmap64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-				trap_syscalls_in_symbol_named("munmap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-				trap_syscalls_in_symbol_named("mremap", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-				found_a_brk_or_sbrk |= trap_syscalls_in_symbol_named("sbrk", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-				/* PROBLEM: trap-syscalls wants to be able to do open(). 
-				 * Surely it should be doing raw_open? And not instrumenting itself? */
-				//trap_syscalls_in_symbol_named("open", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-				//trap_syscalls_in_symbol_named("__libc_open64", l, dynsym, dynsym_end, dynstr, dynstr + dynstrsz);
-			}
-		}
-	/* MONSTER HACK TEMPORARY FIXME */
-		if (0 == strcmp(l->l_name, "/lib/x86_64-linux-gnu/libc.so.6"))
-		{
-			libc_base = (void *) l->l_addr;
-		}
-	} // end for all loaded objects
-	/* MONSTER HACK TEMPORARY FIXME */
-	assert(libc_base);
-	const off_t OPEN64_START = 953744;
-	const size_t OPEN64_LEN = 302;
-	trap_one_instruction_range(
-		(unsigned char *) libc_base + OPEN64_START, (unsigned char *) libc_base + OPEN64_START + OPEN64_LEN,
-		0, 1);
-
-	/* There's no hope of us working if we didn't find these. ACTUALLY don't abort
-	 * though, because aborting during startup stops gdb from taking control. */
-	// if (!found_an_mmap) abort();
-	// if (!found_a_brk_or_sbrk) abort();
-#else
-	/* Just trap the whole bloody lot. */
-#endif
 	__liballocs_systrap_is_initialized = 1;
 }
 
@@ -432,7 +334,7 @@ void __liballocs_systrap_init(void)
  * function's address, so be defensive about overrides. */
 void __liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, int *p_flags,
                   int *p_fd, off_t *p_offset, const void *caller)
-__attribute__((alias("local_liballocs_nudge_mmap")));
+__attribute__((weak,alias("local_liballocs_nudge_mmap")));
 
 extern struct allocator __static_file_allocator;
 extern void *__private_nommap_malloc_heap_base;
@@ -465,7 +367,12 @@ void local_liballocs_nudge_mmap(void **p_addr, size_t *p_length, int *p_prot, in
 		 * init of the pageindex. That's too soon to do our test for a self call, so
 		 * we let that case proceed normally. This is relying on the private malloc heap
 		 * being too large an area to fit inside any hole. That is likely true but is
-		 * definitely not guaranteed (FIXME). */
+		 * definitely not guaranteed (FIXME).
+		 *
+		 * FIXME: gate this on whether we've done our gap-plugging? I'm not 100% sure
+		 * that's good value... when debugging I have found it useful to be able to
+		 * identify quickly our own mmaps. So maybe heed NDEBUG? That's a bit gross
+		 * but possibly the best thing despite that. */
 		static uintptr_t unhinted_self_call_mmap_area = 0x70fffffff000; /* FIXME: sysdep */
 		*p_addr = (void*) unhinted_self_call_mmap_area;
 		unhinted_self_call_mmap_area += *p_length;

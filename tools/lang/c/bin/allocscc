@@ -91,7 +91,6 @@ class AllocsCC(AllocsCompilerWrapper):
         if self.onlyPreprocessing():
             return []
         return [
-            "--save-temps",
             "--decil",
             #"--native",
             "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/cilallocs/cilallocs.cmxs"),
@@ -101,9 +100,8 @@ class AllocsCC(AllocsCompilerWrapper):
             "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/monalloca/monalloca.cmxs")] + \
             (["--domonalloca"]
                 if len(sourceFiles) > 0 and allSourceFilesAreC else []) + \
-            ["-Wno-unused-variable", "-Wno-unused-label",
-            "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/trapptrwrites/trapptrwrites.cmxs"),
-            "--dotrap-ptr-writes"]
+            ["-Wno-unused-variable", "-Wno-unused-label"] + \
+            (["--save-temps"] if "CIL_SAVE_TEMPS" in os.environ else [])
         # We need the above -Wno-unused-... because CIL creates
         # some unused stuff (unavoidably, I believe) which will
         # make compilation done with -Werror barf if we don't
