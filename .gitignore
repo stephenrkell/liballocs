@@ -196,5 +196,3 @@ oopsla*.ps
 *.orig
 /tests/bit-fields/bit-fields
 /tests/packed-seq-walk/packed-seq-walk
-
-/lib/ocaml
