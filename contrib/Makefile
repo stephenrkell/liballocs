@@ -4,8 +4,8 @@ CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 export OCAML_LIBDEST := ${CONTRIB}/../lib/ocaml/
 export PATH := ${PATH}:${OCAML_LIBDEST}bin/
 
-export CIL_CC=clang-18
-export CC=${CIL_CC}
+export CIL_CC := gcc
+export CC := ${CIL_CC}
 
 # NOTE all this env.sh amounts to just a different way to do
 # ./configure --with-blah=/path/to/blah ?
