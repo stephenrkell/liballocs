@@ -229,7 +229,7 @@ look something like the following.
         cppo libcsexp-ocaml libcsexp-ocaml-dev libyojson-ocaml \
         libyojson-ocaml-dev libnum-ocaml libnum-ocaml-dev \
         libzarith-ocaml libzarith-ocaml-dev \
-        linux-libc-dev-i386-cross libdune-ocaml-dev && \
+        linux-libc-dev-i386-cross libdune-ocaml-dev libfindlib-ocaml-dev && \
     git clone https://github.com/stephenrkell/liballocs.git && \
     cd liballocs && \
     git submodule update --init --recursive && \
