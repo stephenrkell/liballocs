@@ -24,4 +24,4 @@
 	url = git@github.com:probablytom/dune
 [submodule "contrib/cil"]
 	path = contrib/cil
-	url = https://github.com/probablytom/cil.git
+	url = https://github.com/mbyzhangAlt/cil.git

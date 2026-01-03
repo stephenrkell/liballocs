@@ -12,18 +12,17 @@ import os, sys, re, subprocess, tempfile
 REAL_FILE = os.path.realpath(__file__)
 REAL_DIR = os.path.realpath(os.path.dirname(REAL_FILE))
 liballocs_base = os.path.realpath(REAL_DIR + "/../../../..")
-cil_base = os.environ.get("CIL_ROOT", liballocs_base + "/contrib/cil/")
-cilly_cmd = cil_base + "/_build/install/default/bin/cilly"
+ocaml_prefix = os.environ.get("LIBALLOCS_OCAML_PREFIX", liballocs_base + "/lib/ocaml")
+cilly_cmd = ocaml_prefix + "/bin/cilly"
 sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
-existing_cil_install = os.environ.get("CIL_INSTALL", cil_base + "_build/install/default/lib/goblint-cil")
 existing_elftin = os.environ.get("ELFTIN")
 if existing_elftin == None:
     os.putenv("ELFTIN", liballocs_base + "/contrib/elftin")
 existing_ocamlpath = os.environ.get("OCAMLPATH")
 if existing_ocamlpath == None:
     existing_ocamlpath = ""
-os.putenv("OCAMLPATH", existing_cil_install + ":" + existing_ocamlpath)
+os.putenv("OCAMLPATH", ocaml_prefix + "/lib:" + existing_ocamlpath)
 os.putenv("LANG", "C") # Allow allocscc to be called with non-english locales
 
 class AllocsCC(AllocsCompilerWrapper):

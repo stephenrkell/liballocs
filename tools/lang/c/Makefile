@@ -6,9 +6,12 @@ OCAMLFIND ?= ocamlfind
 ifeq ($(CIL_INSTALL),)
 $(error "Expected CIL_INSTALL to be set")
 endif
-ifeq ($(CIL_ROOT),)
-$(error "Expected CIL_ROOT to be set")
+ifeq ($(LIBALLOCS_OCAML_PREFIX),)
+$(error "Expected LIBALLOCS_OCAML_PREFIX to be set")
 endif
+
+export OCAMLPATH := $(LIBALLOCS_OCAML_PREFIX)/lib:$(OCAMLPATH)
+
 CILLY ?= $(CIL_INSTALL)/../bin/cilly
 CIL_TOOLS ?= cilallocs dumpallocs monalloca dumpmemacc trapptrwrites
 OCAMLFLAGS += -package findlib -package goblint-cil
@@ -28,14 +31,14 @@ DEPS += $(OCAML_DEPS)
 -include $(DEPS)
 
 %.cmxs: %.cmx
-	eval \$\(opam env --switch=${CIL_ROOT} --set-switch\) && $(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
+	$(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
 %.cmx %.cmi: %.ml
-	eval \$\(opam env --switch=${CIL_ROOT} --set-switch\) && $(OCAMLFIND) ocamlopt -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) -c "$<"
+	$(OCAMLFIND) ocamlopt -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) -c "$<"
 goblintCil.cmo: goblintCil.ml ;
 %.cmo %.cmi: %.ml
-	eval \$\(opam env --switch=${CIL_ROOT} --set-switch\) && $(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -c "$<"
+	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -c "$<"
 %.cma: %.cmo
-	eval \$\(opam env --switch=${CIL_ROOT} --set-switch\) && $(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -a $+
+	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -a $+
 
 # build cilallocs first
 dumpallocs/dumpallocs.cmx: cilallocs/cilallocs.cmx

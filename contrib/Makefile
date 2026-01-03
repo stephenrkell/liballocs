@@ -1,8 +1,14 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
-export OCAML_LIBDEST := ${CONTRIB}/../lib/ocaml/
-export PATH := ${PATH}:${OCAML_LIBDEST}bin/
+export LIBALLOCS_OCAML_PREFIX := $(CONTRIB)/../lib/ocaml
+CONFIG_MK += \nLIBALLOCS_OCAML_PREFIX := ${LIBALLOCS_OCAML_PREFIX}\n
+varlist += LIBALLOCS_OCAML_PREFIX
+
+export OCAML_LIBDEST := ${LIBALLOCS_OCAML_PREFIX}/lib
+export OCAMLPATH = ${OCAML_LIBDEST}
+
+export PATH := ${PATH}:${LIBALLOCS_OCAML_PREFIX}/bin
 
 export CIL_CC := gcc
 export CC := ${CIL_CC}
@@ -131,20 +137,20 @@ build-cil: cil.stamp mainFeature.cmx
 
 .PHONY: dune-configurator
 dune-configurator:
-	cd dune && dune build -p dune-configurator && dune install -p dune-configurator --prefix=${OCAML_LIBDEST} --libdir=${OCAML_LIBDEST}
+	cd dune && dune build -p dune-configurator && dune install -p dune-configurator --prefix=${LIBALLOCS_OCAML_PREFIX}
 
 # PROBLEM: cil's ocamlbuild takes a significant time to re-run even in the
 # case where nothing's changed. So use a stamp to run around that.
 cil.stamp: goblint-cil
 goblint-cil: dune-configurator
-	cd cil && dune build && dune build @install && dune install --prefix=${OCAML_LIBDEST} --libdir=${OCAML_LIBDEST}
+	cd cil && dune build && dune build @install && dune install --prefix=${LIBALLOCS_OCAML_PREFIX}
 	touch cil.stamp
 
 CONFIG_MK += \nCIL_ROOT ?= $(CONTRIB)/cil/\n
 varlist += CIL_ROOT
 export CIL_ROOT
 
-CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/../lib/ocaml/goblint-cil/\n
+CONFIG_MK += \nCIL_INSTALL ?= ${LIBALLOCS_OCAML_PREFIX}/lib/goblint-cil/\n
 varlist += CIL_INSTALL
 export CIL_INSTALL
 
