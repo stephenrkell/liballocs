@@ -263,15 +263,33 @@ else if (s = "bool" ||  false) then "bool"
 else if (s = "wchar_t" ||  false) then "wchar_t"
   else s
 
-let baseTypeRawStr ts = 
-  let rawString = match ts with 
-     TInt(kind,attrs) -> (Pretty.sprint 80 (d_ikind () kind))
-   | TFloat(kind,attrs) -> (Pretty.sprint 80 (d_fkind () kind))
-   | TBuiltin_va_list(attrs) -> "__builtin_va_list"
-   | _ -> raise(Failure ("bad base type: " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_type ts))))
-   in canonicalizeBaseTypeStr (trim rawString)
-   
-let baseTypeStr ts = identFromString (baseTypeRawStr ts)
+(* See DW_ATE_* in dwarf.h for these names (we strip "DW_ATE_" and
+ * XXX need a special case for signed and unsigned int; see libdwarfpp's
+ * base_type_die::canonical_name_for()  (in dies.cpp). FIXME: stop it from doing that?! *)
+let dwarfEncodingForBaseType t = match t with
+     TInt(IChar, attrs) -> if !(Machdep.theMachine).char_is_unsigned then "unsigned_char" else "signed_char"
+   | TInt(ISChar, attrs) -> "signed_char"
+   | TInt(IUChar, attrs) -> "unsigned_char"
+   | TInt(IBool, attrs) -> "boolean"
+   | TInt(IInt, attrs) -> "int"
+   | TInt(IUInt, attrs) -> "uint"
+   | TInt(IShort, attrs) -> "int"
+   | TInt(IUShort, attrs) -> "uint"
+   | TInt(ILong, attrs) -> "int"
+   | TInt(IULong, attrs) -> "uint"
+   | TInt(ILongLong, attrs) -> "int"
+   | TInt(IULongLong, attrs) -> "uint"
+   | TFloat(FFloat, attrs) -> "float"
+   | TFloat(FDouble, attrs) -> "float"
+   | TFloat(FLongDouble, attrs) -> "float"
+   | _ -> raise(Failure ("bad base type: " ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_type t))))
+
+let baseTypeRawStr t =
+  match t with
+     TBuiltin_va_list(attrs) -> "__builtin_va_list"
+   | _ -> (dwarfEncodingForBaseType t) ^ "$" ^ string_of_int (Cil.bitsSizeOf t)
+
+let baseTypeStr t = identFromString (baseTypeRawStr t)
 
 (* dwarfidl has a latent escaping convention in its ident syntax, to allow 
  * idents to easily encode near-arbitrary strings. Yes, this is sane. *)
