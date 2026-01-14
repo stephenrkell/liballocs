@@ -622,6 +622,7 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) (gs : Cil.global lis
           | Mem(e) -> acc
          end 
        | Asm(_, _, _, _, _, l) -> acc
+       | VarDecl(_, l) -> acc
    in
    let rec accumulateOverInstrs acc instrs = 
      (* debug_print 2 "hello from accumulateOverInstrs\n"; flush Pervasives.stderr; *)
@@ -767,6 +768,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
           Call(_, _, _, l, _) -> "(call) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
         | Set(_, _, l, _) -> "(assignment) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
         | Asm(_, _, _, _, _, l) -> "(assembly) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
+        | VarDecl(_, l) -> "(vardecl) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
       ) ^ "\n"); flush Out_channel.stderr);
       match i with 
       Call(_, funExpr, args, l, _) -> begin
@@ -848,6 +850,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
       end 
     | Set(lv, e, l, _) -> (* (debug_print 2 ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); flush Pervasives.stderr; *) SkipChildren (* ) *)
     | Asm(_, _, _, _, _, l) -> (* (debug_print 2 ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); *) SkipChildren (* ) *)
+    | VarDecl(_, l) -> SkipChildren
    (* ) *)
 end (* class dumpAllocsVisitor *)
 
