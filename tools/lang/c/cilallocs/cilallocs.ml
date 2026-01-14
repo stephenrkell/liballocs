@@ -480,7 +480,6 @@ let matchIgnoringLocation g1 g2 = match g1 with
   | GAsm(s, loc) ->          begin match g2 with GAsm(s2, loc)        -> s  = s2  | _ -> false end
   | GPragma(a, loc) ->       begin match g2 with GPragma(a2, loc)     -> a  = a2  | _ -> false end
   | GText(s) ->              begin match g2 with GText(s2)            -> s  = s2  | _ -> false end
-  | GStaticAssert(e,s,l) ->  begin match g2 with GStaticAssert(e2,s2,_)-> e=e2 && s=s2 | _ -> false end
 
 let isFunction g = match g with
   GFun(_, _) -> true
