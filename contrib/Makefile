@@ -155,17 +155,14 @@ varlist += CIL_INSTALL
 export CIL_INSTALL
 
 .PHONY: mainFeature.cmx
-mainFeature.cmx:
+mainFeature.cmx: cil.stamp
 	cd cil && cp ${CIL_ROOT}/src/mainFeature.ml ${CIL_ROOT}/src/mainFeature.mli ${CIL_INSTALL} && ocamlfind ocamlopt -c ${CIL_INSTALL}/mainFeature.mli && ocamlfind ocamlopt -linkpkg -package dynlink -package findlib -package str -package zarith -I ${CIL_INSTALL} ${CIL_INSTALL}goblintCil.cmxa ${CIL_INSTALL}mainFeature.ml
 
 .PHONY: goblint-cil-deps
-goblint-cil-deps: cppo csexp dune-configurator yojson
+goblint-cil-deps: dune-configurator
 
 clean::
 	cd cil && dune clean
-	cd yojson && dune uninstall -p yojson --prefix=/usr/lib/ocaml/
-	cd csexp  && dune uninstall -p csexp --prefix=/usr/lib/ocaml/
-	cd cppo   && dune uninstall -p cppo --prefix=/usr/lib/ocaml/
 	cd dune   && dune uninstall -p dune-configurator --prefix=/usr/lib/ocaml/
 	rm -f cil.stamp
 
