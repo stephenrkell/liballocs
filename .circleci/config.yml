@@ -13,7 +13,7 @@ jobs:
               build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++-10 gcc-10 lib32gcc-10-dev \
-              ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
+              ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev cppo \
               default-jdk-headless python3 \
               make git gawk gdb wget libc6-dbg \
               ocaml-dune libdune-ocaml-dev \

@@ -220,7 +220,7 @@ look something like the following.
 
     $ sudo apt-get install libelf-dev libdw-dev binutils-dev \
         autoconf automake libtool pkg-config autoconf-archive \
-        g++ ocaml ocamlbuild ocaml-dune ocaml-findlib \
+        g++ ocaml ocamlbuild ocaml-dune ocaml-findlib cppo \
         libppx-deriving-yojson-ocaml-dev \
         default-jre-headless python3 python \
         make git gawk gdb wget \
