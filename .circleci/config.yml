@@ -70,6 +70,7 @@ jobs:
               ca-certificates make build-essential g++-10 autoconf automake libtool \
               libelf-dev python3 git gawk libunwind-dev \
               ocaml ocamlbuild ocaml-findlib \
+              libppx-deriving-yojson-ocaml-dev libyojson-ocaml libnum-ocaml libzarith-ocaml \
               clang \
               libdw-dev binutils-dev libffi-dev \
               libboost-iostreams-dev libboost-regex-dev \
