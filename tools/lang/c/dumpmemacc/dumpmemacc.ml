@@ -16,7 +16,7 @@ class dumpMemAccVisitor = fun (fl: Cil.file) -> object(self)
   method doReport (direction : string) (kind: string) (exprT : Cil.typ) (enclosingT : Cil.typ) : unit =
       let chan = match !outChannel with
           Some(c) -> c
-        | None -> Pervasives.stderr
+        | None -> Out_channel.stderr
       in
       let loc = match !currentLoc with
           Some(l) -> l
@@ -117,7 +117,7 @@ class dumpMemAccVisitor = fun (fl: Cil.file) -> object(self)
 
   method vinst (outerI: instr) : instr list visitAction = ChangeDoChildrenPost([outerI], fun is ->
       match is with 
-      [Call(maybeOut, funExpr, args, l)] -> (
+      [Call(maybeOut, funExpr, args, l, _)] -> (
           currentLoc := Some(l);
           (match maybeOut with
               Some(lv) -> self#reportWrite lv
@@ -126,7 +126,7 @@ class dumpMemAccVisitor = fun (fl: Cil.file) -> object(self)
           let _ = List.mapi (fun idx -> (fun subE -> (self#reportVirtualWrite subE))) args in ();
           is
       )
-    | [Set(lv, e, l)] ->
+    | [Set(lv, e, l, _)] ->
           currentLoc := Some(l);
           self#reportVirtualWrite e;
           self#reportWrite lv;

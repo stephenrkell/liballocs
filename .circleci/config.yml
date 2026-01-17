@@ -13,9 +13,14 @@ jobs:
               build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
               autoconf automake libtool pkg-config autoconf-archive \
               g++-10 gcc-10 lib32gcc-10-dev \
-              ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
+              ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev cppo \
               default-jdk-headless python3 \
               make git gawk gdb wget libc6-dbg \
+              ocaml-dune libdune-ocaml-dev \
+              libyojson-ocaml libyojson-ocaml-dev libppx-deriving-yojson-ocaml-dev \
+              libzarith-ocaml libzarith-ocaml-dev \
+              libnum-ocaml libnum-ocaml-dev \
+              libcsexp-ocaml libcsexp-ocaml-dev \
               libunwind-dev libunwind-dev:i386 linux-libc-dev-i386-cross libc6-dev-i386 \
               libboost-iostreams-dev libboost-regex-dev \
               libboost-serialization-dev libboost-filesystem-dev libffi-dev \
@@ -65,6 +70,7 @@ jobs:
               ca-certificates make build-essential g++-10 autoconf automake libtool \
               libelf-dev python3 git gawk libunwind-dev \
               ocaml ocamlbuild ocaml-findlib \
+              libppx-deriving-yojson-ocaml-dev libyojson-ocaml libnum-ocaml libzarith-ocaml \
               clang \
               libdw-dev binutils-dev libffi-dev \
               libboost-iostreams-dev libboost-regex-dev \

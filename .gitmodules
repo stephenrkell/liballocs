@@ -16,9 +16,12 @@
 [submodule "contrib/donald"]
 	path = contrib/donald
 	url = https://github.com/stephenrkell/donald.git
-[submodule "contrib/cil"]
-	path = contrib/cil
-	url = https://github.com/stephenrkell/cil.git
 [submodule "contrib/elftin"]
 	path = contrib/elftin
 	url = https://github.com/stephenrkell/elftin.git
+[submodule "contrib/dune"]
+	path = contrib/dune
+	url = https://github.com/probablytom/dune.git
+[submodule "contrib/cil"]
+	path = contrib/cil
+	url = https://github.com/mbyzhangAlt/cil.git
