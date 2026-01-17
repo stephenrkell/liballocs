@@ -10,8 +10,8 @@ export OCAMLPATH = ${OCAML_LIBDEST}
 
 export PATH := ${PATH}:${LIBALLOCS_OCAML_PREFIX}/bin
 
-export CIL_CC := gcc
-export CC := ${CIL_CC}
+export CC := gcc
+export CIL_CC := ${CC}
 
 # NOTE all this env.sh amounts to just a different way to do
 # ./configure --with-blah=/path/to/blah ?
