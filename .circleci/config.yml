@@ -16,6 +16,11 @@ jobs:
               ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
               default-jdk-headless python3 \
               make git gawk gdb wget libc6-dbg \
+              ocaml-dune libdune-ocaml-dev \
+              libyojson-ocaml libyojson-ocaml-dev libppx-deriving-yojson-ocaml-dev \
+              libzarith-ocaml libzarith-ocaml-dev \
+              libnum-ocaml libnum-ocaml-dev \
+              libcsexp-ocaml libcsexp-ocaml-dev \
               libunwind-dev libunwind-dev:i386 linux-libc-dev-i386-cross libc6-dev-i386 \
               libboost-iostreams-dev libboost-regex-dev \
               libboost-serialization-dev libboost-filesystem-dev libffi-dev \

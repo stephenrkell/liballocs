@@ -1,0 +1,8 @@
+# We want to ensure lib/ocaml _always_ exists, but we can't commit an empty dir
+# to a git repo. There has to be some content at this path. However, everything
+# that gets placed here is a build artifact that shouldn't be committed.
+
+# So: ignore everything in this directory _except_ this file, so that this file
+# ensures the path exists.
+*
+!.gitignore

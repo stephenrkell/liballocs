@@ -87,7 +87,7 @@ let maybeDecayArrayTypesig maybeTs = match maybeTs with
   | _ -> Undet
 
 let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : sz = 
-  debug_print 2 ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ") ... ");  flush Pervasives.stderr;
+  debug_print 2 ("Hello from getSizeExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_exp ex)) ^ ") ... ");  flush Out_channel.stderr;
   let isTrailingField fi compinfo = 
     let reverseFields = rev compinfo.cfields
     in
@@ -112,17 +112,17 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
    *      &a.i[0]   a.k.a.  &a.i   a.k.a.    a.i
    * might be a trailing field, if i is the last field in the struct. *)
   let rec isTrailingFieldOffsetExpr ts off = 
-    debug_print 2 ("Hello from isTrailingFieldOffsetExpr(" ^ (Pretty.sprint 80 (d_typsig () ts)) ^ (Pretty.sprint 80 (d_offset Pretty.nil () off)) ^ ") ");  flush Pervasives.stderr;
+    debug_print 2 ("Hello from isTrailingFieldOffsetExpr(" ^ (Pretty.sprint 80 (d_typsig () ts)) ^ (Pretty.sprint 80 (d_offset Pretty.nil () off)) ^ ") ");  flush Out_channel.stderr; 
     match off with
-      NoOffset -> (debug_print 2 ("... no offset\n");  flush Pervasives.stderr; false)
+      NoOffset -> (debug_print 2 ("... no offset\n");  flush Out_channel.stderr; false)
     | Field(fi, NoOffset) when isTrailingField fi fi.fcomp 
-        -> (debug_print 2 ("... trailing field + no offset\n");  flush Pervasives.stderr; true)
+        -> (debug_print 2 ("... trailing field + no offset\n");  flush Out_channel.stderr; true)
     | Field(fi, NoOffset)
-        -> (debug_print 2 ("... non-trailing no-offset\n"); flush Pervasives.stderr; false)
+        -> (debug_print 2 ("... non-trailing no-offset\n"); flush Out_channel.stderr; false)
     | Index(indexEx, maybeOffset)
-        -> (debug_print 2 ("... index\n");  flush Pervasives.stderr; isTrailingFieldOffsetExpr (arrayElementType ts) maybeOffset)
+        -> (debug_print 2 ("... index\n");  flush Out_channel.stderr; isTrailingFieldOffsetExpr (arrayElementType ts) maybeOffset)
     | Field(fi, someOffset)
-        -> (debug_print 2 ("... residual field case\n");  flush Pervasives.stderr; isTrailingFieldOffsetExpr (typeSig fi.ftype) someOffset)
+        -> (debug_print 2 ("... residual field case\n");  flush Out_channel.stderr; isTrailingFieldOffsetExpr (typeSig fi.ftype) someOffset)
 
  (*   
     (getConcreteType (typeSig fi.ftype)) = (getConcreteType ts) -> 
@@ -138,7 +138,7 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
     *)
   in
   let containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv = begin
-    debug_print 2 ("Hello from containingTypeSigInTrailingFieldOffsetFromNullPtrExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv)) ^ ")\n");  flush Pervasives.stderr;
+    debug_print 2 ("Hello from containingTypeSigInTrailingFieldOffsetFromNullPtrExpr(" ^ (Pretty.sprint 80 (Pretty.dprintf "%a" d_lval lv)) ^ ")\n");  flush Out_channel.stderr; 
     match lv with
       (* Does it make sense to have complex expressions when doing 
          an offsetof-based size calculation? e.g.
@@ -161,18 +161,18 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
                                     Field(d-fieldinfo, 
                                         NoOffset)))))))
        *) 
-    (Mem(e), off) -> debug_print 2 ("Saw Mem case\n"); flush Pervasives.stderr;
+    (Mem(e), off) -> debug_print 2 ("Saw Mem case\n"); flush Out_channel.stderr; 
         if isStaticallyNullPtr e 
             then (
-                debug_print 2 ("Saw statically-null case\n");
-                flush Pervasives.stderr; 
+                debug_print 2 ("Saw statically-null case\n"); 
+                flush Out_channel.stderr; 
                 let targetTs = pointerTargetType (typeSig (typeOf e))
                 in
                 if isTrailingFieldOffsetExpr targetTs off 
                     then Some(targetTs)
                     else None
             )
-            else (debug_print 2 ("Saw non-statically-null case\n"); flush Pervasives.stderr; None)
+            else (debug_print 2 ("Saw non-statically-null case\n"); flush Out_channel.stderr; None)
    | _ -> None
   end
   in
@@ -268,14 +268,14 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
                             if ci.cstruct && List.length ci.cfields > 0 then
                                 let fi = List.nth ci.cfields (List.length ci.cfields - 1)
                                 in
-                                let _ = (debug_print 2 ("Hello from field-subtracting (s - f) case in getSizeExpr (s is " ^ (typsigToString ts1) ^ ", f is " ^ (typToString fi.ftype) ^ " )\n");  flush Pervasives.stderr) in
+                                let _ = (debug_print 2 ("Hello from field-subtracting (s - f) case in getSizeExpr (s is " ^ (typsigToString ts1) ^ ", f is " ^ (typToString fi.ftype) ^ " )\n");  flush Out_channel.stderr) in
                                 let subtractingLastField =
                                     if fi.fbitfield <> None then false
                                     else
                                     (let tsf = Cil.typeSig fi.ftype in
                                      tsMatchModuloSignedness tsf ts2 ||
                                      (match tsf with
-                                        TSArray(tsa, Some(bound), _) when bound = Int64.one ->
+                                        TSArray(tsa, Some(bound), _) when bound = cilint_of_int64 Int64.one ->
                                                 tsMatchModuloSignedness tsa ts2
                                       | ts -> false)
                                     )
@@ -308,7 +308,7 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
       end
    | CastE(t, e) -> (getSizeExpr e env gs) (* i.e. recurse down e *)
    | AddrOf(lv) -> begin 
-        debug_print 2 ("Hello from AddrOf case in getSizeExpr\n");  flush Pervasives.stderr;
+        debug_print 2 ("Hello from AddrOf case in getSizeExpr\n");  flush Out_channel.stderr;
         let ts = containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv 
         in match ts with
             None -> Undet
@@ -329,7 +329,7 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
          | Undet -> debug_print 2 "don't know\n"
          | TooComplex -> debug_print 2 "something too complex\n"
    );
-   flush Pervasives.stderr;
+   flush Out_channel.stderr;
    res
    )
 
@@ -380,35 +380,35 @@ let matchUserAllocArgs i arglist signature env maybeFunNameToPrint (calledFuncti
      in
      let fragment = (* string_after *) (matched_string signature) (* nskip *)
      in 
-     (debug_print 2 ("Info: signature " ^ signature ^ " did contain a function arg spec (" ^ fragment ^ " a.k.a. signature + "^ (string_of_int nskip) ^")\n"); flush Pervasives.stderr);
+     (debug_print 2 ("Info: signature " ^ signature ^ " did contain a function arg spec (" ^ fragment ^ " a.k.a. signature + "^ (string_of_int nskip) ^")\n"); flush Out_channel.stderr);
      fragment
  )
  with Not_found -> (
-       (debug_print 0 ("Warning: signature " ^ signature ^ " did not contain an arg spec\n"); flush Pervasives.stderr);
+       (debug_print 0 ("Warning: signature " ^ signature ^ " did not contain an arg spec\n"); flush Out_channel.stderr); 
        ""
  )
  in let sizeArgPos = 
        if string_match (regexp "[^A-Z]*[A-Z]") signatureArgSpec 0 
        then Some((String.length (matched_string signatureArgSpec)) - 1 (* for the bracket*) - 1 (* because we want zero-based *))
-       else (debug_print 0 ("Warning: signature " ^ signature ^ " did not contain a capitalized arg spec element\n"); flush Pervasives.stderr; None)
+       else (debug_print 0 ("Warning: signature " ^ signature ^ " did not contain a capitalized arg spec element\n"); flush Out_channel.stderr; None)
  in match sizeArgPos with
   Some(s) -> 
      if (length arglist) > s then 
        let szEx = 
-          (debug_print 2 ("Looking at arg expression number " ^ (string_of_int s) ^ "\n"); flush Pervasives.stderr); 
+          (debug_print 2 ("Looking at arg expression number " ^ (string_of_int s) ^ "\n"); flush Out_channel.stderr); 
           getSizeExpr (nth arglist s) env gs
        in 
        match szEx with
-         Existing(szType, _) -> (debug_print 2 ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Pervasives.stderr );
+         Existing(szType, _) -> (debug_print 2 ("Inferred that we are allocating some number of " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_typsig szType)) ^ "\n"); flush Out_channel.stderr );
                szEx
-       | Undet | TooComplex -> debug_print 1 ("Could not infer what we are allocating\n"); flush Pervasives.stderr; szEx
-       | Synthetic(_) -> debug_print 1 ("We are allocating a composite: FIXME print this out\n"); flush Pervasives.stderr; szEx
+       | Undet | TooComplex -> debug_print 1 ("Could not infer what we are allocating\n"); flush Out_channel.stderr; szEx
+       | Synthetic(_) -> debug_print 1 ("We are allocating a composite: FIXME print this out\n"); flush Out_channel.stderr; szEx
      else (match maybeFunNameToPrint with 
          Some(fnname) -> 
                ((debug_print 0 ("Warning: signature " ^ signature
                ^ " wrongly predicts allocation function " ^ fnname ^ " will have at least " 
                ^ (string_of_int s) ^ " arguments, where call site it has only " ^ (string_of_int (length arglist)) ^"\n"); 
-               flush Pervasives.stderr); Undet)
+               flush Out_channel.stderr); Undet)
        | None -> (debug_print 0 ("Warning: spec argument count (" ^ (string_of_int s) ^ ") does not match call-site argument count (" ^ (string_of_int (length arglist)) ^ ")")); Undet)
  | None -> 
       (* If we have no sizearg pos, use the return type of the function: 
@@ -455,11 +455,11 @@ let functionNameMatchesSignature fname signature =
     in
     match friendlyName with 
       Some(s) -> 
-        (debug_print 2 ("Info: signature " ^ signature ^ " did contain a function name: " ^ s ^ "\n");
-        flush Pervasives.stderr; 
+        (debug_print 2 ("Info: signature " ^ signature ^ " did contain a function name: " ^ s ^ "\n"); 
+        flush Out_channel.stderr; 
         fname = s )
     | None -> (debug_print 2 ("Warning: signature " ^ signature ^ " did not contain a function name\n"); 
-        flush Pervasives.stderr; false )
+        flush Out_channel.stderr; false )
 
 let functionArgCountMatchesSignature arglist signature = 
     let (friendlyName, friendlyArgChars) = parseSignature signature
@@ -471,7 +471,7 @@ let rec extractUserAllocMatchingSignature i maybeFunName arglist signature env (
  (* destruct the signature string *)
  debug_print 2 ("Warning: matching against signature " ^ signature ^ " when argcount is " 
     ^ (string_of_int (List.length arglist)) ^ "\n"); 
- flush Pervasives.stderr;
+ flush Out_channel.stderr;
  match maybeFunName with 
    Some(fname) 
     when functionNameMatchesSignature fname signature 
@@ -607,8 +607,8 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) (gs : Cil.global lis
    Let's try this. *)
    let rec accumulateOverOneInstr acc i = (* debug_print 2 "hello from accumulateOverOneInstr\n"; flush Pervasives.stderr; *)
        match i with
-         Call(_, f, args, l) -> acc
-       | Set((host, off), e, l) -> begin 
+         Call(_, f, args, l, _) -> acc
+       | Set((host, off), e, l, _) -> begin 
            match host with
             Var(v) -> if v.vglob then acc else begin
                let szness = getSizeExpr e acc gs in
@@ -616,7 +616,7 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) (gs : Cil.global lis
                    Undet -> acc
                  | _ -> (
                  debug_print 2 ("found some sizeofness in assignment to: " ^ (Pretty.sprint 80 (Pretty.dprintf  "\t%a\t" d_lval (host, off))) ^ " (vid " ^ (string_of_int v.vid) ^ ", sizeofness " ^ (sizeofnessToString szness) ^  ")\n");
-                 flush Pervasives.stderr;
+                 flush Out_channel.stderr;
                  (v.vid, szness) :: (remove_assoc v.vid acc))
             end
           | Mem(e) -> acc
@@ -642,12 +642,9 @@ let rec accumulateOverStatements acc (stmts: Cil.stmt list) (gs : Cil.global lis
    |    Continue (l : location) ->
     *) 
    |    Block(b) -> (* recurse over the block's stmts *) accumulateOverStatements acc b.bstmts gs
-   |    If (e, b1, b2, l) -> accumulateOverStatements (accumulateOverStatements acc b2.bstmts gs) b1.bstmts gs
-   |    Switch (e, b, ss, l) -> accumulateOverStatements (accumulateOverStatements acc ss gs) b.bstmts gs
-   |    Loop (b, l, continueLabel, breakLabel) -> accumulateOverStatements acc b.bstmts gs
-   |    TryFinally (tryBlock, finallyBlock, l) -> accumulateOverStatements (accumulateOverStatements acc tryBlock.bstmts gs) finallyBlock.bstmts gs
-   |    TryExcept (tryBlock, _, exceptBlock, l)
-         -> accumulateOverStatements (accumulateOverStatements acc tryBlock.bstmts gs) exceptBlock.bstmts gs (* FIXME: instr list doesn't get handled*) 
+   |    If (e, b1, b2, l, _) -> accumulateOverStatements (accumulateOverStatements acc b2.bstmts gs) b1.bstmts gs
+   |    Switch (e, b, ss, l, _) -> accumulateOverStatements (accumulateOverStatements acc ss gs) b.bstmts gs
+   |    Loop (b, l, _, continueLabel, breakLabel) -> accumulateOverStatements acc b.bstmts gs
    | _ -> acc
    in 
    match stmts with 
@@ -685,7 +682,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
      (* debug_print 2 ("printing alloc for " ^ fileAndLine ^ ", funvar " ^ funvar.vname ^ "\n"); *)
      let chan = match !outChannel with
       | Some(s) -> s
-      | None    -> Pervasives.stderr
+      | None    -> Out_channel.stderr
      in
      let targetFunc = match maybeFunvar with 
        Some(funvar) -> Pretty.sprint 80 (* I so do not understand Pretty.dprintf *)
@@ -767,12 +764,12 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
   method vinst (i: instr) : instr list visitAction = 
     ( debug_print 2 ("considering instruction " ^ (
        match i with 
-          Call(_, _, _, l) -> "(call) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
-        | Set(_, _, l) -> "(assignment) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
+          Call(_, _, _, l, _) -> "(call) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
+        | Set(_, _, l, _) -> "(assignment) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
         | Asm(_, _, _, _, _, l) -> "(assembly) at " ^ l.file ^ ", line: " ^ (string_of_int l.line)
-      ) ^ "\n"); flush Pervasives.stderr);
+      ) ^ "\n"); flush Out_channel.stderr);
       match i with 
-      Call(_, funExpr, args, l) -> begin
+      Call(_, funExpr, args, l, _) -> begin
          let handleCall maybeFunvar (functionT : Cil.typ) = begin
           let functionTs = typeSig functionT in
           match functionTs with 
@@ -849,7 +846,7 @@ class dumpAllocsVisitor = fun (fl: Cil.file) -> object(self)
         | _ (* match f *) -> (debug_print 2 ("skipping call to non-lvalue at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n"); flush Pervasives.stderr; SkipChildren)
         *)
       end 
-    | Set(lv, e, l) -> (* (debug_print 2 ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); flush Pervasives.stderr; *) SkipChildren (* ) *)
+    | Set(lv, e, l, _) -> (* (debug_print 2 ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); flush Pervasives.stderr; *) SkipChildren (* ) *)
     | Asm(_, _, _, _, _, l) -> (* (debug_print 2 ("skipping assignment at " ^ l.file ^ ":" ^ (string_of_int l.line) ^ "\n" ); *) SkipChildren (* ) *)
    (* ) *)
 end (* class dumpAllocsVisitor *)
