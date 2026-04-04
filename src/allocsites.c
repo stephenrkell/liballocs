@@ -95,7 +95,7 @@ static struct allocs_file_metadata *get_file(const void *allocsite)
 {
 	struct big_allocation *file_bigalloc = __lookup_bigalloc_from_root(allocsite,
 		&__static_file_allocator, NULL);
-	assert(file_bigalloc && "file bigallocs have not been initialized");
+	assert(file_bigalloc && "queried a wild alloc site, or file bigallocs have not been initialized");
 	struct allocs_file_metadata *file = file_bigalloc->allocator_private;
 	return file;
 }
