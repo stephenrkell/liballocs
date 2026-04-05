@@ -354,8 +354,8 @@ ALLOC_EVENT(post_successful_alloc)(void *allocptr, size_t modified_size, size_t 
 		__current_allocsite ? __current_allocsite : caller, sizefn); \
 	if (initial_lifetime_policies) /* always statically known but we can't #ifdef here */ \
 	{ \
-		lifetime_insert_t *lti = lifetime_insert_for_chunk(allocptr /* == userptr */, sizefn); \
-		if (lti) lti->with_type.lifetime_policies |= initial_lifetime_policies; \
+		INSERT_TYPE *lti = insert_for_chunk(allocptr /* == userptr */, sizefn); \
+		if (lti) lti->common.lifetime_policies |= initial_lifetime_policies; \
 		/* GitHub issue #21: make initial_lifetime_policies caller-sensitive somehow? */ \
 	} \
 } \
@@ -375,8 +375,8 @@ int ALLOC_EVENT(pre_nonnull_free)(void *userptr, size_t freed_usable_size) \
 	if (initial_lifetime_policies) /* always statically known but we can't #ifdef here */ \
 	{ \
 		INSERT_TYPE *lti = insert_for_chunk(userptr, sizefn); \
-		lti->with_type.lifetime_policies &= ~LIFETIME_POLICY_FLAG(0); /* ZMTODO: This should not be 0 by default, but the one corresponding to this free */ \
-		if (lti->with_type.lifetime_policies != 0) return 1; /* Cancel free if we are still alive */ \
+		lti->common.lifetime_policies &= ~LIFETIME_POLICY_FLAG(0); /* ZMTODO: This should not be 0 by default, but the one corresponding to this free */ \
+		if (lti->common.lifetime_policies != 0) return 1; /* Cancel free if we are still alive */ \
 		__notify_free(userptr); \
 	} \
 	index_namefrag ## _index_delete(&ALLOC_ALLOCATOR_NAME(allocator_namefrag), \

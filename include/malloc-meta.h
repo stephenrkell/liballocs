@@ -57,15 +57,21 @@
 struct insert {
 	union {
 		struct insert_initial {
-			unsigned short unused:16; /* Always Zero, branch union on this */
-			unsigned long  alloc_site:48;
+			unsigned char  always_0:1;
+			unsigned long  alloc_site:47;
+			unsigned short unused:12;
+			unsigned char  lifetime_policies:4; // should never be zero (0000 => already freed)
 		} initial;
 		struct insert_with_type {
-			  signed short alloc_site_id:15; /* may be zero; -1 means "no/unknown alloc site" */
 			unsigned char  always_1:1;
-			unsigned long  uniqtype_shifted:44;  /* uniqtype ptrs are 8-byte-aligned and have top bit 0 => this field is ((unsigned long) u)>>3 */
-			unsigned char  lifetime_policies:4; // should never be zero 0000 should be that it is freed when and only when parent is freed.
+			  signed short alloc_site_id:15;    /* may be zero; -1 means "no/unknown alloc site" */
+			unsigned long  uniqtype_shifted:44; /* uniqtype ptrs are 8-byte-aligned and have top bit 0 => this field is ((unsigned long) u)>>3 */
+			unsigned char  lifetime_policies:4; // should never be zero (0000 => already freed)
 		} with_type;
+		struct insert_common {
+			unsigned long  _ignore:60;
+			unsigned char  lifetime_policies:4;
+		} common;
 	};
 } __attribute((packed));
 
