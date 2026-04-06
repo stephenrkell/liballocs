@@ -26,5 +26,7 @@ LDFLAGS += $(shell env LIBALLOCS_ALLOC_FNS="$(LIBALLOCS_ALLOC_FNS)" \
 #$(info adding LDFLAGS $(LDFLAGS))
 
 # We don't want allocscc here, so just use plain cc
+# Force DWARF 4 since tools (dwarftypes, usedtypes) don't support DWARF 5 (GCC 15 default)
 plugin-hello: CC := cc
+plugin-hello: CFLAGS += -gdwarf-4
 plugin-hello: plugin-hello.o
