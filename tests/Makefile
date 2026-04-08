@@ -104,19 +104,15 @@ default: checkall
 checkall: $(patsubst %,checkrun-%,$(cases))
 
 define set_out_err
-printf "%-20s\t" "$(1)" && out=$$(mktemp) && err=$$(mktemp) && printf '\texpected: %-10s\t' "$(2)"
+testname="$(1)" && expected="$(2)" && out=$$(mktemp) && err=$$(mktemp)
 endef
 dollar := $$
-define fail_action_escaped
-{ echo "FAIL$$(dollar){status:+ (exit status $$(dollar){status})}; out $$(dollar)out, err $$(dollar)err"; \
-(if [ -e $$(dollar)err ]; then tail -n20 $$(dollar)err; fi); }
-endef
 define fail_action
-{ echo "FAIL$${status:+ ($${status})}"; \
+{ printf "%-20s\texpected: %-10s\tFAIL%s\n" "$$testname" "$$expected" "$${status:+ (exit status $${status})}"; \
 (tail -n20 $$err; false); }
 endef
 define success_action
-echo 'PASS'
+printf "%-20s\texpected: %-10s\tPASS\n" "$$testname" "$$expected"
 endef
 # Some cases are expected to fail
 checkrun-fail-%:
@@ -147,15 +143,15 @@ checkrun-ld-so-malloc:
 
 # Some cases are special and require only to build OK
 checkrun-allocsld-as-cmd:
-	@/bin/echo -ne "$*\tbuild only" && \
-	$(MAKE) cleanbuild-allocsld-as-cmd >/dev/null 2>&1 && $(success_action) || $(fail_action)
+	@$(call set_out_err,allocsld-as-cmd,build only) && \
+	$(MAKE) cleanbuild-allocsld-as-cmd >$$out 2>$$err && $(success_action) || $(fail_action)
 
 # Some cases are special and require only an exit status of zero
 # NOTE: this define is going to be eval'd, so we need two layers of escaping
 define exit-zero-case
 checkrun-$(1):
 	@$$(call set_out_err,$(1),exit-zero) && \
-	$(MAKE) cleanrun-$(1) >$$(dollar)out 2>$$(dollar)err; status=$$(dollar)?; if ! [ $$(dollar)status -eq 0 ]; then $(fail_action_escaped); else $(success_action); fi; exit $$(dollar)status
+	$(MAKE) cleanrun-$(1) >$$(dollar)out 2>$$(dollar)err; status=$$(dollar)?; if ! [ $$(dollar)status -eq 0 ]; then $$(fail_action); else $$(success_action); fi; exit $$(dollar)status
 endef
 define exit-zero-case-names
 allocsld-as-ldso \
