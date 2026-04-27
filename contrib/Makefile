@@ -1,7 +1,7 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
-export LIBALLOCS_OCAML_PREFIX := $(CONTRIB)/../lib/ocaml
+export LIBALLOCS_OCAML_PREFIX := $(realpath $(CONTRIB)/../lib/ocaml)
 CONFIG_MK += \nLIBALLOCS_OCAML_PREFIX := ${LIBALLOCS_OCAML_PREFIX}\n
 varlist += LIBALLOCS_OCAML_PREFIX
 
@@ -132,39 +132,46 @@ clean::
 
 # ----------------------------cil
 
-.PHONY: build-cil
-build-cil: cil.stamp mainFeature.cmx
-
-.PHONY: dune-configurator
-dune-configurator:
-	cd dune && dune build -p dune-configurator && dune install -p dune-configurator --prefix=${LIBALLOCS_OCAML_PREFIX}
-
-# PROBLEM: cil's ocamlbuild takes a significant time to re-run even in the
-# case where nothing's changed. So use a stamp to run around that.
-cil.stamp: goblint-cil
-goblint-cil: dune-configurator
-	cd cil && dune build && dune build @install && dune install --prefix=${LIBALLOCS_OCAML_PREFIX}
-	touch cil.stamp
-
-CONFIG_MK += \nCIL_ROOT ?= $(CONTRIB)/cil/\n
+export CIL_ROOT := $(CONTRIB)/cil
+CONFIG_MK += \nCIL_ROOT := $(CIL_ROOT)\n
 varlist += CIL_ROOT
-export CIL_ROOT
 
-CONFIG_MK += \nCIL_INSTALL ?= ${LIBALLOCS_OCAML_PREFIX}/lib/goblint-cil/\n
+export CIL_INSTALL := $(LIBALLOCS_OCAML_PREFIX)/lib/goblint-cil
+CONFIG_MK += \nCIL_INSTALL := $(CIL_INSTALL)\n
 varlist += CIL_INSTALL
-export CIL_INSTALL
+
+export OPAMROOT := $(CONTRIB)/opamroot
+CONFIG_MK += \nOPAMROOT := $(OPAMROOT)\n
+varlist += OPAMROOT
+
+export OPAMSWITCH := $(CIL_ROOT)
+CONFIG_MK += \nOPAMSWITCH := $(OPAMSWITCH)\n
+varlist += OPAMSWITCH
+
+export OCAMLFIND := opam exec -- ocamlfind
+CONFIG_MK += \nOCAMLFIND := $(OCAMLFIND)\n
+varlist += OCAMLFIND
+
+export OPAMYES = 1
+
+.PHONY: build-cil
+build-cil: build-cil-core mainFeature.cmx
 
 .PHONY: mainFeature.cmx
-mainFeature.cmx: cil.stamp
-	cd cil && cp ${CIL_ROOT}/src/mainFeature.ml ${CIL_ROOT}/src/mainFeature.mli ${CIL_INSTALL} && ocamlfind ocamlopt -c ${CIL_INSTALL}/mainFeature.mli && ocamlfind ocamlopt -linkpkg -package dynlink -package findlib -package str -package zarith -I ${CIL_INSTALL} ${CIL_INSTALL}goblintCil.cmxa ${CIL_INSTALL}mainFeature.ml
+mainFeature.cmx: build-cil-core
+	cd cil && cp ${CIL_ROOT}/src/mainFeature.ml ${CIL_ROOT}/src/mainFeature.mli ${CIL_INSTALL} && $(OCAMLFIND) ocamlopt -c ${CIL_INSTALL}/mainFeature.mli && $(OCAMLFIND) ocamlopt -linkpkg -package dynlink -package findlib -package str -package zarith -I ${CIL_INSTALL} ${CIL_INSTALL}/goblintCil.cmxa ${CIL_INSTALL}/mainFeature.ml
 
-.PHONY: goblint-cil-deps
-goblint-cil-deps: dune-configurator
+.PHONY: build-cil-core
+build-cil-core:
+	opam init --bare --no-setup
+	cd ${CIL_ROOT} && if [ ! -d ${OPAMSWITCH}/_opam ]; then opam switch create . 5.4.0 --no-install; fi
+	cd ${CIL_ROOT} && opam install . --destdir=${LIBALLOCS_OCAML_PREFIX}
 
 clean::
-	cd cil && dune clean
-	cd dune   && dune uninstall -p dune-configurator --prefix=/usr/lib/ocaml/
-	rm -f cil.stamp
+	cd ${CIL_ROOT} && opam remove . --destdir=${LIBALLOCS_OCAML_PREFIX} || true
+	cd ${CIL_ROOT} && opam switch remove . || true
+	rm -rf ${OPAMSWITCH}/_opam
+	rm -rf ${OPAMROOT}
 
 # ----------------------------toolsub
 

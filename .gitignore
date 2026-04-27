@@ -35,10 +35,12 @@
 /contrib/antlr-3.4.tar.gz
 /contrib/config.mk
 /contrib/env.sh
+/contrib/opamroot
 /contrib/libantlr3c-3.4/
 /libltdl/
 
 /lib/outdir
+/lib/ocaml
 
 /config.h
 /config.h.in
