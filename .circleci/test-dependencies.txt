@@ -10,6 +10,7 @@ git
 gawk
 libunwind-dev
 opam
+libgmp-dev
 clang
 libdw-dev
 binutils-dev

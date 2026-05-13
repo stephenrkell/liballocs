@@ -220,7 +220,7 @@ look something like the following.
 
     $ sudo apt-get install libelf-dev libdw-dev binutils-dev \
         autoconf automake libtool pkg-config autoconf-archive \
-        g++ opam \
+        g++ opam libgmp-dev \
         default-jre-headless python3 python \
         make git gawk gdb wget \
         libunwind-dev libc6-dev-i386 zlib1g-dev libc6-dbg \

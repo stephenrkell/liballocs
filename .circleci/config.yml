@@ -12,7 +12,7 @@ jobs:
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
               autoconf automake libtool pkg-config autoconf-archive \
-              opam \
+              opam libgmp-dev \
               default-jdk-headless python3 \
               make git gawk gdb wget libc6-dbg \
               libunwind-dev libunwind-dev:i386 linux-libc-dev-i386-cross libc6-dev-i386 \
