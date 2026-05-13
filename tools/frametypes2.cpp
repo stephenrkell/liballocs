@@ -43,6 +43,7 @@
 #include <fileno.hpp>
 
 #include "stickyroot.hpp"
+#include "subprograms-util.hpp"
 #include "frame-element.hpp"
 #include "uniqtypes.hpp"
 #include "relf.h"
@@ -129,33 +130,6 @@ struct hash<dwarf::encap::loc_expr>
 };
 }
 
-struct iterator_bf_skipping_types : public core::iterator_bf<>
-{
-	typedef core::iterator_bf<> super;
-	void increment(unsigned min_depth)
-	{
-		/* The idea here is not that we skip types per se.
-		 * It's that we skip the children of types, e.g.
-		 * local vars or formals that actually belong to
-		 * methods. Remember that subprograms are types.
-		 * Also remember that we're allowed to start above
-		 * the minimum depth. */
-		if (*this != END && depth() < min_depth)
-		{
-			this->increment_skipping_siblings();
-		}
-		else if (tag_here() != DW_TAG_subprogram &&
-			spec_here().tag_is_type(tag_here()))
-		{
-			this->increment_skipping_subtree();
-		} else this->super::increment();
-		if (*this != END && depth() < min_depth) *this = END;
-	}
-	void increment() { this->increment(0); }
-	// forward constructors
-	using core::iterator_bf<>::iterator_bf;
-};
-
 void print_sp_expr(sticky_root_die& root, Dwarf_Addr lower, Dwarf_Addr upper)
 {
 	/* Last question. What's the stack pointer in terms of the 
@@ -222,80 +196,6 @@ resolve_subp_address(iterator_df<subprogram_die> i_subp, sticky_root_die& root)
 	}
 
 	throw No_entry();
-}
-
-void
-gather_defined_subprograms(sticky_root_die& root,
-	subprogram_vaddr_interval_map_t& out_by_vaddr,
-	map<subprogram_key, iterator_df<subprogram_die> >& out_by_key
-	)
-{
-	/* FIXME: could speed this up by cutting off the search underneath
-	 * certain tags. But which? Subprograms need not be grandchildren of the root,
-	 * if we have namespaces or the like. */
-	for (iterator_df<> i = root.begin(); i != root.end(); ++i)
-	{
-		if (i.is_a<subprogram_die>())
-		{
-			auto i_cu = i.enclosing_cu();
-			
-			iterator_df<subprogram_die> i_subp = i;
-			// only add real, defined subprograms to the list
-			if (
-				// not a declaration
-				(!i_subp->get_declaration() || !*i_subp->get_declaration()) &&
-				// not an "abstract instance"
-				// FIXME: lift this up into libdwarfpp
-				(!i_subp->get_inline() || *i_subp->get_inline() == DW_INL_not_inlined)
-			)
-			{
-				string sourcefile_name = i_subp->get_decl_file() ? 
-					i_cu->source_file_name(*i_subp->get_decl_file())
-					: "(unknown source file)";
-				string comp_dir = i_cu->get_comp_dir() ? *i_cu->get_comp_dir() : "";
-
-				string subp_name;
-				if (i_subp.name_here()) subp_name = *i_subp.name_here();
-				else 
-				{
-					std::ostringstream s;
-					s << "0x" << std::hex << i_subp.offset_here();
-					subp_name = s.str();
-				}
-
-				subprogram_key k(subp_name, sourcefile_name, comp_dir);
-				auto ret = out_by_key.insert(make_pair(k, i_subp));
-				if (!ret.second)
-				{
-					/* This means that "the same value already existed". */
-					cerr << "Warning: subprogram " << *i_subp
-						<< " already in subprograms_list as " 
-						<< ret.first->first.subprogram_name() 
-						<< " (in " 
-						<< ret.first->first.sourcefile_name()
-						<< ", compiled in " << ret.first->first.comp_dir()
-						<< ")"
-						<< endl;
-				}
-				auto all_intervals = i_subp->file_relative_intervals(root, nullptr, nullptr);
-				cerr << "Adding subprogram " << i_subp.summary()
-					<< " with intervals: ";
-				for (auto i_int = all_intervals.begin(); i_int != all_intervals.end();
-					++i_int)
-				{
-					set< pair< subprogram_key, iterator_df<subprogram_die> > > singleton_set;
-					singleton_set.insert(make_pair(k, i_subp));
-					if (i_int != all_intervals.begin()) cerr << ", ";
-					cerr << std::hex << i_int->first << std::dec;
-					out_by_vaddr.insert(make_pair(
-						i_int->first,
-						singleton_set
-					));
-				}
-				cerr << endl;
-			}
-		}
-	}
 }
 
 unsigned get_frame_offset(frame_intervals_t const& subp_frame_intervals)
@@ -1090,33 +990,6 @@ enum flags_t
 void add_local_elements(frame_intervals_t& out, sticky_root_die& root,
 	map<subprogram_key, iterator_df<subprogram_die> > const& subprograms_by_key, flags_t flags)
 {
-	struct iterator_bf_skipping_types : public core::iterator_bf<>
-	{
-		typedef core::iterator_bf<> super;
-		void increment(unsigned min_depth)
-		{
-			/* The idea here is not that we skip types per se.
-			 * It's that we skip the children of types, e.g.
-			 * local vars or formals that actually belong to
-			 * methods. Remember that subprograms are types.
-			 * Also remember that we're allowed to start above
-			 * the minimum depth. */
-			if (*this != END && depth() < min_depth)
-			{
-				this->increment_skipping_siblings();
-			}
-			else if (tag_here() != DW_TAG_subprogram &&
-				spec_here().tag_is_type(tag_here()))
-			{
-				this->increment_skipping_subtree();
-			} else this->super::increment();
-			if (*this != END && depth() < min_depth) *this = END;
-		}
-		void increment() { this->increment(0); }
-		// forward constructors
-		using core::iterator_bf<>::iterator_bf;
-	};
-	
 	for (auto i_i_subp = subprograms_by_key.begin();
 		i_i_subp != subprograms_by_key.end(); ++i_i_subp)
 	{

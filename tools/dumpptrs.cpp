@@ -30,6 +30,7 @@
 #endif
 
 #include "stickyroot.hpp"
+#include "subprograms-util.hpp"
 #include "uniqtypes.hpp"
 
 using std::cin;
@@ -450,19 +451,7 @@ int main(int argc, char **argv)
 		
 		/* Optimisation: don't bother exploring subtrees that are types, because they never 
 		 * contain variables. */
-		struct iterator_bf_skipping_types : public core::iterator_bf<>
-		{
-			void increment()
-			{
-				if (spec_here().tag_is_type(tag_here()))
-				{
-					increment_skipping_subtree();
-				} else increment();
-			}			
-			// forward constructors
-			using core::iterator_bf<>::iterator_bf;
-		} start_bf(start_df);
-		
+		struct iterator_bf_skipping_types start_bf(start_df);
 		for (auto i_bf = start_bf;
 			i_bf != core::iterator_base::END
 			&& (i_bf == start_bf || i_bf.depth() > initial_depth); 
