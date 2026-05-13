@@ -12,7 +12,7 @@
 	url = https://github.com/stephenrkell/libsystrap.git
 [submodule "contrib/toolsub"]
 	path = contrib/toolsub
-	url = https://github.com/stephenrkell/toolsub.git
+	url = https://github.com/mbyzhang/toolsub.git
 [submodule "contrib/donald"]
 	path = contrib/donald
 	url = https://github.com/stephenrkell/donald.git
