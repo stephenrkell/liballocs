@@ -157,7 +157,7 @@ struct arena_bitmap_info
 #define RECENTLY_FREED_SIZE 100
 	/* Keep a circular buffer of recently freed chunks */
 	void *recently_freed[RECENTLY_FREED_SIZE];
-	void **next_recently_freed_to_replace; = &recently_freed[0];
+	void **next_recently_freed_to_replace;// = &recently_freed[0];
 #endif
 };
 void __free_arena_bitmap_and_info(void *info  /* really struct arena_bitmap_info * */);
@@ -361,7 +361,7 @@ static inline struct insert *__generic_malloc_index_insert(
 		if (info->recently_freed[i] == allocptr)
 		{
 			info->recently_freed[i] = NULL;
-			info->next_recently_freed_to_replace = &recently_freed[i];
+			info->next_recently_freed_to_replace = &info->recently_freed[i];
 		}
 	}
 #endif
@@ -416,8 +416,8 @@ static inline struct insert *__generic_malloc_index_insert(
 
 #undef insert_size
 #ifdef TRACE_GENERIC_MALLOC_INDEX
-	fprintf(stderr, "***[%09ld] Inserting user chunk at %p into bitmap at %p\n",
-		info->bitmap_insert_count, allocptr, bitmap);
+	fprintf(stderr, "***[%09ld] Inserting user chunk at %p into bitmap at %p, caller %p\n",
+		info->bitmap_insert_count, allocptr, bitmap, caller);
 #endif
 #if !defined(NDEBUG) || defined(TRACE_GENERIC_MALLOC_INDEX)
 	++info->bitmap_insert_count;
@@ -453,7 +453,7 @@ static inline void __generic_malloc_index_delete(struct allocator *a,
 	 * a double-free if we hit it. */
 	for (int i = 0; i < RECENTLY_FREED_SIZE; ++i)
 	{
-		if (recently_freed[i] == userptr)
+		if (info->recently_freed[i] == userptr)
 		{
 			fprintf(stderr, "*** Double free detected for alloc chunk %p\n",
 				userptr);
@@ -481,6 +481,7 @@ static inline void __generic_malloc_index_delete(struct allocator *a,
 #endif
 		__liballocs_delete_bigalloc_at(userptr, b->allocated_by);
 #ifdef TRACE_GENERIC_MALLOC_INDEX
+		if (!info->next_recently_freed_to_replace) info->next_recently_freed_to_replace = &info->recently_freed[0];
 		*info->next_recently_freed_to_replace = userptr;
 		++info->next_recently_freed_to_replace;
 		if (info->next_recently_freed_to_replace == &info->recently_freed[RECENTLY_FREED_SIZE])
@@ -515,6 +516,7 @@ static inline void __generic_malloc_index_delete(struct allocator *a,
 
 out:
 #ifdef TRACE_GENERIC_MALLOC_INDEX
+	if (!info->next_recently_freed_to_replace) info->next_recently_freed_to_replace = &info->recently_freed[0];
 	*info->next_recently_freed_to_replace = userptr;
 	++info->next_recently_freed_to_replace;
 	if (info->next_recently_freed_to_replace == &info->recently_freed[RECENTLY_FREED_SIZE])
