@@ -12,21 +12,17 @@ import os, sys, re, subprocess, tempfile
 REAL_FILE = os.path.realpath(__file__)
 REAL_DIR = os.path.realpath(os.path.dirname(REAL_FILE))
 liballocs_base = os.path.realpath(REAL_DIR + "/../../../..")
+ocaml_prefix = os.environ.get("LIBALLOCS_OCAML_PREFIX", liballocs_base + "/lib/ocaml")
+cilly_cmd = ocaml_prefix + "/bin/cilly"
 sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
-existing_cil_install = os.environ.get("CIL_INSTALL")
-if existing_cil_install == None:
-    cilly_cmd = liballocs_base + "/contrib/cil/bin/cilly"
-    existing_cil_install = liballocs_base + "/contrib/cil/lib"
-else:
-    cilly_cmd = existing_cil_install + "/../bin/cilly"
 existing_elftin = os.environ.get("ELFTIN")
 if existing_elftin == None:
     os.putenv("ELFTIN", liballocs_base + "/contrib/elftin")
 existing_ocamlpath = os.environ.get("OCAMLPATH")
 if existing_ocamlpath == None:
     existing_ocamlpath = ""
-os.putenv("OCAMLPATH", existing_cil_install + ":" + existing_ocamlpath)
+os.putenv("OCAMLPATH", ocaml_prefix + "/lib:" + existing_ocamlpath)
 os.putenv("LANG", "C") # Allow allocscc to be called with non-english locales
 
 class AllocsCC(AllocsCompilerWrapper):
@@ -95,7 +91,7 @@ class AllocsCC(AllocsCompilerWrapper):
             return []
         return [
             "--decil",
-            "--native",
+            #"--native",
             "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/cilallocs/cilallocs.cmxs"),
             "--load=%s" % (self.getLibAllocsBaseDir() + "/tools/lang/c/dumpallocs/dumpallocs.cmxs"),
             "--dodumpallocs",

@@ -6,10 +6,17 @@ OCAMLFIND ?= ocamlfind
 ifeq ($(CIL_INSTALL),)
 $(error "Expected CIL_INSTALL to be set")
 endif
+ifeq ($(LIBALLOCS_OCAML_PREFIX),)
+$(error "Expected LIBALLOCS_OCAML_PREFIX to be set")
+endif
+
+export OCAMLPATH := $(LIBALLOCS_OCAML_PREFIX)/lib:$(OCAMLPATH)
+
 CILLY ?= $(CIL_INSTALL)/../bin/cilly
 CIL_TOOLS ?= cilallocs dumpallocs monalloca dumpmemacc trapptrwrites
-OCAMLFLAGS +=  -package findlib
-OCAMLFLAGS += -I $(CIL_INSTALL)/cil -I $(dir $(THIS_MAKEFILE))/cilallocs
+OCAMLFLAGS += -package findlib -package goblint-cil
+OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/cilallocs
+OCAMLFLAGS += -open GoblintCil -open GoblintCil.Cilint
 
 CIL_TOOLS_SRC := $(shell find $(CIL_TOOLS) $(realpath $(dir $(THIS_MAKEFILE)))/lib -name '*.ml')
 
@@ -27,6 +34,7 @@ DEPS += $(OCAML_DEPS)
 	$(OCAMLFIND) ocamlopt -shared -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) $+
 %.cmx %.cmi: %.ml
 	$(OCAMLFIND) ocamlopt -o "$@" $(OCAMLOPTFLAGS) $(OCAMLFLAGS) -c "$<"
+goblintCil.cmo: goblintCil.ml ;
 %.cmo %.cmi: %.ml
 	$(OCAMLFIND) ocamlc -o "$@" $(OCAMLFLAGS) -c "$<"
 %.cma: %.cmo
@@ -46,4 +54,4 @@ monalloca/monalloca.cmo: cilallocs/cilallocs.cmo
 
 .PHONY: clean
 clean:
-	for dir in $(CIL_TOOLS); do (cd $$dir && rm -f *.o *.cmo *.cma *.cmi *.cmx *.cmxa *.cmxs *.cil.c *.i ); done
+	for dir in $(CIL_TOOLS); do (cd $$dir && rm -f *.o *.cmo *.cma *.cmi *.cmx *.cmxa *.cmxs *.cil.c *.i *.d ); done

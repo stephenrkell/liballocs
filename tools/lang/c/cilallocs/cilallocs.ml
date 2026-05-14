@@ -43,7 +43,6 @@ open Unix
 open List
 open Str
 open Map
-open Pretty
 open Cil
 open Hashtbl
 module NamedTypeMap = Map.Make(String)
@@ -169,7 +168,7 @@ let unzip l =
 
 let foldConstants e = visitCilExpr (Cil.constFoldVisitor true) e
 
-let makeIntegerConstant n = Const(CInt64(n, IInt, None))
+let makeIntegerConstant n = Const(CInt(n, IInt, None))
 
 let isStaticallyZero e = isZero (foldConstants e) 
 
@@ -186,8 +185,8 @@ let rec isStaticallyNull e = isStaticallyZero e || isStaticallyNullPtr e
 
 let constInt64ValueOfExprNoChr (intExp: Cil.exp) : int64 option =
     match (foldConstants intExp) with
-        Const(CInt64(intValue, _, _)) -> 
-            Some(intValue)
+        Const(CInt(intValue, _, _)) ->
+            Some(int64_of_cilint intValue)
       | _ -> None
   
 let constInt64ValueOfExpr (intExp: Cil.exp) : int64 option =
@@ -196,9 +195,9 @@ let constInt64ValueOfExpr (intExp: Cil.exp) : int64 option =
       | _ -> constInt64ValueOfExprNoChr intExp
 
 let nullPtr = CastE( TPtr(TVoid([]), []) , zero )
-let one = Const(CInt64((Int64.of_int 1), IInt, None))
+let one = Const(CInt((cilint_of_int64 (Int64.of_int 1)), IInt, None))
 let onePtr = CastE( TPtr(TVoid([]), []) , one )
-let negativeOne = Const(CInt64((Int64.of_int (0-1)), IInt, None))
+let negativeOne = Const(CInt(cilint_of_int64 (Int64.of_int (0-1)), IInt, None))
 let negativeOnePtr = CastE( TPtr(TVoid([]), []) , negativeOne )
 
 let debug_print lvl s = 
@@ -208,7 +207,7 @@ let debug_print lvl s =
     int_of_string levelString
   end with Not_found -> 0 | Failure(_) -> 0
   in
-  if level >= lvl then (output_string Pervasives.stderr s; flush Pervasives.stderr) else ()
+  if level >= lvl then (output_string Out_channel.stderr s; flush Out_channel.stderr) else ()
 
 (* HACKed realpath for now: *)
 let abspath f =
@@ -229,8 +228,8 @@ let trim str =
         in   
         let len = String.length str in   
         try
-            let left = search_pos 0 (fun i -> i >= len) (succ)
-            and right = search_pos (len - 1) (fun i -> i < 0) (pred)
+            let left = search_pos 0 (fun i -> i >= len) (Stdlib.succ)
+            and right = search_pos (len - 1) (fun i -> i < 0) (Stdlib.pred)
             in
             String.sub str left (right - left + 1)   
         with Empty -> ""
@@ -305,7 +304,7 @@ let rec barenameFromSig ts =
       "__ARG" ^ (string_of_int startAt) ^ "_" ^ (barenameFromSig t) ^ remainder
  in
  match ts with
-   TSArray(tNestedSig, optSz, attrs) -> "__ARR" ^ (match optSz with Some(s) -> (string_of_int (i64_to_int s)) | None -> "0") ^ "_" ^ (barenameFromSig tNestedSig)
+   TSArray(tNestedSig, optSz, attrs) -> "__ARR" ^ (match optSz with Some(s) -> (string_of_int (i64_to_int (int64_of_cilint s))) | None -> "0") ^ "_" ^ (barenameFromSig tNestedSig)
  | TSPtr(tNestedSig, attrs) -> "__PTR_" ^ (barenameFromSig tNestedSig)
  | TSComp(isSpecial, name, attrs) -> name
  | TSFun(returnTs, Some(argsTss), false, attrs) -> 
@@ -333,7 +332,7 @@ let rec dwarfidlFromSig ts =
  match ts with
    TSArray(tNestedSig, optSz, attrs)
      -> "(array_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "] {" 
-        ^ (match optSz with Some(s) -> ("subrange_type [upper_bound = " ^ (string_of_int (i64_to_int s)) ^ "];") | None -> "") ^ " })"
+        ^ (match optSz with Some(s) -> ("subrange_type [upper_bound = " ^ (string_of_int (i64_to_int (int64_of_cilint s))) ^ "];") | None -> "") ^ " })"
  | TSPtr(tNestedSig, attrs) -> "(pointer_type [type = " ^ (dwarfidlFromSig tNestedSig) ^ "];)" 
  | TSComp(isSpecial, name, attrs) -> name
  | TSFun(returnTs, Some(argsTss), false, attrs) -> 
@@ -384,7 +383,7 @@ let rec decayArrayInTypesig ts = match ts with
 let rec accumulateArrayDimensionsInTypesig ts = match ts with
    TSArray(tsig, Some(sz), attrs) ->  (* recurse for multidim arrays *)
         (match accumulateArrayDimensionsInTypesig tsig with
-            (ts, Some(subN)) -> (ts, Some(Int64.mul sz subN))
+            (ts, Some(subN)) -> (ts, Some(Int64.mul (int64_of_cilint sz) subN))
           | (ts, None) -> (ts, None)
         )
  | TSArray(tsig, None, attrs) -> (* recurse for multidim arrays *)
@@ -398,7 +397,7 @@ let rec collapseArrayDimensionsInTypesig ts = match ts with
      -> (* tsig is also an array, so ... *)
         let ts, maybeSz = accumulateArrayDimensionsInTypesig ts
         in
-        TSArray(ts, maybeSz, attrs)
+        TSArray(ts, Option.map cilint_of_int64 maybeSz, attrs)
  | _ -> ts
 
 (* This will make a "pointer to array of X" typesig into a "pointer to X" typesig.
@@ -481,7 +480,6 @@ let matchIgnoringLocation g1 g2 = match g1 with
   | GAsm(s, loc) ->          begin match g2 with GAsm(s2, loc)        -> s  = s2  | _ -> false end
   | GPragma(a, loc) ->       begin match g2 with GPragma(a2, loc)     -> a  = a2  | _ -> false end
   | GText(s) ->              begin match g2 with GText(s2)            -> s  = s2  | _ -> false end
-  | GStaticAssert(e,s,l) ->  begin match g2 with GStaticAssert(e2,s2,_)-> e=e2 && s=s2 | _ -> false end
 
 let isFunction g = match g with
   GFun(_, _) -> true
@@ -576,7 +574,7 @@ let getOrCreateUniqtypeGlobal m concreteType globals =
        tempGlobal.vattr <- [Attr("weak", [])];
        tempGlobal
      in
-     let newGlobalVarInfo = GVarDecl(newGlobal, {line = -1; file = "BLAH FIXME"; byte = 0})
+     let newGlobalVarInfo = GVarDecl(newGlobal, {line = -1; file = "BLAH FIXME"; byte = 0; column = -1; endLine = -1; endByte = -1; endColumn = -1; synthetic = false })
      in 
      let newMap = (UniqtypeMap.add concreteType newGlobalVarInfo m)
      in 
@@ -671,7 +669,7 @@ let findOrCreateExternalFunctionInFile fl nm proto : fundec = (* findOrCreateFun
     Some(d) -> d
   | None -> let funDec = emptyFunction nm in
         funDec.svar.vtype <- proto;
-        fl.globals <- newGlobalsList fl.globals [GVarDecl(funDec.svar, {line = -1; file = "BLAH FIXME"; byte = 0})] isFunction; 
+   let loc = {line = -1; file = "BLAH FIXME"; byte = 0; column = -1; endLine = -1; endByte = -1; endColumn = -1; synthetic = false } in
         funDec
 
 let findOrCreateNewFunctionInFile fl nm proto l createBeforePred : fundec = (* findOrCreateFunc fl nm proto *) (* NO! doesn't let us have the fundec *)
@@ -696,7 +694,7 @@ let makeInlineFunctionInFile fl ourFun nm proto body referencedValues = begin
    let arglist = List.map (fun (ident, typ, attrs) -> makeFormalVar ourFun ident typ) protoArgs in 
    let () = setFunctionType ourFun protoWithInlineAttrs in
    let nameFunc =  (fun n t -> makeTempVar ourFun ~name:n t) in
-   let loc = {line = -1; file = "BLAH FIXME"; byte = 0} in
+   let loc = {line = -1; file = "BLAH FIXME"; byte = 0; column = -1; endLine = -1; endByte = -1; endColumn = -1; synthetic = false } in
    let argPatternBindings = List.map (fun ((ident, typ, attrs), arg) -> (ident, Fv arg)) (List.combine protoArgs arglist) in 
    let extPatternBindings = (* List.map (fun (ident, v) -> (ident, Fv v)) *) referencedValues in
    let madeBody = mkBlock (Formatcil.cStmts body nameFunc loc (argPatternBindings @ extPatternBindings)) in
@@ -845,7 +843,8 @@ let restructureInstrsStatement
                                               skind = Instr(group);
                                               sid = 0;
                                               succs = [];
-                                              preds = []
+                                              preds = [];
+                                              fallthrough = None
                                            }]
                                 })
                   in
@@ -854,7 +853,8 @@ let restructureInstrsStatement
                     skind = skind;
                     sid = 0;
                     succs = [];
-                    preds = []
+                    preds = [];
+                    fallthrough = None
                   }
               ) groupedInstrs) in
               let b = mkBlock stmts in

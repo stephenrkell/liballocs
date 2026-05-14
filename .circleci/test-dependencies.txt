@@ -9,9 +9,8 @@ python3
 git
 gawk
 libunwind-dev
-ocaml
-ocamlbuild
-ocaml-findlib
+opam
+libgmp-dev
 clang
 libdw-dev
 binutils-dev

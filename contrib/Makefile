@@ -1,6 +1,18 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
+export LIBALLOCS_OCAML_PREFIX := $(abspath $(CONTRIB)/../lib/ocaml)
+CONFIG_MK += \nLIBALLOCS_OCAML_PREFIX := ${LIBALLOCS_OCAML_PREFIX}\n
+varlist += LIBALLOCS_OCAML_PREFIX
+
+export OCAML_LIBDEST := ${LIBALLOCS_OCAML_PREFIX}/lib
+export OCAMLPATH = ${OCAML_LIBDEST}
+
+export PATH := ${PATH}:${LIBALLOCS_OCAML_PREFIX}/bin
+
+export CC := gcc
+export CIL_CC := ${CC}
+
 # NOTE all this env.sh amounts to just a different way to do
 # ./configure --with-blah=/path/to/blah ?
 # ... but we prefer it because it's more compositional:
@@ -120,30 +132,53 @@ clean::
 
 # ----------------------------cil
 
-.PHONY: build-cil
-build-cil: cil.stamp
+export CIL_ROOT := $(CONTRIB)/cil
+CONFIG_MK += \nCIL_ROOT := $(CIL_ROOT)\n
+varlist += CIL_ROOT
 
-# PROBLEM: cil's ocamlbuild takes a significant time to re-run even in the
-# case where nothing's changed. So use a stamp to run around that.
-cil.stamp: cil/Makefile $(shell find cil -name '*.c' -o -name '*.ml' -o -name '*.mli' -o -name '*.in' -o -name '*.mly' )
-	$(MAKE) -C cil all install-local && touch $@
-cil/Makefile: cil/configure
-	cd cil && CC=$${ALLOCSCC_CC:-$${CC:-cc}} ./configure INSTALL="`which install` -p"
-
-CONFIG_MK += \nCIL_INSTALL ?= $(CONTRIB)/cil/lib\n
+export CIL_INSTALL := $(LIBALLOCS_OCAML_PREFIX)/lib/goblint-cil
+CONFIG_MK += \nCIL_INSTALL := $(CIL_INSTALL)\n
 varlist += CIL_INSTALL
-export CIL_INSTALL
+
+export OPAMROOT := $(CONTRIB)/opamroot
+CONFIG_MK += \nOPAMROOT := $(OPAMROOT)\n
+varlist += OPAMROOT
+
+export OPAMSWITCH := $(CIL_ROOT)
+CONFIG_MK += \nOPAMSWITCH := $(OPAMSWITCH)\n
+varlist += OPAMSWITCH
+
+export OCAMLFIND := opam exec -- ocamlfind
+CONFIG_MK += \nOCAMLFIND := $(OCAMLFIND)\n
+varlist += OCAMLFIND
+
+export OPAMYES = 1
+
+.PHONY: build-cil
+build-cil: build-cil-core mainFeature.cmx
+
+.PHONY: mainFeature.cmx
+mainFeature.cmx: build-cil-core
+	cd cil && cp ${CIL_ROOT}/src/mainFeature.ml ${CIL_ROOT}/src/mainFeature.mli ${CIL_INSTALL} && $(OCAMLFIND) ocamlopt -c ${CIL_INSTALL}/mainFeature.mli && $(OCAMLFIND) ocamlopt -linkpkg -package dynlink -package findlib -package str -package zarith -I ${CIL_INSTALL} ${CIL_INSTALL}/goblintCil.cmxa ${CIL_INSTALL}/mainFeature.ml
+
+.PHONY: build-cil-core
+build-cil-core:
+	opam init --bare --no-setup --disable-sandboxing
+	cd ${CIL_ROOT} && if [ ! -d ${OPAMSWITCH}/_opam ]; then opam switch create . 5.4.0 --no-install; fi
+	cd ${CIL_ROOT} && opam install . --destdir=${LIBALLOCS_OCAML_PREFIX}
 
 clean::
-	$(MAKE) -C cil clean
-	rm -f cil.stamp
+	cd ${CIL_ROOT} && opam remove . --destdir=${LIBALLOCS_OCAML_PREFIX} || true
+	cd ${CIL_ROOT} && opam switch remove . || true
+	rm -rf ${OPAMSWITCH}/_opam
+	rm -rf ${OPAMROOT}
 
 # ----------------------------toolsub
 
 .PHONY: build-toolsub
 build-toolsub: build-cil
 	$(MAKE) -C toolsub wrapper-recursive cilpp-recursive  # don't build clang-based cccppp
-	$(MAKE) -C toolsub/wrapper/example/constructor-priority-checker dumpconstr
+	#$(MAKE) -C toolsub/wrapper/example/constructor-priority-checker dumpconstr
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB
 

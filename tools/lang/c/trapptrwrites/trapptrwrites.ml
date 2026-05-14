@@ -89,7 +89,7 @@ let trapPtrWrites file =
           match unrollType (typeOfLval lv) with
           | TPtr _ | TFun _ ->
               Call (None, Lval (var notifyPtrWriteFun),
-                    [ mkCast (mkAddrOf lv) constVoidPtrPtrType ; Lval rv ], loc) :: tail
+                    [ mkCast (mkAddrOf lv) constVoidPtrPtrType ; Lval rv ], loc, loc) :: tail
           | TComp (c, _) -> (* treat unions as structs, might not be a good idea... *)
               List.fold_left (fun acc field ->
                   let flv = addOffsetLval (Field(field, NoOffset)) lv in
@@ -101,31 +101,31 @@ let trapPtrWrites file =
               Call (None, Lval (var notifyCopyFun),
                     [ mkAddrOf lv ; StartOf rv ;
                     BinOp (Mult, length_exp, SizeOf eltyp, !upointType) ],
-                    loc) :: tail
+                    loc, loc) :: tail
           | _ -> tail
       in
 
       match i with
-      | Set (lv, _, _) | Call (Some lv, _, _, _) when not (lvNeedTrapCalls lv) ->
+      | Set (lv, _, _, _) | Call (Some lv, _, _, _, _) when not (lvNeedTrapCalls lv) ->
           SkipChildren
-      | Set(lv, Lval rv, l) ->
-          ChangeTo (addTrapCallsForLval lv rv l [Set(lv, Lval rv, l)])
-      | Set(lv, e, l) ->
+      | Set(lv, Lval rv, l, _) ->
+          ChangeTo (addTrapCallsForLval lv rv l [Set(lv, Lval rv, l, l)])
+      | Set(lv, e, l, _) ->
           let curFunc = match curFunc with
             | Some f -> f
             | None -> assert false
           in
           let tmpvar = var (makeTempVar curFunc (typeOfLval lv)) in
-          ChangeTo (Set(tmpvar, e, l) ::
-              addTrapCallsForLval lv tmpvar l [Set(lv, Lval tmpvar, l)])
-      | Call(Some lv, f, args, l) ->
+          ChangeTo (Set(tmpvar, e, l, l) ::
+              addTrapCallsForLval lv tmpvar l [Set(lv, Lval tmpvar, l, l)])
+      | Call(Some lv, f, args, l, _) ->
           let curFunc = match curFunc with
             | Some f -> f
             | None -> assert false
           in
           let tmpvar = var (makeTempVar curFunc (typeOfLval lv)) in
-          ChangeTo (Call(Some tmpvar, f, args, l) ::
-              addTrapCallsForLval lv tmpvar l [Set(lv, Lval tmpvar, l)])
+          ChangeTo (Call(Some tmpvar, f, args, l, l) ::
+              addTrapCallsForLval lv tmpvar l [Set(lv, Lval tmpvar, l, l)])
       | _ -> SkipChildren
   end in
 
