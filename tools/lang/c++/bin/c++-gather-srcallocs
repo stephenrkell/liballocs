@@ -1,0 +1,22 @@
+#!/bin/bash
+
+cu_sourcepath="$1"
+obj="$2"
+cu_fname="$3"
+cu_compdir="$4"
+
+# Map foo.cpp / foo.cc / foo.C / foo.cxx -> foo.i.allocs
+# links all c++ related files to *.i.allocs
+cu_allocspath="$( echo "$cu_sourcepath" | \
+    sed 's/\.\(cpp\|cc\|cxx\|C\|c++\)$/.i.allocs/' )"
+
+if [[ "$cu_allocspath" == "$cu_sourcepath" ]]; then
+    echo "Warning: unrecognised C++ source extension in $cu_sourcepath" 1>&2
+    exit 0
+fi
+
+if [[ ! -r "$cu_allocspath" ]]; then
+    echo "Warning: missing expected allocs file ($cu_allocspath)" 1>&2
+else
+    cat "$cu_allocspath"
+fi
