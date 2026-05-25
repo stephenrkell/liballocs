@@ -155,14 +155,7 @@ varlist += OCAMLFIND
 export OPAMYES = 1
 
 .PHONY: build-cil
-build-cil: build-cil-core mainFeature.cmx
-
-.PHONY: mainFeature.cmx
-mainFeature.cmx: build-cil-core
-	cd cil && cp ${CIL_ROOT}/src/mainFeature.ml ${CIL_ROOT}/src/mainFeature.mli ${CIL_INSTALL} && $(OCAMLFIND) ocamlopt -c ${CIL_INSTALL}/mainFeature.mli && $(OCAMLFIND) ocamlopt -linkpkg -package dynlink -package findlib -package str -package zarith -I ${CIL_INSTALL} ${CIL_INSTALL}/goblintCil.cmxa ${CIL_INSTALL}/mainFeature.ml
-
-.PHONY: build-cil-core
-build-cil-core:
+build-cil:
 	opam init --bare --no-setup --disable-sandboxing
 	cd ${CIL_ROOT} && if [ ! -d ${OPAMSWITCH}/_opam ]; then opam switch create . 5.4.0 --no-install; fi
 	cd ${CIL_ROOT} && opam install . --destdir=${LIBALLOCS_OCAML_PREFIX}
