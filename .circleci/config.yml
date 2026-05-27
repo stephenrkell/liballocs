@@ -2,13 +2,16 @@ version: 2.0
 jobs:
   build:
     docker:
+      # MARKER BEGIN DISTRIBUTION +0 [[:blank:]]([-a-z0-9\.]+:[-a-z0-9\.]+)
       - image: ubuntu:24.04
+      # MARKER END DISTRIBUTION
     steps:
       - run:
           name: Install dependencies
           command: |
             dpkg --add-architecture i386
             apt update
+            # MARKER BEGIN PACKAGES +1 [[:blank:]]([^#]+)#
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
               autoconf automake libtool pkg-config autoconf-archive \
@@ -19,6 +22,7 @@ jobs:
               libboost-iostreams-dev libboost-regex-dev \
               libboost-serialization-dev libboost-filesystem-dev libffi-dev \
               gettext-base # for envsubst
+            # MARKER END PACKAGES
       - checkout
       - run:
           name: Update submodules

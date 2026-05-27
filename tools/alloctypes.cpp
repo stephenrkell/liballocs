@@ -1,7 +1,3 @@
-/* This is a simple dwarfpp program which generates a C file
- * recording data on a uniqued set of data types  allocated in a given executable.
- */
- 
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -112,8 +108,6 @@ get_names_depended_on(vector<allocsite>::const_iterator begin, vector<allocsite>
 
 int main(int argc, char **argv)
 {
-	/* We open the file named by argv[1] and dump its DWARF types. */ 
-	
 	if (argc <= 1) 
 	{
 		cerr << "Please name an input file." << endl;
@@ -139,11 +133,11 @@ int main(int argc, char **argv)
 	if (!p_root) { std::cerr << "Error opening file" << std::endl; return 1; }
 	sticky_root_die& root = *p_root;
 	
-	/* Do we have an allocsites file for this object? If so, we incorporate its 
-	 * synthetic data types. ALSO treat arr0 as synthetic (FIXME) */
+	/* Do we have an allocsites file for this object? E.g. at /usr/lib/meta/real/path/to/binary.
+	 * If so, we incorporate its synthetic data types. ALSO treat arr0 as synthetic (FIXME) */
 	auto allocsites = read_allocsites_for_binary(argv1.string());
 	//set< pair<string, string> > to_generate_array0;
-	if (!allocsites) { cerr << "Error: no allocation sites for " << std::endl; return 1; }
+	if (!allocsites) { cerr << "Error: no allocation sites for " << argv1 << std::endl; return 1; }
 	/* rewrite the allocsites we were passed */
 	vector<iterator_df<type_die> > created_types = ensure_needed_types_and_assign_to_allocsites(root, *allocsites);
 	cerr << "Processing " << allocsites->size() << " allocation sites." << endl;

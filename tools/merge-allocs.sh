@@ -71,7 +71,12 @@ while read -r obj func addr sourcefile sourceline sourceline_end typ rest; do
             #echo "reading some more" 1>&2
             have_matched_this_source_line=0
             # for allocsite metadata, srcmeta_rest will be two fields: the target function and then the type name/descr
-            read -r srcmeta_sourcefile srcmeta_sourceline srcmeta_sourceline_end srcmeta_rest <&3 || break 2
+            read -r srcmeta_sourcefile srcmeta_sourceline srcmeta_sourceline_end srcmeta_rest\
+              <&3 || break 1
+            # when we run out of source info we still only break out of the source loop,
+            # i.e. we want to exhaust all our obj lines
+            # just in case we need to output a null (no-match) line for them
+
             #echo "Setting have_matched_this_source_line to 0 for sourcefile $srcmeta_sourcefile line $srcmeta_sourceline" 1>&2
             #echo "read returned $?, new sourceline is $srcmeta_sourceline" 1>&2
         else
@@ -126,15 +131,21 @@ while read -r obj func addr sourcefile sourceline sourceline_end typ rest; do
                continue 1
             else 
                 # This means we didn't match, and the source line is not LT the obj line. 
-                # Try advancing the outer loop and re-testing
+                # Try advancing the outer (obj) loop and re-testing
                 # We might have a match for the next iteration of the outer loop
-                # Each time we advance the outer, we are giving up on matching that line. 
+                # Each time we advance the outer, we are giving up on matching that obj line. 
                 # (We can say "comparing lt" because the equality case was handled in the first test.)
-                echo "warning: skipping objdump meta line, comparing lt next source entry (which has file ${srcmeta_sourcefile}, line ${srcmeta_sourceline}): $obj $func $addr $sourcefile $sourceline $sourceline_end $srcmeta_rest" 1>&2
+                echo "warning: giving up on objdump meta line, comparing lt next source entry (which has file ${srcmeta_sourcefile}, line ${srcmeta_sourceline}): $obj $func $addr $sourcefile $sourceline $sourceline_end $srcmeta_rest" 1>&2
+                # output the line anyway, but without any srcmeta fields
+                echo "$obj"$'\t'"$func"$'\t'"$addr"$'\t'"$sourcefile"$'\t'"$sourceline"$'\t'"$sourceline_end"$'\t'
                 keep_old_source_line=1
                 continue 2
             fi
         fi
     done
-   
+    # we are about to abandon this obj line... have we output anything for it?
+    # if we did, we did 'continue' above
+    # output the line anyway, but without any srcmeta fields
+    echo "$obj"$'\t'"$func"$'\t'"$addr"$'\t'"$sourcefile"$'\t'"$sourceline"$'\t'"$sourceline_end"$'\t'
+
 done <"$all_obj_meta_file" 3<"$all_source_meta_file"
