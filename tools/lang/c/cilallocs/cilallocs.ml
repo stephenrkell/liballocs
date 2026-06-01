@@ -91,7 +91,7 @@ let addrOfLv (lv: lval) =
     let bits_offset, bits_width = 
       bitsOffset enclosing_type (Field(bf,NoOffset)) in
     let bytes_offset = bits_offset / 8 in
-    let lvPtr = mkCast ~e:(mkAddrOf (new_lv)) ~newt:(charPtrType) in
+    let lvPtr = mkCast ~kind:Explicit ~e:(mkAddrOf (new_lv)) ~newt:(charPtrType) in
     (BinOp(PlusPI, lvPtr, (integer bytes_offset), ulongType))
   end
 
@@ -174,7 +174,7 @@ let isStaticallyZero e = isZero (foldConstants e)
 
 let rec isStaticallyNullPtr e = match (typeSig (typeOf e)) with
     TSPtr(_) -> begin match e with
-            CastE(targetT, subE) ->
+            CastE(_, targetT, subE) ->
                 if isPointerType (typeOf subE) then isStaticallyNullPtr subE
                 else isStaticallyZero subE
           | _ -> isStaticallyZero e
@@ -194,11 +194,11 @@ let constInt64ValueOfExpr (intExp: Cil.exp) : int64 option =
       | Const(CChr(chrValue)) -> constInt64ValueOfExprNoChr (Const(charConstToInt chrValue))
       | _ -> constInt64ValueOfExprNoChr intExp
 
-let nullPtr = CastE( TPtr(TVoid([]), []) , zero )
+let nullPtr = CastE(Explicit, TPtr(TVoid([]), []) , zero )
 let one = Const(CInt((cilint_of_int64 (Int64.of_int 1)), IInt, None))
-let onePtr = CastE( TPtr(TVoid([]), []) , one )
+let onePtr = CastE(Explicit, TPtr(TVoid([]), []) , one )
 let negativeOne = Const(CInt(cilint_of_int64 (Int64.of_int (0-1)), IInt, None))
-let negativeOnePtr = CastE( TPtr(TVoid([]), []) , negativeOne )
+let negativeOnePtr = CastE(Explicit, TPtr(TVoid([]), []) , negativeOne )
 
 let debug_print lvl s = 
   let level = try begin 
@@ -437,11 +437,11 @@ let rec simplifyPtrExprs someE =
     |Lval(Mem(subE), offs) -> Lval(Mem(simplifyPtrExprs subE), simplifyOffset offs)
     |UnOp(op, subE, subT) -> UnOp(op, simplifyPtrExprs subE, subT)
     |BinOp(op, subE1, subE2, subT) -> BinOp(op, simplifyPtrExprs subE1, simplifyPtrExprs subE2, subT)
-    |CastE(subT, subE) -> 
+    |CastE(kind, subT, subE) -> 
         let simplifiedSubE = simplifyPtrExprs subE
         in
         if getConcreteType (Cil.typeSig subT) = getConcreteType (Cil.typeSig (Cil.typeOf simplifiedSubE))
-        then simplifiedSubE else CastE(subT, simplifiedSubE)
+        then simplifiedSubE else CastE(kind, subT, simplifiedSubE)
     |AddrOf(Var(vi), offs) -> AddrOf(Var(vi), simplifyOffset offs)
     |AddrOf(Mem(subE), offs) -> AddrOf(Mem(simplifyPtrExprs subE), simplifyOffset offs)
     |StartOf(Var(vi), offs) -> StartOf(Var(vi), simplifyOffset offs)
@@ -465,7 +465,7 @@ let rec simplifyPtrExprs someE =
      (* PROBLEM: we want to yield just "s", but this changes the type.
       * What's simpler: StartOf(Mem x, NoOffset) or CastE(t, x)?
       * We say the latter. *)
-        CastE(Cil.typeOf withSubExprsSimplified, s)
+        CastE(Explicit, Cil.typeOf withSubExprsSimplified, s)
    | _ -> withSubExprsSimplified
 
 let matchIgnoringLocation g1 g2 = match g1 with 

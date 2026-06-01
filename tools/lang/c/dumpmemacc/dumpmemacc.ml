@@ -106,7 +106,7 @@ class dumpMemAccVisitor = fun (fl: Cil.file) -> object(self)
     |   AlignOfE(_) -> e (* no read, no write *)
     |   UnOp(op, subE, t) -> (* no read *) self#reportVirtualWrite e; e (* result may go in a temporary *)
     |   BinOp(op, subE1, subE2, t) ->  (* no read *) self#reportVirtualWrite e; e (* result may go in a temporary *)
-    |   CastE(t, subE) -> 
+    |   CastE(_, t, subE) -> 
             (* if a rep-changing cast, result may go in a temporary *)
             (* no read *) (if castIsRepChanging t subE then self#reportVirtualWrite e else ()); e (* result may go in a temporary *)
     |   AddrOf(_) -> e (* no read, no write *)

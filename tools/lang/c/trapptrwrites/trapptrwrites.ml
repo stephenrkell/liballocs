@@ -89,7 +89,7 @@ let trapPtrWrites file =
           match unrollType (typeOfLval lv) with
           | TPtr _ | TFun _ ->
               Call (None, Lval (var notifyPtrWriteFun),
-                    [ mkCast (mkAddrOf lv) constVoidPtrPtrType ; Lval rv ], loc, loc) :: tail
+                    [ mkCast ~kind:Explicit ~e:(mkAddrOf lv) ~newt:constVoidPtrPtrType ; Lval rv ], loc, loc) :: tail
           | TComp (c, _) -> (* treat unions as structs, might not be a good idea... *)
               List.fold_left (fun acc field ->
                   let flv = addOffsetLval (Field(field, NoOffset)) lv in

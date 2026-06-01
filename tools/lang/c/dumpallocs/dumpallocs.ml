@@ -56,7 +56,7 @@ let rec sizeExprHasNoSizeof (e: exp) =
  | Lval((Mem(ex),o)) -> sizeExprHasNoSizeof ex
  | UnOp(u, e1, t) -> sizeExprHasNoSizeof e1
  | BinOp(b, e1, e2, t) -> (sizeExprHasNoSizeof e1) && (sizeExprHasNoSizeof e2)
- | CastE(t, ex) -> sizeExprHasNoSizeof ex
+ | CastE(_, t, ex) -> sizeExprHasNoSizeof ex
  | AddrOf((Var(v),o)) -> true
  | AddrOf((Mem(ex),o)) -> sizeExprHasNoSizeof ex
  | StartOf((Var(v),o)) -> true
@@ -306,7 +306,7 @@ let rec getSizeExpr (ex: exp) (env : (int * sz) list) (gs : Cil.global list) : s
            end
         |  Mem(_) -> Undet
       end
-   | CastE(t, e) -> (getSizeExpr e env gs) (* i.e. recurse down e *)
+   | CastE(_, t, e) -> (getSizeExpr e env gs) (* i.e. recurse down e *)
    | AddrOf(lv) -> begin 
         debug_print 2 ("Hello from AddrOf case in getSizeExpr\n");  flush Out_channel.stderr;
         let ts = containingTypeSigInTrailingFieldOffsetFromNullPtrExpr lv 
