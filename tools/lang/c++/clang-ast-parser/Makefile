@@ -12,7 +12,7 @@ CLANG_LIBS = $(shell ls /usr/lib/llvm-20/lib/libclang*.a | xargs -n1 basename | 
 
 CXXFLAGS = -std=c++17 -g $(LLVM_CXXFLAGS) -Iinclude
 
-BIN = bin
+BIN = ../bin
 SRC = src
 BUILD = build
 TARGET = $(BIN)/clang-ast-parser
@@ -20,7 +20,7 @@ TARGET = $(BIN)/clang-ast-parser
 SRCS = $(shell find $(SRC) -name *.cpp)
 OBJS = $(subst $(SRC)/,$(BUILD)/,$(addsuffix .o,$(basename $(SRCS))))
 
-default: bin/clang-ast-parser
+default: ../bin/clang-ast-parser
 
 $(BUILD)/%.o: $(SRC)/%.cpp
 	mkdir -p $(dir $@)
@@ -41,6 +41,7 @@ clang-ast-parser: clang-ast-parser.o
 
 clean:
 	rm -rf build
+	rm -f $(TARGET)
 
 dep:
 	wget https://apt.llvm.org/llvm.sh

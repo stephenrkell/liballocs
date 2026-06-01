@@ -70,7 +70,7 @@ class AllocsCxx(AllocsCompilerWrapper):
     def runAllocsParser(self, sourceFile):
         parser = os.path.join(
             self.getLibAllocsBaseDir(),
-            "tools/lang/c++/clang-ast-parser/bin/clang-ast-parser"
+            "tools/lang/c++/bin/clang-ast-parser"
         )
         if not os.path.exists(parser):
             self.debugMsg("clang-ast-parser not found, skipping C++ allocs dump\n")
