@@ -1,32 +1,29 @@
 version: 2.0
 jobs:
   build:
+    environment:
+      BASH_ENV: /root/.bash_env
     docker:
-      # MARKER BEGIN DISTRIBUTION +0 [[:blank:]]([-a-z0-9\.]+:[-a-z0-9\.]+)
       - image: ubuntu:24.04
-      # MARKER END DISTRIBUTION
     steps:
+      - checkout
       - run:
           name: Install dependencies
           command: |
             dpkg --add-architecture i386
             apt update
-            # MARKER BEGIN PACKAGES +1 [[:blank:]]([^#]+)#
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
-              build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
-              autoconf automake libtool pkg-config autoconf-archive \
-              opam libgmp-dev \
-              default-jdk-headless python3 \
-              make git gawk gdb wget libc6-dbg \
-              libunwind-dev libunwind-dev:i386 linux-libc-dev-i386-cross libc6-dev-i386 \
-              libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev libffi-dev \
-              gettext-base # for envsubst
-            # MARKER END PACKAGES
-      - checkout
+             $(cat .circleci/build-dependencies.txt)
       - run:
           name: Update submodules
           command: git submodule update --init --recursive
+      - run:
+          name: Set up OCaml 5.1.0 switch
+          no_output_timeout: 1h
+          command: |
+            opam init --no-setup --disable-sandboxing --bare -y
+            opam switch create 5.1.0
+            opam env >> $BASH_ENV
       - run:
           name: Build submodules
           command: make -C contrib -j 2

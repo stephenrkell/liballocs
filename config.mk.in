@@ -7,14 +7,12 @@ TOOLSUB := @toolsub@
 ELFTIN := @elftin@
 CIL_INSTALL := @cil_install@
 LIBALLOCSTOOL_CFLAGS := @liballocstool_cflags@
-LIBALLOCS_OCAML_PREFIX := @liballocs_ocaml_prefix@
 # export anything needed during build of liballocs-enabled executables
 export CIL_INSTALL
 export TOOLSUB
 export ELFTIN
 export LIBMALLOCHOOKS
 export LIBALLOCSTOOL_CFLAGS
-export LIBALLOCS_OCAML_PREFIX
 
 XWRAP_LDPLUGIN := $(ELFTIN)/xwrap-ldplugin/xwrap-ldplugin.so
 export XWRAP_LDPLUGIN
