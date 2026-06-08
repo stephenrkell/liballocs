@@ -676,7 +676,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 linkItemsIncluded = []
                 linkItemsDeferred = []
                 for item in allLinkItems:
-                    if item.startswith("-L") or item.startswith("-l") or item.endswith(".so"):
+                    if item.startswith("-L") or item.startswith("-l") or re.match(".*\\.so(\\.[0-9]+)*$", item):
                         linkItemsDeferred += [item]
                     else:
                         linkItemsIncluded += [item]

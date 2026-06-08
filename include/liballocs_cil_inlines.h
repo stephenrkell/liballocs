@@ -85,15 +85,15 @@ CURRENT_ALLOC_VARS_QUALIFIERS void *__current_allocsite CURRENT_ALLOC_VARS_QUALI
 
 void __liballocs_unindex_stack_objects_counted_by(unsigned long *, void *frame_addr);
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca_caller_frame_cleanup)(void *counter);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca_caller_frame_cleanup)(void *counter)
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_alloca_caller_frame_cleanup)(void *counter);
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_alloca_caller_frame_cleanup)(void *counter)
 {
 	__liballocs_unindex_stack_objects_counted_by((unsigned long *) counter, __builtin_frame_address(0));
 }
 
 /* alloca helpers */
-extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_sp)(void);
-extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_sp)(void)
+extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_sp)(void);
+extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_sp)(void)
 {
 	unsigned long our_sp;
 	#ifdef UNW_TARGET_X86
@@ -104,8 +104,8 @@ extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liba
 	return (const void*) our_sp;
 }
 
-extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_bp)(void);
-extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_bp)(void)
+extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_bp)(void);
+extern inline const void *(__attribute__((always_inline,gnu_inline)) __liballocs_get_bp)(void)
 {
 	return (const void *) __builtin_frame_address(0);
 }
@@ -118,8 +118,8 @@ extern inline const void *(__attribute__((always_inline,gnu_inline,used)) __liba
  * for the allocation site / type metadata. We call a helper to get
  * the *overall* size, and then the __liballocs_notify_and_adjust_alloca()
  * function will fill in both the header and the trailer. */
-extern inline unsigned long (__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca_size)(unsigned long orig_size);
-extern inline unsigned long (__attribute__((always_inline,gnu_inline,used)) __liballocs_alloca_size)(unsigned long orig_size)
+extern inline unsigned long (__attribute__((always_inline,gnu_inline)) __liballocs_alloca_size)(unsigned long orig_size);
+extern inline unsigned long (__attribute__((always_inline,gnu_inline)) __liballocs_alloca_size)(unsigned long orig_size)
 {
 	/* Insert heap trailer etc..
 	 * Basically we have to do everything that our malloc hooks, allocator wrappers
@@ -138,8 +138,8 @@ extern inline unsigned long (__attribute__((always_inline,gnu_inline,used)) __li
 	 * we don't track them. */
 }
 
-extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_notify_and_adjust_alloca)(void *allocated, unsigned long orig_size, unsigned long tweaked_size, unsigned long *frame_counter, void *caller);
-extern inline void *(__attribute__((always_inline,gnu_inline,used)) __liballocs_notify_and_adjust_alloca)(void *allocated, unsigned long orig_size, unsigned long tweaked_size, unsigned long *frame_counter, void *caller)
+extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_notify_and_adjust_alloca)(void *allocated, unsigned long orig_size, unsigned long tweaked_size, unsigned long *frame_counter, void *caller);
+extern inline void *(__attribute__((always_inline,gnu_inline)) __liballocs_notify_and_adjust_alloca)(void *allocated, unsigned long orig_size, unsigned long tweaked_size, unsigned long *frame_counter, void *caller)
 {
 #ifndef LIBALLOCS_NO_ZERO
 	__builtin_memset(allocated, 0, tweaked_size);
@@ -213,8 +213,8 @@ struct __liballocs_memrange_cache
 };
 extern struct __liballocs_memrange_cache /* __thread */ __liballocs_ool_cache;
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_check_cache_sanity )(struct __liballocs_memrange_cache *cache __attribute__((unused)));
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_check_cache_sanity )(struct __liballocs_memrange_cache *cache __attribute__((unused)))
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_check_cache_sanity )(struct __liballocs_memrange_cache *cache __attribute__((unused)));
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_check_cache_sanity )(struct __liballocs_memrange_cache *cache __attribute__((unused)))
 {
 #ifdef DEBUG
 	unsigned visited_linear = 0u;
@@ -247,8 +247,8 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 #endif
 }
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_unlink )(struct __liballocs_memrange_cache *cache, unsigned i);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_unlink )(struct __liballocs_memrange_cache *cache, unsigned i)
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_cache_unlink )(struct __liballocs_memrange_cache *cache, unsigned i);
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_cache_unlink )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
 	__liballocs_check_cache_sanity(cache);
 	/* unset validity and make this the next victim */
@@ -266,8 +266,8 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	__liballocs_check_cache_sanity(cache);
 }
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_push_head_mru )(struct __liballocs_memrange_cache *cache, unsigned i);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_push_head_mru )(struct __liballocs_memrange_cache *cache, unsigned i)
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_cache_push_head_mru )(struct __liballocs_memrange_cache *cache, unsigned i);
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_cache_push_head_mru )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
 	__liballocs_check_cache_sanity(cache);
 	/* Put us at the head of the LRU chain. */
@@ -284,8 +284,8 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	__liballocs_check_cache_sanity(cache);
 }	
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_victim )(struct __liballocs_memrange_cache *cache, unsigned i);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_victim )(struct __liballocs_memrange_cache *cache, unsigned i)
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_cache_bump_victim )(struct __liballocs_memrange_cache *cache, unsigned i);
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_cache_bump_victim )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
 	__liballocs_check_cache_sanity(cache);
 	/* make sure we're not the next victim */
@@ -299,8 +299,8 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 	__liballocs_check_cache_sanity(cache);
 }
 
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_mru )(struct __liballocs_memrange_cache *cache, unsigned i);
-extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_cache_bump_mru )(struct __liballocs_memrange_cache *cache, unsigned i)
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_cache_bump_mru )(struct __liballocs_memrange_cache *cache, unsigned i);
+extern inline void (__attribute__((always_inline,gnu_inline)) __liballocs_cache_bump_mru )(struct __liballocs_memrange_cache *cache, unsigned i)
 {
 	__liballocs_check_cache_sanity(cache);
 	if (cache->head_mru != i)
@@ -312,10 +312,10 @@ extern inline void (__attribute__((always_inline,gnu_inline,used)) __liballocs_c
 }
 
 extern inline
-struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
+struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline))
 __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *t, unsigned long require_period);
 extern inline
-struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
+struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline))
 __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, const void *obj, struct uniqtype *t, unsigned long require_period)
 {
 #ifndef LIBALLOCS_NOOP_INLINES
@@ -352,10 +352,10 @@ __liballocs_memrange_cache_lookup )(struct __liballocs_memrange_cache *cache, co
 }
 
 extern inline
-struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
+struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline))
 __liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *cache, const void *obj, unsigned long require_period);
 extern inline
-struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline,used))
+struct __liballocs_memrange_cache_entry_s *(__attribute__((always_inline,gnu_inline))
 __liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *cache, const void *obj, unsigned long require_period)
 {
 #ifndef LIBALLOCS_NOOP_INLINES
@@ -389,8 +389,8 @@ __liballocs_memrange_cache_lookup_notype )(struct __liballocs_memrange_cache *ca
 	return (struct __liballocs_memrange_cache_entry_s *)(void*)0;
 }
 
-extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr);
-extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline,used)) __liballocs_get_cached_object_type)(const void *addr)
+extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline)) __liballocs_get_cached_object_type)(const void *addr);
+extern inline struct uniqtype *(__attribute__((always_inline,gnu_inline)) __liballocs_get_cached_object_type)(const void *addr)
 {
 	struct __liballocs_memrange_cache_entry_s *found = __liballocs_memrange_cache_lookup_notype(
 		&__liballocs_ool_cache,
