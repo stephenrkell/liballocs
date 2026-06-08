@@ -18,6 +18,9 @@ RUN apt-get update && \
     env DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y \
     $(cat /tmp/build-dependencies.txt)
 USER ${user}
+RUN opam init --no-setup --disable-sandboxing --bare -y && \
+    opam switch create 5.1.0
+ENV OPAMSWITCH=5.1.0
 
 FROM base AS full
 ARG user=user
@@ -26,8 +29,10 @@ ARG MAKE_PARALLELISM=4
 COPY --chown=${user}:${user} . /usr/local/src/liballocs/
 RUN cd /usr/local/src/liballocs && \
    git submodule update --init --recursive && \
+   eval $(opam env) && \
    make -C contrib -j${MAKE_PARALLELISM}
 RUN cd /usr/local/src/liballocs && \
+   eval $(opam env) && \
    ./autogen.sh && \
    (. contrib/env.sh && ./configure --prefix=/usr/local) && \
    make -j${MAKE_PARALLELISM}

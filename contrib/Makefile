@@ -1,14 +1,6 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
-export LIBALLOCS_OCAML_PREFIX := $(abspath $(CONTRIB)/../lib/ocaml)
-CONFIG_MK += \nLIBALLOCS_OCAML_PREFIX := ${LIBALLOCS_OCAML_PREFIX}\n
-varlist += LIBALLOCS_OCAML_PREFIX
-
-export OCAML_LIBDEST := ${LIBALLOCS_OCAML_PREFIX}/lib
-export OCAMLPATH = ${OCAML_LIBDEST}
-
-export PATH := ${PATH}:${LIBALLOCS_OCAML_PREFIX}/bin
 
 export CC := gcc
 export CIL_CC := ${CC}
@@ -136,35 +128,35 @@ export CIL_ROOT := $(CONTRIB)/cil
 CONFIG_MK += \nCIL_ROOT := $(CIL_ROOT)\n
 varlist += CIL_ROOT
 
-export CIL_INSTALL := $(LIBALLOCS_OCAML_PREFIX)/lib/goblint-cil
+export CIL_INSTALL := $(shell opam var lib 2>/dev/null)/goblint-cil
 CONFIG_MK += \nCIL_INSTALL := $(CIL_INSTALL)\n
 varlist += CIL_INSTALL
 
-export OPAMROOT := $(CONTRIB)/opamroot
-CONFIG_MK += \nOPAMROOT := $(OPAMROOT)\n
-varlist += OPAMROOT
+# goblint-cil requires OCaml >= 4.12.0.  The active opam switch is used for
+# building; run 'eval $(opam env)' before invoking make, or set OPAMSWITCH.
+CIL_MIN_OCAML := 4.12.0
 
-export OPAMSWITCH := $(CIL_ROOT)
-CONFIG_MK += \nOPAMSWITCH := $(OPAMSWITCH)\n
-varlist += OPAMSWITCH
-
-export OCAMLFIND := opam exec -- ocamlfind
+export OCAMLFIND := ocamlfind
 CONFIG_MK += \nOCAMLFIND := $(OCAMLFIND)\n
 varlist += OCAMLFIND
 
-export OPAMYES = 1
+.PHONY: check-ocaml-version
+check-ocaml-version:
+	@ocaml_ver=$$(ocaml -vnum 2>/dev/null) \
+	  || { echo "ERROR: ocaml not found in PATH; run 'eval \$$(opam env)' first"; exit 1; }; \
+	  printf '%s\n%s\n' "$(CIL_MIN_OCAML)" "$$ocaml_ver" | sort -V -C \
+	  || { echo "ERROR: OCaml >= $(CIL_MIN_OCAML) required, found $$ocaml_ver"; exit 1; }; \
+	  echo "OCaml $$ocaml_ver ok (>= $(CIL_MIN_OCAML))"
 
 .PHONY: build-cil
-build-cil:
-	opam init --bare --no-setup --disable-sandboxing
-	cd ${CIL_ROOT} && if [ ! -d ${OPAMSWITCH}/_opam ]; then opam switch create . 5.4.0 --no-install; fi
-	cd ${CIL_ROOT} && opam install . --destdir=${LIBALLOCS_OCAML_PREFIX}
+build-cil: check-ocaml-version
+	cd ${CIL_ROOT} && opam install --deps-only --yes .
+	cd ${CIL_ROOT} && dune build @install
+	cd ${CIL_ROOT} && dune install
 
 clean::
-	cd ${CIL_ROOT} && opam remove . --destdir=${LIBALLOCS_OCAML_PREFIX} || true
-	cd ${CIL_ROOT} && opam switch remove . || true
-	rm -rf ${OPAMSWITCH}/_opam
-	rm -rf ${OPAMROOT}
+	cd ${CIL_ROOT} && dune uninstall || true
+	cd ${CIL_ROOT} && dune clean || true
 
 # ----------------------------toolsub
 
