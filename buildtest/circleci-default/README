@@ -1,2 +1,0 @@
-This directory lets you build a Dockerfile that *should* mirror the
-CircleCI config that gets tested with each push.
