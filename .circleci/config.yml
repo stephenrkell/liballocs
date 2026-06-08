@@ -13,15 +13,7 @@ jobs:
             apt update
             # MARKER BEGIN PACKAGES +1 [[:blank:]]([^#]+)#
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
-              build-essential libbsd-dev libelf-dev libdw-dev binutils-dev zlib1g-dev \
-              autoconf automake libtool pkg-config autoconf-archive \
-              opam libgmp-dev \
-              default-jdk-headless python3 \
-              make git gawk gdb wget libc6-dbg \
-              libunwind-dev libunwind-dev:i386 linux-libc-dev-i386-cross libc6-dev-i386 \
-              libboost-iostreams-dev libboost-regex-dev \
-              libboost-serialization-dev libboost-filesystem-dev libffi-dev \
-              gettext-base # for envsubst
+             $(cat .circleci/build-dependencies.txt)
             # MARKER END PACKAGES
       - checkout
       - run:
