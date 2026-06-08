@@ -249,6 +249,7 @@ AC_SUBST([toolsub], [$ac_toolsub])
 AC_SUBST([elftin], [$ac_elftin])
 AC_SUBST([cil_install], [$ac_cil_install])
 AC_SUBST([liballocstool_cflags], [$LIBALLOCSTOOL_CFLAGS])
+AC_SUBST([liballocs_ocaml_prefix], [$LIBALLOCS_OCAML_PREFIX])
 
 AM_CONDITIONAL(DEBUG, [test "x$enable_debug" = "xyes"])
 AM_CONDITIONAL(USE_FAKE_LIBUNWIND, [test "x$enable_fake_libunwind" = "xyes"])
