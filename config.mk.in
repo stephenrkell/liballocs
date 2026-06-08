@@ -13,6 +13,7 @@ export TOOLSUB
 export ELFTIN
 export LIBMALLOCHOOKS
 export LIBALLOCSTOOL_CFLAGS
+export LIBALLOCS_OCAML_PREFIX
 
 XWRAP_LDPLUGIN := $(ELFTIN)/xwrap-ldplugin/xwrap-ldplugin.so
 export XWRAP_LDPLUGIN
