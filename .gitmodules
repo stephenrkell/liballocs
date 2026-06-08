@@ -12,7 +12,7 @@
 	url = https://github.com/stephenrkell/libsystrap.git
 [submodule "contrib/toolsub"]
 	path = contrib/toolsub
-	url = https://github.com/mbyzhang/toolsub.git
+	url = https://github.com/stephenrkell/toolsub.git
 [submodule "contrib/donald"]
 	path = contrib/donald
 	url = https://github.com/stephenrkell/donald.git
@@ -21,4 +21,4 @@
 	url = https://github.com/stephenrkell/elftin.git
 [submodule "contrib/cil"]
 	path = contrib/cil
-	url = https://github.com/mbyzhangAlt/cil.git
+	url = https://github.com/stephenrkell/cil.git
