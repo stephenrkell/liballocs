@@ -37,6 +37,13 @@ void workaround_glibc_bugs(void)
 	struct uniqtype *link_map_type = NULL;
 	for (struct link_map *l = _r_debug.r_map; l; l = l->l_next)
 	{
+		/* Only the statically-allocated link map carries trustworthy per-object
+		 * metadata, and it is all we need for the type. The other link maps are
+		 * chunks from the ld.so's own malloc, which liballocs does not
+		 * instrument when there is no allocsld: their heap "insert" is
+		 * meaningless, so asking for their type/site would read that garbage and
+		 * then look up a wild alloc site. So introspect only the static one. */
+		if (alloc_get_allocator(l) != &__static_symbol_allocator) continue;
 		struct uniqtype *u = alloc_get_type(l);
 		if (u) link_map_type = u;
 	}
@@ -56,11 +63,12 @@ void workaround_glibc_bugs(void)
 		{
 			/* Do we have type information for link map entries? */
 			struct allocator *a = alloc_get_allocator(l);
-			size_t sz = alloc_get_size(l);
-			const void *site = alloc_get_site(l);
-			struct uniqtype *u = alloc_get_type(l);
-			void *base = alloc_get_base(l);
 			assert(a);
+			size_t sz = alloc_get_size(l);
+			void *base = alloc_get_base(l);
+			_Bool introspectable = (a == &__static_symbol_allocator);
+			const void *site = introspectable ? alloc_get_site(l) : NULL;
+			struct uniqtype *u = introspectable ? alloc_get_type(l) : NULL;
 
 			if (l ==  _r_debug.r_map)
 			{
