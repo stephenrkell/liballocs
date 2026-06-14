@@ -9,7 +9,7 @@ std::string uniqtypeNameFromClangType(QualType qt, ASTContext *ctx) {
 
     // For records (struct/class): use tag name
     if (const RecordType *RT = T->getAs<RecordType>()) {
-        std::string name = RT->getDecl()->getNameAsString();
+        std::string name = RT->getDecl()->getQualifiedNameAsString();
         if (!name.empty()) return "__uniqtype__" + name;
     }
 
@@ -18,6 +18,7 @@ std::string uniqtypeNameFromClangType(QualType qt, ASTContext *ctx) {
         uint64_t bits = ctx->getTypeSize(qt);
         std::string canonName = BT->getName(ctx->getPrintingPolicy()).str();
         // Map to DWARF canonical name (e.g. "int" → "int", "char" → "signed char")
+        std::replace(canonName.begin(), canonName.end(), ' ', '_');
         return "__uniqtype__" + canonName + "$$" + std::to_string(bits);
     }
 
