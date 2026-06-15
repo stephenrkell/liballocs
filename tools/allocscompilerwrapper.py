@@ -479,7 +479,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 extraFlags += ["-fPIC"]
                 # WHERE do we get relf.h, in the librunt era?
                 # Bit of a hack: in the contrib. FIXME FIXME.
-                stubs_pp_cmd = self.getPlainCCompilerCommand() + ["-gdwarf-4", "-std=c11", "-E", "-Wp,-dD", "-Wp,-P"] \
+                stubs_pp_cmd = self.getPlainCCompilerCommand() + ["-gdwarf-4", "-std=c11", "-E", "-Wp,-P"] \
                     + extraFlags + ["-o", stubs_pp, \
                     "-I" + self.getLibAllocsBaseDir() + "/tools", \
                     "-I" + self.getLibAllocsBaseDir() + "/include", \

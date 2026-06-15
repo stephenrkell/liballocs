@@ -11,7 +11,7 @@ $(info CIL_LIBDIR is $(CIL_LIBDIR))
 #export ALLOCSCC_CC := clang-13
 #export CC_IS_CLANG := 1
 
-CFLAGS += -g3 -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types
+CFLAGS += -g -gstrict-dwarf -std=c99 -fno-eliminate-unused-debug-types
 CFLAGS += -Wl,-q             # FIXME: I think this is no longer needed
 ifeq ($(TEST_OPT_LEVEL),)
 CFLAGS += -O2                # 'normal'...
