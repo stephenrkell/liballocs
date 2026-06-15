@@ -136,9 +136,9 @@ export CIL_ROOT := $(CONTRIB)/cil
 CONFIG_MK += \nCIL_ROOT := $(CIL_ROOT)\n
 varlist += CIL_ROOT
 
-export CIL_INSTALL := $(LIBALLOCS_OCAML_PREFIX)/lib/goblint-cil
-CONFIG_MK += \nCIL_INSTALL := $(CIL_INSTALL)\n
-varlist += CIL_INSTALL
+export CIL_LIBDIR := $(LIBALLOCS_OCAML_PREFIX)/lib/goblint-cil
+CONFIG_MK += \nCIL_LIBDIR := $(CIL_LIBDIR)\n
+varlist += CIL_LIBDIR
 
 export OPAMROOT := $(CONTRIB)/opamroot
 CONFIG_MK += \nOPAMROOT := $(OPAMROOT)\n
@@ -170,7 +170,7 @@ clean::
 
 .PHONY: build-toolsub
 build-toolsub: build-cil
-	$(MAKE) -C toolsub wrapper-recursive cilpp-recursive  # don't build clang-based cccppp
+	USE_GOBLINT=1 $(MAKE) -C toolsub wrapper-recursive cilpp-recursive  # don't build clang-based cccppp
 	#$(MAKE) -C toolsub/wrapper/example/constructor-priority-checker dumpconstr
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB

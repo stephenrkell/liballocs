@@ -3,8 +3,8 @@ srcroot := $(realpath $(dir $(THIS_MAKEFILE))/../../..)
 include $(srcroot)/config.mk
 OCAMLFIND ?= ocamlfind
 
-ifeq ($(CIL_INSTALL),)
-$(error "Expected CIL_INSTALL to be set")
+ifeq ($(CIL_LIBDIR),)
+$(error "Expected CIL_LIBDIR to be set")
 endif
 ifeq ($(LIBALLOCS_OCAML_PREFIX),)
 $(error "Expected LIBALLOCS_OCAML_PREFIX to be set")
@@ -12,7 +12,7 @@ endif
 
 export OCAMLPATH := $(LIBALLOCS_OCAML_PREFIX)/lib:$(OCAMLPATH)
 
-CILLY ?= $(CIL_INSTALL)/../bin/cilly
+CILLY ?= $(CIL_LIBDIR)/../../bin/cilly
 CIL_TOOLS ?= cilallocs dumpallocs monalloca dumpmemacc trapptrwrites
 OCAMLFLAGS += -package findlib -package goblint-cil
 OCAMLFLAGS += -I $(dir $(THIS_MAKEFILE))/cilallocs

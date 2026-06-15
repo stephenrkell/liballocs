@@ -6,7 +6,7 @@ $(info Initially CFLAGS is $(CFLAGS) and CPPFLAGS is $(CPPFLAGS))
 THIS_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 -include $(dir $(THIS_MAKEFILE))/../config.mk
 
-$(info CIL_INSTALL is $(CIL_INSTALL))
+$(info CIL_LIBDIR is $(CIL_LIBDIR))
 # tell allocscc which C compiler to use -- TEST / FIXME
 #export ALLOCSCC_CC := clang-13
 #export CC_IS_CLANG := 1

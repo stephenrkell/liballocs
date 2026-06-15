@@ -226,18 +226,18 @@ AC_ARG_WITH([elftin],
                 fi
             ],
             [ac_elftin=${ELFTIN:-$(realpath $srcdir)/contrib/elftin]})
-AC_ARG_WITH([cil-install],
-            [AS_HELP_STRING([--with-cil-install=DIR],
-              [where to find CIL libraries (cil/cil.cmxa)])],
+AC_ARG_WITH([cil-libdir],
+            [AS_HELP_STRING([--with-cil-libdir=DIR],
+              [where to find CIL libraries (cil.cmxa)])],
             [
                 if test -d "$withval"
                 then
                         ac_toolsub="$withval"
                 else
-                        AC_MSG_ERROR(--with-cil-install expected directory name)
+                        AC_MSG_ERROR(--with-cil-libdir expected directory name)
                 fi
             ],
-            [ac_cil_install=${CIL_INSTALL:-$(realpath $srcdir)/contrib/cil/lib]})
+            [ac_cil_libdir=${CIL_LIBDIR:-$(realpath $srcdir)/contrib/cil/lib/cil]})
 
 # things on the left will be substituted, if @-surrounded, by the right, in .in files
 AC_SUBST([libmallochooks], [$ac_libmallochooks])
@@ -247,7 +247,7 @@ AC_SUBST([libdlbind], [$ac_libdlbind])
 AC_SUBST([donald], [$ac_donald])
 AC_SUBST([toolsub], [$ac_toolsub])
 AC_SUBST([elftin], [$ac_elftin])
-AC_SUBST([cil_install], [$ac_cil_install])
+AC_SUBST([cil_libdir], [$ac_cil_libdir])
 AC_SUBST([liballocstool_cflags], [$LIBALLOCSTOOL_CFLAGS])
 AC_SUBST([liballocs_ocaml_prefix], [$LIBALLOCS_OCAML_PREFIX])
 
