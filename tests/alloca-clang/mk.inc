@@ -19,7 +19,7 @@ CC := $(LIBALLOCS)/tools/allocs-wrap $(shell which $(CLANG))
 LDFLAGS += `$(LIBALLOCS)/tools/allocs-ldflags`
 
 # debugging
-CPPFLAGS += -Wp,-dD -Wp,-save-temps
+# CPPFLAGS += -Wp,-dD -Wp,-save-temps
 
 CFLAGS += -fno-addrsig # HACK but by itself doesn't work... hacked toolsub 'wrapper' to undo -faddrsig that creeps in earlier
 CFLAGS += -gdwarf-4
