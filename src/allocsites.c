@@ -95,7 +95,7 @@ static struct allocs_file_metadata *get_file(const void *allocsite)
 {
 	struct big_allocation *file_bigalloc = __lookup_bigalloc_from_root(allocsite,
 		&__static_file_allocator, NULL);
-	assert(file_bigalloc && "queried a wild alloc site, or file bigallocs have not been initialized");
+	if (!file_bigalloc) return NULL;
 	struct allocs_file_metadata *file = file_bigalloc->allocator_private;
 	return file;
 }
@@ -104,6 +104,7 @@ struct allocsite_entry *__liballocs_find_allocsite_entry_at(
 	const void *allocsite)
 {
 	struct allocs_file_metadata *file = get_file(allocsite);
+	if (!file) return NULL;
 	uintptr_t allocsite_vaddr = (uintptr_t) allocsite - file->m.l->l_addr;
 	if (!file->allocsites_info) return NULL;
 	struct allocsite_entry *start = file->allocsites_info->ptr;
@@ -122,6 +123,7 @@ struct allocsite_entry *__liballocs_find_allocsite_entry_at(
 allocsite_id_t __liballocs_allocsite_id(const void *allocsite)
 {
 	struct allocs_file_metadata *file = get_file(allocsite);
+	if (!file) return NULL;
 	struct allocsite_entry *found_entry
 	 = __liballocs_find_allocsite_entry_at(allocsite);
 	if (!found_entry) return (allocsite_id_t) -1;
