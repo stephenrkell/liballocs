@@ -170,7 +170,7 @@ clean::
 
 .PHONY: build-toolsub
 build-toolsub: build-cil
-	USE_GOBLINT=1 $(MAKE) -C toolsub wrapper-recursive cilpp-recursive  # don't build clang-based cccppp
+	USE_GOBLINT=1 CIL_INSTALL=$(CIL_LIBDIR) $(MAKE) -C toolsub wrapper-recursive cilpp-recursive  # don't build clang-based cccppp
 	#$(MAKE) -C toolsub/wrapper/example/constructor-priority-checker dumpconstr
 CONFIG_MK += \nTOOLSUB ?= $(CONTRIB)/toolsub\n
 varlist += TOOLSUB
