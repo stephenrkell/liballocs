@@ -24,15 +24,10 @@ ARG user=user
 ARG MAKE_PARALLELISM=4
 
 COPY --chown=${user}:${user} . /usr/local/src/liballocs/
-# Initialise the OCaml environment (used to build CIL); liballocs itself does
-# not manage opam switches -- it just needs one to exist here.
-RUN opam init --disable-sandboxing --yes
 RUN cd /usr/local/src/liballocs && \
    git submodule update --init --recursive && \
-   eval $(opam env) && \
    make -C contrib -j${MAKE_PARALLELISM}
 RUN cd /usr/local/src/liballocs && \
-   eval $(opam env) && \
    ./autogen.sh && \
    (. contrib/env.sh && ./configure --prefix=/usr/local) && \
    make -j${MAKE_PARALLELISM}

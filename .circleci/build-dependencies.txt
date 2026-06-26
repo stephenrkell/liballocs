@@ -9,7 +9,14 @@ automake
 libtool
 pkg-config
 autoconf-archive
-opam 
+ocaml-findlib
+ocaml-dune
+libdune-ocaml-dev
+libzarith-ocaml-dev
+libyojson-ocaml-dev
+libppx-deriving-yojson-ocaml-dev
+libstdlib-ocaml-dev
+cppo
 libgmp-dev
 default-jdk-headless
 python3

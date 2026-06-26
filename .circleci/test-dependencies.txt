@@ -9,7 +9,14 @@ python3
 git
 gawk
 libunwind-dev
-opam
+ocaml-findlib
+ocaml-dune
+libdune-ocaml-dev
+libzarith-ocaml-dev
+libyojson-ocaml-dev
+libppx-deriving-yojson-ocaml-dev
+libstdlib-ocaml-dev
+cppo
 libgmp-dev
 clang
 libdw-dev

@@ -123,15 +123,17 @@ clean::
 
 # ----------------------------cil
 
+export CIL_ROOT := $(CONTRIB)/cil
+CONFIG_MK += \nCIL_ROOT := $(CIL_ROOT)\n
+varlist += CIL_ROOT
 
-export CIL_LIBDIR := $(LIBALLOCS_OCAML_PREFIX)/lib/goblint-cil
+export CIL_LIBDIR := $(CIL_ROOT)/_build/install/default/lib/goblint-cil
 CONFIG_MK += \nCIL_LIBDIR := $(CIL_LIBDIR)\n
 varlist += CIL_LIBDIR
 
 .PHONY: build-cil
 build-cil: export CIL_CC := $(CC)
 build-cil:
-	cd ${CIL_ROOT} && opam install --deps-only --yes .
 	cd ${CIL_ROOT} && dune build @install
 
 clean::

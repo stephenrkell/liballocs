@@ -1,8 +1,6 @@
 version: 2.0
 jobs:
   build:
-    environment:
-      BASH_ENV: /root/.bash_env
     docker:
       - image: ubuntu:24.04
     steps:
@@ -14,11 +12,6 @@ jobs:
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
              $(cat .circleci/build-dependencies.txt)
-      - run:
-          name: Initialise opam
-          command: |
-            opam init --disable-sandboxing --yes
-            echo 'eval $(opam env)' >> "$BASH_ENV"
       - run:
           name: Update submodules
           command: git submodule update --init --recursive
@@ -45,14 +38,10 @@ jobs:
       #          $(for libname in `ldd /bin/true | sed -En '/[[:blank:]]*([^[:blank:]]* => )?(.*) \(0x[0-9a-f]+\)/ {s//\2/;p}' | egrep 'libc\.so\.6|ld-linux.*\.so' | xargs readlink -f`; do echo "/usr/lib/meta${libname}-meta.so"; done)
       - persist_to_workspace:
           root: /
-          # Carry the opam switch (findlib.conf + CIL's runtime deps) into the
-          # test job; cilly needs it when transforming the tests' C sources.
-          paths: root/project root/.opam usr/lib/meta
+          paths: root/project usr/lib/meta
   test:
     requires:
       - build
-    environment:
-      BASH_ENV: /root/.bash_env
     docker:
       - image: ubuntu:24.04
     steps:
@@ -66,9 +55,6 @@ jobs:
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               $(cat .circleci/test-dependencies.txt)
-      - run:
-          name: Activate opam environment (restored from build job)
-          command: echo 'eval $(opam env)' >> "$BASH_ENV"
       - run:
           name: Run tests
           command: make -C /root/project/tests -k SKIP_CASES=lib-test

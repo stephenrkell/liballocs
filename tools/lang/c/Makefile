@@ -7,7 +7,7 @@ ifeq ($(CIL_LIBDIR),)
 $(error "Expected CIL_LIBDIR to be set")
 endif
 
-export OCAMLPATH := $(dir $(CIL_INSTALL))$(if $(OCAMLPATH),:$(OCAMLPATH))
+export OCAMLPATH := $(dir $(CIL_LIBDIR))$(if $(OCAMLPATH),:$(OCAMLPATH))
 
 CILLY ?= $(CIL_LIBDIR)/../../bin/cilly
 CIL_TOOLS ?= cilallocs dumpallocs monalloca dumpmemacc trapptrwrites
