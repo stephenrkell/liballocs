@@ -176,7 +176,7 @@ ALLOCSLD_OBJS := meta-dso.o err.o  # in one-DSO builds, these will be in allocsl
 # constraints of allocsld: must be free of UNDs? free of via-PLT calls?
 CORE_OBJS := cache.o allocsites.o pageindex.o addrlist.o uniqtype-bfs.o \
   meta-dso-util.o uniqtype-util.o counters.o rt-uniqtypes.o util.o private-libc.o query.o walk.o \
-  init.o workarounds.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) \
+  init.o $(filter-out user2hook.o,$(MALLOCHOOKS_OBJS)) \
   $(patsubst $(srcdir)/allocators/%.c,allocators/%.o,$(wildcard $(srcdir)/allocators/*.c))
 ifeq ($(LIBALLOCS_ONE_DSO),)
 CORE_OBJS += $(ALLOCSLD_OBJS)
