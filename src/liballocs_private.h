@@ -266,8 +266,6 @@ extern struct uniqtype *pointer_to___uniqtype__Elf64_auxv_t;
 extern struct uniqtype *pointer_to___uniqtype____ARR0_signed_char;
 extern struct uniqtype *pointer_to___uniqtype__intptr_t;
 
-void workaround_glibc_bugs(void) __attribute__((visibility("hidden")));
-
 #ifdef __cplusplus
 } /* end extern "C" */
 #endif
