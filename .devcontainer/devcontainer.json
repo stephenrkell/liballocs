@@ -1,0 +1,14 @@
+{
+  "name": "liballocs",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "target": "base",
+    "args": {
+      "user": "user"
+    }
+  },
+  "workspaceFolder": "/usr/local/src/liballocs",
+  "remoteUser": "user",
+  "postCreateCommand": "git submodule update --init --recursive && make -C contrib -j$(nproc) && ./autogen.sh && (. contrib/env.sh && ./configure --prefix=/usr/local) && make -j$(nproc)"
+}

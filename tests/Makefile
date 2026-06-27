@@ -76,7 +76,7 @@ ifeq ($(CC),)
 $(error Could not find allocscc)
 endif
 
-cases := $(filter-out unit-tests,$(sort $(wildcard [-a-z]*)))
+cases := $(filter-out unit-tests $(SKIP_CASES),$(sort $(wildcard [-a-z]*)))
 
 LIBALLOCS := $(realpath $(dir $(THIS_MAKEFILE))/..)
 export LIBALLOCS

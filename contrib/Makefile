@@ -1,17 +1,8 @@
 THIS_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
 CONTRIB := $(realpath $(dir $(THIS_MAKEFILE)))
 
-export LIBALLOCS_OCAML_PREFIX := $(abspath $(CONTRIB)/../lib/ocaml)
-CONFIG_MK += \nLIBALLOCS_OCAML_PREFIX := ${LIBALLOCS_OCAML_PREFIX}\n
-varlist += LIBALLOCS_OCAML_PREFIX
-
-export OCAML_LIBDEST := ${LIBALLOCS_OCAML_PREFIX}/lib
-export OCAMLPATH = ${OCAML_LIBDEST}
-
-export PATH := ${PATH}:${LIBALLOCS_OCAML_PREFIX}/bin
 
 export CC := gcc
-export CIL_CC := ${CC}
 
 # NOTE all this env.sh amounts to just a different way to do
 # ./configure --with-blah=/path/to/blah ?
@@ -136,35 +127,17 @@ export CIL_ROOT := $(CONTRIB)/cil
 CONFIG_MK += \nCIL_ROOT := $(CIL_ROOT)\n
 varlist += CIL_ROOT
 
-export CIL_LIBDIR := $(LIBALLOCS_OCAML_PREFIX)/lib/goblint-cil
+export CIL_LIBDIR := $(CIL_ROOT)/_build/install/default/lib/goblint-cil
 CONFIG_MK += \nCIL_LIBDIR := $(CIL_LIBDIR)\n
 varlist += CIL_LIBDIR
 
-export OPAMROOT := $(CONTRIB)/opamroot
-CONFIG_MK += \nOPAMROOT := $(OPAMROOT)\n
-varlist += OPAMROOT
-
-export OPAMSWITCH := $(CIL_ROOT)
-CONFIG_MK += \nOPAMSWITCH := $(OPAMSWITCH)\n
-varlist += OPAMSWITCH
-
-export OCAMLFIND := opam exec -- ocamlfind
-CONFIG_MK += \nOCAMLFIND := $(OCAMLFIND)\n
-varlist += OCAMLFIND
-
-export OPAMYES = 1
-
 .PHONY: build-cil
+build-cil: export CIL_CC := $(CC)
 build-cil:
-	opam init --bare --no-setup --disable-sandboxing
-	cd ${CIL_ROOT} && if [ ! -d ${OPAMSWITCH}/_opam ]; then opam switch create . 5.4.0 --no-install; fi
-	cd ${CIL_ROOT} && opam install . --destdir=${LIBALLOCS_OCAML_PREFIX}
+	cd ${CIL_ROOT} && dune build @install
 
 clean::
-	cd ${CIL_ROOT} && opam remove . --destdir=${LIBALLOCS_OCAML_PREFIX} || true
-	cd ${CIL_ROOT} && opam switch remove . || true
-	rm -rf ${OPAMSWITCH}/_opam
-	rm -rf ${OPAMROOT}
+	cd ${CIL_ROOT} && dune clean || true
 
 # ----------------------------toolsub
 
