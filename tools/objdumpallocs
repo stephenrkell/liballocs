@@ -66,7 +66,7 @@ make_match_any_line_floating_eregexp () {
 }
 
 line_regexp='^([0-9a-f]*) <([^>]*)>'
-alloc_descriptors="${LIBALLOCS_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p alloca(Z)p"
+alloc_descriptors="${LIBALLOCS_ALLOC_FNS} malloc(Z)p calloc(zZ)p realloc(pZ)p memalign(zZ)p alloca(Z)p _Znwm(Z)p _Znam(Z)p"
 suballoc_descriptors="${LIBALLOCS_SUBALLOC_FNS:-}"
 allocsz_descriptors="${LIBALLOCS_ALLOCSZ_FNS:-}"
 all_alloc_descriptors="${alloc_descriptors}${suballoc_descriptors:+ ${suballoc_descriptors}}${allocsz_descriptors:+ ${allocsz_descriptors}}"
