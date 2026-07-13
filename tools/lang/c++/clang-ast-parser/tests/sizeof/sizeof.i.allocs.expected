@@ -20,9 +20,11 @@ tests/sizeof/sizeof.cpp	53	11	malloc	__uniqtype__Point	1
 tests/sizeof/sizeof.cpp	54	11	malloc	__uniqtype__Point	1
 tests/sizeof/sizeof.cpp	55	22	malloc	__uniqtype__Point	1
 tests/sizeof/sizeof.cpp	59	2	malloc	__uniqtype__Point	0
-tests/sizeof/sizeof.cpp	62	2	malloc	__uniqtype____uninterpreted_byte	0
+tests/sizeof/sizeof.cpp	62	2	malloc	__uniqtype____anonstruct_point_3006516372	0
 tests/sizeof/sizeof.cpp	65	2	malloc	__uniqtype__Status	0
 tests/sizeof/sizeof.cpp	66	2	malloc	__uniqtype__Status	0
 tests/sizeof/sizeof.cpp	67	2	malloc	__uniqtype__Status	1
-tests/sizeof/sizeof.cpp	73	2	malloc	__uniqtype____uninterpreted_byte	0
-tests/sizeof/sizeof.cpp	78	2	malloc	__uniqtype____uninterpreted_byte	0
+tests/sizeof/sizeof.cpp	72	2	malloc	__uniqtype__Light	0
+tests/sizeof/sizeof.cpp	73	2	malloc	__uniqtype__Light	1
+tests/sizeof/sizeof.cpp	78	2	malloc	__uniqtype__Light2	0
+tests/sizeof/sizeof.cpp	79	2	malloc	__uniqtype__Light2	1

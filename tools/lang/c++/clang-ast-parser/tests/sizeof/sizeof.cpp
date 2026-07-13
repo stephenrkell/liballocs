@@ -58,22 +58,23 @@ int main(int argc, char **argv) {
 	sz_re = sizeof(Point);
 	malloc(sz_re); // __uniqtype__Point 0
 
-	// anonymous struct (no typedef - can't name it)
-	malloc(sizeof(point)); // __uniqtype____uninterpreted_byte 0
-	// anonymous struct via typedef - should use typedef name
+	// anonymous struct (no typedef)
+	malloc(sizeof(point)); // __uniqtype____anonstruct_point_3006516372 0
+	// anonymous struct via typedef
 	Status s;
 	malloc(sizeof(Status));        // __uniqtype__Status 0
 	malloc(sizeof(s));             // __uniqtype__Status 0
 	malloc(2 * sizeof(Status));    // __uniqtype__Status 1
 
-	// TODO: enums
 	enum Light {
 		Red, Yellow, Green
 	};
-	malloc(sizeof(Light));
+	malloc(sizeof(Light)); // __uniqtype__Light 0
+	malloc(2 * sizeof(Light)); // __uniqtype__Light 1
 
 	enum class Light2 {
 		Red, Yellow, Green
 	};
-	malloc(sizeof(Light2));
+	malloc(sizeof(Light2)); // __uniqtype__Light2 0
+	malloc(2 * sizeof(Light2)); // __uniqtype__Light2 1
 }

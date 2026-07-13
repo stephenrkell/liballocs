@@ -300,11 +300,30 @@ bool NewDetectorVisitor::VisitCallExpr(CallExpr *E) {
         }
     }
 
+    // For anonymous records with no typedef, try to extract a hint name from
+    // the sizeof expression (e.g. sizeof(point) → hint "point").
+    std::string hint;
+    if (!info.type.isNull()) {
+        if (const RecordType *RT = info.type->getAs<RecordType>()) {
+            RecordDecl *RD = RT->getDecl();
+            if (RD->getDeclName().isEmpty() && !RD->getTypedefNameForAnonDecl()) {
+                const Expr *sizeArg = E->getArg(sizeOfArgIdx)->IgnoreParenImpCasts();
+                if (const auto *ue = dyn_cast<UnaryExprOrTypeTraitExpr>(sizeArg)) {
+                    if (ue->getKind() == UETT_SizeOf && !ue->isArgumentType()) {
+                        const Expr *arg = ue->getArgumentExpr()->IgnoreParenImpCasts();
+                        if (const auto *dr = dyn_cast<DeclRefExpr>(arg))
+                            hint = dr->getDecl()->getNameAsString();
+                    }
+                }
+            }
+        }
+    }
+
     *OutStream << loc.getFileEntry()->tryGetRealPathName() << "\t"
         << loc.getSpellingLineNumber() << "\t"
         << loc.getSpellingColumnNumber() << "\t"
         << qualifiedName << "\t"
-        << uniqtypeNameFromClangType(info.type, Context) << "\t"
+        << uniqtypeNameFromClangType(info.type, Context, hint) << "\t"
         << (info.is_array ? "1" : "0") << "\n";
     return true;
 }

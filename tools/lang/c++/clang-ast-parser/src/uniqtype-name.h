@@ -5,7 +5,8 @@
 #include "clang/AST/Type.h"
 #include <string>
 
-std::string uniqtypeNameFromClangType(clang::QualType qt, clang::ASTContext *ctx);
+std::string uniqtypeNameFromClangType(clang::QualType qt, clang::ASTContext *ctx,
+                                       const std::string& hint = "");
 
 #endif
 
