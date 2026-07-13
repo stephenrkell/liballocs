@@ -1,6 +1,6 @@
 CLANG_AST_PARSER = ../../../bin/clang-ast-parser
 
-TEST_NAME = malloc
+TEST_NAME = offsetof
 SRC = $(TEST_NAME).cpp
 ACTUAL = $(TEST_NAME).i.allocs
 EXPECTED = $(TEST_NAME).i.allocs.expected

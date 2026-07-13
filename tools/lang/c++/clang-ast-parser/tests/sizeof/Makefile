@@ -1,6 +1,6 @@
 CLANG_AST_PARSER = ../../../bin/clang-ast-parser
 
-TEST_NAME = malloc
+TEST_NAME = sizeof
 SRC = $(TEST_NAME).cpp
 ACTUAL = $(TEST_NAME).i.allocs
 EXPECTED = $(TEST_NAME).i.allocs.expected
@@ -12,7 +12,8 @@ NORMALIZE = sed -i 's|^.*/tests/|tests/|'
 $(ACTUAL): $(SRC)
 	$(CLANG_AST_PARSER) $(SRC)
 
-test: $(ACTUAL)
+test:
+	$(CLANG_AST_PARSER) $(SRC)
 	$(NORMALIZE) $(ACTUAL) > /dev/null
 	@diff -yq $(ACTUAL) $(EXPECTED) \
 		&& echo "PASS: $(TEST_NAME)" \

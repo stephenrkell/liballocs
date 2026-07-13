@@ -5,12 +5,18 @@
 using namespace clang;
 
 std::string uniqtypeNameFromClangType(QualType qt, ASTContext *ctx) {
+    if (qt.isNull()) return "__uniqtype____uninterpreted_byte";
+
 	const Type *T = qt.getTypePtr();
 
-    // For records (struct/class): use tag name
+    // For records (struct/class): use tag name; for anonymous records use the typedef name.
     if (const RecordType *RT = T->getAs<RecordType>()) {
-        std::string name = RT->getDecl()->getQualifiedNameAsString();
-        if (!name.empty()) return "__uniqtype__" + name;
+        RecordDecl *RD = RT->getDecl();
+        if (!RD->getDeclName().isEmpty())
+            return "__uniqtype__" + RD->getQualifiedNameAsString();
+        // Anonymous record (e.g. typedef struct { ... } T;): use the typedef alias.
+        if (const TypedefNameDecl *TND = RD->getTypedefNameForAnonDecl())
+            return "__uniqtype__" + TND->getQualifiedNameAsString();
     }
 
     // For built-in types: use canonical name + bit width
