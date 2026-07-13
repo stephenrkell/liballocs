@@ -1,0 +1,4 @@
+tests/templates/templates.cpp	27	13	new	__uniqtype__Point$3cA$3e	0
+tests/templates/templates.cpp	30	13	malloc	__uniqtype__Pair$3cint$2c$20A$3e	0
+tests/templates/templates.cpp	33	13	new	__uniqtype__Box$3cPoint$3cA$3e$3e	0
+tests/templates/templates.cpp	36	13	malloc	__uniqtype__Pair$3cPoint$3cA$3e$2c$20Box$3cPair$3cint$2c$20A$3e$3e$3e	0
