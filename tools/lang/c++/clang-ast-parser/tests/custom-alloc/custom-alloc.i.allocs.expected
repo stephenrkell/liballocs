@@ -1,0 +1,4 @@
+tests/custom-alloc/custom-alloc.cpp	13	5	my_malloc	__uniqtype__Point	0
+tests/custom-alloc/custom-alloc.cpp	14	5	my_malloc	__uniqtype__Point	1
+tests/custom-alloc/custom-alloc.cpp	17	5	my_calloc	__uniqtype__Node	0
+tests/custom-alloc/custom-alloc.cpp	20	5	pool_alloc	__uniqtype__Point	0

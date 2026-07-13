@@ -9,8 +9,9 @@ using namespace clang;
 using namespace llvm;
 
 NewDetectorVisitor::NewDetectorVisitor(ASTContext *Context,
-                                       std::shared_ptr<raw_fd_ostream> outStream)
-    : Context(Context), OutStream(outStream) {}
+                                       std::shared_ptr<raw_fd_ostream> outStream,
+                                       const AllocTable& allocTable)
+    : Context(Context), OutStream(outStream), allocTable(allocTable) {}
 
 // Attempt to evaluate a comparison (e.g. x > 5) given known constant values for variables.
 static bool tryEvaluateBoolWithValues(const Expr *cond, const ValueEnvMap& values,
@@ -263,13 +264,12 @@ bool NewDetectorVisitor::VisitCallExpr(CallExpr *E) {
     if (!fdecl) return true;
 
     std::string qualifiedName = fdecl->getQualifiedNameAsString();
-    if (allocator_funcs.find(qualifiedName) == allocator_funcs.end()) return true;
+    int sizeOfArgIdx = lookupSizeArgIdx(allocTable, qualifiedName,
+                                        static_cast<int>(E->getNumArgs()));
+    if (sizeOfArgIdx < 0) return true;
 
     FullSourceLoc loc = Context->getFullLoc(E->getBeginLoc());
     if (!loc.isValid()) return true;
-
-    int sizeOfArgIdx = sizeOfArgIndex(qualifiedName, E->getNumArgs());
-    if (sizeOfArgIdx < 0) return true;
 
     // Use the dataflow environment at this exact call site
     static const SizeEnvMap emptyEnv;

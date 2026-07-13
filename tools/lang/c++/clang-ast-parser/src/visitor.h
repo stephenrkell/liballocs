@@ -1,6 +1,7 @@
 #ifndef VISITOR_H
 #define VISITOR_H
 
+#include "allocators.h"
 #include "size_env.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Analysis/CFG.h"
@@ -15,7 +16,8 @@ using ValueEnvMap = std::map<const clang::VarDecl*, llvm::APSInt>;
 class NewDetectorVisitor : public clang::RecursiveASTVisitor<NewDetectorVisitor> {
 public:
     explicit NewDetectorVisitor(clang::ASTContext *Context,
-                                std::shared_ptr<llvm::raw_fd_ostream> outStream);
+                                std::shared_ptr<llvm::raw_fd_ostream> outStream,
+                                const AllocTable& allocTable);
 
     bool VisitFunctionDecl(clang::FunctionDecl *FD);
     bool VisitCXXNewExpr(clang::CXXNewExpr *E);
@@ -37,6 +39,7 @@ private:
 
     clang::ASTContext *Context;
     std::shared_ptr<llvm::raw_fd_ostream> OutStream;
+    const AllocTable& allocTable;
     std::map<const clang::CallExpr*, SizeEnvMap> callSiteEnvs;
 };
 
