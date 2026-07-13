@@ -1,0 +1,3 @@
+tests/offsetof/offsetof.cpp	18	12	calloc	__uniqtype__blah	0
+tests/offsetof/offsetof.cpp	19	13	calloc	__uniqtype__baz	0
+tests/offsetof/offsetof.cpp	22	13	malloc	__uniqtype__blah	0

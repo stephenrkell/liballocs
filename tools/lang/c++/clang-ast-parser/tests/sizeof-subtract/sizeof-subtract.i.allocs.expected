@@ -1,0 +1,4 @@
+tests/sizeof-subtract/sizeof-subtract.cpp	16	16	malloc	__uniqtype__s1	0
+tests/sizeof-subtract/sizeof-subtract.cpp	19	16	malloc	__uniqtype__s1	0
+tests/sizeof-subtract/sizeof-subtract.cpp	22	16	malloc	__uniqtype__s2	0
+tests/sizeof-subtract/sizeof-subtract.cpp	26	16	malloc	__uniqtype__s1	0

@@ -18,6 +18,10 @@ AllocTypeInfo extractTypeFromSizeOf(const Expr *exp, const SizeEnvMap& env) {
             return AllocTypeInfo(e->getTypeOfArgument(), false, true);
         }
     }
+    // offsetof(T, field) — T is the type being allocated.
+    if (const auto *oe = dyn_cast<OffsetOfExpr>(exp))
+        return AllocTypeInfo(oe->getTypeSourceInfo()->getType(), false, true);
+
     // process integers
     if (const auto *int_literal = dyn_cast<IntegerLiteral>(exp)) {
         return AllocTypeInfo(int_literal->getType(), false, false);
@@ -36,6 +40,12 @@ AllocTypeInfo extractTypeFromSizeOf(const Expr *exp, const SizeEnvMap& env) {
                 // sizeof(T) * sizeof(T)
                 if (l.from_sizeof && r.from_sizeof && !l.type.isNull())
                     return AllocTypeInfo(l.type, true, true);
+                return AllocTypeInfo();
+            }
+            case BO_Sub: {
+                // sizeof(T) - sizeof(field) — T is the type being allocated.
+                AllocTypeInfo l = extractTypeFromSizeOf(bo->getLHS(), env);
+                if (!l.type.isNull()) return l;
                 return AllocTypeInfo();
             }
             case BO_Add: {
