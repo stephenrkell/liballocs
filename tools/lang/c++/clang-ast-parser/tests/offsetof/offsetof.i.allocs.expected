@@ -1,3 +1,3 @@
 tests/offsetof/offsetof.cpp	18	12	calloc	__uniqtype__blah	0
-tests/offsetof/offsetof.cpp	19	13	calloc	__uniqtype__baz	0
-tests/offsetof/offsetof.cpp	22	13	malloc	__uniqtype__blah	0
+tests/offsetof/offsetof.cpp	19	13	calloc	structure_type dumpallocs_synthetic_$2fhome$2fismail$2fProjects$2fliballocs$2ftools$2flang$2fc$2b$2b$2fclang$2dast$2dparser$2ftests$2foffsetof$2foffsetof$2ecpp$0919$0913 { member : baz; member : (array_type [type = blah] { }); };	0
+tests/offsetof/offsetof.cpp	22	13	malloc	structure_type dumpallocs_synthetic_$2fhome$2fismail$2fProjects$2fliballocs$2ftools$2flang$2fc$2b$2b$2fclang$2dast$2dparser$2ftests$2foffsetof$2foffsetof$2ecpp$0922$0913 { member : blah; member : (array_type [type = char$8] { }); };	0

@@ -5,6 +5,7 @@
 #include "clang/Basic/SourceManager.h"
 #include <cstdint>
 #include <cstdio>
+#include "uniqtype-name.h"
 
 using namespace clang;
 
@@ -95,5 +96,41 @@ std::string uniqtypeNameFromClangType(QualType qt, ASTContext *ctx,
 
     // Unknown / too complex — fall back to uninterpreted byte
     return "__uniqtype____uninterpreted_byte";
+}
+
+static std::string dwarfidlMemberTypeStr(QualType qt, ASTContext *ctx) {
+    if (const RecordType *RT = qt->getAs<RecordType>()) {
+        RecordDecl *RD = RT->getDecl();
+        if (!RD->getDeclName().isEmpty())
+            return RD->getQualifiedNameAsString();
+        if (const TypedefNameDecl *TND = RD->getTypedefNameForAnonDecl())
+            return TND->getQualifiedNameAsString();
+        return "__anonymous";
+    }
+    if (const BuiltinType *BT = qt->getAs<BuiltinType>()) {
+        uint64_t bits = ctx->getTypeSize(qt);
+        std::string name = BT->getName(ctx->getPrintingPolicy()).str();
+        std::replace(name.begin(), name.end(), ' ', '_');
+        return name + "$" + std::to_string(bits);
+    }
+    return "__unknown";
+}
+
+// Build the dwarfidl structure_type string for a synthetic allocation,
+std::string syntheticTypeString(const std::vector<SyntheticMember>& members,
+                                 const std::string& filepath,
+                                 unsigned line, unsigned col,
+                                 ASTContext *ctx) {
+    std::string loc = filepath + "\t" + std::to_string(line)
+                                + "\t" + std::to_string(col);
+    std::string name = "dumpallocs_synthetic_" + identFromString(loc);
+    std::string body;
+    for (const auto& m : members) {
+        std::string memberStr = dwarfidlMemberTypeStr(m.type, ctx);
+        if (m.is_array)
+            memberStr = "(array_type [type = " + memberStr + "] { })";
+        body += "member : " + memberStr + "; ";
+    }
+    return "structure_type " + name + " { " + body + "};";
 }
 

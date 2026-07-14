@@ -50,8 +50,18 @@ AllocTypeInfo extractTypeFromSizeOf(const Expr *exp, const SizeEnvMap& env) {
             }
             case BO_Add: {
                 AllocTypeInfo l = extractTypeFromSizeOf(bo->getLHS(), env);
+                AllocTypeInfo r = extractTypeFromSizeOf(bo->getRHS(), env);
+                if (!l.from_sizeof) return r;
+                if (!r.from_sizeof) return l;
+                // Both sides carry sizeofness. Same underlying type → existing.
+                if (!l.type.isNull() && !r.type.isNull()) {
+                    if (l.type.getCanonicalType() == r.type.getCanonicalType())
+                        return AllocTypeInfo(l.type, true, true);
+                    // Different types (e.g. offsetof(T,f) + n*sizeof(U)) → synthetic struct.
+                    return AllocTypeInfo(std::vector<SyntheticMember>{{l.type, l.is_array}, {r.type, true}});
+                }
                 if (!l.type.isNull()) return l;
-                return extractTypeFromSizeOf(bo->getRHS(), env);
+                return r;
             }
             default:
                 return AllocTypeInfo();

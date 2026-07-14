@@ -288,22 +288,24 @@ bool NewDetectorVisitor::VisitCallExpr(CallExpr *E) {
 
     if (!info.from_sizeof) info = AllocTypeInfo();
 
-    // (T*) malloc or static_cast<T*>(malloc) — cast overrides type
-    auto parents = Context->getParents(*E);
-    if (!parents.empty()) {
-        if (auto *c_cast = parents[0].get<CStyleCastExpr>()) {
-            info.type = c_cast->getType()->getPointeeType();
-            info.is_array = true;
-        } else if (auto *cxx_cast = parents[0].get<CXXStaticCastExpr>()) {
-            info.type = cxx_cast->getType()->getPointeeType();
-            info.is_array = true;
+    // (T*) malloc or static_cast<T*>(malloc) — cast overrides type (not for synthetics)
+    if (!info.isSynthetic()) {
+        auto parents = Context->getParents(*E);
+        if (!parents.empty()) {
+            if (auto *c_cast = parents[0].get<CStyleCastExpr>()) {
+                info.type = c_cast->getType()->getPointeeType();
+                info.is_array = true;
+            } else if (auto *cxx_cast = parents[0].get<CXXStaticCastExpr>()) {
+                info.type = cxx_cast->getType()->getPointeeType();
+                info.is_array = true;
+            }
         }
     }
 
     // For anonymous records with no typedef, try to extract a hint name from
     // the sizeof expression (e.g. sizeof(point) → hint "point").
     std::string hint;
-    if (!info.type.isNull()) {
+    if (!info.isSynthetic() && !info.type.isNull()) {
         if (const RecordType *RT = info.type->getAs<RecordType>()) {
             RecordDecl *RD = RT->getDecl();
             if (RD->getDeclName().isEmpty() && !RD->getTypedefNameForAnonDecl()) {
@@ -319,11 +321,18 @@ bool NewDetectorVisitor::VisitCallExpr(CallExpr *E) {
         }
     }
 
-    *OutStream << loc.getFileEntry()->tryGetRealPathName() << "\t"
+    std::string filepath = loc.getFileEntry()->tryGetRealPathName().str();
+    std::string typeStr = info.isSynthetic()
+        ? syntheticTypeString(info.synth_members, filepath,
+                              loc.getSpellingLineNumber(),
+                              loc.getSpellingColumnNumber(), Context)
+        : uniqtypeNameFromClangType(info.type, Context, hint);
+
+    *OutStream << filepath << "\t"
         << loc.getSpellingLineNumber() << "\t"
         << loc.getSpellingColumnNumber() << "\t"
         << qualifiedName << "\t"
-        << uniqtypeNameFromClangType(info.type, Context, hint) << "\t"
+        << typeStr << "\t"
         << (info.is_array ? "1" : "0") << "\n";
     return true;
 }
