@@ -82,6 +82,8 @@ std::vector<bool> NewDetectorVisitor::computeLiveBlocks(const CFG& cfg,
 // Run forward dataflow over the function to populate callSiteEnvs.
 bool NewDetectorVisitor::VisitFunctionDecl(FunctionDecl *FD) {
     if (!FD->hasBody()) return true;
+    // If the function is a template or otherwise dependent, we can't analyze it yet.
+    if (FD->isDependentContext()) return true;
     callSiteEnvs.clear();
 
     auto cfg = CFG::buildCFG(FD, FD->getBody(), Context, CFG::BuildOptions());
@@ -156,6 +158,7 @@ bool NewDetectorVisitor::VisitFunctionDecl(FunctionDecl *FD) {
 // and return the sizeofness that all live return statements agree on (Undet if they disagree).
 AllocTypeInfo NewDetectorVisitor::computeReturnSizeofness(FunctionDecl *FD,
                                                           const ValueEnvMap& values) {
+    if (FD->isDependentContext()) return AllocTypeInfo();
     auto cfg = CFG::buildCFG(FD, FD->getBody(), Context, CFG::BuildOptions());
     if (!cfg) return AllocTypeInfo();
 
@@ -294,10 +297,8 @@ bool NewDetectorVisitor::VisitCallExpr(CallExpr *E) {
         if (!parents.empty()) {
             if (auto *c_cast = parents[0].get<CStyleCastExpr>()) {
                 info.type = c_cast->getType()->getPointeeType();
-                info.is_array = true;
             } else if (auto *cxx_cast = parents[0].get<CXXStaticCastExpr>()) {
                 info.type = cxx_cast->getType()->getPointeeType();
-                info.is_array = true;
             }
         }
     }

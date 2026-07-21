@@ -23,7 +23,7 @@ int main(void)
 	
 	// assert that the alloc is a blah
 	struct uniqtype *got_type = __liballocs_get_alloc_type(b);
-	struct uniqtype *blah_type = __liballocs_get_alloc_type(dlsym(RTLD_NEXT, "__uniqtype__blah"));
+	struct uniqtype *blah_type = (struct uniqtype *) dlsym(RTLD_NEXT, "__uniqtype__blah");
 	assert(blah_type);
 	assert(got_type);
 	assert(got_type == blah_type);
@@ -34,7 +34,7 @@ int main(void)
 	
 	// assert that the alloc is the composite
 	struct uniqtype *got_comp_type = __liballocs_get_alloc_type(bz);
-	struct uniqtype *baz_type = __liballocs_get_alloc_type(dlsym(RTLD_NEXT, "__uniqtype__baz"));
+	struct uniqtype *baz_type = (struct uniqtype *) dlsym(RTLD_NEXT, "__uniqtype__baz");
 	assert(baz_type);
 	assert(got_comp_type);
 	assert(got_comp_type->un.info.kind == COMPOSITE);

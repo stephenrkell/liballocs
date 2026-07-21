@@ -3,6 +3,7 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <cxxabi.h>
 #include <map>
 #include <sstream>
 #include <string>
@@ -13,7 +14,7 @@ struct AllocFnSpec {
     int sizeArgIdx;  // 0-based index of the size (Z) argument
 };
 
-// Maps function name → one spec per overload (different arg counts).
+// Maps function name -> one spec per overload (different arg counts).
 using AllocTable = std::map<std::string, std::vector<AllocFnSpec>>;
 
 // Parse a liballocs allocator signature, e.g. "myfunc(pzZ)p".
@@ -76,8 +77,23 @@ inline AllocTable buildAllocTable() {
         while (iss >> sig) {
             std::string name;
             AllocFnSpec spec;
-            if (parseAllocSignature(sig, name, spec))
-                table[name].push_back(spec);
+            if (!parseAllocSignature(sig, name, spec))
+                continue;
+            // demangle C++ function names
+            if (name.size() > 2 && name[0] == '_' && name[1] == 'Z') {
+                int status = 0;
+                char *demangled = abi::__cxa_demangle(name.c_str(), nullptr, nullptr, &status);
+                if (status == 0 && demangled) {
+                    // get name of function
+                    std::string dem(demangled);
+                    free(demangled);
+                    size_t paren = dem.find('(');
+                    if (paren != std::string::npos)
+                        dem = dem.substr(0, paren);
+                    name = dem;
+                }
+            }
+            table[name].push_back(spec);
         }
     }
 

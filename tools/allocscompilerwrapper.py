@@ -162,48 +162,6 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 if objcopy_ret != 0:
                     return objcopy_ret
 
-            # Handle C++ name mangling: find symbols whose demangled name matches a
-            # wrapped allocator name and rename them to their C-linkage (unmangled) form
-            # so the generated C allocstub can reference them.
-            wrapped_names = set(self.allWrappedSymNames())
-            if wrapped_names:
-                nm_out = subprocess.Popen(
-                    ["nm", "-fposix", filename],
-                    stdout=subprocess.PIPE, stderr=errfile
-                ).communicate()[0].decode()
-
-                mangled_syms = []
-                sym_types = {}
-                for line in nm_out.split('\n'):
-                    parts = line.split()
-                    if len(parts) < 2:
-                        continue
-                    sym, typ = parts[0], parts[1]
-                    if sym.startswith('_Z'):
-                        mangled_syms.append(sym)
-                        sym_types[sym] = typ
-
-                if mangled_syms:
-                    cxxfilt_out = subprocess.Popen(
-                        ['c++filt'] + mangled_syms,
-                        stdout=subprocess.PIPE
-                    ).communicate()[0].decode()
-                    demangled = [l for l in cxxfilt_out.split('\n') if l]
-
-                    objcopy_args = []
-                    for mangled, demangled_name in zip(mangled_syms, demangled):
-                        fn_name = demangled_name.split('(')[0]
-                        if fn_name in wrapped_names:
-                            self.debugMsg("Renaming C++ mangled %s -> %s for allocstub linking\n" % (mangled, fn_name))
-                            if sym_types[mangled].islower():
-                                objcopy_args += ['--globalize-symbol', mangled]
-                            objcopy_args += ['--redefine-sym', '%s=%s' % (mangled, fn_name)]
-
-                    if objcopy_args:
-                        objcopy_ret = subprocess.call(['objcopy'] + objcopy_args + [filename])
-                        if objcopy_ret != 0:
-                            return objcopy_ret
-
             self.debugMsg("No need to globalize\n")
             return 0
 

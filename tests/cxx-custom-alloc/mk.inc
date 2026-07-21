@@ -6,7 +6,7 @@ export CXXFLAGS
 
 # Tell the liballocs instrumentation about our custom allocator.
 # Same env-var format as the C tool (dumpallocs.ml) and clang-ast-parser.
-export LIBALLOCS_ALLOC_FNS := my_malloc(Z)p my_calloc(zZ)p
+export LIBALLOCS_ALLOC_FNS := _Z9my_mallocm(Z)p _Z9my_callocmm(zZ)p
 
 LDLIBS += -lallocs
 

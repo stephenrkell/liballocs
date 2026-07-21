@@ -6,5 +6,5 @@ export CXXFLAGS
 
 LDLIBS += -lallocs
 
-cxx-sizeof-subtract: cxx-sizeof-subtract.cpp
+cxx-new: cxx-new.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
