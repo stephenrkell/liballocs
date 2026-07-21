@@ -201,6 +201,8 @@ class CompilerWrapper:
     
     # also the items themselves -- could be strings or SourceFiles
     phaseItems = [[] for n in range(Phase.DRIVER, 1+Phase.LINK)]
+
+    phases = []
     
     # keep a map of all source files (not items; excluding linker inputs), indexed by position
     allSourceFiles = dict({})

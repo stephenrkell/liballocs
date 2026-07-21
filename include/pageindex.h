@@ -82,6 +82,13 @@ extern bigalloc_num_t *pageindex __attribute__((weak));
 #if defined(__PIC__) || defined(__code_model_large__)
 extern bigalloc_num_t *__liballocs_pageindex __attribute__((weak));
 #endif
+/* Forward-declare the enum so C++ sees a complete-enough type for the return type.
+ * The enum is defined in the liballocs DSO; we only need the declaration here. */
+#ifdef __cplusplus
+enum object_memory_kind : int;
+#else
+enum object_memory_kind; /* GCC extension: incomplete enum forward declaration */
+#endif
 enum object_memory_kind __liballocs_get_memory_kind(const void *obj) __attribute__((visibility("protected")));
 
 void __liballocs_print_l0_to_stream_err(void);

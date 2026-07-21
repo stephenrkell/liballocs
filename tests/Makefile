@@ -227,10 +227,12 @@ default:
 
 # generic clean rule that we can run from test dirs too (with $(MAKE) -f ../Makefile)
 clean: # (delete anything whose name is a prefix of a .c file's and doesn't contain a dot)
-	rm -f $(filter-out .,$(foreach pat,% %.o %.allocstubs.o %.allocstubs.c %.linked.o %.s %.i %.cil.s %.cil.i,$(patsubst %.c,$(pat),$(shell find -name '*.c'))))
+	rm -f $(filter-out .,$(foreach pat,% %.o %.ii %.usedtypes.c %.allocstubs.o %.allocstubs.c %.linked.o %.s %.i %.cil.s %.cil.i,$(patsubst %.c,$(pat),$(shell find -name '*.c'))))
+	rm -f $(filter-out .,$(foreach pat,% %.o %.ii %.usedtypes.c %.allocstubs.o %.allocstubs.c %.linked.o %.s %.i %.cil.s %.cil.i,$(patsubst %.cpp,$(pat),$(shell find -name '*.cpp'))))
 	find -name '*.cil.c' -o \
 	     -name '*.allocs' -o -name '*.so' -o -name '*.ltrans.out' -o \
-	     -name '*.allocstubs.c' -o -name '*.fixuplog' | xargs rm -f
+	     -name '*.allocstubs.c' -o -name '*.fixuplog' -o \
+	     -name 'allocstubs.s' -o -name '*.bc' | xargs rm -f
 
 .PHONY: unit-tests
 unit-tests:

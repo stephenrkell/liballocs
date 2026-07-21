@@ -79,6 +79,12 @@ cat "$all_obj_allocs_file" | cut -f1 | sort | uniq | while read obj rest; do
             (1|2|12|29) # DW_LANG_C89, DW_LANG_C, DW_LANG_C99, DW_LANG_C11
                 $(dirname "$0")/lang/c/bin/c-"$our_name_rewritten" "$cu_sourcepath" "$obj" "$cu_fname" "$cu_compdir"
             ;;
+            (4|26|33|34|43|44) # DW_LANG_C_plus_plus, DW_LANG_C_plus_plus_03,
+                # DW_LANG_C_plus_plus_11, DW_LANG_C_plus_plus_14
+                # DW_LANG_C_plus_plus_17, DW_LANG_C_plus_plus_20
+                $(dirname "$0")/lang/c++/bin/c++-"$our_name_rewritten" \
+                "$cu_sourcepath" "$obj" "$cu_fname" "$cu_compdir"
+            ;;
             (*) # unknown
                 echo "Warning: could not gather source-level allocs for unknown language: $cu_language_fullstr ($cu_language_num, $( echo -n "$cu_language_fullstr" | hd ))" 1>&2
             ;;

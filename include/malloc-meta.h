@@ -54,24 +54,30 @@
 #error "Variable size lifetime policies not fully supported yet"
 #endif
 
+struct insert_initial {
+	unsigned char  always_0:1;
+	unsigned long  alloc_site:47;
+	unsigned short unused:12;
+	unsigned char  lifetime_policies:4; // should never be zero (0000 => already freed)
+};
+
+struct insert_with_type {
+	unsigned char  always_1:1;
+		signed short alloc_site_id:15;    /* may be zero; -1 means "no/unknown alloc site" */
+	unsigned long  uniqtype_shifted:44; /* uniqtype ptrs are 8-byte-aligned and have top bit 0 => this field is ((unsigned long) u)>>3 */
+	unsigned char  lifetime_policies:4; // should never be zero (0000 => already freed)
+};
+
+struct insert_common {
+	unsigned long  _ignore:60;
+	unsigned char  lifetime_policies:4;
+};
+
 struct insert {
 	union {
-		struct insert_initial {
-			unsigned char  always_0:1;
-			unsigned long  alloc_site:47;
-			unsigned short unused:12;
-			unsigned char  lifetime_policies:4; // should never be zero (0000 => already freed)
-		} initial;
-		struct insert_with_type {
-			unsigned char  always_1:1;
-			  signed short alloc_site_id:15;    /* may be zero; -1 means "no/unknown alloc site" */
-			unsigned long  uniqtype_shifted:44; /* uniqtype ptrs are 8-byte-aligned and have top bit 0 => this field is ((unsigned long) u)>>3 */
-			unsigned char  lifetime_policies:4; // should never be zero (0000 => already freed)
-		} with_type;
-		struct insert_common {
-			unsigned long  _ignore:60;
-			unsigned char  lifetime_policies:4;
-		} common;
+		struct insert_initial initial;
+		struct insert_with_type with_type;
+		struct insert_common common;
 	};
 } __attribute((packed));
 

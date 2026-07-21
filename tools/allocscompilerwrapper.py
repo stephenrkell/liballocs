@@ -146,7 +146,7 @@ class AllocsCompilerWrapper(CompilerWrapper):
         # do we need to unbind? 
         with (self.makeErrFile(os.path.realpath(filename) + ".fixuplog", "w+") if not errfile else errfile) as errfile:
 
-            # Now deal with globalizing wrapped functions
+            # Globalize any local (static) C wrapped symbols so the allocstub can link them.
             self.debugMsg("Looking for wrapped functions that need globalizing\n")
             # grep for local symbols -- a lower-case letter after the symname is the giveaway
             cmdstring = "nm -fposix --defined-only \"%s\" | egrep \"^(%s) [a-z] \"" \
@@ -159,8 +159,9 @@ class AllocsCompilerWrapper(CompilerWrapper):
                 objcopy_ret = subprocess.call(["objcopy"] \
                  + [opt for pair in globalize_pairs for opt in pair] \
                  + [filename])
-                return objcopy_ret
-            # no need to objcopy; all good
+                if objcopy_ret != 0:
+                    return objcopy_ret
+
             self.debugMsg("No need to globalize\n")
             return 0
 
