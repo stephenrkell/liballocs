@@ -2,4 +2,4 @@ tests/new/new.cpp	13	17	new	__uniqtype__Point	0
 tests/new/new.cpp	14	17	new	__uniqtype__Point	1
 tests/new/new.cpp	15	17	new	__uniqtype__int$$32	0
 tests/new/new.cpp	17	27	new	__uniqtype__std$3a$3avector$3cint$3e	0
-tests/new/new.cpp	20	17	malloc	__uniqtype__Point	0
+tests/new/new.cpp	19	17	malloc	__uniqtype__Point	0

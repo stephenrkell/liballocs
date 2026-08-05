@@ -5,7 +5,7 @@ SRC = $(TEST_NAME).cpp
 ACTUAL = $(TEST_NAME).i.allocs
 EXPECTED = $(TEST_NAME).i.allocs.expected
 
-NORMALIZE = sed -i 's|^.*/tests/|tests/|'
+NORMALIZE = sed -i 's|^.*/tests/|tests/|; s|dumpallocs_synthetic_[a-zA-Z0-9_$$]*\$$2ftests\$$2f|dumpallocs_synthetic_\$$2ftests\$$2f|g'
 
 .PHONY: test update-expected gdb-parse ast-dump
 

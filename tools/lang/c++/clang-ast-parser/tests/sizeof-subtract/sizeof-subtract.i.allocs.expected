@@ -1,4 +1,4 @@
 tests/sizeof-subtract/sizeof-subtract.cpp	16	16	malloc	__uniqtype__s1	0
-tests/sizeof-subtract/sizeof-subtract.cpp	19	16	malloc	structure_type dumpallocs_synthetic_$2fhome$2fismail$2fProjects$2fliballocs$2ftools$2flang$2fc$2b$2b$2fclang$2dast$2dparser$2ftests$2fsizeof$2dsubtract$2fsizeof$2dsubtract$2ecpp$0919$0916 { member : s1; member : (array_type [type = unsigned_int$32] { }); };	0
+tests/sizeof-subtract/sizeof-subtract.cpp	19	16	malloc	structure_type dumpallocs_synthetic_$2ftests$2fsizeof$2dsubtract$2fsizeof$2dsubtract$2ecpp$0919$0916 { member : s1; member : (array_type [type = unsigned_int$32] { }); };	0
 tests/sizeof-subtract/sizeof-subtract.cpp	22	16	malloc	__uniqtype__s2	0
 tests/sizeof-subtract/sizeof-subtract.cpp	26	16	malloc	__uniqtype__s1	0

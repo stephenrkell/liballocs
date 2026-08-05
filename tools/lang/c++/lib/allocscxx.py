@@ -81,11 +81,10 @@ class AllocsCxx(AllocsCompilerWrapper):
         subprocess.call(cmd)
 
     def runPhasesBeforeLink(self):
-        ret = super().runPhasesBeforeLink()
-        if ret == 0 and not self.onlyPreprocessing() and Phase.ASSEMBLE in self.enabledPhases:
+        if Phase.COMPILE in self.enabledPhases:
             for src in self.getSourceInputFiles():
                 self.runAllocsParser(src)
-        return ret
+        return super().runPhasesBeforeLink()
 
     def getBasicCompilerCommand(self):
         return [os.environ.get("ALLOCSCXX_CXX", "c++")]
