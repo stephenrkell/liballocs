@@ -1,14 +1,15 @@
 CXX = g++
 
-LLVM_CXXFLAGS = $(shell llvm-config-20 --cxxflags)
-LLVM_LDFLAGS  = $(shell llvm-config-20 --ldflags)
-LLVM_LIBS     = $(shell llvm-config-20 --libs --system-libs --link-static)
+LLVM_CONFIG ?= $(firstword $(shell command -v llvm-config-20 2>/dev/null) \
+                            $(shell command -v llvm-config    2>/dev/null))
 
+LLVM_CXXFLAGS = $(shell $(LLVM_CONFIG) --cxxflags)
+LLVM_LDFLAGS  = $(shell $(LLVM_CONFIG) --ldflags)
+LLVM_LIBS     = $(shell $(LLVM_CONFIG) --libs --system-libs --link-static)
+LLVM_LIBDIR   = $(shell $(LLVM_CONFIG) --libdir)
 
-# 1. Get the full paths
-# 2. Use 'basename' to get just the filename (e.g., libclangBasic.a)
-# 3. Use 'sed' to strip the 'lib' prefix and '.a' suffix
-CLANG_LIBS = $(shell ls /usr/lib/llvm-20/lib/libclang*.a | xargs -n1 basename | sed 's/^lib\(.*\)\.a/-l\1/')
+CLANG_LIBS = $(shell ls $(LLVM_LIBDIR)/libclang*.a 2>/dev/null | \
+               xargs -n1 basename | sed 's/^lib\(.*\)\.a/-l\1/')
 
 CXXFLAGS = -std=c++17 -g $(LLVM_CXXFLAGS) -Iinclude
 
@@ -42,6 +43,10 @@ clang-ast-parser: clang-ast-parser.o
 clean:
 	rm -rf build
 	rm -f $(TARGET)
+
+# Run all tests under tests/
+test: $(TARGET)
+	$(MAKE) -C tests
 
 dep:
 	wget https://apt.llvm.org/llvm.sh

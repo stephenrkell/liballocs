@@ -24,6 +24,12 @@ jobs:
               gettext-base # for envsubst
             # MARKER END PACKAGES
       - run:
+          name: Install LLVM 20 (for clang-ast-parser)
+          command: |
+            wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 20
+            DEBIAN_FRONTEND=noninteractive apt install -y \
+              libclang-20-dev llvm-20-dev libpolly-20-dev libisl-dev
+      - run:
           name: Report OCaml version for debugging
           command: |
             dpkg -l | grep ocaml
@@ -41,6 +47,9 @@ jobs:
             ./autogen.sh
             ./configure
             make -j 2
+      - run:
+          name: Build clang-ast-parser
+          command: make -C tools/lang/c++ LLVM_CONFIG=llvm-config-20
       #- run: # now our glibc is built with DWARF 5, so don't do this
       #    name: Create liballocs metadata
       #    no_output_timeout: 25m
@@ -67,6 +76,9 @@ jobs:
             apt update
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               $(cat .circleci/test-dependencies.txt)
+      - run:
+          name: Run clang-ast-parser tests
+          command: make -C /root/project/tools/lang/c++ test LLVM_CONFIG=llvm-config-20
       - run:
           name: Run tests
           command: make -C /root/project/tests -k
