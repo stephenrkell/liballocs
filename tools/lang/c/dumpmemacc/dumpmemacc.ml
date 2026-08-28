@@ -16,7 +16,7 @@ class dumpMemAccVisitor = fun (fl: Cil.file) -> object(self)
   method doReport (direction : string) (kind: string) (exprT : Cil.typ) (enclosingT : Cil.typ) : unit =
       let chan = match !outChannel with
           Some(c) -> c
-        | None -> Out_channel.stderr
+        | None -> Stdlib.stderr
       in
       let loc = match !currentLoc with
           Some(l) -> l

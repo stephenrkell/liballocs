@@ -207,7 +207,7 @@ let debug_print lvl s =
     int_of_string levelString
   end with Not_found -> 0 | Failure(_) -> 0
   in
-  if level >= lvl then (output_string Out_channel.stderr s; flush Out_channel.stderr) else ()
+  if level >= lvl then (output_string Stdlib.stderr s; flush Stdlib.stderr) else ()
 
 (* HACKed realpath for now: *)
 let abspath f =
