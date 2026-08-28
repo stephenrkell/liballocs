@@ -56,6 +56,7 @@ jobs:
             DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt install -y \
               $(cat .circleci/test-dependencies.txt)
       - run:
+          # We ran lib-test immediately after building, so no need to run it now
           name: Run tests
           command: make -C /root/project/tests -k SKIP_CASES=lib-test
 
