@@ -280,6 +280,8 @@ struct big_allocation *elf_adopt_mapping_sequence(void *mapping_start,
 	assert(!mseq_b->suballocator);
 	assert(!mseq_b->first_child);
 	ElfW(Ehdr) *ehdr = mapping_start;
+	// FIXME: rewrite this to use the visitor in felf.h
+	// (and rewrite the visitor in felf.h to suit this use case?)
 	unsigned metavector_nentries =
 			1 /* ehdr */
 			+ (ehdr->e_phoff ? 1 : 0)
