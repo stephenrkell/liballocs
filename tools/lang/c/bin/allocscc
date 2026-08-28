@@ -12,7 +12,12 @@ import os, sys, re, subprocess, tempfile
 REAL_FILE = os.path.realpath(__file__)
 REAL_DIR = os.path.realpath(os.path.dirname(REAL_FILE))
 liballocs_base = os.path.realpath(REAL_DIR + "/../../../..")
-cil_base = liballocs_base + "/contrib/cil"
+cil_libdir = os.environ.get("CIL_LIBDIR")
+# HACK: this only works for goblint
+if cil_libdir == None:
+    cil_base = liballocs_base + "/contrib/cil"
+else:
+    cil_base = cil_libdir + "/../../../../.."
 cilly_cmd = cil_base + "/_build/install/default/bin/cilly"
 sys.path.append(liballocs_base + "/tools")
 from allocscompilerwrapper import *
