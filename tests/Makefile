@@ -168,6 +168,7 @@ lib-test \
 forward-decls \
 metavec-layout \
 meta-dso-compact \
+pointer-related \
 packed-seq-walk \
 hello-via-wrapper \
 hello-environ \
