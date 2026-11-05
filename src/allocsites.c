@@ -123,7 +123,7 @@ struct allocsite_entry *__liballocs_find_allocsite_entry_at(
 allocsite_id_t __liballocs_allocsite_id(const void *allocsite)
 {
 	struct allocs_file_metadata *file = get_file(allocsite);
-	if (!file) return NULL;
+	if (!file) return (allocsite_id_t) -1;
 	struct allocsite_entry *found_entry
 	 = __liballocs_find_allocsite_entry_at(allocsite);
 	if (!found_entry) return (allocsite_id_t) -1;
