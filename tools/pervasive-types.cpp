@@ -125,11 +125,6 @@ int main(int argc, char **argv)
 	cout << "\n/* uniqtype for void */\n";
 	write_uniqtype_section_decl(cout, "__uniqtype__void");
 	string mangled_name = mangle_typename(make_pair(string(""), string("void")));
-	cout << "const char *" << mangled_name
-			<< "_subobj_names[] "
-			<< " __attribute__((section (\".data.__uniqtype__void"
-			   << ", \\\"awG\\\", @progbits, __uniqtype__void"  << ", comdat#\")))"
-			<< "= { (void*)0 };\n";
 	write_uniqtype_open_void(cout,
 		mangled_name,
 		"void",
