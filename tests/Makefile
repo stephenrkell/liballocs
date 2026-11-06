@@ -167,6 +167,7 @@ uniqtype-make-precise \
 lib-test \
 forward-decls \
 metavec-layout \
+meta-dso-compact \
 packed-seq-walk \
 hello-via-wrapper \
 hello-environ \
