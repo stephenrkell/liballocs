@@ -9,6 +9,7 @@
 #include "relf.h"
 #include "liballocs.h"
 #include "liballocs_private.h"
+#include "meta-abi.h"
 
 #ifdef _LIBGEN_H
 #error "meta-dso-util.c needs GNU basename() so must not include libgen.h"
@@ -131,6 +132,21 @@ int load_and_init_all_metadata_for_one_object(struct dl_phdr_info *info, size_t 
 		/* The dlerror message will repeat the libfile name, so no need to print it. */
 		debug_printf((is_exe || is_libc) ? 0 : 1, "error dlopening meta-DSO `%s': %s\n",
 			symlink_path, dlerror());
+		__private_free(libfile_name);
+		free(symlink_path);
+		return 0;
+	}
+	/* Decline a meta-DSO built for an old ABI. */
+	struct link_map *meta_l = meta_handle;
+	ElfW(Sym) *version_sym = symbol_lookup_in_dyn(meta_l->l_ld, meta_l->l_addr,
+		LIBALLOCS_META_ABI_VERSION_SYMBOL);
+	unsigned meta_abi_version = version_sym
+		? *(unsigned *) sym_to_addr_given_base(meta_l->l_addr, version_sym) : 0;
+	if (meta_abi_version != LIBALLOCS_META_ABI_VERSION)
+	{
+		debug_printf(0, "Declining to use meta-DSO `%s': metadata ABI version %u, but we need %u\n",
+			libfile_name, meta_abi_version, (unsigned) LIBALLOCS_META_ABI_VERSION);
+		dlclose(meta_handle);
 		__private_free(libfile_name);
 		free(symlink_path);
 		return 0;
