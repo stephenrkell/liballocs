@@ -174,9 +174,10 @@ else \
 fi
 endef
 
+META_ABI_SRC := $(dir $(THIS_MAKEFILE))meta-abi.c
 # for debugging, try: @echo all dependencies: $+
-$(META_BASE)/%-meta.so: /% $(call meta_sources,%)
-	$(META_CC) $(META_CFLAGS) -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+) && \
+$(META_BASE)/%-meta.so: /% $(call meta_sources,%) $(META_ABI_SRC)
+	$(META_CC) $(META_CFLAGS) -I$(LIBALLOCS)/include -shared $(META_LDFLAGS) -o "$@" $(filter %.c,$+) && \
 $(link_under_build_id)
 
 SWAP_STDOUT_STDERR := 3>&2 2>&1 1>&3

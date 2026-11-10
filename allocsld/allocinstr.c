@@ -20,6 +20,7 @@
 #include "asmutil.h"
 // #define __liballocs_extract_and_output_alloc_site_and_type extract_and_output_alloc_site_and_type
 #include "allocmeta.h"
+#include "meta-abi.h"
 #include "malloc-meta.h"
 #include "linear_malloc_index.h"
 #include "cover-tracks.h"
@@ -226,6 +227,11 @@ _Bool walk_all_ld_so_symbols(struct link_map *ld_so_link_map, void *arg)
 		/* loadee_base_addr_hint */ (uintptr_t) 0, NULL, NULL);
 	if (!ld_so_meta.dynamic_vaddr) goto out; // harsh but go with it for now
 	ElfW(Dyn) *meta_dyn = (ElfW(Dyn) *) (ld_so_meta.dynamic_vaddr + ld_so_meta.base_addr);
+	/* don't read a meta-DSO built for another metadata ABI. */
+	ElfW(Sym) *version_sym = symbol_lookup_in_dyn(meta_dyn, ld_so_meta.base_addr,
+		LIBALLOCS_META_ABI_VERSION_SYMBOL);
+	if (!version_sym || *(unsigned *) sym_to_addr_given_base(ld_so_meta.base_addr, version_sym)
+		!= LIBALLOCS_META_ABI_VERSION) goto out;
 	// also look for  'extrasyms' and walk those
 	ElfW(Sym) *extrasyms_sym = symbol_lookup_in_dyn(meta_dyn,
 		ld_so_meta.base_addr, "extrasyms");
