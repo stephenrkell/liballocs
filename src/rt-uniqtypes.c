@@ -164,12 +164,17 @@ void init_rt_uniqtypes_obj(void)
 	pointer_to___uniqtype____PTR___PTR_signed_char = dlsym(RTLD_DEFAULT, "__uniqtype____PTR___PTR_signed_char$$8");
 	if (!pointer_to___uniqtype____PTR___PTR_signed_char)
 	{
-		CREATE(__uniqtype____PTR___PTR_signed_char, "__uniqtype____PTR___PTR_signed_char$$8", 1, {
+		/* Degree > 1, so related[1] is the ultimate pointee
+		 * (see UNIQTYPE_ULTIMATE_POINTEE_TYPE). */
+		CREATE(__uniqtype____PTR___PTR_signed_char, "__uniqtype____PTR___PTR_signed_char$$8", 2, {
 			.pos_maxoff = sizeof (char**),
 			.un = { address: { .kind = ADDRESS, .indir_level = 2 } }
 		});
 		pointer_to___uniqtype____PTR___PTR_signed_char->related[0] = (struct uniqtype_rel_info) {
 			{ t : { pointer_to___uniqtype____PTR_signed_char } }
+		};
+		pointer_to___uniqtype____PTR___PTR_signed_char->related[1] = (struct uniqtype_rel_info) {
+			{ t : { pointer_to___uniqtype__signed_char } }
 		};
 	}
 	pointer_to___uniqtype__Elf64_auxv_t = dlsym(RTLD_DEFAULT, "__uniqtype__Elf64_auxv_t");

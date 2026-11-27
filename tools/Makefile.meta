@@ -42,6 +42,17 @@ META_CC ?= $(CC)
 $(info META_CC is $(META_CC))
 META_CFLAGS ?= $(CFLAGS)
 
+#  -s                     no .symtab/.strtab: every uniqtype is in .dynsym
+#  --hash-style=gnu       relf.h and ld.so both grok the GNU hash table, SysV is deadweight
+#  -z noseparate-code     a meta-DSO has no code
+#  -z pack-relative-relocs DT_RELR encoding for R_*_RELATIVE relocs, only if supported
+# GNU ld only warns about unknown -z options, so this mainly guards against other linkers, which reject them.
+meta_try_zflag = $(shell echo 'int x;' | $(META_CC) -shared -fPIC -x c - -o /dev/null -Wl,-z,$(1) >/dev/null 2>&1 && echo '-Wl,-z,$(1)')
+# Packed relative relocs need linker support *and* a libc that declares GLIBC_ABI_DT_RELR, otherwise an older ld.so silently leaves them unapplied.
+meta_relr_probe = $(shell t=$$(mktemp) && echo 'int x;' | $(META_CC) -shared -fPIC -x c - -o $$t -Wl,--no-as-needed -Wl,-z,pack-relative-relocs 2>/dev/null && readelf -V $$t 2>/dev/null | grep -q GLIBC_ABI_DT_RELR && echo '-Wl,-z,pack-relative-relocs'; rm -f $$t)
+META_LDFLAGS_RELR ?= $(call meta_relr_probe)
+META_LDFLAGS ?= -Wl,-s -Wl,--hash-style=gnu $(call meta_try_zflag,noseparate-code) $(META_LDFLAGS_RELR)
+
 # By default, remake everything we have already made,
 # but don't make new .allocsites files.
 default: $(shell find $(META_BASE) -type f -name '*.allocsites*' ! -name 'Makefile.meta' )
@@ -176,7 +187,7 @@ endef
 
 # for debugging, try: @echo all dependencies: $+
 $(META_BASE)/%-meta.so: /% $(call meta_sources,%)
-	$(META_CC) $(META_CFLAGS) -shared -Wl,--hash-style=both -o "$@" $(filter %.c,$+) && \
+	$(META_CC) $(META_CFLAGS) -shared $(META_LDFLAGS) -o "$@" $(filter %.c,$+) && \
 $(link_under_build_id)
 
 SWAP_STDOUT_STDERR := 3>&2 2>&1 1>&3
