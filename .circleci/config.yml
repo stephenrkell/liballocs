@@ -1,4 +1,4 @@
-version: 2.0
+version: 2.1
 jobs:
   build:
     docker:
@@ -40,8 +40,6 @@ jobs:
           root: /
           paths: root/project usr/lib/meta
   test:
-    requires:
-      - build
     docker:
       - image: ubuntu:24.04
     steps:
@@ -61,7 +59,6 @@ jobs:
           command: make -C /root/project/tests -k SKIP_CASES=lib-test
 
 workflows:
-  version: 2
   default:
     jobs:
       - build
